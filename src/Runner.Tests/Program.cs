@@ -412,6 +412,23 @@ public static class Program
 	}
 
 	// his ask 2026-11-03: a new game has no save to keep clean - the clean save and the save to play are left out while it is on
+	static void T_PgLiteUnticksPgPatcherUntilThePlayerTicksIt()
+	{
+		using var f = new FakeMo2();
+		var s = f.WriteSetup(("landscapefixer", []), ("pgpatcher", []));
+		Equal(null, s.ApplyPgLiteRule(false), "no PGLite: nothing changes");
+		var note = s.ApplyPgLiteRule(true);
+		Check(note?.Contains("PGLite", StringComparison.Ordinal) == true, "PGLite ticked: PGPatcher switched off with a notice: " + note);
+		Equal("landscapefixer", string.Join(",", Runner.Plan(s, null, null, null).Select(x => x.Key)), "PGPatcher left out of the run");
+		Equal(null, s.ApplyPgLiteRule(true), "still unticked: it stays off, nothing new");
+		s.Root["steps"]!.AsArray().OfType<JsonObject>().First(o => Setup.Str(o, "step") == "pgpatcher")["on"] = true;
+		Equal("", s.ApplyPgLiteRule(true), "the player ticked it back: kept as their choice");
+		Equal("landscapefixer,pgpatcher", string.Join(",", Runner.Plan(s, null, null, null).Select(x => x.Key)), "PGPatcher runs again");
+		Equal(null, s.ApplyPgLiteRule(true), "their tick stays");
+		Equal("", s.ApplyPgLiteRule(false), "PGLite unticked: their choice is cleared");
+		Check(s.ApplyPgLiteRule(true) is { Length: > 0 }, "PGLite ticked again later: switched off again");
+	}
+
 	static void T_NewGameLeavesOutTheSaveSteps()
 	{
 		using var f = new FakeMo2();

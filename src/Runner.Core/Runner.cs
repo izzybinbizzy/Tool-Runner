@@ -130,7 +130,8 @@ public static class Runner
 		}
 	}
 
-	public static StartCheck CheckStart(RunRequest a_req)
+	// a_keep false = the dry run: a change the PG Lite rule makes is planned with, never written
+	public static StartCheck CheckStart(RunRequest a_req, bool a_keep = true)
 	{
 		var c = new StartCheck();
 		Setup setup;
@@ -166,8 +167,27 @@ public static class Runner
 		} catch (Exception e) when (e is IOException) {
 			return c.No(e.Message);
 		}
+		string? pgNote = null;
+		try {
+			pgNote = setup.ApplyPgLiteRule(new Profile(mo2, setup.Profile, () => false).IsOn(Setup.PgLiteMod));
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			// a profile that does not read is refused by the check below, in words
+		}
+		if (pgNote != null) {
+			if (a_keep) {
+				setup.Save();
+			}
+			try {
+				c.Todo = Plan(setup, a_req.Only, a_req.From, a_req.Until);
+			} catch (ArgumentException e) {
+				return c.No(e.Message);
+			}
+		}
 		try {
 			c.Check = Preflight.Run(setup, mo2, c.Todo.Select(s => s.Key).ToList());
+			if (pgNote is { Length: > 0 }) {
+				c.Check.Add(new Issue("pgpatcher", false, pgNote));
+			}
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or InvalidDataException or InvalidOperationException) {
 			// a check that cannot look (a drive that is not there, a folder it may not read) refuses the run in words - nothing has
 			// been touched, and it never ends as a crash

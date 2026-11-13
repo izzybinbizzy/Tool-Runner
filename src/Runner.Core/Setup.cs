@@ -70,6 +70,39 @@ public sealed class Setup
 
 	public List<StepEntry> EnabledSteps => Steps.Where(s => s.On && !LeftOutForNewGame(s.Key)).ToList();
 
+	public const string PgLiteMod = "PGLite";
+
+	// PG Lite does while the game runs what PGPatcher builds ahead, so with PGLite ticked the PGPatcher step is switched off once
+	// and runs only when the player ticks it back; that tick is kept as their choice until PGLite is unticked. Returns null when
+	// nothing changed, "" for a quiet change, else the notice to show
+	public string? ApplyPgLiteRule(bool a_pgLiteTicked)
+	{
+		if ((Root["steps"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(o => Str(o, "step") == "pgpatcher") is not { } step) {
+			return null;
+		}
+		var settings = step["settings"] as JsonObject;
+		if (settings == null) {
+			settings = new JsonObject();
+			step["settings"] = settings;
+		}
+		var on = Bool(step, "on") ?? true;
+		if (!a_pgLiteTicked) {
+			var had = settings.Remove("pglite_unticked") | settings.Remove("with_pglite");
+			return had ? "" : null;
+		}
+		if (Bool(settings, "with_pglite") == true || !on) {
+			return null;
+		}
+		if (Bool(settings, "pglite_unticked") == true) {
+			settings.Remove("pglite_unticked");
+			settings["with_pglite"] = true;
+			return "";
+		}
+		step["on"] = false;
+		settings["pglite_unticked"] = true;
+		return "PGLite is ticked in this profile, so the PGPatcher step was switched off (PG Lite does that work while you play). Tick PGPatcher again to run it anyway.";
+	}
+
 	public JsonObject? StepSettings(string a_key) => Steps.FirstOrDefault(s => s.Key == a_key)?.Settings;
 
 	JsonObject Obj(string a_key) => Root[a_key] as JsonObject ?? new JsonObject();

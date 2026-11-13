@@ -60,7 +60,7 @@ public static class DryRun
 				return busy;
 			}
 		}
-		var gate = Runner.CheckStart(a_req);
+		var gate = Runner.CheckStart(a_req, a_keep: false);
 		RunPreview? preview = null;
 		var notes = new List<(string, string)>();
 		if (gate is { Setup: { } setup, Mo2: { } mo2, Todo.Count: > 0 }) {
