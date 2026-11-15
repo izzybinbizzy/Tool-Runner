@@ -91,6 +91,8 @@ public static class ThemeGallery
 		async void Use(string a_name)
 		{
 			if (a_name == Theme.Current) {
+				// back to the look in use while another pick is still being read: that pick is dropped
+				Theme.DropPending();
 				return;
 			}
 			var problems = await Theme.ApplyAsync(a_name);

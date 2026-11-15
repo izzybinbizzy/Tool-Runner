@@ -43,7 +43,9 @@ public static class GameStart
 			return true;
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			// the write may have landed before it failed: the kept copy goes back now, and stays on record until it has
-			StepKit.PutFilesBack(a_ctx, a_file);
+			if (StepKit.PutFilesBack(a_ctx, a_file).Count > 0) {
+				throw new StepFailedException($"{Path.GetFileName(a_file)} could not be changed for this game start, nor put back as it was ({e.Message}) - close what holds it, then run again from this step");
+			}
 			a_ctx.Log.Warn($"{Path.GetFileName(a_file)} could not be changed for this game start ({e.Message})");
 			return false;
 		}
@@ -143,15 +145,27 @@ public static partial class FasterArchives
 		var quiet = Stopwatch.StartNew();
 		var cpu = tools.Keys.ToDictionary(p => p, p => Procs.CpuOrNull(p) ?? TimeSpan.Zero);
 		List<int> Live() => tools.Where(t => Procs.StartTime(t.Key) == t.Value).Select(t => t.Key).ToList();
+		var sampled = Stopwatch.StartNew();
+		// Did its program work since the last look? Repacking takes a core or more; a window that waits for a choice next to
+		// nothing - a tenth of one core over the stretch between two looks tells them apart
+		bool Worked(List<int> a_live)
+		{
+			var seconds = Math.Max(0.2, sampled.Elapsed.TotalSeconds);
+			var worked = false;
+			foreach (var p in a_live) {
+				var before = cpu.GetValueOrDefault(p);
+				var now = Procs.CpuOrNull(p) ?? before;
+				worked |= (now - before).TotalSeconds / seconds > 0.1;
+				cpu[p] = now;
+			}
+			sampled.Restart();
+			return worked;
+		}
 		try {
 			while (Live() is { Count: > 0 } live) {
-				foreach (var p in live) {
-					var now = Procs.CpuOrNull(p) ?? cpu[p];
-					// it works (repacking): nobody is being waited for
-					if ((now - cpu[p]).TotalSeconds > 0.5) {
-						quiet.Restart();
-					}
-					cpu[p] = now;
+				// it works (repacking): nobody is being waited for
+				if (Worked(live)) {
+					quiet.Restart();
 				}
 				if (quiet.Elapsed > limit) {
 					live.ForEach(Procs.KillTree);
@@ -162,8 +176,11 @@ public static partial class FasterArchives
 		} catch (OperationCanceledException) {
 			// a Stop: a window that only waits for a choice is closed with it (Mod Organizer cannot close under a program of the
 			// game's); one that is repacking is never cut off - half-written archives are worse than a wait
-			if (quiet.Elapsed > TimeSpan.FromSeconds(10)) {
-				Live().ForEach(Procs.KillTree);
+			// (looked at over one more second, so a Stop in the first seconds of the wait judges by what it does now)
+			Thread.Sleep(1000);
+			var left = Live();
+			if (!Worked(left)) {
+				left.ForEach(Procs.KillTree);
 			} else {
 				a_ctx.Log.Warn("Faster Archives is repacking - it is left to finish; close Mod Organizer when it is done");
 			}

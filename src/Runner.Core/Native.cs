@@ -527,21 +527,31 @@ public static partial class Procs
 	// one process of a look: its id, its parent's, its image name ("ModOrganizer.exe"); false ends the look
 	delegate bool Visit(int a_pid, int a_parent, ReadOnlySpan<char> a_image);
 
-	static volatile bool s_lookFailed;
+	[ThreadStatic]
+	static bool t_lookFailed;
 
-	// Windows would not give its list of processes at the last look (after three tries): what was asked for came back empty,
-	// which is no answer. Whoever takes "not running" as leave to write something asks this first
-	public static bool LookFailed => s_lookFailed;
+	// Windows would not give its list of processes at this thread's last look (after its tries): what was asked for came back
+	// empty, which is no answer. Whoever takes "not running" as leave to write something asks this right after its look - it
+	// is kept per thread, so another thread's look that worked never hides it
+	public static bool LookFailed => t_lookFailed;
+
+	// the offline tests make this many of the next looks fail
+	public static int FailLooks { get; set; }
 
 	static unsafe void Walk(Visit a_visit)
 	{
 		const uint TH32CS_SNAPPROCESS = 2;
-		var snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-		for (var again = 0; snap == -1 && again < 3; ++again) {
-			Thread.Sleep(15);
+		nint snap = -1;
+		if (FailLooks > 0) {
+			--FailLooks;
+		} else {
 			snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+			for (var again = 0; snap == -1 && again < 3; ++again) {
+				Thread.Sleep(15);
+				snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+			}
 		}
-		s_lookFailed = snap == -1;
+		t_lookFailed = snap == -1;
 		if (snap == -1) {
 			return;
 		}

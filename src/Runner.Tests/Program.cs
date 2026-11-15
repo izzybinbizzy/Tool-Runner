@@ -678,6 +678,27 @@ public static class Program
 		Check(said.Count == 2 && said[0] == FasterArchives.Asks && said[1] == "", "the window says the run waits for the player, then no longer: " + string.Join(" | ", said));
 		Check(!FasterArchives.Offered([], DateTime.Now.AddSeconds(5)), "an old window says nothing about a later start");
 		Throws<StepFailedException>(() => FasterArchives.Wait(ctx, "shaders", new StepSettings([]), 4, since), "an offer more often than the step allows stops it, in words");
+
+		// nobody chooses: a window that only waits is closed, as its Cancel would, and the step stops in words
+		var since2 = DateTime.Now;
+		using var idle = Process.Start(new ProcessStartInfo(tool, "-n 60 127.0.0.1") { UseShellExecute = false, CreateNoWindow = true })!;
+		string? gaveUp = null;
+		try {
+			FasterArchives.Wait(ctx, "shaders", new StepSettings(new JsonObject { ["offer_wait_min"] = 0.02 }), 1, since2);
+		} catch (StepFailedException e) {
+			gaveUp = e.Message;
+		}
+		Check(gaveUp?.Contains("nobody chose", StringComparison.Ordinal) == true, "nobody chose within the wait: the step stops and says so: " + gaveUp);
+		Check(idle.WaitForExit(5000), "and the window that only waited is closed, so Mod Organizer can close");
+
+		// a Stop while its window only waits closes that window too
+		var since3 = DateTime.Now;
+		using var stopMe = Process.Start(new ProcessStartInfo(tool, "-n 60 127.0.0.1") { UseShellExecute = false, CreateNoWindow = true })!;
+		using var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(700));
+		var stopping = StepContext(f, "shaders", a_cancel: stop.Token);
+		using var log2 = stopping.Log;
+		Throws<OperationCanceledException>(() => FasterArchives.Wait(stopping, "shaders", new StepSettings([]), 1, since3), "a Stop ends the wait");
+		Check(stopMe.WaitForExit(5000), "and closes a window that only waits for a choice");
 	}
 
 	// CodeRabbit's first round on 1.0 (pull request 32): the points a test can hold
@@ -700,6 +721,40 @@ public static class Program
 		Equal(0, Runner.PutBackParked(ctx, "landscapefixer").Count, "the put-back after a park that was cut off");
 		Check(File.Exists(Path.Combine(mod, "old one.txt")) && File.Exists(Path.Combine(mod, "old two.txt")), "both of the player's old files are in the mod again");
 		Check(!Directory.Exists(Path.Combine(ctx.BackupFolder, "unfinished", "Output A")), "none of them was taken for half-written output");
+
+		// a put-back cut off part way: what is back in the mod already stays there at the next try
+		StepKit.ParkMod(ctx, "landscapefixer", "Output A");
+		var again = ctx.Journal.Parked[^1];
+		File.Move(Path.Combine(again.To, "old one.txt"), Path.Combine(mod, "old one.txt"));
+		again.Returning = true;
+		Equal(0, Runner.PutBackParked(ctx, "landscapefixer").Count, "the put-back tried again");
+		Check(File.Exists(Path.Combine(mod, "old one.txt")) && File.Exists(Path.Combine(mod, "old two.txt")) && again.PutBack, "all of the old output is in the mod");
+		Check(!Directory.Exists(Path.Combine(ctx.BackupFolder, "unfinished", "Output A")), "what was back already was not taken for half-written output");
+		// ... and cut off after the last file had moved, before the record could say so
+		StepKit.ParkMod(ctx, "landscapefixer", "Output A");
+		var last = ctx.Journal.Parked[^1];
+		Files.MoveContents(last.To, last.From);
+		Directory.Delete(last.To, true);
+		last.Returning = true;
+		Equal(0, Runner.PutBackParked(ctx, "landscapefixer").Count, "nothing left to move");
+		Check(last.PutBack && !last.Lost && File.Exists(Path.Combine(mod, "old two.txt")), "put back, never written off as lost");
+
+		// two steps that wrote the same file in place: an undo goes back to what stood there before the first
+		var twice = new List<KeptFile> { new() { Path = @"X:\mod\patch.esp", Backup = null, Settled = true }, new() { Path = @"x:\MOD\patch.esp", Backup = "the first step's output", Settled = true },
+			new() { Path = @"X:\mod\other.esp", Backup = "its own old bytes", Settled = true } };
+		var firsts = RunUndo.FirstStates(twice);
+		Check(firsts.Count == 2 && firsts[0].Backup == null && firsts[1].Backup == "its own old bytes", "each file's first record is the state to go back to");
+
+		// a list of processes Windows would not give is no proof that Mod Organizer is closed, even when the look after it works
+		var open = new Mo2Control(ctx.Mo2, "Test", RunLog.Null);
+		Check(!open.Running, "no Mod Organizer of this instance runs");
+		Procs.FailLooks = 1;
+		Check(open.Running, "one look failed: it counts as open");
+		Check(!open.Running, "and as closed again once Windows answers");
+
+		Equal("_CON.demo copy", ToolRunner.App.Theme.FileSafe("CON.demo copy"), "a name Windows keeps for a device gets a mark in front");
+		Equal("Ocean  dark copy", ToolRunner.App.Theme.FileSafe("Ocean: dark copy"), "a character Windows refuses in a name is taken out");
+		Equal("Theme", ToolRunner.App.Theme.FileSafe("..."), "a name with nothing left is given one");
 
 		// a file a tool writes new, straight into a mod: kept as "was not there", gone again when the step fails, and on record
 		// as built in the same write that settles it
@@ -749,6 +804,14 @@ public static class Program
 		Check(File.Exists(elsewhere), "a record for another profile is left for that profile");
 
 		Check(RunnerErrors.All.Select(e => e.Code).Distinct().Count() == RunnerErrors.All.Count, "every catalog code is given once");
+
+		// a failed step that started the game: a file of the player's in overwrite that the game rewrote stays, what is new goes
+		var began = DateTime.UtcNow.AddMinutes(-10);
+		var beforeOw = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase) { ["a mod's settings.json"] = began.AddDays(-3), ["untouched.ini"] = began.AddDays(-3) };
+		string[] madeOw = ["a mod's settings.json", "half a cache.bin"];
+		Equal("a mod's settings.json", string.Join(",", Runner.RewrittenByTheGame(madeOw, beforeOw, began.AddMinutes(1).ToLocalTime(), began)), "the game ran in this step: its rewrite of a file that was there stays");
+		Equal("", string.Join(",", Runner.RewrittenByTheGame(madeOw, beforeOw, began.AddHours(-1).ToLocalTime(), began)), "the game last ran in an earlier step: a tool's rewrite goes with the rest");
+		Equal("", string.Join(",", Runner.RewrittenByTheGame(madeOw, beforeOw, null, began)), "no game in this run: as before");
 
 		// a Mod Organizer set up for another game is said before anything runs
 		Equal(0, Preflight.Run(Setup.Load(f.SetupFile), Mo2Instance.Load(f.Exe, f.Instance), ["landscapefixer"]).Count(i => i.Text.Contains("another game", StringComparison.Ordinal)), "Skyrim Special Edition: nothing said");
@@ -4557,6 +4620,9 @@ public static class Program
 			Check(sent.All(p => (Directory.Exists(p) ? Files.SizeOf(p) : new FileInfo(p).Length) <= 1), "and only what fits is sent");
 			DataRemoval.BinRoom = _ => 0;
 			Check(DataRemoval.Carry(keep, _ => null).Any(l => l.Contains("keeps no Recycle Bin", StringComparison.Ordinal)), "on a drive with no bin it is left in place too");
+			var handed = new List<string>();
+			DataRemoval.Carry(keep, p => { handed.Add(p); return null; });
+			Equal(0, handed.Count, "nothing at all is handed to a bin that is not there, an empty file or folder included");
 		} finally {
 			DataRemoval.BinRoom = room;
 		}
@@ -7580,6 +7646,12 @@ public static class Program
 			// a run that was cut off says what to press
 			j.State = RunState.Running;
 			Check(RunSummary.Of(j) is { Kind: "bad", Title: "Did not finish" } cutOff && cutOff.Rows.Any(x => x.Label == "Next" && x.Text.Contains("Put my profile back", StringComparison.Ordinal)), "a run that was cut off");
+			Check(RunSummary.Of(j).Rows.Any(x => x.Label.StartsWith("New output", StringComparison.Ordinal) && x.Text.Contains("switched on once your profile is put back", StringComparison.Ordinal)),
+				"its outputs are built, not yet on");
+			j.Undoing = true;
+			Check(RunSummary.Of(j).Rows.Any(x => x.Label.StartsWith("New output", StringComparison.Ordinal) && x.Text.Contains("sets them aside", StringComparison.Ordinal)),
+				"an undo that was cut off sets them aside when it is finished - never 'switched on'");
+			j.Undoing = false;
 		} finally {
 			StepRegistry.Replace(realDyndolod);
 			StepRegistry.Replace(realPandora);

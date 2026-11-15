@@ -112,7 +112,9 @@ public static class QuietGame
 				// failed step over an option
 				// the write may have landed before it failed (the file is swapped, then its read-only mark put back): the kept copy
 				// goes back now, and stays on record until it has
-				StepKit.PutFilesBack(a_ctx, path);
+				if (StepKit.PutFilesBack(a_ctx, path).Count > 0) {
+					throw new StepFailedException($"{Path.GetFileName(path)} could not be changed for the small window, nor put back as it was ({e.Message}) - close what holds it, then run again from this step");
+				}
 				a_ctx.Log.Warn($"{Path.GetFileName(path)} could not be changed for the small window ({e.Message}) - the game may start as it usually does");
 			}
 		}

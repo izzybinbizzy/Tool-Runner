@@ -69,7 +69,8 @@ public sealed class RunSummary
 			s.Rows.Add(new Row(a_j.Built.Count == 1 ? "New output" : "New outputs",
 				string.Join(", ", a_j.Built.Select(m => sizes.TryGetValue(m, out var b) ? $"{m} ({DiskForecast.Size(b)})" : m)) +
 				// a run cut off before its profile was put back has built them, but nothing has switched them on yet
-				(cutOff ? " - built; switched on once your profile is put back" : " - on in Mod Organizer")));
+				(a_j.Undoing ? " - built; the undo that was cut off sets them aside when it is finished" :
+					cutOff ? " - built; switched on once your profile is put back" : " - on in Mod Organizer")));
 		}
 		if (a_j.OrderChanged && !a_j.Undone) {
 			s.Rows.Add(new Row("Plugin order", "sorted by LOOT - the new order stays (History > Undo this run takes it back)"));

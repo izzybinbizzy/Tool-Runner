@@ -665,6 +665,8 @@ public sealed class ShaderStep : IStep
 					Stopwatch? low = null;
 					while (!g.HasExited) {
 						a_ctx.Cancel.ThrowIfCancellationRequested();
+						// (looked up again at every look: a mapped log folder may only be made during this start)
+						logs = InGame.LogFolders(a_ctx.Setup, a_ctx.Mo2);
 						var log = InGame.NewestShaderLog(logs);
 						var logFresh = log != null && File.GetLastWriteTimeUtc(log) >= started.AddSeconds(-5);
 						var text = logFresh ? Files.ReadSharedText(log!) : "";

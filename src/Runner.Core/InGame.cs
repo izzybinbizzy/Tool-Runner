@@ -1002,6 +1002,8 @@ public static partial class InGame
 			if (!GameUp(a_ctx)) {
 				throw GameClosed(a_ctx, "while its shaders compiled");
 			}
+			// looked up again at every look: a folder a plugin maps the logs to may only be made, or get its first log, during the watch
+			logs = LogFolders(a_ctx.Setup, a_ctx.Mo2);
 			if (!seen && BootPassOverIn(logs, a_since) && !Compiling(logs, a_ctx.Mo2.OverwriteDir, a_since)) {
 				passOverSince ??= sw.Elapsed;
 				if (sw.Elapsed - passOverSince >= TimeSpan.FromSeconds(30)) {
@@ -1272,15 +1274,18 @@ public static partial class InGame
 				Files.DeleteDir(part);
 			}
 			Directory.CreateDirectory(part);
+			// what the changed saves still to come will take: a link that fails is a copy on top of that
+			var remaining = bytes;
 			foreach (var f in files) {
 				a_ctx.Cancel.ThrowIfCancellationRequested();
 				var dest = Path.Combine(part, f.Name);
 				if (Same(f) is not { } same) {
 					f.CopyTo(dest, false);
+					remaining -= f.Length;
 				} else if (!Native.HardLink(dest, same.FullName)) {
 					// a link that cannot be made (another disk, a file system without links) is a copy after all, and its room was
 					// not counted above: never taken out of what the run's outputs were promised
-					if (FreeBytes(a_ctx.BackupFolder) < f.Length + margin * 1073741824L) {
+					if (FreeBytes(a_ctx.BackupFolder) < f.Length + remaining + margin * 1073741824L) {
 						throw new IOException($"an unchanged save could not be linked to the last run's copy, and copying it would not leave the {margin} GB this run needs free");
 					}
 					f.CopyTo(dest, false);

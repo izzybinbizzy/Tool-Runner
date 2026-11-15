@@ -336,10 +336,7 @@ public static class Theme
 				one["value"] = text;
 			}
 		}
-		// the file's name is the theme's with every character Windows refuses in a name taken out (a theme may be called
-		// "Ocean: dark", and a slash in a name would put the copy outside the Themes folder); the name inside stays as it is
-		static string FileSafe(string a_title) =>
-			string.Concat(a_title.Select(c => Array.IndexOf(Path.GetInvalidFileNameChars(), c) >= 0 ? ' ' : c)).Trim().TrimEnd('.') is { Length: > 0 } safe ? safe : "Theme";
+		// the file is named by FileSafe; the name inside the file stays as it is
 		var title = a_name.Replace(" (file)", "", StringComparison.Ordinal) + " copy";
 		var path = Path.Combine(Folder, FileSafe(title) + ".json");
 		for (var n = 2; File.Exists(path); ++n) {
@@ -377,6 +374,24 @@ public static class Theme
 
 	// the Settings picker: the folder and the file read off the window's thread, the look applied on it
 	static int s_asked;
+
+	// a pick that is still being read is not applied when it arrives
+	public static void DropPending() => ++s_asked;
+
+	static readonly string[] DeviceNames = ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"];
+
+	// A theme's name as a file's name: every character Windows refuses in a name taken out (a theme may be called "Ocean: dark",
+	// and a slash in a name would put the copy outside the Themes folder), and a name Windows keeps for a device given a mark in
+	// front ("CON.demo copy.json" is still the console, whatever follows the dot)
+	public static string FileSafe(string a_title)
+	{
+		var safe = string.Concat(a_title.Select(c => Array.IndexOf(Path.GetInvalidFileNameChars(), c) >= 0 ? ' ' : c)).Trim().TrimEnd('.');
+		if (safe.Length == 0) {
+			return "Theme";
+		}
+		return DeviceNames.Contains(safe.Split('.')[0].Trim(), StringComparer.OrdinalIgnoreCase) ? "_" + safe : safe;
+	}
 
 	// null: a later pick took this one's place, and nothing was applied
 	public static async Task<List<string>?> ApplyAsync(string a_name)

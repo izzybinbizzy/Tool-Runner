@@ -300,6 +300,8 @@ public static class SettingsPanel
 		}).ContinueWith(t => whoHint.Dispatcher.BeginInvoke(() => whoHint.Text = t.Result.Count == 0 ? "No saves found in this profile yet." :
 			"Characters with saves here, most recently played first: " + string.Join(", ", t.Result.Take(12))), TaskScheduler.Default);
 		Field(stack, apply, "A tool idle this long is looked at (minutes)", work, "idleMinutes", JsonValueKind.Number);
+		work["boxWaitSeconds"] ??= 60;
+		Field(stack, apply, "A game box nobody can answer may stay open (seconds)", work, "boxWaitSeconds", JsonValueKind.Number);
 		Field(stack, apply, "Free space a run needs (GB)", work, "minFreeGb", JsonValueKind.Number);
 		// the forecast of the room a run takes: on, a run that will not fit is not started; off, it is only told
 		work["diskForecastStops"] ??= true;

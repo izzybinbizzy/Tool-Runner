@@ -469,9 +469,18 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	public Func<bool>? RunningProbe { get; set; }
 
 	// a Mod Organizer whose path cannot be read counts as running (no profile file is written under it)
-	// (a list of processes Windows would not give is no proof that Mod Organizer is closed: it counts as open, and nothing is
-	// written under it)
-	bool IsRunning() => RunningProbe?.Invoke() ?? (Pids().Count > 0 || Unreadable().Count > 0 || OwnStarting() || Procs.LookFailed);
+	// A list of processes Windows would not give is no proof that Mod Organizer is closed: it counts as open, and nothing is
+	// written under it. Each of the two looks is judged right after it (the second one working again once hid the first's failure)
+	bool IsRunning()
+	{
+		if (RunningProbe?.Invoke() is { } probed) {
+			return probed;
+		}
+		var mine = Pids().Count > 0;
+		var unknown = Procs.LookFailed;
+		var unreadable = Unreadable().Count > 0;
+		return mine || unreadable || unknown || Procs.LookFailed || OwnStarting();
+	}
 
 	// the run was asked to stop (the run's own cancellation): a close made for the put-back waits for nothing it can do without -
 	// set by the run; none = never asked

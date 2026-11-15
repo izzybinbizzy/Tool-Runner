@@ -135,7 +135,11 @@ public static class DataRemoval
 		// never those of the drive letter in front. A volume with no drive letter of its own is judged by what Windows keeps
 		// for it; with nothing kept it counts as having no bin (what would go there is then left in place and named)
 		var mount = new char[520];
-		var root = GetVolumePathName(full, mount, (uint)mount.Length) ? new string(mount).TrimEnd('\0') : Path.GetPathRoot(full) ?? "";
+		// (a lookup Windows refuses names no volume: judged by the drive letter in front, it could be the wrong disk's bin - no bin, then)
+		if (!GetVolumePathName(full, mount, (uint)mount.Length)) {
+			return 0;
+		}
+		var root = new string(mount).TrimEnd('\0');
 		DriveInfo? drive = null;
 		if (root.Length <= 3) {
 			try {
@@ -194,7 +198,8 @@ public static class DataRemoval
 			// "to the Recycle Bin, never erased" holds only for what fits the bin: what does not is left where it is, and named
 			try {
 				var (size, room) = (SizeOf(p), BinRoom(p));
-				if (size > room) {
+				// (a drive with no bin takes nothing, an empty file or folder included)
+				if (room == 0 || size > room) {
 					failed.Add(room == 0 ? $"{p}: its drive keeps no Recycle Bin, so Windows would delete it for good - left in place; delete it yourself when you are sure"
 						: $"{p}: {size / 1048576:#,0} MB is more than its drive's Recycle Bin takes ({room / 1048576:#,0} MB), so Windows would delete it for good - left in place; delete it yourself when you are sure");
 					continue;

@@ -56,6 +56,9 @@ public sealed class ParkRecord
 	// a mod's old output was on its way into the backup and the move never ended (a crash, a file held): what still stands at
 	// From is the rest of that old output, never what a tool half wrote
 	public bool Parking { get; set; }
+	// the move back out of the backup has begun: at a second try (a crash, a file held) what stands at From is the part that is
+	// back already, never what a tool half wrote
+	public bool Returning { get; set; }
 	// its copy in the backup was gone when it was to be put back (the backup cleared by hand): nothing can bring it back, the mod is
 	// left switched off, and the put-back is not held up for ever by it
 	public bool Lost { get; set; }

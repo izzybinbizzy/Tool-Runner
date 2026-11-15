@@ -916,7 +916,8 @@ public static class Runner
 				// a folder whose move into the backup failed half way: what still stands there is the player's own, never the
 				// step's half-written output - the part that moved simply joins it again
 				// (a mod whose park was cut off part way - Parking - is the same case: the rest of the player's old output)
-				if (Directory.Exists(p.From) && (p.IsFolder ? p.Moved : !p.Parking)) {
+				// (and a put-back that was cut off - Returning: the part of it that is back already)
+				if (Directory.Exists(p.From) && (p.IsFolder ? p.Moved : !p.Parking) && !p.Returning) {
 					var half = Path.Combine(a_ctx.BackupFolder, "unfinished", p.Mod);
 					var moved = Directory.EnumerateFileSystemEntries(p.From).Any(e => !Path.GetFileName(e).Equals("meta.ini", StringComparison.OrdinalIgnoreCase));
 					if (moved) {
@@ -927,6 +928,12 @@ public static class Runner
 							throw new IOException($"{left.Count} half-written file(s) could not be moved out, e.g. {Path.GetFileName(left[0])}");
 						}
 					}
+				}
+				if (gone && p.Returning) {
+					// the last file had moved back before the record could say so
+					p.PutBack = true;
+					a_ctx.Journal.TrySave();
+					continue;
 				}
 				if (gone) {
 					// never said as "put back", never ticked holding nothing (PutBack keeps it off), and never counted as still
@@ -940,6 +947,8 @@ public static class Runner
 					a_ctx.Log.Simple("Note: " + lost);
 					continue;
 				}
+				p.Returning = true;
+				a_ctx.Journal.TrySave();
 				Files.MoveContents(p.To, p.From);
 				p.PutBack = true;
 				// the move is made: a record the disk refuses right now is not a put-back that failed
@@ -1302,7 +1311,7 @@ public static class Runner
 			// a mod a step changed in place (ACMOS's roads painted into a terrain LOD no step of this run rebuilt) keeps everything else it holds:
 			// only those files go back. Where a step rebuilt the mod, its park record brought the whole mod back above
 			var parkedMods = a_j.Parked.Where(p => p.Replaced && !p.IsFolder).ToList();
-			var inPlace = a_j.Kept.Where(k => k.Settled && !parkedMods.Any(p => Files.IsUnder(k.Path, p.From))).ToList();
+			var inPlace = RunUndo.FirstStates(a_j.Kept.Where(k => k.Settled && !parkedMods.Any(p => Files.IsUnder(k.Path, p.From))));
 			foreach (var k in inPlace) {
 				if (k.Backup != null && File.Exists(k.Backup)) {
 					Files.WriteAtomic(k.Path, File.ReadAllBytes(k.Backup));
@@ -1421,6 +1430,10 @@ public static class Runner
 		return (made, older);
 	}
 
+	// of what a failed step "made" in overwrite: the files that were there before it and that the game it started rewrote
+	public static List<string> RewrittenByTheGame(IEnumerable<string> a_made, IReadOnlyDictionary<string, DateTime> a_before, DateTime? a_gameLaunched, DateTime a_beganUtc) =>
+		a_gameLaunched is { } launched && launched.ToUniversalTime() >= a_beganUtc.AddSeconds(-2) ? a_made.Where(a_before.ContainsKey).ToList() : [];
+
 	// a failed step's new files in overwrite would win over the output put back: moved into the run's backup ("unfinished\overwrite")
 	// - only what the step made, and a crash report among them is named with where it went
 	static void MoveNewOverwrite(RunContext a_ctx, Dictionary<string, DateTime> a_before, DateTime a_beganUtc)
@@ -1432,6 +1445,15 @@ public static class Runner
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			a_ctx.Log.Warn("overwrite could not be looked at after the failed step: " + e.Message);
 			return;
+		}
+		// In a step that started the game, a file that stood in overwrite before and changed is the game's own rewrite of something
+		// of the player's (a mod's settings, a cache it keeps, a log): left where it is. Moved out with the rest, the player's
+		// overwrite lost it for good - nothing put its old bytes back. What is NEW since the step began still goes.
+		var rewritten = RewrittenByTheGame(fresh, a_before, a_ctx.GameLaunched, a_beganUtc);
+		if (rewritten.Count > 0) {
+			fresh = fresh.Except(rewritten, StringComparer.OrdinalIgnoreCase).ToList();
+			a_ctx.Log.Detail($"{rewritten.Count} file(s) of yours in Mod Organizer's overwrite that the game rewrote during the step are left as the game wrote them: " +
+				string.Join(", ", rewritten.Take(4).Select(Path.GetFileName)) + (rewritten.Count > 4 ? " ..." : ""));
 		}
 		var reports = new List<string>();
 		var stayed = new List<string>();
