@@ -1311,10 +1311,14 @@ public static class Runner
 			// a mod a step changed in place (ACMOS's roads painted into a terrain LOD no step of this run rebuilt) keeps everything else it holds:
 			// only those files go back. Where a step rebuilt the mod, its park record brought the whole mod back above
 			var parkedMods = a_j.Parked.Where(p => p.Replaced && !p.IsFolder).ToList();
-			var inPlace = RunUndo.FirstStates(a_j.Kept.Where(k => k.Settled && !parkedMods.Any(p => Files.IsUnder(k.Path, p.From))));
+			// Also under a mod a later step replaced whole: the copy that step parked can hold an EARLIER step's rewrite of the file,
+			// and only the file's first record is what stood there before the run. Laid over what the park brought back, it is the
+			// same bytes where no step wrote the file before the park.
+			var inPlace = RunUndo.FirstStates(a_j.Kept.Where(k => k.Settled));
 			foreach (var k in inPlace) {
 				if (k.Backup != null && File.Exists(k.Backup)) {
 					Files.WriteAtomic(k.Path, File.ReadAllBytes(k.Backup));
+					File.SetLastWriteTimeUtc(k.Path, File.GetLastWriteTimeUtc(k.Backup));
 					log.Detail($"{Path.GetFileName(k.Path)}: back as it was before this run");
 				} else if (k.Backup == null && File.Exists(k.Path)) {
 					// a file this run made new, straight into a mod that holds other things: only that file goes

@@ -1426,6 +1426,48 @@ public static class Program
 		Check(File.Exists(Path.Combine(half, "rest.txt")) && File.Exists(Path.Combine(half, "moved.txt")), "the halves of a move that stopped come together again");
 	}
 
+	// two steps that write the same file in place, and a file written in place before a later step replaces its whole mod: an
+	// undo ends on what stood there before the run, for a file that was there and for one that was not
+	static void T_AnUndoEndsOnWhatStoodThereBeforeTheRun()
+	{
+		using var f = new FakeMo2();
+		var modA = Path.Combine(f.Mods, "Output A");
+		var modB = Path.Combine(f.Mods, "Output B");
+		File.WriteAllText(Path.Combine(modA, "was there.esp"), "the player's A");
+		File.WriteAllText(Path.Combine(modA, "untouched.txt"), "stays");
+		File.WriteAllText(Path.Combine(modB, "was there.esp"), "the player's B");
+		static void InPlace(RunContext a_ctx, string a_mod, string a_file, string a_text)
+		{
+			var path = Path.Combine(a_ctx.Mo2.ModDir(a_mod), a_file);
+			StepKit.KeepInPlace(a_ctx, a_mod, a_file);
+			File.WriteAllText(path, a_text);
+			StepKit.Settled(a_ctx, a_mod, [path]);
+		}
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
+			InPlace(ctx, "Output A", "was there.esp", "the first step's");
+			InPlace(ctx, "Output A", "not there before.esp", "the first step's");
+			InPlace(ctx, "Output B", "was there.esp", "the first step's");
+			InPlace(ctx, "Output B", "not there before.esp", "the first step's");
+		}));
+		StepRegistry.Replace(new FakeStep("synthesis", (ctx, s) => {
+			InPlace(ctx, "Output A", "was there.esp", "the second step's");
+			InPlace(ctx, "Output A", "not there before.esp", "the second step's");
+			// the whole of Output B replaced: what goes into the backup holds the first step's two files
+			WriteOutput(ctx, "synthesis", "Output B", "OutB.esp");
+		}));
+		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("synthesis", new JsonObject()));
+		Equal(RunState.Finished, Runner.Run(new RunRequest(f.SetupFile, f.Data)).State, "the run finished");
+		Equal("the second step's", File.ReadAllText(Path.Combine(modA, "was there.esp")), "after the run the file is the last step's");
+		var j = Journal.All(Runner.RunsDir(f.Data)).First();
+		var r = Runner.Undo(Journal.Load(j.Folder));
+		Equal(RunState.Restored, r.State, "undone: " + r.Verdict);
+		Equal("the player's A", File.ReadAllText(Path.Combine(modA, "was there.esp")), "written in place twice: back to what the player had, not the first step's");
+		Check(!File.Exists(Path.Combine(modA, "not there before.esp")), "a file two steps made new is gone");
+		Equal("stays", File.ReadAllText(Path.Combine(modA, "untouched.txt")), "the rest of that mod is as it was");
+		Equal("the player's B", File.ReadAllText(Path.Combine(modB, "was there.esp")), "written in place, then its mod replaced whole: back to what the player had");
+		Check(!File.Exists(Path.Combine(modB, "not there before.esp")), "and the file the first step made new there is gone too");
+	}
+
 	// ------------------------------------------------------------------ what MO2 changed (his ask 2026-10-27)
 	static void T_Mo2ChangesReadThePaneTopDown()
 	{

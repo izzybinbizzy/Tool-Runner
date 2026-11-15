@@ -223,8 +223,13 @@ public static partial class ToolSettings
 		var own = SwitchRecord(a_setup);
 		List<string> records;
 		try {
-			var dir = Path.GetDirectoryName(a_setup.File);
-			records = string.IsNullOrEmpty(dir) || !Directory.Exists(dir) ? [] : [.. Directory.EnumerateFiles(dir, "*.tool on")];
+			// a setup that is no file on disk has no record beside it
+			if (string.IsNullOrEmpty(a_setup.File)) {
+				return;
+			}
+			// listed without asking first whether the folder is there: "is it there" answers no for a folder that cannot be
+			// looked at as well, and the listing itself says which of the two it is
+			records = [.. Directory.EnumerateFiles(Path.GetDirectoryName(Path.GetFullPath(a_setup.File))!, "*.tool on")];
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			// looked at through this setup's own record alone, another setup's would be missed and its mod read as the player's tick
 			throw new StepFailedException($"the setups folder could not be looked through for a mod that learning a tool's settings left on ({e.Message}) - make the folder readable, then start again");
