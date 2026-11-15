@@ -577,6 +577,11 @@ public static partial class InGame
 			return (no, "an SKSE plugin did not load - the game goes on without it (check that plugin's requirements): " + text);
 		}
 		if (labels.Count == 1) {
+			// a box whose one button says Cancel is no notice: it shows something going on (a progress window), and pressing
+			// it would call that off (Uia.BoxNames tells it from a plain notice's lone OK, which carries Cancel's control id)
+			if (labels[0].Equals("Cancel", StringComparison.OrdinalIgnoreCase)) {
+				return (null, "the game shows a Windows box this step does not answer: its one button is Cancel, and pressing that would call off what it shows - " + text);
+			}
 			return (labels[0], "the game showed a notice: " + text);
 		}
 		return (null, "the game shows a Windows box this step does not answer: " + text);
@@ -654,10 +659,11 @@ public static partial class InGame
 			}
 			var buttons = Uia.RealButtons(e);
 			// each button by what it is: its words are Windows' language
-			outList.Add(new NativeBox(Uia.Name(e), Uia.TextOf(e, 800), buttons.Select(Uia.RoleName).ToList(),
+			var names = Uia.BoxNames(buttons);
+			outList.Add(new NativeBox(Uia.Name(e), Uia.TextOf(e, 800), names,
 				label => {
-					if (buttons.FirstOrDefault(x => Uia.RoleName(x) == label) is { } btn) {
-						Uia.Press(btn);
+					if (names.IndexOf(label) is >= 0 and var at) {
+						Uia.Press(buttons[at]);
 					}
 				}));
 		}
@@ -885,7 +891,7 @@ public static partial class InGame
 				}
 				// Faster Archives closes the game itself, a second into its start, to show its offer: no crash - the game is
 				// started again once its window has closed
-				if (sw.Elapsed > TimeSpan.FromSeconds(5) && !GameUp(a_ctx) && FasterArchives.Offered(LogFolders(a_ctx.Setup, a_ctx.Mo2), launched)) {
+				if (sw.Elapsed > TimeSpan.FromSeconds(5) && !GameUp(a_ctx) && FasterArchives.Offered(LogFolders(a_ctx.Setup, a_ctx.Mo2), launched, a_ctx.Control.Started)) {
 					offered = true;
 					break;
 				}

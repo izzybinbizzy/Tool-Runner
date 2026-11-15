@@ -143,7 +143,7 @@ public static class RunnerErrors
 			"Run again from this step. If it happens every time, switch \"Hidden\" off for that step in Settings > A step, so the tool runs in the open."),
 		E("TR-414", "LOOT wrote no sorted list|LOOT's sorted list is empty|LOOT did not see", "LOOT could not sort this load order, so your order was left as it was.",
 			"Press Sort in Mod Organizer itself to read LOOT's own message (a rule that goes in a circle, no masterlist yet while offline), put that right, then run again from this step - or untick the LOOT sort step."),
-		E("TR-415", "the game shows a box this run does not know|the game's box did not close after its answer was pressed", "A mod, or the game, asked a question the run cannot answer for you, so the game was closed and the step stopped.",
+		E("TR-415", "the game shows a box this run does not know|the game's box did not close after its answer was pressed|the game shows a Windows box this step does not answer","A mod, or the game, asked a question the run cannot answer for you, so the game was closed and the step stopped.",
 			"Start the game yourself once and answer it (many such questions come only once), or switch off that mod's own setting that asks; then run again from this step. " +
 			"While you are at the PC you can also answer it during the run: the window names the box and waits a minute before the step stops."),
 		E("TR-416", "Faster Archives closed the game to ask", "Faster Archives closes the game at its start when it finds archives it can repack, and asks in a window of its own. That is no crash.",

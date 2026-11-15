@@ -241,7 +241,7 @@ public static class Runner
 		}
 		RunLog log = opened;
 		log.Mirror(Path.Combine(runs, "current log.txt"));
-		log.Echo = a_req.Echo;
+		log.EchoTo(a_req.Echo);
 		using var cts = new CancellationTokenSource();
 		var commands = new Commands(journal, cts.Cancel);
 		Mo2Control? forThisRun = null;
@@ -267,7 +267,11 @@ public static class Runner
 		// every box of every process the run starts, from its first step to its last (BoxWatch)
 		var family = new RunWindows.Family();
 		var reader = new RunWindows.Reader();
-		using var boxes = new BoxWatch(() => reader.Boxes(family.Now(control.RunProcesses(), control.Started.Contains)), log,
+		using var boxes = new BoxWatch(() => {
+				// the same beat keeps the record of what the run's processes started themselves (StartedSet.Sweep)
+				control.Started.Sweep();
+				return reader.Boxes(family.Now(control.RunProcesses(), control.Started.Contains, control.Started.Owned()));
+			}, log,
 			a_open => {
 				journal.Box = a_open;
 				// the run's own thread may change the record under this save: tried again, so the window gets the line now
@@ -302,13 +306,24 @@ public static class Runner
 		// Stop ends this run's own game and tools at once - only a process it started, still the same process (started after
 		// this run began - a PID can be reused), and never Mod Organizer itself (the put-back closes that the normal way)
 		commands.OnStop = () => {
-			foreach (var pid in control.Started) {
-				// the very process that was started (its start time as recorded then), never one that got its PID since
-				if (control.Started.SameProcess(pid) && Procs.StartTime(pid) is { } t && t >= journal.Started.ToUniversalTime().AddSeconds(-2) &&
-				    !Procs.Image(pid).Equals("ModOrganizer.exe", StringComparison.OrdinalIgnoreCase)) {
-					log.Warn($"Stop: ending {Procs.Image(pid)} (process {pid}), started by this run");
-					Procs.KillTree(pid);
+			// what the run started and what those started (a launcher that has ended leaves its child on record), each still the
+			// very process that was recorded - never one that got its PID since
+			control.Started.Sweep();
+			foreach (var pid in control.Started.Owned()) {
+				if (Procs.StartTime(pid) is not { } t || t < journal.Started.ToUniversalTime().AddSeconds(-2)) {
+					continue;
 				}
+				var image = Procs.Image(pid);
+				// Faster Archives' own program is the waiting step's to end or leave: one that is repacking is never cut off
+				if (image.Equals("ModOrganizer.exe", StringComparison.OrdinalIgnoreCase) || FasterArchives.IsTool(image)) {
+					continue;
+				}
+				// a child on record is ended only as the tool itself under another number, never as something a tool opened
+				if (!control.Started.Contains(pid) && !control.Started.StartedImage(image)) {
+					continue;
+				}
+				log.Warn($"Stop: ending {image} (process {pid}), started by this run");
+				Procs.KillTree(pid);
 			}
 		};
 		Dictionary<string, byte[]>? snap0 = null;
@@ -918,9 +933,12 @@ public static class Runner
 				// (a mod whose park was cut off part way - Parking - is the same case: the rest of the player's old output)
 				// (and a put-back that was cut off - Returning: the part of it that is back already)
 				if (Directory.Exists(p.From) && (p.IsFolder ? p.Moved : !p.Parking) && !p.Returning) {
-					var half = Path.Combine(a_ctx.BackupFolder, "unfinished", p.Mod);
 					var moved = Directory.EnumerateFileSystemEntries(p.From).Any(e => !Path.GetFileName(e).Equals("meta.ini", StringComparison.OrdinalIgnoreCase));
 					if (moved) {
+						// into a folder of its own: a put-back that is tried again (its record could not be written, then the
+						// program died) takes what the first try brought back for half-written too, and moved into the same
+						// folder it wrote over what was kept there
+						var half = StepKit.FreeFolder(Path.Combine(a_ctx.BackupFolder, "unfinished", p.Mod));
 						Files.MoveContents(p.From, half, n => n.Equals("meta.ini", StringComparison.OrdinalIgnoreCase));
 						// nothing in a mod folder is ever erased: what could not be moved stops the put-back, named
 						var left = Directory.EnumerateFileSystemEntries(p.From).Where(e => !Path.GetFileName(e).Equals("meta.ini", StringComparison.OrdinalIgnoreCase)).ToList();
@@ -1313,8 +1331,9 @@ public static class Runner
 			var parkedMods = a_j.Parked.Where(p => p.Replaced && !p.IsFolder).ToList();
 			// Also under a mod a later step replaced whole: the copy that step parked can hold an EARLIER step's rewrite of the file,
 			// and only the file's first record is what stood there before the run. Laid over what the park brought back, it is the
-			// same bytes where no step wrote the file before the park.
-			var inPlace = RunUndo.FirstStates(a_j.Kept.Where(k => k.Settled));
+			// same bytes where no step wrote the file before the park. (A file first written AFTER its mod was replaced has no
+			// such record: what the park brought back is its state before the run.)
+			var inPlace = RunUndo.FirstStates(a_j.Kept.Where(k => k.Settled), a_j.Parked);
 			foreach (var k in inPlace) {
 				if (k.Backup != null && File.Exists(k.Backup)) {
 					Files.WriteAtomic(k.Path, File.ReadAllBytes(k.Backup));
@@ -1466,9 +1485,11 @@ public static class Runner
 		// where they would win over the output just put back
 		foreach (var f in fresh) {
 			try {
-				var dst = Path.Combine(a_ctx.BackupFolder, "unfinished", "overwrite", Path.GetRelativePath(ow, f));
+				// under a name of its own: a second failed step of the run leaves files of the same names (a tool's log), and the
+				// first step's are never written over
+				var dst = Files.FreeFile(Path.Combine(a_ctx.BackupFolder, "unfinished", "overwrite", Path.GetRelativePath(ow, f)));
 				Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
-				Files.Move(f, dst, true);
+				Files.Move(f, dst);
 				if (InGame.IsCrashReport(Path.GetFileName(f))) {
 					reports.Add(dst);
 				}

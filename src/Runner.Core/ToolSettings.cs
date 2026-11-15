@@ -236,10 +236,18 @@ public static partial class ToolSettings
 		}
 		foreach (var record in records) {
 			try {
-				if (!File.Exists(record)) {
+				// read without asking first whether it is there: "is it there" answers no for a record that cannot be looked
+				// at as well, and passed over on that answer its mod stayed on as the player's tick. Only a record that is
+				// truly gone (another setup's start undid it between the listing and this read) is passed over
+				(string Mod, string? Instance, string? Profile) read;
+				try {
+					read = ReadSwitch(record);
+				} catch (FileNotFoundException) {
+					continue;
+				} catch (DirectoryNotFoundException) {
 					continue;
 				}
-				var (mod, instance, profile) = ReadSwitch(record);
+				var (mod, instance, profile) = read;
 				var here = instance != null && profile != null ? Files.SamePath(instance, a_profile.Mo2.BaseDir) && profile.Equals(a_profile.Name, StringComparison.OrdinalIgnoreCase)
 					: Files.SamePath(record, own);
 				if (!here) {

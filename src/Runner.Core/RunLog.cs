@@ -29,8 +29,89 @@ public sealed class RunLog : IDisposable
 
 	public string? TextPath { get; }
 	public event Action<string, Level>? Line;
-	// every line of the detailed log as it is written, for a command line that shows the run while it goes
-	public Action<string>? Echo { get; set; }
+
+	volatile EchoQueue? _echo;
+
+	// how long the end of a run waits for the lines still on their way to the command line
+	public static TimeSpan EchoWait { get; set; } = TimeSpan.FromSeconds(5);
+
+	// Every line of the detailed log as it is written, for a command line that shows the run while it goes. Written by a
+	// thread of its own: output piped to a program that has stopped reading blocks the write that fills the pipe, and on the
+	// run's own thread that held the run - it reached neither its next Stop check nor its put-back. A reader that falls
+	// behind loses lines there (said in their place); the log file has every one.
+	public void EchoTo(Action<string>? a_to)
+	{
+		_echo?.Close(TimeSpan.Zero);
+		_echo = a_to == null ? null : new EchoQueue(a_to);
+	}
+
+	sealed class EchoQueue
+	{
+		readonly Action<string> _to;
+		readonly Queue<string> _lines = new();
+		readonly object _gate = new();
+		readonly Thread _thread;
+		bool _closing;
+		int _dropped;
+		const int Most = 2000;
+
+		public EchoQueue(Action<string> a_to)
+		{
+			_to = a_to;
+			_thread = new Thread(Pump) { IsBackground = true, Name = "log echo" };
+			_thread.Start();
+		}
+
+		// never waits: a full queue drops the line and counts it
+		public void Post(string a_line)
+		{
+			lock (_gate) {
+				if (_closing) {
+					return;
+				}
+				if (_lines.Count >= Most) {
+					++_dropped;
+					return;
+				}
+				if (_dropped > 0) {
+					_lines.Enqueue($"({_dropped} line(s) are not shown here: this output was not read fast enough - the run's log has them)");
+					_dropped = 0;
+				}
+				_lines.Enqueue(a_line);
+				Monitor.Pulse(_gate);
+			}
+		}
+
+		void Pump()
+		{
+			while (true) {
+				string line;
+				lock (_gate) {
+					while (_lines.Count == 0 && !_closing) {
+						Monitor.Wait(_gate);
+					}
+					if (_lines.Count == 0) {
+						return;
+					}
+					line = _lines.Dequeue();
+				}
+				try {
+					_to(line);
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ObjectDisposedException) {
+				}
+			}
+		}
+
+		// what is queued is still written, for a_wait at most: a reader that has stopped never holds the end of a run
+		public void Close(TimeSpan a_wait)
+		{
+			lock (_gate) {
+				_closing = true;
+				Monitor.PulseAll(_gate);
+			}
+			_thread.Join(a_wait);
+		}
+	}
 
 	public static RunLog Null { get; } = new();
 
@@ -111,10 +192,7 @@ public sealed class RunLog : IDisposable
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ObjectDisposedException) {
 			}
 		}
-		try {
-			Echo?.Invoke(line);
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ObjectDisposedException) {
-		}
+		_echo?.Post(line);
 		Line?.Invoke(a_text, a_level);
 	}
 
@@ -132,6 +210,9 @@ public sealed class RunLog : IDisposable
 
 	public void Dispose()
 	{
+		// the lines on their way to the command line first, so the run's verdict follows them there
+		_echo?.Close(EchoWait);
+		_echo = null;
 		// each writer on its own: a last flush the disk refuses for one never leaves the others open
 		lock (_gate) {
 			try {

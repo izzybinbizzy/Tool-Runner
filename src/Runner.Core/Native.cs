@@ -40,6 +40,22 @@ public static partial class Native
 	// a window another window owns (GW_OWNER): a dialog or box of any toolkit - Delphi, WPF, WinForms - never a tool's main window
 	public static bool IsOwned(nint a_hwnd) => GetWindow(a_hwnd, 4) != 0;
 
+	[LibraryImport("user32.dll", EntryPoint = "MB_GetString")]
+	private static partial nint MessageBoxWord(uint a_button);
+
+	static readonly Lazy<string> TheCancelWord = new(() => {
+		try {
+			// the words Windows' own message boxes put on their buttons, in Windows' language: 1 is Cancel
+			var p = MessageBoxWord(1);
+			return p == 0 ? "" : (Marshal.PtrToStringUni(p) ?? "").Replace("&", "", StringComparison.Ordinal).Trim();
+		} catch (EntryPointNotFoundException) {
+			return "";
+		}
+	});
+
+	// what Windows' own Cancel button reads in this Windows' language ("" when Windows does not say)
+	public static string CancelWord() => TheCancelWord.Value;
+
 	[LibraryImport("user32.dll")]
 	[return: MarshalAs(UnmanagedType.Bool)]
 	public static partial bool IsWindowEnabled(nint a_hwnd);

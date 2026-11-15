@@ -26,13 +26,18 @@ public sealed class BoxWatch : IDisposable
 	readonly Action<string> _show;
 	readonly Action? _endGame;
 	readonly Dictionary<long, Known> _open = [];
-	readonly CancellationTokenSource _stop = new();
+	// held while a look acts on what it saw (a press, a game ended, a line for the window), and by the run's end while it
+	// lets go of the watch: once Dispose has returned nothing is pressed or ended any more. The watch's sleep waits on it too
+	readonly object _gate = new();
+	volatile bool _disposed;
 	Thread? _thread;
 	string _shown = "";
 	string _lastFault = "";
 	volatile string? _blocked;
 
 	public static TimeSpan Every { get; set; } = TimeSpan.FromSeconds(3);
+	// how long the run's end waits for a look that is in the middle of a press, and then for the watch's thread to end
+	public static TimeSpan EndWait { get; set; } = TimeSpan.FromSeconds(10);
 	const int PressTries = 3;
 	static readonly TimeSpan PressAgain = TimeSpan.FromSeconds(10);
 
@@ -76,29 +81,48 @@ public sealed class BoxWatch : IDisposable
 
 	void Loop()
 	{
-		while (!_stop.IsCancellationRequested) {
+		while (!_disposed) {
 			try {
 				LookOnce(DateTime.UtcNow);
 			} catch (Exception e) when (e is not OutOfMemoryException) {
 				// a look that could not be made is made again; the watch is never what ends a run. Said once per kind of fault
-				if (e.Message != _lastFault) {
+				if (e.Message != _lastFault && !_disposed) {
 					_lastFault = e.Message;
 					_log.Detail($"the watch for boxes could not look this time ({e.GetType().Name}: {e.Message}) - it looks again");
 				}
 			}
-			_stop.Token.WaitHandle.WaitOne(Every);
+			// nothing here is ever disposed under a look that is still out (a wait handle was, and the look that came back to it
+			// took the whole program down): the sleep is a wait on the gate, which the run's end pulses
+			lock (_gate) {
+				if (!_disposed) {
+					Monitor.Wait(_gate, Every);
+				}
+			}
 		}
 	}
 
 	// one look (the offline tests call it with a clock of their own)
 	public void LookOnce(DateTime a_now)
 	{
+		// reading the windows can take long (a hung window answers UI Automation only at its timeout): outside the gate
 		var boxes = _look();
-		foreach (var gone in _open.Keys.Except(boxes.Select(b => b.Id)).ToList()) {
+		lock (_gate) {
+			Act(boxes, a_now);
+		}
+	}
+
+	// under the gate: what the look does about the boxes it saw
+	void Act(IReadOnlyList<Open> a_boxes, DateTime a_now)
+	{
+		foreach (var gone in _open.Keys.Except(a_boxes.Select(b => b.Id)).ToList()) {
 			_open.Remove(gone);
 		}
 		var waiting = new List<string>();
-		foreach (var b in boxes) {
+		foreach (var b in a_boxes) {
+			// the run let go of the watch (while this look read the windows, or while it was held up in a press): nothing more
+			if (_disposed) {
+				return;
+			}
 			var v = KnownBoxes.Judge(b.Box);
 			if (!_open.TryGetValue(b.Id, out var k)) {
 				k = _open[b.Id] = new Known { First = a_now };
@@ -157,17 +181,26 @@ public sealed class BoxWatch : IDisposable
 		}
 	}
 
-	volatile bool _disposed;
-
+	// The run lets go of the watch. A look that is acting holds the gate: it is waited for, so that nothing is pressed and no
+	// game ended once this has returned - but never without end (a press that hangs in a dead window must not hold the end of
+	// a run). The one act that was already under way then is all that may still finish; the look sees the flag before its next.
 	public void Dispose()
 	{
 		if (_disposed) {
 			return;
 		}
-		_disposed = true;
-		_stop.Cancel();
-		_thread?.Join(TimeSpan.FromSeconds(10));
-		_stop.Dispose();
+		var held = Monitor.TryEnter(_gate, EndWait);
+		try {
+			_disposed = true;
+			if (held) {
+				Monitor.PulseAll(_gate);
+			}
+		} finally {
+			if (held) {
+				Monitor.Exit(_gate);
+			}
+		}
+		_thread?.Join(EndWait);
 	}
 }
 
@@ -188,7 +221,10 @@ public static class RunWindows
 		// the family now: a_roots (what the run started itself) and their children, each with whether it is the game's
 		// a_runsGame: is this Skyrim the one the run started? One the player starts under the run's Mod Organizer is only ever
 		// named - it is never answered for them, and never what stops a step
-		public Dictionary<int, (bool Game, string Image)> Now(IEnumerable<int> a_roots, Func<int, bool>? a_runsGame = null)
+		// a_orphans: what the run has on record as started by its own processes (StartedSet.Owned). One whose parent ended
+		// between two looks was never met here as a child - Faster Archives' own program, when the game closes within
+		// seconds of starting it - and is taken in from that record
+		public Dictionary<int, (bool Game, string Image)> Now(IEnumerable<int> a_roots, Func<int, bool>? a_runsGame = null, IEnumerable<int>? a_orphans = null)
 		{
 			foreach (var dead in _known.Where(p => p.Value.Started == null || Procs.StartTime(p.Key) != p.Value.Started).Select(p => p.Key).ToList()) {
 				_known.Remove(dead);
@@ -214,6 +250,12 @@ public static class RunWindows
 					var image = Procs.Image(pid);
 					_known[pid] = new Proc(at, p.Game || IsGame(image), image);
 					grew = true;
+				}
+			}
+			foreach (var o in a_orphans ?? []) {
+				if (!_known.ContainsKey(o) && Procs.StartTime(o) is { } at) {
+					var image = Procs.Image(o);
+					_known[o] = new Proc(at, IsGame(image), image);
 				}
 			}
 			return _known.ToDictionary(p => p.Key, p => (p.Value.Game && (a_runsGame == null ||
@@ -267,10 +309,11 @@ public static class RunWindows
 					continue;
 				}
 				var buttons = Uia.RealButtons(e);
-				var open = new BoxWatch.Open(h, new BoxSeen(whose.Image, whose.Game, Uia.Name(e), Uia.TextOf(e, 800), buttons.Select(Uia.RoleName).ToList()),
+				var names = Uia.BoxNames(buttons);
+				var open = new BoxWatch.Open(h, new BoxSeen(whose.Image, whose.Game, Uia.Name(e), Uia.TextOf(e, 800), names),
 					label => {
-						if (buttons.FirstOrDefault(x => Uia.RoleName(x) == label) is { } btn) {
-							Uia.Press(btn);
+						if (names.IndexOf(label) is >= 0 and var at) {
+							Uia.Press(buttons[at]);
 						}
 					});
 				_read[h] = (DateTime.UtcNow, open);

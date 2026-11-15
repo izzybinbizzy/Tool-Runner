@@ -62,6 +62,9 @@ public sealed class ParkRecord
 	// its copy in the backup was gone when it was to be put back (the backup cleared by hand): nothing can bring it back, the mod is
 	// left switched off, and the put-back is not held up for ever by it
 	public bool Lost { get; set; }
+	// its place among this run's park and file records, in the order they were made (Journal.NextSeq; 0 = a record from
+	// before the order was kept): an undo must know whether a file was kept before or after its mod was replaced
+	public int Seq { get; set; }
 }
 
 // a file outside the mods that a step changes for its run (a tool's settings, DynDOLOD's preset, NGIO's flag): its old bytes
@@ -73,6 +76,8 @@ public sealed class KeptFile
 	public bool Done { get; set; }
 	// changed in place for good (no park record covers it): an undo puts this file back on its own
 	public bool Settled { get; set; }
+	// its place among this run's park and file records (ParkRecord.Seq)
+	public int Seq { get; set; }
 }
 
 // The run record on disk: everything needed to put the profile back after a crash, a Stop now or a power cut, and what
@@ -108,6 +113,11 @@ public sealed class Journal
 	[JsonIgnore]
 	public IEnumerable<string> ParkedMods => Parked.Where(p => !p.IsFolder).Select(p => p.Mod);
 	public List<KeptFile> Kept { get; set; } = [];
+	// the last number given to a park or file record of this run
+	public int LastSeq { get; set; }
+
+	public int NextSeq() => ++LastSeq;
+
 	// the marker left where the player stood before the clean save's teleport (the save to play takes them back to it)
 	public string? ReturnMarker { get; set; }
 	public List<string> Notes { get; set; } = [];

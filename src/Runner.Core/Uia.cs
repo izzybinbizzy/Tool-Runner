@@ -121,7 +121,29 @@ public static class Uia
 	}
 
 	// a button as our checks know it: its standard name, else its own words
-	public static string RoleName(AutomationElement a_b) => StandardName(AutomationId(a_b)) ?? Name(a_b).Replace("&", "", StringComparison.Ordinal).Trim();
+	public static string RoleName(AutomationElement a_b) => StandardName(AutomationId(a_b)) ?? OwnWords(a_b);
+
+	static string OwnWords(AutomationElement a_b) => Name(a_b).Replace("&", "", StringComparison.Ordinal).Trim();
+
+	// A box's buttons as the checks know them. Its ONE button is named by its own words unless those say Cancel: Windows gives
+	// the lone OK of a plain notice the control id of Cancel (so that Esc closes the box), and the lone Cancel of a progress
+	// window has that id too - only the words tell a notice to acknowledge from a button that must not be pressed
+	public static List<string> BoxNames(IReadOnlyList<AutomationElement> a_buttons) =>
+		BoxNames([.. a_buttons.Select(b => (StandardName(AutomationId(b)), OwnWords(b)))], Native.CancelWord());
+
+	// a_cancelWord: what Windows' own Cancel button reads in this Windows' language ("" when it would not say)
+	public static List<string> BoxNames(IReadOnlyList<(string? Standard, string Own)> a_buttons, string a_cancelWord)
+	{
+		if (a_buttons is [var (standard, own)]) {
+			// its words first: a Cancel in English or in Windows' own language, whatever its control id
+			if (own.Equals("Cancel", StringComparison.OrdinalIgnoreCase) || (a_cancelWord != "" && own.Equals(a_cancelWord, StringComparison.OrdinalIgnoreCase))) {
+				return ["Cancel"];
+			}
+			// Cancel's id under other words is a notice's button: named by those words
+			return [standard == "Cancel" && own != "" ? own : standard ?? own];
+		}
+		return [.. a_buttons.Select(b => b.Standard ?? b.Own)];
+	}
 
 	// the order a box lays its buttons out in: top to bottom, left to right
 	public static List<int> ReadingOrder(IReadOnlyList<(double Left, double Top)> a_at) =>

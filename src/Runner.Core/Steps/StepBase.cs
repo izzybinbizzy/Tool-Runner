@@ -95,8 +95,9 @@ public static class StepKit
 		return a_profile.States().TryGetValue(mod, out var state) && state == '-' ? mod : null;
 	}
 
-	// a name no other park in this backup has
-	static string FreeFolder(string a_dir)
+	// a name nothing in this backup has yet: what is in a run's backup is never written over, not by a second park of the
+	// same mod, not by a put-back that is tried again
+	public static string FreeFolder(string a_dir)
 	{
 		var dst = a_dir;
 		for (var i = 2; Directory.Exists(dst) || File.Exists(dst); ++i) {
@@ -117,7 +118,7 @@ public static class StepKit
 		var dst = FreeFolder(Path.Combine(a_ctx.BackupFolder, "outputs", a_mod));
 		Directory.CreateDirectory(dst);
 		// recorded BEFORE the first move: a move that fails half way still has its record, so the put-back finds what moved
-		var park = new ParkRecord { Step = a_step, Mod = a_mod, From = d, To = dst, Parking = true };
+		var park = new ParkRecord { Step = a_step, Mod = a_mod, From = d, To = dst, Parking = true, Seq = a_ctx.Journal.NextSeq() };
 		a_ctx.Journal.Parked.Add(park);
 		a_ctx.Journal.Save();
 		var n = 0;
@@ -154,7 +155,7 @@ public static class StepKit
 			backup = Path.Combine(dir, $"{a_ctx.Journal.Kept.Count + 1} {Path.GetFileName(a_path)}");
 			Files.Copy(a_path, backup, true);
 		}
-		a_ctx.Journal.Kept.Add(new KeptFile { Path = a_path, Backup = backup });
+		a_ctx.Journal.Kept.Add(new KeptFile { Path = a_path, Backup = backup, Seq = a_ctx.Journal.NextSeq() });
 		a_ctx.Journal.Save();
 	}
 
@@ -308,7 +309,7 @@ public static class StepKit
 			// on record BEFORE the move, as ParkMod, so what a move that fails half way took comes back; until Moved, an undo takes what
 			// stands here for what that move left, never for the run's output. One that comes back stays "not replaced" until its
 			// step has finished (the run marks its step's records then)
-			var park = new ParkRecord { Step = a_comesBackFor ?? "", Mod = a_label, From = a_path, To = dst, Replaced = a_comesBackFor == null, IsFolder = true };
+			var park = new ParkRecord { Step = a_comesBackFor ?? "", Mod = a_label, From = a_path, To = dst, Replaced = a_comesBackFor == null, IsFolder = true, Seq = a_ctx.Journal.NextSeq() };
 			a_ctx.Journal.Parked.Add(park);
 			a_ctx.Journal.Save();
 			try {
@@ -354,13 +355,15 @@ public static class StepKit
 	// a tool left open keeps MO2 locked: its windows asked to close, then the process tree ended (by PID)
 	public static void CloseTool(RunContext a_ctx, string? a_image) => CloseTool(a_ctx.Control, a_image, a_ctx.Log);
 
-	// the processes of this image that this run started, and the children of them (a packed program runs its window in a child)
+	// the processes of this image that this run started, and the children of them (a packed program runs its window in a child
+	// - also one whose launcher has ended since: StartedSet.Sweep keeps it on record)
 	public static List<int> StartedRunning(Mo2Control a_control, string a_image)
 	{
 		// only what is still the very process the run started: hours into a run the list holds many ended ones, and Windows hands
 		// their numbers out again - to a program of the player's, which must never be closed as "the run's"
+		a_control.Started.Sweep();
 		var live = a_control.Started.Live();
-		var mine = new HashSet<int>(live);
+		var mine = new HashSet<int>(a_control.Started.Owned());
 		foreach (var root in live) {
 			foreach (var c in Procs.Tree(root)) {
 				mine.Add(c);

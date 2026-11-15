@@ -216,7 +216,7 @@ public sealed class GrassStep : IStep
 						throw new StepFailedException(box);
 					}
 					// Faster Archives closed the game for its offer: no crash, and not one of the cache's own starts
-					if (File.Exists(flag) && FasterArchives.Offered(InGame.LogFolders(a_ctx.Setup, a_ctx.Mo2), launched)) {
+					if (File.Exists(flag) && FasterArchives.Offered(InGame.LogFolders(a_ctx.Setup, a_ctx.Mo2), launched, a_ctx.Control.Started)) {
 						FasterArchives.Wait(a_ctx, Key, a_s, ++offers, launched);
 						--launches;
 						continue;
@@ -307,8 +307,9 @@ public sealed class ShaderStep : IStep
 	// between two shader mods or updating one never makes the other's cache stale (the fourth review, M1)
 	// a_layers: the other ticked shader mods this cache is built together with - part of it, hashed with it (none = the
 	// fingerprint a cache had before layers were known, so an older stamp still reads)
+	// a_winners: false = the fingerprint as it was before it knew which mod wins a shader file two mods ship (an older stamp)
 	public static string Fingerprint(Mo2Instance a_mo2, Cache a_c, Profile? a_profile = null, IReadOnlyCollection<string>? a_otherCaches = null,
-		IReadOnlyCollection<string>? a_layers = null)
+		IReadOnlyCollection<string>? a_layers = null, bool a_winners = true)
 	{
 		using var sha = SHA256.Create();
 		void Add(string a_file)
@@ -321,6 +322,8 @@ public sealed class ShaderStep : IStep
 			var data = File.ReadAllBytes(a_file);
 			sha.TransformBlock(data, 0, data.Length, null, 0);
 		}
+		// each shader file by the mods that ship it: where two do, which one wins is part of what the cache is built from
+		var shippedBy = new Dictionary<string, List<string>>(StringComparer.Ordinal);
 		void AddShaders(string a_mod)
 		{
 			var shaders = Path.Combine(a_mo2.ModDir(a_mod), "Shaders");
@@ -329,6 +332,13 @@ public sealed class ShaderStep : IStep
 			}
 			foreach (var f in Directory.EnumerateFiles(shaders, "*", SearchOption.AllDirectories)
 				         .Where(f => ShaderFileKinds.Contains(Path.GetExtension(f).ToLowerInvariant())).Order(StringComparer.OrdinalIgnoreCase)) {
+				var file = Path.GetRelativePath(shaders, f).ToLowerInvariant();
+				if (!shippedBy.TryGetValue(file, out var by)) {
+					shippedBy[file] = by = [];
+				}
+				if (!by.Contains(a_mod, StringComparer.OrdinalIgnoreCase)) {
+					by.Add(a_mod);
+				}
 				var rel = System.Text.Encoding.UTF8.GetBytes(a_mod + "|" + Path.GetRelativePath(shaders, f).ToLowerInvariant());
 				sha.TransformBlock(rel, 0, rel.Length, null, 0);
 				var data = File.ReadAllBytes(f);
@@ -377,6 +387,21 @@ public sealed class ShaderStep : IStep
 				         .Select(kv => kv.Key).Order(StringComparer.OrdinalIgnoreCase)) {
 				AddShaders(mod);
 			}
+			// Two mods that ship the same shader file: the game reads the winner's, so a change of the mod order that changes
+			// the winner changes what the cache is built from. Only such files are added - an order that changes no winner
+			// leaves the fingerprint as it was, and so does a profile where no two mods share a shader file
+			var shared = shippedBy.Where(s => s.Value.Count > 1).OrderBy(s => s.Key, StringComparer.Ordinal).ToList();
+			if (a_winners && shared.Count > 0) {
+				var place = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+				foreach (var m in a_profile.ModOrder()) {
+					place.TryAdd(m, place.Count);
+				}
+				foreach (var (file, by) in shared) {
+					var winner = by.OrderBy(m => place.GetValueOrDefault(m, int.MaxValue)).ThenBy(m => m, StringComparer.OrdinalIgnoreCase).First();
+					var line = System.Text.Encoding.UTF8.GetBytes("wins|" + file + "|" + winner.ToLowerInvariant());
+					sha.TransformBlock(line, 0, line.Length, null, 0);
+				}
+			}
 			var exe = Path.Combine(a_mo2.GameDir, "SkyrimSE.exe");
 			if (File.Exists(exe)) {
 				var v = System.Text.Encoding.UTF8.GetBytes("game " + System.Diagnostics.FileVersionInfo.GetVersionInfo(exe).FileVersion);
@@ -410,8 +435,12 @@ public sealed class ShaderStep : IStep
 			if (Files.CountFiles(Path.Combine(a_mo2.ModDir(a_c.OutputMod), "ShaderCache")) < Math.Max(1, stamped * 9 / 10)) {
 				return false;
 			}
+			// A stamp from before the fingerprint knew which mod wins a shared shader file ("winners") is read by the fingerprint
+			// it was written with: the cache it stands for is still that cache, and reading it the new way would have built
+			// every such cache again for nothing. The next build stamps it the new way
+			var winners = o?["winners"] is JsonValue wv && wv.TryGetValue<bool>(out var w) && w;
 			// a cache that ended by quiet (the log never said it was done) is built again
-			return o?["verified"]?.GetValue<bool>() != false && o?["fingerprint"]?.ToString() == Fingerprint(a_mo2, a_c, a_profile, a_otherCaches, a_layers);
+			return o?["verified"]?.GetValue<bool>() != false && o?["fingerprint"]?.ToString() == Fingerprint(a_mo2, a_c, a_profile, a_otherCaches, a_layers, winners);
 		} catch (System.Text.Json.JsonException) {
 			return false;
 		}
@@ -739,7 +768,7 @@ public sealed class ShaderStep : IStep
 					// the time spent waiting for the player's answer is not the compile's: it never counts against the step's limit
 					total.Stop();
 					// Faster Archives closed the game for its offer: no crash, and not one of the step's restarts
-					if (a_ctx.BlockedBy == null && FasterArchives.Offered(logs, launched)) {
+					if (a_ctx.BlockedBy == null && FasterArchives.Offered(logs, launched, a_ctx.Control.Started)) {
 						FasterArchives.Wait(a_ctx, "shaders", a_s, ++offers, launched);
 					} else {
 						GameEnded(a_ctx, a_s, c, ++restarts, Files.CountFiles(owCache));
@@ -768,7 +797,7 @@ public sealed class ShaderStep : IStep
 		}
 		// stamped against the profile as it is put back, the state the next freshness check reads - never the compile's own switches
 		Files.WriteAtomic(StampFile(a_ctx.Mo2, c), new JsonObject { ["fingerprint"] = Fingerprint(a_ctx.Mo2, c, a_ctx.Profile, a_otherCaches, a_b.Layers), ["built"] = DateTime.Now.ToString("O"), ["files"] = count,
-			["verified"] = verified }.ToJsonString());
+			["verified"] = verified, ["winners"] = true }.ToJsonString());
 		a_ctx.Note($"shaders ({c.OutputMod}): {result}");
 	}
 }

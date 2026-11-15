@@ -214,6 +214,16 @@ public static partial class Files
 		return newest;
 	}
 
+	// a file name nothing has yet at that place: "log.txt", then "log (2).txt", "log (3).txt"
+	public static string FreeFile(string a_path)
+	{
+		var free = a_path;
+		for (var i = 2; File.Exists(free) || Directory.Exists(free); ++i) {
+			free = Path.Combine(Path.GetDirectoryName(a_path) ?? "", $"{Path.GetFileNameWithoutExtension(a_path)} ({i}){Path.GetExtension(a_path)}");
+		}
+		return free;
+	}
+
 	// everything inside a_src moved into a_dst (a rename where Windows can; across drives a copy, then a delete). No count is
 	// returned: counting meant walking the whole target after every move, three walks around one terrain LOD output
 	public static void MoveContents(string a_src, string a_dst, Func<string, bool>? a_skip = null)

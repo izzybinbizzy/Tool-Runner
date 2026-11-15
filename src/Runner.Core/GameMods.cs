@@ -86,11 +86,23 @@ public static partial class FasterArchives
 
 	public static bool OfferOn(string a_ini) => !OfferOff().IsMatch(a_ini.Replace("\r", "", StringComparison.Ordinal));
 
-	// its program, started since a_sinceUtc, each with its start time (a number Windows gives to another process later is not it)
-	static Dictionary<int, DateTime> ToolSince(DateTime a_sinceUtc)
+	// Its program, started since a_sinceUtc, each with its start time (a number Windows gives to another process later is not
+	// it). a_owned: only what the run can prove its own - on its record as started by the game this run started. One that
+	// another game of the player's started in those seconds is not that (a process is only ever ended by a PID this run
+	// started, or one of its children)
+	static Dictionary<int, DateTime> ToolSince(StartedSet a_started, DateTime a_sinceUtc, bool a_owned)
 	{
 		var found = new Dictionary<int, DateTime>();
-		foreach (var p in Procs.Pids(ToolImage)) {
+		var running = Procs.Pids(ToolImage);
+		if (running.Count == 0) {
+			return found;
+		}
+		List<int>? owned = null;
+		if (a_owned) {
+			a_started.Sweep();
+			owned = a_started.Owned();
+		}
+		foreach (var p in running.Where(p => owned?.Contains(p) != false)) {
 			if (Procs.StartTime(p) is { } t && t >= a_sinceUtc.AddSeconds(-2)) {
 				found[p] = t;
 			}
@@ -98,11 +110,14 @@ public static partial class FasterArchives
 		return found;
 	}
 
-	// Did Faster Archives close the game of this start for its offer? Its own program runs since that start, or its log of that
-	// start says it handed off. a_since: when the game was started (the PC's own time)
-	public static bool Offered(IReadOnlyList<string> a_logFolders, DateTime a_since)
+	// how long its window is looked at, at the offer limit, before it is taken for one that only waits
+	public static TimeSpan OfferLook { get; set; } = TimeSpan.FromSeconds(3);
+
+	// Did Faster Archives close the game of this start for its offer? Its own program runs since that start (a_started: what
+	// this run started), or its log of that start says it handed off. a_since: when the game was started (the PC's own time)
+	public static bool Offered(IReadOnlyList<string> a_logFolders, DateTime a_since, StartedSet a_started)
 	{
-		if (ToolSince(a_since.ToUniversalTime()).Count > 0) {
+		if (ToolSince(a_started, a_since.ToUniversalTime(), true).Count > 0) {
 			return true;
 		}
 		foreach (var dir in a_logFolders) {
@@ -123,26 +138,24 @@ public static partial class FasterArchives
 	public static void Wait(RunContext a_ctx, string a_step, StepSettings a_s, int a_time, DateTime a_since)
 	{
 		var most = a_s.Int("max_offers", 3);
-		var tools = ToolSince(a_since.ToUniversalTime());
-		if (a_time > most) {
-			// its window of this offer opened seconds ago and only waits for a choice: closed, as its Cancel would, so that Mod
-			// Organizer can close for the put-back (it cannot under a program the game started)
-			foreach (var p in tools.Keys) {
+		// What is ENDED here (a window that only waits: at the offer limit, when nobody chose, at a Stop) is only a program the
+		// run can prove its own. What is WAITED for may be less sure: when the game closed for the offer and no such program
+		// is on the run's record (its program was not started by the game directly), its program of that name started since
+		// this game start is waited for all the same - and never ended
+		var tools = ToolSince(a_ctx.Control.Started, a_since.ToUniversalTime(), true);
+		var mine = tools.Keys.ToHashSet();
+		if (tools.Count == 0) {
+			tools = ToolSince(a_ctx.Control.Started, a_since.ToUniversalTime(), false);
+		}
+		// returns whether every one of them was the run's to end
+		bool End(List<int> a_pids)
+		{
+			foreach (var p in a_pids.Where(mine.Contains)) {
 				Procs.KillTree(p);
 			}
-			throw new StepFailedException($"{What} - {a_time} times in this step. Choose \"Repack now\" or \"Don't offer these again\" in its window when it next asks, or {HowToPass}; then run again from this step");
+			return a_pids.All(mine.Contains);
 		}
-		a_ctx.Log.Warn(What + ". Choose in its window; the run starts the game again when that window has closed.");
-		a_ctx.Log.Simple("Note: " + What + " - it waits for your choice in its own window");
-		if (tools.Count == 0) {
-			a_ctx.Log.Detail("its window has closed already - starting the game again");
-			return;
-		}
-		var limit = TimeSpan.FromMinutes(a_s.Num("offer_wait_min", 30));
-		// the band that says the run waits for the player, with no Done to press: the run goes on by itself
-		a_ctx.Activity(a_step, "Faster Archives asks for your choice in its own window");
-		a_ctx.Control.WaitingForPlayer?.Invoke(Asks);
-		var quiet = Stopwatch.StartNew();
+		const string stillOpen = "its window is still open (the run could not tell that its own game opened it, so it is left alone): choose Cancel there, so that Mod Organizer can close";
 		var cpu = tools.Keys.ToDictionary(p => p, p => Procs.CpuOrNull(p) ?? TimeSpan.Zero);
 		List<int> Live() => tools.Where(t => Procs.StartTime(t.Key) == t.Value).Select(t => t.Key).ToList();
 		var sampled = Stopwatch.StartNew();
@@ -161,6 +174,53 @@ public static partial class FasterArchives
 			sampled.Restart();
 			return worked;
 		}
+		// A Stop: a window that only waits for a choice is closed with it (Mod Organizer cannot close under a program of the
+		// game's); one that is repacking is never cut off - half-written archives are worse than a wait
+		// (looked at over one more second, so a Stop in the first seconds of the wait judges by what it does now)
+		void AtStop()
+		{
+			Thread.Sleep(1000);
+			var left = Live();
+			if (Worked(left)) {
+				a_ctx.Log.Warn("Faster Archives is repacking - it is left to finish; close Mod Organizer when it is done");
+			} else if (!End(left)) {
+				a_ctx.Log.Warn("Faster Archives: " + stillOpen);
+			}
+		}
+		var repacking = false;
+		if (a_time > most) {
+			// Its window of this offer opened seconds ago. One that only waits for a choice is closed, as its Cancel would, so that
+			// Mod Organizer can close for the put-back (it cannot under a program the game started). But the player may have
+			// chosen "Repack now" in those seconds, and a repack is never cut off: it is looked at for a moment first, and one
+			// that works is waited out like any other
+			if (tools.Count > 0) {
+				try {
+					a_ctx.Pause(OfferLook);
+				} catch (OperationCanceledException) {
+					AtStop();
+					throw;
+				}
+			}
+			var open = Live();
+			if (!Worked(open)) {
+				var closed = End(open);
+				throw new StepFailedException($"{What} - {a_time} times in this step{(closed ? "" : " - " + stillOpen)}. Choose \"Repack now\" or \"Don't offer these again\" in its window when it next asks, or {HowToPass}; then run again from this step");
+			}
+			repacking = true;
+			a_ctx.Log.Warn($"{What} - {a_time} times in this step, and this time it is repacking: the run waits for it to finish, then starts the game again");
+		} else {
+			a_ctx.Log.Warn(What + ". Choose in its window; the run starts the game again when that window has closed.");
+		}
+		a_ctx.Log.Simple(repacking ? "Note: Faster Archives is repacking the game's archives - the run goes on when it has finished" : "Note: " + What + " - it waits for your choice in its own window");
+		if (tools.Count == 0) {
+			a_ctx.Log.Detail("its window has closed already - starting the game again");
+			return;
+		}
+		var limit = TimeSpan.FromMinutes(a_s.Num("offer_wait_min", 30));
+		// the band that says the run waits for the player, with no Done to press: the run goes on by itself
+		a_ctx.Activity(a_step, "Faster Archives asks for your choice in its own window");
+		a_ctx.Control.WaitingForPlayer?.Invoke(Asks);
+		var quiet = Stopwatch.StartNew();
 		try {
 			while (Live() is { Count: > 0 } live) {
 				// it works (repacking): nobody is being waited for
@@ -168,22 +228,14 @@ public static partial class FasterArchives
 					quiet.Restart();
 				}
 				if (quiet.Elapsed > limit) {
-					live.ForEach(Procs.KillTree);
-					throw new StepFailedException($"{What}, and nobody chose for {limit.TotalMinutes:0} minutes - its window was closed unanswered (it asks again at the next game start). Choose there, or {HowToPass}; then run again from this step");
+					var closed = End(live);
+					throw new StepFailedException($"{What}, and nobody chose for {limit.TotalMinutes:0} minutes - " +
+						(closed ? "its window was closed unanswered (it asks again at the next game start)" : stillOpen) + $". Choose there, or {HowToPass}; then run again from this step");
 				}
 				a_ctx.Pause(TimeSpan.FromSeconds(5));
 			}
 		} catch (OperationCanceledException) {
-			// a Stop: a window that only waits for a choice is closed with it (Mod Organizer cannot close under a program of the
-			// game's); one that is repacking is never cut off - half-written archives are worse than a wait
-			// (looked at over one more second, so a Stop in the first seconds of the wait judges by what it does now)
-			Thread.Sleep(1000);
-			var left = Live();
-			if (!Worked(left)) {
-				left.ForEach(Procs.KillTree);
-			} else {
-				a_ctx.Log.Warn("Faster Archives is repacking - it is left to finish; close Mod Organizer when it is done");
-			}
+			AtStop();
 			throw;
 		} finally {
 			a_ctx.Control.WaitingForPlayer?.Invoke("");
