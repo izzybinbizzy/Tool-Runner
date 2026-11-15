@@ -22,6 +22,11 @@ public static class Preflight
 		if (InsideMo2()) {
 			outList.Add(new Issue("", true, "the runner was started from inside Mod Organizer - start it on its own (it closes and opens Mod Organizer itself)"));
 		}
+		// Skyrim Special Edition (the Anniversary Edition is the same game) and nothing else: a Mod Organizer that manages Skyrim VR,
+		// Enderal, the 2011 game or Fallout is told so before a tool is pointed at a game it was not made for
+		if (OtherGame(a_mo2) is { } other) {
+			outList.Add(new Issue("", true, $"this Mod Organizer manages another game ({other}) - Tool Runner works with Skyrim Special Edition and its Anniversary Edition only"));
+		}
 		if (GameCheck() is { Count: > 0 } game) {
 			outList.Add(new Issue("", true, "the game is running (" + string.Join(", ", game) + ") - close it first"));
 		}
@@ -49,10 +54,19 @@ public static class Preflight
 				outList.Add(new Issue("", true, $"only {free:0.0} GB free on {root} - the run needs at least {a_setup.MinFreeGb} GB for its outputs and backups"));
 			}
 		}
+		// what the run is about to remake, added up per disk (the floor above knows nothing of how big this setup's outputs are)
+		try {
+			var todo = a_setup.EnabledSteps.Where(s => a_steps.Contains(s.Key)).ToList();
+			outList.AddRange(DiskForecast.Build(a_setup, a_mo2, todo).Issues(Setup.Bool(a_setup.Root, "diskForecastStops") != false));
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) {
+			outList.Add(new Issue("", false, "the room this run needs could not be worked out: " + e.Message));
+		}
 		var ow = Files.CountFiles(a_mo2.OverwriteDir);
 		if (ow > 0) {
 			outList.Add(new Issue("", false, $"Mod Organizer's overwrite folder holds {ow} file(s) - the tools will read them as part of your load order"));
 		}
+		// two mods that put a window of their own in front of a game start (GameMods.cs)
+		outList.AddRange(new[] { FasterArchives.Check(a_setup, profile), Crdw.Check(a_setup, profile) }.OfType<Issue>());
 		var order = a_setup.EnabledSteps.Select(s => s.Key).ToList();
 		foreach (var w in StepCatalog.OrderWarnings(order)) {
 			outList.Add(new Issue("", false, "out of the recommended order: " + w));
@@ -91,6 +105,10 @@ public static class Preflight
 	}
 
 	// started as one of Mod Organizer's executables: it hooks its virtual folder into those. A window its Tools menu opened is only its child, and runs as any other
+	// the game a Mod Organizer says it manages when that is not Skyrim Special Edition, else null (an instance that names no game is not judged)
+	public static string? OtherGame(Mo2Instance a_mo2) =>
+		a_mo2.GameName.Trim() is { Length: > 0 } name && !name.Equals("Skyrim Special Edition", StringComparison.OrdinalIgnoreCase) ? name : null;
+
 	static bool InsideMo2()
 	{
 		using var me = Process.GetCurrentProcess();

@@ -43,10 +43,19 @@ public static class DataFolder
 			return old;
 		}
 		try {
-			Directory.Move(old, now);
+			// one rename or nothing: moved file by file (an old folder that is a junction to another disk), a file held half way
+			// left the setups and the run records split over two folders, and no later start took up the rest
+			for (var again = 0; ; ++again) {
+				try {
+					Directory.Move(old, now);
+					break;
+				} catch (IOException) when (again < 4) {
+					Thread.Sleep(150);
+				}
+			}
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			try {
-				File.Delete(Path.Combine(old, Pending));
+				Files.Delete(Path.Combine(old, Pending));
 			} catch (Exception e2) when (e2 is IOException or UnauthorizedAccessException) {
 			}
 			return old;
@@ -105,7 +114,7 @@ public static class DataFolder
 			return;
 		}
 		try {
-			File.Delete(Path.Combine(a_now, Pending));
+			Files.Delete(Path.Combine(a_now, Pending));
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			// the next start repoints once more - harmless
 		}

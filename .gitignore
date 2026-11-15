@@ -3,4 +3,5 @@ obj/
 .vs/
 *.user
 publish/
+Tool Runner Data/
 MO2 Tool Runner Data/

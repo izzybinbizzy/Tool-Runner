@@ -1,0 +1,10 @@
+[
+  {
+    "name": "WPF",
+    "home": "https://github.com/dotnet/wpf",
+    "licence": "MIT",
+    "copyright": "Copyright (c) .NET Foundation and Contributors",
+    "what": "The Fluent theme's accent brushes (Accent.xaml and AccentLight.xaml) are generated from WPF's own Fluent theme files, Dark.xaml and Light.xaml.",
+    "files": [ "Runner.App/Accent.xaml", "Runner.App/AccentLight.xaml" ]
+  }
+]

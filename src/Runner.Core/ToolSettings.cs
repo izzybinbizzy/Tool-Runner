@@ -43,11 +43,24 @@ public static partial class ToolSettings
 	[GeneratedRegex(@"\[ListVars\] <Debug: (?<n>[^:<>]+): (?<v>.*)>\s*$")]
 	private static partial Regex ListVar();
 
-	// the values of the LAST run in that log (a name seen again later wins)
+	// The values of the LAST run in that log (a name seen again later wins). Read line by line, never the whole log at once:
+	// DynDOLOD's debug log of a large load order is hundreds of megabytes, and it was read into memory three times over at the
+	// very end of the longest step, for a note
 	public static Dictionary<string, string> ReadVars(string a_log)
 	{
 		var outMap = new Dictionary<string, string>(StringComparer.Ordinal);
-		foreach (var line in Files.ReadSharedText(a_log).Split('\n')) {
+		using var fs = new FileStream(a_log, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1 << 16, FileOptions.SequentialScan);
+		// how it is written, judged by its beginning (up to the last whole line of the first 64 KB)
+		var head = new byte[(int)Math.Min(fs.Length, 1 << 16)];
+		var got = fs.ReadAtLeast(head, head.Length, false);
+		var cut = got == fs.Length ? got : Math.Max(0, Array.LastIndexOf(head, (byte)'\n', Math.Max(0, got - 1)) + 1);
+		Files.DecodeText(head[..(cut == 0 ? got : cut)], out var how);
+		fs.Position = 0;
+		using var reader = new StreamReader(fs, how, detectEncodingFromByteOrderMarks: true);
+		while (reader.ReadLine() is { } line) {
+			if (!line.Contains("[ListVars]", StringComparison.Ordinal)) {
+				continue;
+			}
 			var m = ListVar().Match(line);
 			if (m.Success) {
 				outMap[m.Groups["n"].Value.Trim()] = m.Groups["v"].Value.Trim();
@@ -93,7 +106,20 @@ public static partial class ToolSettings
 
 	public static Learned? Load(Setup a_setup, string a_step)
 	{
-		var f = Path.Combine(Folder(a_setup, a_step), "learned.json");
+		var dir = Folder(a_setup, a_step);
+		var f = Path.Combine(dir, "learned.json");
+		// a Keep cut off between its two renames left no set under the step's own name: the whole new one beside it (its
+		// learned.json is written last) is the set, else the old one stands again
+		if (!Directory.Exists(dir)) {
+			foreach (var spare in new[] { dir + " new", dir + " old" }.Where(s => File.Exists(Path.Combine(s, "learned.json")))) {
+				try {
+					Directory.Move(spare, dir);
+					break;
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+					// held for a moment, or another look just did it: read what stands
+				}
+			}
+		}
 		try {
 			return File.Exists(f) ? JsonSerializer.Deserialize<Learned>(Files.ReadShared(f)) : null;
 		} catch (JsonException) {
@@ -145,24 +171,100 @@ public static partial class ToolSettings
 		var dir = Folder(a_setup, a_step);
 		var fresh = dir + " new";
 		if (Directory.Exists(fresh)) {
-			Directory.Delete(fresh, true);
+			Files.DeleteDir(fresh);
 		}
 		Directory.CreateDirectory(Path.Combine(fresh, "files"));
 		var l = new Learned { Step = a_step, Tool = a_tool, At = DateTime.UtcNow, Values = a_values ?? [] };
 		for (var i = 0; i < a_files.Count; ++i) {
 			var stored = Path.Combine("files", $"{i + 1} {Path.GetFileName(a_files[i])}");
-			File.Copy(a_files[i], Path.Combine(fresh, stored));
+			Files.Copy(a_files[i], Path.Combine(fresh, stored));
 			l.Files.Add(new LearnedFile { Live = a_files[i], Stored = stored });
 		}
 		Files.WriteAtomic(Path.Combine(fresh, "learned.json"), JsonSerializer.SerializeToUtf8Bytes(l, Pretty));
-		if (Directory.Exists(dir)) {
-			Directory.Delete(dir, true);
+		// The old set steps aside under another name (one rename), the new one moves in, and only then the old one goes. At no
+		// moment is there no whole set: deleted first, a crash or a file held open half way left none - and the next run ran
+		// the tool with whatever its window was last left at, without a word (Load takes up a set this was cut off on)
+		var old = dir + " old";
+		if (Directory.Exists(old)) {
+			Files.DeleteDir(old);
 		}
-		Directory.Move(fresh, dir);
+		if (Directory.Exists(dir)) {
+			Files.MoveDirectory(dir, old);
+		}
+		Files.MoveDirectory(fresh, dir);
+		try {
+			Files.DeleteDir(old);
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			// the old set left beside the new one only takes room; the next Keep takes it away
+		}
 		return l;
 	}
 
 	// the tool's own window, opened through Mod Organizer for the player; once they close it, every settings file it wrote is kept
+	// the mod "Learn its settings" switched on for the tool's window, named until it is off again: a crash in between leaves this for the next look
+	public static string SwitchRecord(Setup a_setup) => a_setup.File + ".tool on";
+
+	// what a record holds: the mod, then the Mod Organizer and the profile it was switched on in (an older record holds the mod
+	// alone - it is its own setup's)
+	public static string SwitchText(string a_mod, Mo2Instance a_mo2, string a_profile) => a_mod + "\n" + a_mo2.BaseDir + "\n" + a_profile;
+
+	static (string Mod, string? Instance, string? Profile) ReadSwitch(string a_record)
+	{
+		var lines = Files.ReadSharedText(a_record).Split('\n').Select(l => l.Trim()).Where(l => l != "").ToList();
+		return (lines.ElementAtOrDefault(0) ?? "", lines.ElementAtOrDefault(1), lines.ElementAtOrDefault(2));
+	}
+
+	// With Mod Organizer closed, before a run or a Learn reads the profile as the player's. Every record beside this setup that
+	// names this Mod Organizer and profile counts: two setups can share a profile, and a mod one of them left on would be read
+	// by the other as the player's own tick and kept on at every put-back. A record that cannot be undone stops what asked,
+	// for the same reason - and so that a later Learn never writes over a record that still stands.
+	public static void UndoLeftSwitch(Setup a_setup, Profile a_profile, RunLog a_log)
+	{
+		var own = SwitchRecord(a_setup);
+		List<string> records;
+		try {
+			// a setup that is no file on disk has no record beside it
+			if (string.IsNullOrEmpty(a_setup.File)) {
+				return;
+			}
+			// listed without asking first whether the folder is there: "is it there" answers no for a folder that cannot be
+			// looked at as well, and the listing itself says which of the two it is
+			records = [.. Directory.EnumerateFiles(Path.GetDirectoryName(Path.GetFullPath(a_setup.File))!, "*.tool on")];
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			// looked at through this setup's own record alone, another setup's would be missed and its mod read as the player's tick
+			throw new StepFailedException($"the setups folder could not be looked through for a mod that learning a tool's settings left on ({e.Message}) - make the folder readable, then start again");
+		}
+		foreach (var record in records) {
+			try {
+				// read without asking first whether it is there: "is it there" answers no for a record that cannot be looked
+				// at as well, and passed over on that answer its mod stayed on as the player's tick. Only a record that is
+				// truly gone (another setup's start undid it between the listing and this read) is passed over
+				(string Mod, string? Instance, string? Profile) read;
+				try {
+					read = ReadSwitch(record);
+				} catch (FileNotFoundException) {
+					continue;
+				} catch (DirectoryNotFoundException) {
+					continue;
+				}
+				var (mod, instance, profile) = read;
+				var here = instance != null && profile != null ? Files.SamePath(instance, a_profile.Mo2.BaseDir) && profile.Equals(a_profile.Name, StringComparison.OrdinalIgnoreCase)
+					: Files.SamePath(record, own);
+				if (!here) {
+					continue;
+				}
+				if (mod != "" && a_profile.IsOn(mod)) {
+					a_profile.SetMods([], [mod], a_log);
+					a_log.Warn($"the mod \"{mod}\" was left on when learning a tool's settings was cut off - it is off again");
+				}
+				Files.Delete(record);
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or KeyNotFoundException) {
+				throw new StepFailedException($"a mod left on when learning a tool's settings was cut off could not be switched off ({e.Message}) - " +
+					$"close what holds the profile's files and start again (or untick it in Mod Organizer yourself and delete \"{Path.GetFileName(record)}\" beside the setups)");
+			}
+		}
+	}
+
 	public static Learned Learn(Setup a_setup, string a_step, RunLog a_log, CancellationToken a_ct)
 	{
 		using var hold = Runner.HoldIfFree() ?? throw new StepFailedException("a run is going - learn a tool's settings when it is done");
@@ -186,9 +288,11 @@ public static partial class ToolSettings
 		// holding a plugin is left to the player, as in a run). Only that mod is unticked after: what the player changed in Mod
 		// Organizer meanwhile stays
 		var profile = new Profile(mo2, a_setup.Profile, () => control.Running);
+		UndoLeftSwitch(a_setup, profile, a_log);
 		var toolMod = StepKit.ToolMod(mo2, profile, title);
 		if (toolMod != null) {
 			StepKit.NoPluginIn(mo2, toolMod, tool);
+			Files.WriteAtomic(SwitchRecord(a_setup), SwitchText(toolMod, mo2, a_setup.Profile));
 			profile.SetMods([toolMod], [], a_log);
 		}
 		try {
@@ -210,6 +314,7 @@ public static partial class ToolSettings
 				try {
 					control.Close(null, CancellationToken.None);
 					profile.SetMods([], [toolMod], a_log);
+					Files.Delete(SwitchRecord(a_setup));
 				} catch (Exception e) when (e is Mo2BusyException or IOException or UnauthorizedAccessException or InvalidOperationException or KeyNotFoundException) {
 					a_log.Warn($"the mod \"{toolMod}\" could not be switched off again ({e.Message}) - untick it in Mod Organizer");
 				}

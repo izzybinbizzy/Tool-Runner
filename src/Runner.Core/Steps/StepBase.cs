@@ -24,7 +24,7 @@ public sealed class CheckContext
 public static class StepRegistry
 {
 	static readonly Dictionary<string, IStep> Steps = new IStep[] {
-		new ShaderStep(), new CleanSaveStep(), new WryeBashStep(), new SynthesisStep(), new LandscapeFixerStep(), new PgPatcherStep(),
+		new ShaderStep(), new CleanSaveStep(), new LootStep(), new WryeBashStep(), new SynthesisStep(), new LandscapeFixerStep(), new PgPatcherStep(),
 		new XLodGenStep(), new AcmosStep(), new GrassStep(), new TreeLodGenStep(), new TexGenStep(), new DynDolodStep(),
 		new AnvilLodStep(), new PandoraStep(), new PlaySaveStep(),
 	}.Concat(GuidedToolStep.All).ToDictionary(s => s.Key);
@@ -95,8 +95,9 @@ public static class StepKit
 		return a_profile.States().TryGetValue(mod, out var state) && state == '-' ? mod : null;
 	}
 
-	// a name no other park in this backup has
-	static string FreeFolder(string a_dir)
+	// a name nothing in this backup has yet: what is in a run's backup is never written over, not by a second park of the
+	// same mod, not by a put-back that is tried again
+	public static string FreeFolder(string a_dir)
 	{
 		var dst = a_dir;
 		for (var i = 2; Directory.Exists(dst) || File.Exists(dst); ++i) {
@@ -117,7 +118,8 @@ public static class StepKit
 		var dst = FreeFolder(Path.Combine(a_ctx.BackupFolder, "outputs", a_mod));
 		Directory.CreateDirectory(dst);
 		// recorded BEFORE the first move: a move that fails half way still has its record, so the put-back finds what moved
-		a_ctx.Journal.Parked.Add(new ParkRecord { Step = a_step, Mod = a_mod, From = d, To = dst });
+		var park = new ParkRecord { Step = a_step, Mod = a_mod, From = d, To = dst, Parking = true, Seq = a_ctx.Journal.NextSeq() };
+		a_ctx.Journal.Parked.Add(park);
 		a_ctx.Journal.Save();
 		var n = 0;
 		foreach (var e in Directory.EnumerateFileSystemEntries(d).ToList()) {
@@ -128,11 +130,14 @@ public static class StepKit
 			if (Directory.Exists(e)) {
 				Files.MoveDirectory(e, Path.Combine(dst, name));
 			} else {
-				File.Move(e, Path.Combine(dst, name));
+				Files.Move(e, Path.Combine(dst, name));
 			}
 			++n;
 		}
-		a_ctx.Log.Detail($"old {a_mod} moved to the backup ({n} item(s), {Files.CountFiles(dst)} file(s))");
+		// all of it is in the backup: from here what appears in the mod is the tool's own
+		park.Parking = false;
+		a_ctx.Journal.Save();
+		a_ctx.Log.Detail($"old {a_mod} moved to the backup ({n} item(s))");
 		return n;
 	}
 
@@ -144,14 +149,32 @@ public static class StepKit
 			return;
 		}
 		string? backup = null;
+		// its number in the run's record names its copy too: it is given once and never again. Named by how many files were
+		// kept so far, a record taken out again (Forget) gave the next file of that name the copy of another - and wrote over it
+		var seq = a_ctx.Journal.NextSeq();
 		if (File.Exists(a_path)) {
 			var dir = Path.Combine(a_ctx.BackupFolder, "files");
 			Directory.CreateDirectory(dir);
-			backup = Path.Combine(dir, $"{a_ctx.Journal.Kept.Count + 1} {Path.GetFileName(a_path)}");
-			File.Copy(a_path, backup, true);
+			backup = Files.FreeFile(Path.Combine(dir, $"{seq} {Path.GetFileName(a_path)}"));
+			Files.Copy(a_path, backup);
 		}
-		a_ctx.Journal.Kept.Add(new KeptFile { Path = a_path, Backup = backup });
+		a_ctx.Journal.Kept.Add(new KeptFile { Path = a_path, Backup = backup, Seq = seq });
 		a_ctx.Journal.Save();
+	}
+
+	// Is the kept copy there? False only when Windows says the file is not there. A copy that cannot be looked at right now (no
+	// access, a share that does not answer) throws: File.Exists says "no" for both, and a file written off on that answer was
+	// never put back, not even once its backup could be read again
+	static bool BackupThere(string a_backup)
+	{
+		try {
+			using var s = new FileStream(a_backup, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+			return true;
+		} catch (FileNotFoundException) {
+			return false;
+		} catch (DirectoryNotFoundException) {
+			return false;
+		}
 	}
 
 	// the kept files back as they were (one, or every one still out when a_path is null); returns those it could not put back
@@ -162,8 +185,18 @@ public static class StepKit
 			try {
 				if (k.Backup == null) {
 					if (File.Exists(k.Path)) {
-						File.Delete(k.Path);
+						Files.Delete(k.Path);
 					}
+				} else if (!BackupThere(k.Backup)) {
+					// On a drive that is not there its old copy may come back with the drive: not put back, and asked again (as an
+					// old output is). In a backup that is there it was cleared away: nothing can bring it back, and counting it as
+					// "could not be put back" would keep every later put-back from ever finishing
+					if (Path.GetPathRoot(Path.GetFullPath(k.Backup)) is { Length: > 0 } drive && !Directory.Exists(drive)) {
+						throw new IOException($"the backup's drive {drive} is not there");
+					}
+					k.Done = true;
+					a_ctx.Log.Warn($"{k.Path} is left as it is: its old copy is no longer in the backup ({k.Backup})");
+					continue;
 				} else {
 					Files.WriteAtomic(k.Path, File.ReadAllBytes(k.Backup));
 					// as it was, its time too: a file in overwrite with a new time reads as the step's own
@@ -176,8 +209,32 @@ public static class StepKit
 				a_ctx.Log.Error($"{k.Path} could NOT be put back ({e.Message}) - its old copy: {k.Backup ?? "(it did not exist)"}");
 			}
 		}
-		a_ctx.Journal.Save();
+		// the files are back: a record the disk will not take right now is never what stops the put-back that follows
+		a_ctx.Journal.TrySave();
 		return failed;
+	}
+
+	// A file a tool may rewrite IN PLACE inside its output mod (Mod Organizer lets a program write over a file that already stands
+	// there, so nothing new lands in overwrite): its old bytes are kept before the tool starts. A step that fails or is stopped
+	// gets them back; a step that finished calls Settled, and an undo then puts exactly that file back. Without it nothing of
+	// the old output was kept anywhere: an undo left the mod without its plugin, and a tool stopped half way left its
+	// half-written plugin as the only copy.
+	public static void KeepInPlace(RunContext a_ctx, string a_mod, params string?[] a_files)
+	{
+		// a file that is not there yet is kept as "was not there": a tool that writes it straight into a mod holding other
+		// things leaves a record all the same, so a failed step takes its half-written file out and an undo takes only that
+		// file - never the whole mod set aside as if the run had made all of it
+		foreach (var f in a_files.OfType<string>().Select(f => Path.Combine(a_ctx.Mo2.ModDir(a_mod), f))) {
+			KeepFile(a_ctx, f);
+		}
+	}
+
+	// a file that was kept and then never changed after all (it could not be written): nothing of it is put back
+	public static void Forget(RunContext a_ctx, string a_path)
+	{
+		if (a_ctx.Journal.Kept.RemoveAll(k => !k.Done && string.Equals(k.Path, a_path, StringComparison.OrdinalIgnoreCase)) > 0) {
+			a_ctx.Journal.Save();
+		}
 	}
 
 	// files kept only while a step changed them in place: the change is complete, so they are never put back
@@ -185,6 +242,21 @@ public static class StepKit
 	{
 		if (a_paths.Count == 0) {
 			return;
+		}
+		foreach (var k in a_ctx.Journal.Kept.Where(k => !k.Done && a_paths.Contains(k.Path, StringComparer.OrdinalIgnoreCase))) {
+			k.Done = true;
+			k.Settled = true;
+		}
+		a_ctx.Journal.Save();
+	}
+
+	// The same, with the output mod on record as built in the SAME write. In two writes, a crash between them left a plugin
+	// replaced in place that no record called this run's: the put-back passed over the settled file, and an undo found
+	// nothing this run had left
+	public static void Settled(RunContext a_ctx, string a_builtMod, IReadOnlyCollection<string> a_paths)
+	{
+		if (!a_ctx.Journal.Built.Contains(a_builtMod, StringComparer.OrdinalIgnoreCase)) {
+			a_ctx.Journal.Built.Add(a_builtMod);
 		}
 		foreach (var k in a_ctx.Journal.Kept.Where(k => !k.Done && a_paths.Contains(k.Path, StringComparer.OrdinalIgnoreCase))) {
 			k.Done = true;
@@ -226,16 +298,21 @@ public static class StepKit
 		a_ctx.Journal.Save();
 	}
 
-	// a tool's own output folder emptied (so the tool writes into an empty one); its old content to the backup
-	public static void ParkDir(RunContext a_ctx, string a_path, string a_label)
+	// A tool's own output folder emptied (so the tool writes into an empty one); its old content to the backup.
+	// a_comesBackFor: the step whose failure brings the old content back. For a folder the PLAYER uses - the shader cache and
+	// the grass cache in Mod Organizer's overwrite - a step that fails or is stopped puts it back like a mod's old output (the
+	// run used to say "the profile is back as it was" with the working cache left in the backup: every shader compiled again
+	// at the next start, and the old cache went for good when the backups were pruned). A tool's own scratch folder needs no way
+	// back and passes none.
+	public static void ParkDir(RunContext a_ctx, string a_path, string a_label, string? a_comesBackFor = null)
 	{
 		if (Directory.Exists(a_path) && Directory.EnumerateFileSystemEntries(a_path).Any()) {
 			var dst = FreeFolder(Path.Combine(a_ctx.BackupFolder, "outputs", a_label));
 			Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
 			// on record BEFORE the move, as ParkMod, so what a move that fails half way took comes back; until Moved, an undo takes what
-			// stands here for what that move left, never for the run's output. Replaced, because a step that fails has always kept
-			// this folder's own way back
-			var park = new ParkRecord { Mod = a_label, From = a_path, To = dst, Replaced = true, IsFolder = true };
+			// stands here for what that move left, never for the run's output. One that comes back stays "not replaced" until its
+			// step has finished (the run marks its step's records then)
+			var park = new ParkRecord { Step = a_comesBackFor ?? "", Mod = a_label, From = a_path, To = dst, Replaced = a_comesBackFor == null, IsFolder = true, Seq = a_ctx.Journal.NextSeq() };
 			a_ctx.Journal.Parked.Add(park);
 			a_ctx.Journal.Save();
 			try {
@@ -248,7 +325,7 @@ public static class StepKit
 			}
 			park.Moved = true;
 			a_ctx.Journal.Save();
-			a_ctx.Log.Detail($"old {a_label} moved to the backup ({Files.CountFiles(dst)} file(s))");
+			a_ctx.Log.Detail($"old {a_label} moved to the backup");
 		}
 		Directory.CreateDirectory(a_path);
 	}
@@ -261,19 +338,36 @@ public static class StepKit
 			throw new StepFailedException($"{StepCatalog.Name(a_step)} made {n} file(s) - too few for {a_mod}");
 		}
 		ParkMod(a_ctx, a_step, a_mod);
-		var got = Files.MoveContents(a_src, a_ctx.Mo2.ModDir(a_mod));
-		a_ctx.Log.Detail($"{a_mod} now holds {got} file(s)");
-		return got;
+		Files.MoveContents(a_src, a_ctx.Mo2.ModDir(a_mod));
+		a_ctx.Log.Detail($"{a_mod} now holds the {n} file(s) it made");
+		return n;
+	}
+
+	// A tool whose work is done (its own "done" line was read, its output is whole) is waited for to close by itself. One that is
+	// slow to close, or sits idle while it lets go, is then closed by the step's own CloseTool: it never turns a finished step
+	// into a failed one (a 24-minute DynDOLOD once read FAILED "passed its 3 minute limit"). A Stop still ends the wait.
+	public static void LetClose(RunContext a_ctx, string a_step, Process a_proc, TimeSpan a_wait, string a_tool)
+	{
+		try {
+			Waits.Exit(a_ctx, a_step, a_proc, a_wait);
+		} catch (StepFailedException e) {
+			a_ctx.Log.Warn($"{a_tool} had finished but did not close by itself ({e.Message}) - it is closed now");
+		}
 	}
 
 	// a tool left open keeps MO2 locked: its windows asked to close, then the process tree ended (by PID)
 	public static void CloseTool(RunContext a_ctx, string? a_image) => CloseTool(a_ctx.Control, a_image, a_ctx.Log);
 
-	// the processes of this image that this run started, and the children of them (a packed program runs its window in a child)
+	// the processes of this image that this run started, and the children of them (a packed program runs its window in a child
+	// - also one whose launcher has ended since: StartedSet.Sweep keeps it on record)
 	public static List<int> StartedRunning(Mo2Control a_control, string a_image)
 	{
-		var mine = new HashSet<int>(a_control.Started);
-		foreach (var root in a_control.Started) {
+		// only what is still the very process the run started: hours into a run the list holds many ended ones, and Windows hands
+		// their numbers out again - to a program of the player's, which must never be closed as "the run's"
+		a_control.Started.Sweep();
+		var live = a_control.Started.Live();
+		var mine = new HashSet<int>(a_control.Started.Owned());
+		foreach (var root in live) {
 			foreach (var c in Procs.Tree(root)) {
 				mine.Add(c);
 			}
