@@ -297,12 +297,14 @@ public static class Theme
 			if (((a_t?["gradients"] as JsonObject)?["PrimaryAndProgress"] as JsonObject)?["stops"] is JsonArray { Count: >= 2 } stops) {
 				try {
 					return ((Color)ColorConverter.ConvertFromString(stops[0]!["color"]!.ToString()), (Color)ColorConverter.ConvertFromString(stops[^1]!["color"]!.ToString()));
-				} catch (Exception e) when (e is FormatException or NullReferenceException) {
+				} catch (Exception e) when (e is FormatException or NullReferenceException or InvalidOperationException) {
+					// (InvalidOperationException: a stop that is plain text, not an object - one such file kept the whole gallery from filling)
 				}
 			}
 			return (Pick("Accent"), Pick("Accent"));
 		}
-		var bar = Bar(own is { } o && o["gradients"] != null ? o : own == null || a_name is HighContrast or ColorBlind ? basis : null);
+		// a theme that names no gradient keeps the default one when it is applied, so its card shows that one too
+		var bar = Bar(own is { } o && o["gradients"] != null ? o : basis);
 		var mode = Value(own?["windowsMode"]) ?? (a_name == ColorBlind || own == null ? "Light" : Value(basis["windowsMode"]) ?? "Light");
 		var corner = ((own?["shape"] ?? basis["shape"]) as JsonObject)?["CardCorner"] is JsonValue c && c.TryGetValue<double>(out var r) ? Math.Clamp(r, 0, 30) : 8;
 		return new(a_name, a_file, Value(own?["description"]) ?? (a_name switch {
@@ -328,17 +330,21 @@ public static class Theme
 						target[k] = v.DeepClone();
 					}
 				}
-			} else if (key is "gradients" && node != null) {
+			} else if (key is "gradients" or "highContrastPairs" && node != null) {
 				doc[key] = node.DeepClone();
 			} else if (key is "windowsMode" or "description" or "icon" && Value(node) is { } text && doc[key] is JsonObject one) {
 				one["value"] = text;
 			}
 		}
+		// the file's name is the theme's with every character Windows refuses in a name taken out (a theme may be called
+		// "Ocean: dark", and a slash in a name would put the copy outside the Themes folder); the name inside stays as it is
+		static string FileSafe(string a_title) =>
+			string.Concat(a_title.Select(c => Array.IndexOf(Path.GetInvalidFileNameChars(), c) >= 0 ? ' ' : c)).Trim().TrimEnd('.') is { Length: > 0 } safe ? safe : "Theme";
 		var title = a_name.Replace(" (file)", "", StringComparison.Ordinal) + " copy";
-		var path = Path.Combine(Folder, title + ".json");
+		var path = Path.Combine(Folder, FileSafe(title) + ".json");
 		for (var n = 2; File.Exists(path); ++n) {
 			title = $"{a_name.Replace(" (file)", "", StringComparison.Ordinal)} copy {n}";
-			path = Path.Combine(Folder, title + ".json");
+			path = Path.Combine(Folder, FileSafe(title) + ".json");
 		}
 		if (doc["name"] is JsonObject nameSlot) {
 			nameSlot["value"] = title;
@@ -370,10 +376,15 @@ public static class Theme
 	}
 
 	// the Settings picker: the folder and the file read off the window's thread, the look applied on it
-	public static async Task<List<string>> ApplyAsync(string a_name)
+	static int s_asked;
+
+	// null: a later pick took this one's place, and nothing was applied
+	public static async Task<List<string>?> ApplyAsync(string a_name)
 	{
+		var mine = ++s_asked;
 		var read = a_name == Default ? null : await Task.Run(() => ReadTheme(a_name));
-		return Apply(a_name, read, true);
+		// the card picked last wins: an earlier pick whose file read slower never takes its place
+		return mine == s_asked ? Apply(a_name, read, true) : null;
 	}
 
 	// applies the theme by its name; returns what did not read (empty = all of it). a_keep: remembered for the next start

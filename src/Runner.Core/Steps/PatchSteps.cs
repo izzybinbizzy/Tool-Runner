@@ -230,7 +230,7 @@ public sealed class PgPatcherStep : IStep
 		} else if (set != null && a_s.Bool("pglite_check", false)) {
 			var conf = JsonNode.Parse(Files.ReadSharedText(set)) as JsonObject;
 			var mode = conf?["params"]?["processing"]?["pglitemode"]?.GetValue<bool>() == true;
-			var ticked = a_c.States.TryGetValue("PGLite", out var f) && f == '+';
+			var ticked = Runner.PgLiteTicked(a_c.Profile);
 			if (mode != ticked) {
 				yield return new Issue(Key, true, $"PGLite is {(ticked ? "ticked" : "not ticked")} in this profile but the PGPatcher settings have PGLite Mode {(mode ? "on" : "off")}");
 			}
@@ -386,7 +386,7 @@ public sealed class SynthesisStep : IStep
 		} else if (!File.Exists(espMod) || File.GetLastWriteTimeUtc(espMod) < t0) {
 			throw new StepFailedException("Synthesis wrote no new Synthesis.esp");
 		}
-		StepKit.Settled(a_ctx, [espMod]);
+		StepKit.Settled(a_ctx, mod, [espMod]);
 		a_ctx.SetAfter(mod);
 	}
 
@@ -625,7 +625,7 @@ public sealed class WryeBashStep : IStep
 			throw new StepFailedException($"Wrye Bash wrote no new {a_patch}");
 		}
 		// the new patch stands: its old bytes (kept before the tool started) are what an undo puts back
-		StepKit.Settled(a_ctx, [inMod]);
+		StepKit.Settled(a_ctx, a_mod, [inMod]);
 	}
 }
 

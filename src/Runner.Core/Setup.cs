@@ -87,6 +87,13 @@ public sealed class Setup
 		}
 		var on = Bool(step, "on") ?? true;
 		if (!a_pgLiteTicked) {
+			// switched off by this rule and not touched since: its reason is gone, so the step is on again, and said - left off,
+			// a player who took PGLite out would have lost PGPatcher without ever having unticked it
+			if (Bool(settings, "pglite_unticked") == true && !on) {
+				settings.Remove("pglite_unticked");
+				step["on"] = true;
+				return "PGLite is no longer ticked in this profile, so the PGPatcher step is switched on again.";
+			}
 			var had = settings.Remove("pglite_unticked") | settings.Remove("with_pglite");
 			return had ? "" : null;
 		}

@@ -43,7 +43,16 @@ public static class DataFolder
 			return old;
 		}
 		try {
-			Files.MoveDirectory(old, now);
+			// one rename or nothing: moved file by file (an old folder that is a junction to another disk), a file held half way
+			// left the setups and the run records split over two folders, and no later start took up the rest
+			for (var again = 0; ; ++again) {
+				try {
+					Directory.Move(old, now);
+					break;
+				} catch (IOException) when (again < 4) {
+					Thread.Sleep(150);
+				}
+			}
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			try {
 				Files.Delete(Path.Combine(old, Pending));

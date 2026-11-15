@@ -94,6 +94,9 @@ public static class ThemeGallery
 				return;
 			}
 			var problems = await Theme.ApplyAsync(a_name);
+			if (problems == null) {
+				return;
+			}
 			note.Text = problems.Count == 0 ? $"\"{Theme.Current}\" is in use." : "In use, with these values left as the default: " + string.Join("; ", problems.Take(6));
 			MarkCurrent();
 			A11y.Say(a_w, note.Text);

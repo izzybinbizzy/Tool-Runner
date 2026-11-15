@@ -120,21 +120,32 @@ public static class DataRemoval
 	[return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
 	static extern bool GetVolumeNameForVolumeMountPoint(string a_root, [System.Runtime.InteropServices.Out] char[] a_name, uint a_length);
 
+	[System.Runtime.InteropServices.DllImport("kernel32.dll", EntryPoint = "GetVolumePathNameW", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+	[return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+	static extern bool GetVolumePathName(string a_path, [System.Runtime.InteropServices.Out] char[] a_root, uint a_length);
+
 	// How much the Recycle Bin of a path's drive takes at most, in bytes; 0 = that drive keeps no bin (a stick, a card, a bin
 	// switched off). Windows keeps the limit per drive (measured on a PC with two 900 GB drives: about 46 and 50 GB), and what is
 	// bigger than it is not recycled: asked without its own questions, as here, Windows deletes it for good. A drive Windows
 	// holds no limit for yet is judged by Windows' own starting rule (a tenth of the first 40 GB and a twentieth of the rest).
 	// The offline tests answer for it.
 	public static Func<string, long> BinRoom { get; set; } = a_path => {
-		var root = Path.GetPathRoot(Path.GetFullPath(a_path)) ?? "";
-		DriveInfo drive;
-		try {
-			drive = new DriveInfo(root);
-			if (drive.DriveType == DriveType.Removable) {
+		var full = Path.GetFullPath(a_path);
+		// The volume the path really stands on: a folder another disk is mounted in has that disk's bin and that disk's limit,
+		// never those of the drive letter in front. A volume with no drive letter of its own is judged by what Windows keeps
+		// for it; with nothing kept it counts as having no bin (what would go there is then left in place and named)
+		var mount = new char[520];
+		var root = GetVolumePathName(full, mount, (uint)mount.Length) ? new string(mount).TrimEnd('\0') : Path.GetPathRoot(full) ?? "";
+		DriveInfo? drive = null;
+		if (root.Length <= 3) {
+			try {
+				drive = new DriveInfo(root);
+				if (drive.DriveType == DriveType.Removable) {
+					return 0;
+				}
+			} catch (Exception e) when (e is ArgumentException or IOException) {
 				return 0;
 			}
-		} catch (Exception e) when (e is ArgumentException or IOException) {
-			return 0;
 		}
 		var name = new char[64];
 		if (GetVolumeNameForVolumeMountPoint(root, name, (uint)name.Length) && new string(name).TrimEnd('\0') is var volume &&
@@ -146,6 +157,9 @@ public static class DataRemoval
 			if (key?.GetValue("MaxCapacity") is int mb && mb > 0) {
 				return mb * 1048576L;
 			}
+		}
+		if (drive == null) {
+			return 0;
 		}
 		const long FortyGb = 40L << 30;
 		try {

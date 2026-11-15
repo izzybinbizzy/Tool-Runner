@@ -209,7 +209,8 @@ public static class Cli
 
 	static int RunOne(RunRequest a_req, bool a_json = false)
 	{
-		var outcome = Runner.Run(a_req);
+		// the run's log on the command line while it goes; a script that asked for JSON gets its one object and nothing else
+		var outcome = Runner.Run(a_json ? a_req : a_req with { Echo = Console.WriteLine });
 		var ended = Ended(outcome);
 		if (a_json) {
 			Console.WriteLine(Reports.Text(Reports.Outcome(outcome, ended)));

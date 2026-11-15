@@ -292,6 +292,10 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	// with their start times: a PID Windows gives the player's Mod Organizer later is never taken for the run's
 	readonly StartedSet _ownMo2 = new();
 
+	// every process this run started itself that is still that process: its own Mod Organizer (the game and the tools start
+	// under it) and what the run started directly
+	public List<int> RunProcesses() => [.. _ownMo2.Live(), .. Started.Live()];
+
 	public bool AllowCloseTheirs { get; set; }
 
 	public static TimeSpan UserWait { get; set; } = TimeSpan.FromMinutes(30);
@@ -465,7 +469,9 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	public Func<bool>? RunningProbe { get; set; }
 
 	// a Mod Organizer whose path cannot be read counts as running (no profile file is written under it)
-	bool IsRunning() => RunningProbe?.Invoke() ?? (Pids().Count > 0 || Unreadable().Count > 0 || OwnStarting());
+	// (a list of processes Windows would not give is no proof that Mod Organizer is closed: it counts as open, and nothing is
+	// written under it)
+	bool IsRunning() => RunningProbe?.Invoke() ?? (Pids().Count > 0 || Unreadable().Count > 0 || OwnStarting() || Procs.LookFailed);
 
 	// the run was asked to stop (the run's own cancellation): a close made for the put-back waits for nothing it can do without -
 	// set by the run; none = never asked

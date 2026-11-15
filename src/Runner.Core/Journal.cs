@@ -53,6 +53,9 @@ public sealed class ParkRecord
 	public bool SetAside { get; set; }
 	// a tool's folder is all in the backup: until then what stands at From is what the move left, never the run's own
 	public bool Moved { get; set; }
+	// a mod's old output was on its way into the backup and the move never ended (a crash, a file held): what still stands at
+	// From is the rest of that old output, never what a tool half wrote
+	public bool Parking { get; set; }
 	// its copy in the backup was gone when it was to be put back (the backup cleared by hand): nothing can bring it back, the mod is
 	// left switched off, and the put-back is not held up for ever by it
 	public bool Lost { get; set; }
@@ -190,6 +193,8 @@ public sealed class Journal
 	// packing the old outputs): to the window still the run going - Stop ends the chores - with Doing as what it shows
 	public bool FinishingUp { get; set; }
 	public string Doing { get; set; } = "";
+	// the boxes open now that the run does not answer itself (a tool's, Mod Organizer's, one of the game's it does not know), in words
+	public string Box { get; set; } = "";
 
 	// what the window and the command line follow as "the run that is going", while its owner lives
 	[JsonIgnore]
@@ -267,8 +272,14 @@ public sealed class Journal
 			return null;
 		}
 		foreach (var d in Directory.GetDirectories(a_runsDir).OrderDescending()) {
-			if (!System.IO.File.Exists(Path.Combine(d, "journal.json"))) {
-				continue;
+			// by its name in the folder's own list: a record this user may not read is still there (File.Exists says "no" for
+			// that too, and a run then started over an interrupted one as if there were none)
+			try {
+				if (!Directory.EnumerateFiles(d, "journal.json").Any()) {
+					continue;
+				}
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+				return (d, e);
 			}
 			try {
 				Exception? last = null;

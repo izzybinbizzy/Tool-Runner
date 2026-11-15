@@ -20,6 +20,10 @@ public sealed class RunContext
 	public required string BackupFolder { get; init; }
 	public IGuide Guide { get; init; } = new NoGuide();
 	public DevBench DevBench { get; init; } = new();
+	// the run's watch for boxes (none when a step is run alone, as the offline tests do)
+	public BoxWatch? Boxes { get; init; }
+	// the box nobody here could answer that ended the game of the step in hand, in words
+	public string? BlockedBy => Boxes?.Blocked;
 
 	// outputs to tick once the step's mods are put back (applied by the runner after each step)
 	public List<string> PendingEnable { get; } = [];

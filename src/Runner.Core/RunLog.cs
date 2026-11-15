@@ -29,6 +29,8 @@ public sealed class RunLog : IDisposable
 
 	public string? TextPath { get; }
 	public event Action<string, Level>? Line;
+	// every line of the detailed log as it is written, for a command line that shows the run while it goes
+	public Action<string>? Echo { get; set; }
 
 	public static RunLog Null { get; } = new();
 
@@ -108,6 +110,10 @@ public sealed class RunLog : IDisposable
 				_mirror?.WriteLine(line);
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ObjectDisposedException) {
 			}
+		}
+		try {
+			Echo?.Invoke(line);
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ObjectDisposedException) {
 		}
 		Line?.Invoke(a_text, a_level);
 	}

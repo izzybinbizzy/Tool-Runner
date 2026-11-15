@@ -427,6 +427,336 @@ public static class Program
 		Equal(null, s.ApplyPgLiteRule(true), "their tick stays");
 		Equal("", s.ApplyPgLiteRule(false), "PGLite unticked: their choice is cleared");
 		Check(s.ApplyPgLiteRule(true) is { Length: > 0 }, "PGLite ticked again later: switched off again");
+		Check(s.ApplyPgLiteRule(false)?.Contains("switched on again", StringComparison.Ordinal) == true, "PGLite gone while the step was still off by the rule: on again, and said");
+		Equal("landscapefixer,pgpatcher", string.Join(",", Runner.Plan(s, null, null, null).Select(x => x.Key)), "so PGPatcher runs again without PGLite");
+		Equal(null, s.ApplyPgLiteRule(false), "and nothing more to do");
+		// PGLite is known by its own plugin, whatever the player's mod folder is called
+		var profile = ProfileOf(f);
+		Check(!Runner.PgLiteTicked(profile), "no PGLite in the profile");
+		f.Mod("PG Lite 2.4 (my copy)");
+		Directory.CreateDirectory(Path.Combine(f.Mods, "PG Lite 2.4 (my copy)", "SKSE", "Plugins"));
+		File.WriteAllText(Path.Combine(f.Mods, "PG Lite 2.4 (my copy)", "SKSE", "Plugins", "PGLite.dll"), "x");
+		var list = Path.Combine(f.ProfileDir, "modlist.txt");
+		File.WriteAllText(list, File.ReadAllText(list).Replace("+Base Mod", "-PG Lite 2.4 (my copy)\r\n+Base Mod", StringComparison.Ordinal));
+		Check(!Runner.PgLiteTicked(profile), "there but unticked: not counted");
+		File.WriteAllText(list, File.ReadAllText(list).Replace("-PG Lite 2.4 (my copy)", "+PG Lite 2.4 (my copy)", StringComparison.Ordinal));
+		Check(Runner.PgLiteTicked(profile), "ticked under another folder name: found by its plugin");
+	}
+
+	// his rule of 2026-11-13: every box of every process the run started is seen the whole run, named, answered when the
+	// runner knows it, and one of the game's that nobody can answer stops the step with its words
+	static void T_EveryBoxIsNamedAndTheKnownOnesAnswered()
+	{
+		using var f = new FakeMo2();
+		using var log = new RunLog(Path.Combine(f.Data, "box log"));
+		var lines = new List<string>();
+		log.Line += (t, _) => lines.Add(t);
+		var open = new List<BoxWatch.Open>();
+		var pressed = new List<string>();
+		var shown = new List<string>();
+		var ended = 0;
+		BoxWatch.Open Box(long a_id, string a_image, bool a_game, string a_title, string a_text, params string[] a_buttons) =>
+			new(a_id, new BoxSeen(a_image, a_game, a_title, a_text, a_buttons), b => pressed.Add($"{a_id}:{b}"));
+		BoxWatch Watch() => new(() => open, log, shown.Add, () => ++ended) { Wait = TimeSpan.FromSeconds(60) };
+		var t0 = new DateTime(2026, 11, 14, 12, 0, 0, DateTimeKind.Utc);
+
+		using (var w = Watch()) {
+			w.LookOnce(t0);
+			Equal(0, lines.Count + pressed.Count + shown.Count, "nothing open: nothing said");
+			// the cache mod's question, as its own source words it
+			open.Add(Box(1, "SkyrimSE.exe", true, "Cache Recursive Directory Walk", "Do you want to generate CRDW cache files?", "Yes", "No"));
+			w.LookOnce(t0);
+			Equal("1:Yes", string.Join(",", pressed), "its question is answered Yes");
+			Check(lines.Any(l => l.StartsWith("a box is open - SkyrimSE.exe: \"Cache Recursive Directory Walk\"", StringComparison.Ordinal)), "named in the log: " + string.Join(" | ", lines));
+			Check(lines.Contains(Crdw.Answered), "and why it was answered so");
+			w.LookOnce(t0.AddSeconds(3));
+			Equal(1, pressed.Count, "not pressed again at the next look");
+			w.LookOnce(t0.AddSeconds(11));
+			Equal(2, pressed.Count, "pressed again when it still stands ten seconds on");
+			open.Clear();
+			w.LookOnce(t0.AddSeconds(14));
+			Equal(null, w.Blocked, "it closed: nothing is blocked");
+			Equal(0, ended, "and the game goes on");
+		}
+
+		pressed.Clear();
+		shown.Clear();
+		using (var w = Watch()) {
+			open.Add(Box(2, "SkyrimSE.exe", true, "Some Mod", "Reset every setting?", "Yes", "No"));
+			w.LookOnce(t0);
+			Equal(0, pressed.Count, "a question nobody here knows is never answered for the player");
+			Check(shown.Count == 1 && shown[0].Contains("Reset every setting?", StringComparison.Ordinal) && shown[0].Contains("60 seconds", StringComparison.Ordinal), "the window says it and how long it has: " + string.Join(" | ", shown));
+			w.LookOnce(t0.AddSeconds(59));
+			Equal(null, w.Blocked, "inside the wait a player may still answer it");
+			w.LookOnce(t0.AddSeconds(61));
+			Check(w.Blocked is { } b && b.Contains("Reset every setting?", StringComparison.Ordinal) && b.Contains("[Yes / No]", StringComparison.Ordinal) && b.Contains("run again from this step", StringComparison.Ordinal),
+				"after it the step stops with the box's own words: " + w.Blocked);
+			Equal(1, ended, "and its game is ended");
+			w.LookOnce(t0.AddSeconds(70));
+			Equal(1, ended, "once");
+			open.Clear();
+		}
+
+		pressed.Clear();
+		shown.Clear();
+		ended = 0;
+		using (var w = Watch()) {
+			open.Add(Box(3, "DynDOLODx64.exe", false, "DynDOLOD", "Something to decide", "Yes", "No"));
+			open.Add(Box(4, "FasterArchivesTool.exe", true, "Faster Archives", "Faster Archives has detected unconverted archives", "Repack now", "Cancel"));
+			open.Add(Box(5, "skse64_loader.exe", true, "SKSE Plugin Loader", "A DLL plugin has failed to load correctly. Continue loading?", "Yes", "No"));
+			open.Add(Box(6, "SkyrimSE.exe", true, "Notice", "Your settings were reset.", "OK"));
+			w.LookOnce(t0);
+			Equal("5:No,6:OK", string.Join(",", pressed), "SKSE's plugin question gets No, a one-button notice is acknowledged, the others are not pressed");
+			Check(w.GameSaidWithin(TimeSpan.FromMinutes(2), t0.AddSeconds(30))?.Contains("Your settings were reset.", StringComparison.Ordinal) == true,
+				"what the game last said in a box is kept for a step that finds it gone: " + w.GameSaidWithin(TimeSpan.FromMinutes(2), t0.AddSeconds(30)));
+			Equal(null, w.GameSaidWithin(TimeSpan.FromMinutes(2), t0.AddMinutes(5)), "but not for a close long after it");
+			open.RemoveAll(o => o.Id is 5 or 6);
+			w.LookOnce(t0.AddMinutes(30));
+			Equal(2, pressed.Count, "a tool's own box and Faster Archives' window are never pressed");
+			Equal(null, w.Blocked, "nor a reason to stop: the step that runs the tool, and the player, answer those");
+			Equal(0, ended, "no game is ended over them");
+			Check(shown[^1].Contains("DynDOLODx64.exe", StringComparison.Ordinal) && shown[^1].Contains(FasterArchives.Asks, StringComparison.Ordinal), "both are said in the window: " + shown[^1]);
+			open.Clear();
+			w.LookOnce(t0.AddMinutes(31));
+			Equal("", shown[^1], "and no longer once they closed");
+		}
+
+		// the watch on its own thread: a box that opens is answered within its beat, and it stops when the run ends
+		var every = BoxWatch.Every;
+		BoxWatch.Every = TimeSpan.FromMilliseconds(40);
+		try {
+			pressed.Clear();
+			var live = new List<BoxWatch.Open>();
+			using var w = new BoxWatch(() => {
+				lock (live) {
+					return live.ToList();
+				}
+			}, log, _ => { }, null);
+			w.Start();
+			lock (live) {
+				live.Add(Box(7, "SkyrimSE.exe", true, "Cache Recursive Directory Walk", "Do you want to generate CRDW cache files?", "Yes", "No"));
+			}
+			var sw = Stopwatch.StartNew();
+			while (sw.Elapsed < TimeSpan.FromSeconds(5)) {
+				lock (pressed) {
+					if (pressed.Count > 0) {
+						break;
+					}
+				}
+				Thread.Sleep(20);
+			}
+			Equal("7:Yes", pressed.FirstOrDefault(), "answered by the running watch");
+		} finally {
+			BoxWatch.Every = every;
+		}
+	}
+
+	// Faster Archives closes the game itself for its offer (no crash), and Cached Recursive Directory Walk keeps a list of the
+	// game's files that a run makes old: both are known by their own files, and a setting changed for a run goes back
+	static void T_TheTwoModsThatStandInFrontOfAGameStart()
+	{
+		const string handOff = "[22:28:13.215] [67820] [info] handed off to D:\\Game\\data\\SKSE\\Plugins\\FasterArchives\\FasterArchivesTool.exe --dialog \"D:\\Game\\Data\" --mode mo2-in-place; closing the game until it is done";
+		Check(FasterArchives.HandedOff("[22:28:12.638] [info] Faster Archives v1.1.0\n" + handOff), "its own last line says it closed the game");
+		Check(!FasterArchives.HandedOff("[22:28:12.638] [info] Faster Archives v1.1.0\n[info] 2 archives to repack"), "a start that goes on is none");
+		Check(FasterArchives.OfferOn("[Repack]\r\nbOfferRepack=1\r\n") && FasterArchives.OfferOn("[Repack]\r\n;bOfferRepack=0\r\n") && !FasterArchives.OfferOn("[Repack]\r\nbOfferRepack=0\r\n") &&
+			!FasterArchives.OfferOn("[Repack]\nbOfferRepack = 0 ; off\n"), "whether it offers, off its own file");
+		Check(FasterArchives.IsTool("FasterArchivesTool.exe") && !FasterArchives.IsTool("SkyrimSE.exe"), "its own program by its name");
+		Check(InGame.IsCrashReport("crash-2026-11-07-23-07-14.log") && !InGame.IsCrashReport("CrashLogger.log") && !InGame.IsCrashReport("CrashLoggerSSE.log"),
+			"a crash logger's own plugin log is no crash report (a game that only closed was once called crashed over it)");
+
+		const string crdwIni = "; CRDW INI\r\n[General]\r\nShowPopUp=b:false\r\nMode=s:LOAD\r\nLogging=b:true\r\n";
+		Equal((false, "LOAD"), Crdw.Parse(crdwIni), "its question off and LOAD behind it");
+		Equal((true, "LOAD"), Crdw.Parse("[General]\r\nLogging=b:true\r\n"), "its own defaults for missing lines");
+		Equal((false, "CACHE"), Crdw.Parse("[General]\nShowPopUp = b:false\nMode = s:cache\n"), "spaces and case");
+		var blind = new Crdw.State("x", false, "LOAD");
+		var asks = new Crdw.State("x", true, "LOAD");
+		var s0 = Setup.FromJson(new JsonObject());
+		var sRefresh = Setup.FromJson(new JsonObject { [Crdw.SettingName] = "refresh" });
+		Equal(null, Crdw.AfterRun(s0, null, true, false), "the mod is not there: nothing to say");
+		Equal(null, Crdw.AfterRun(s0, blind, false, false), "a run that built nothing made nothing old");
+		Check(Crdw.AfterRun(s0, blind, true, true)?.Contains("CACHE", StringComparison.Ordinal) == true, "it loads its old list without asking: said after the run");
+		Equal(null, Crdw.AfterRun(sRefresh, blind, true, true), "the run made its list anew at the save to play: nothing left to do");
+		Check(Crdw.AfterRun(sRefresh, blind, true, false) != null, "no game start after the last tool: still to do");
+		Equal(null, Crdw.AfterRun(s0, asks, true, true), "its question was answered Yes at the run's last game start");
+		Check(Crdw.AfterRun(s0, asks, true, false)?.Contains("answer Yes", StringComparison.Ordinal) == true, "no game start after the last tool: answer Yes next time");
+
+		using var f = new FakeMo2();
+		f.Mod("CRDW Low");
+		f.Mod("CRDW High");
+		f.Mod("Faster Archives");
+		var modlist = Path.Combine(f.ProfileDir, "modlist.txt");
+		File.WriteAllText(modlist, File.ReadAllText(modlist).Replace("+Base Mod", "+CRDW Low\r\n+CRDW High\r\n+Faster Archives\r\n+Base Mod", StringComparison.Ordinal));
+		void Put(string a_mod, string a_rel, string a_text)
+		{
+			var p = Path.Combine(a_mod == "" ? f.Overwrite : Path.Combine(f.Mods, a_mod), a_rel);
+			Directory.CreateDirectory(Path.GetDirectoryName(p)!);
+			File.WriteAllText(p, a_text);
+		}
+		Put("CRDW Low", @"SKSE\Plugins\CRDW.dll", "x");
+		Put("CRDW Low", Crdw.IniRel, crdwIni);
+		Put("CRDW High", Crdw.IniRel, crdwIni.Replace("LOAD", "NATIVE", StringComparison.Ordinal));
+		Put("Faster Archives", @"SKSE\Plugins\FasterArchives.dll", "x");
+		Put("Faster Archives", FasterArchives.IniRel, "[General]\r\nbEnableParallel=1\r\n\r\n[Repack]\r\n; 1 = offer\r\nbOfferRepack=1\r\n");
+		var setup = f.WriteSetup(("landscapefixer", []));
+		var mo2 = Mo2Instance.Load(f.Exe, f.Instance);
+		var profile = new Profile(mo2, "Test", () => false);
+		var order = profile.ModOrder();
+		var winner = order.First(m => m.StartsWith("CRDW", StringComparison.Ordinal));
+		Equal(Path.Combine(f.Mods, winner, Crdw.IniRel), GameStart.Winning(profile, Crdw.IniRel), "the copy the game reads: the mod that wins");
+		Put("", Crdw.IniRel, crdwIni);
+		Equal(Path.Combine(f.Overwrite, Crdw.IniRel), GameStart.Winning(profile, Crdw.IniRel), "overwrite outranks every mod");
+		Check(Crdw.Read(profile) is { PopUp: false, Mode: "LOAD" }, "read as the game reads it");
+
+		// this PC's own SKSE logs are not this test's business
+		setup.Root["skseLogs"] = Path.Combine(f.Root, "no logs here");
+		setup.Save();
+		var notes = Preflight.Run(setup, mo2, ["landscapefixer"]);
+		Check(notes.Any(i => !i.Blocking && i.Text.Contains("Cached Recursive Directory Walk loads its cache without asking", StringComparison.Ordinal)), "the check says its list will be old: " + string.Join(" | ", notes.Select(i => i.Text)));
+		Check(notes.Any(i => !i.Blocking && i.Text.StartsWith("Faster Archives is ticked", StringComparison.Ordinal)), "and that Faster Archives may ask at a game start");
+		// the family of the run's processes: a Skyrim the run did not start is never the run's game
+		var fam = new RunWindows.Family();
+		var me = Environment.ProcessId;
+		Check(fam.Now([me]).ContainsKey(me) && !fam.Now([me])[me].Game, "a process that is no game is none");
+
+		// left alone unless the setup says so
+		var ctx = StepContext(f, "landscapefixer");
+		using (ctx.Log) {
+			GameStart.Prepare(ctx);
+			Equal(0, ctx.Journal.Kept.Count, "by default a run changes neither mod's own settings");
+		}
+		setup.Root[Crdw.SettingName] = "refresh";
+		setup.Root[FasterArchives.SettingName] = "skip";
+		setup.Save();
+		Check(!Preflight.Run(Setup.Load(f.SetupFile), mo2, ["landscapefixer"]).Any(i => i.Text.StartsWith("Faster Archives is ticked", StringComparison.Ordinal)), "a setup that passes the offer over is not warned of it");
+		var crdwFile = Path.Combine(f.Overwrite, Crdw.IniRel);
+		var faFile = Path.Combine(f.Mods, "Faster Archives", FasterArchives.IniRel);
+		var crdwBefore = File.ReadAllBytes(crdwFile);
+		var faBefore = File.ReadAllBytes(faFile);
+		ctx = StepContext(f, "landscapefixer");
+		using (ctx.Log) {
+			GameStart.Prepare(ctx);
+			Equal((false, "CACHE"), Crdw.Parse(File.ReadAllText(crdwFile)), "refresh: it makes its list anew at this step's game starts");
+			Check(!FasterArchives.OfferOn(File.ReadAllText(faFile)), "skip: no offer at this step's game starts");
+			Check(File.ReadAllText(faFile).Contains("bEnableParallel=1", StringComparison.Ordinal) && File.ReadAllText(faFile).Contains("; 1 = offer", StringComparison.Ordinal), "every other line of the file as it was");
+			GameStart.Prepare(ctx);
+			Equal(2, ctx.Journal.Kept.Count, "a second game start of the step keeps nothing twice");
+			Equal(0, StepKit.PutFilesBack(ctx).Count, "both files go back when the step ends");
+			Check(File.ReadAllBytes(crdwFile).SequenceEqual(crdwBefore) && File.ReadAllBytes(faFile).SequenceEqual(faBefore), "byte for byte as the player had them");
+		}
+
+		// the game closed for the offer: known by the mod's own log of that start
+		var logs = Path.Combine(f.Root, "skse logs");
+		Directory.CreateDirectory(logs);
+		File.WriteAllText(Path.Combine(logs, "FasterArchives.log"), "[info] Faster Archives v1.1.0\n" + handOff + "\n");
+		Check(FasterArchives.Offered([logs], DateTime.Now.AddSeconds(-30)), "its log of this start says it closed the game");
+		Check(!FasterArchives.Offered([logs], DateTime.Now.AddMinutes(10)), "a log from before this start says nothing about it");
+		// with nothing left to repack by its own last log, the check stays quiet about it
+		setup.Root["skseLogs"] = logs;
+		setup.Root.Remove(FasterArchives.SettingName);
+		setup.Save();
+		Check(Preflight.Run(Setup.Load(f.SetupFile), mo2, ["landscapefixer"]).Any(i => i.Text.StartsWith("Faster Archives is ticked", StringComparison.Ordinal)), "archives left to repack: said");
+		File.WriteAllText(Path.Combine(logs, "FasterArchives.log"), "[22:28:13.209] [67820] [info] 0 archives to repack (0 into the Vortex mod), 67 already repacked\n");
+		Check(!Preflight.Run(Setup.Load(f.SetupFile), mo2, ["landscapefixer"]).Any(i => i.Text.StartsWith("Faster Archives is ticked", StringComparison.Ordinal)), "nothing left: not said");
+	}
+
+	// the game closed for Faster Archives' offer: its own program is what the run waits for (ping stands in for it, under its name)
+	static void T_FasterArchivesOfferIsWaitedOutNeverCalledACrash()
+	{
+		using var f = new FakeMo2();
+		f.WriteSetup(("shaders", []));
+		var ctx = StepContext(f, "shaders");
+		using var log = ctx.Log;
+		var said = new List<string>();
+		ctx.Control.WaitingForPlayer = said.Add;
+		var tool = Path.Combine(f.Root, FasterArchives.ToolImage);
+		File.Copy(Path.Combine(Environment.SystemDirectory, "PING.EXE"), tool);
+		var since = DateTime.Now;
+		using var p = Process.Start(new ProcessStartInfo(tool, "-n 4 127.0.0.1") { UseShellExecute = false, CreateNoWindow = true })!;
+		Check(FasterArchives.Offered([], since), "its own program runs since this game start: the game was closed for its offer");
+		FasterArchives.Wait(ctx, "shaders", new StepSettings([]), 1, since);
+		Check(p.HasExited, "the wait ends when its window has closed");
+		Check(said.Count == 2 && said[0] == FasterArchives.Asks && said[1] == "", "the window says the run waits for the player, then no longer: " + string.Join(" | ", said));
+		Check(!FasterArchives.Offered([], DateTime.Now.AddSeconds(5)), "an old window says nothing about a later start");
+		Throws<StepFailedException>(() => FasterArchives.Wait(ctx, "shaders", new StepSettings([]), 4, since), "an offer more often than the step allows stops it, in words");
+	}
+
+	// CodeRabbit's first round on 1.0 (pull request 32): the points a test can hold
+	static void T_TheReviewOfOnePointZero()
+	{
+		using var f = new FakeMo2();
+		f.WriteSetup(("landscapefixer", []));
+		var ctx = StepContext(f, "landscapefixer");
+		using var log = ctx.Log;
+		var mod = Path.Combine(f.Mods, "Output A");
+
+		// a park cut off part way: what still stands in the mod is the rest of the player's old output, never a tool's
+		File.WriteAllText(Path.Combine(mod, "old one.txt"), "1");
+		File.WriteAllText(Path.Combine(mod, "old two.txt"), "2");
+		StepKit.ParkMod(ctx, "landscapefixer", "Output A");
+		var park = ctx.Journal.Parked[^1];
+		Check(!park.Parking && File.Exists(Path.Combine(park.To, "old two.txt")), "a park that ended is on record as ended, the files in the backup");
+		File.Move(Path.Combine(park.To, "old two.txt"), Path.Combine(mod, "old two.txt"));
+		park.Parking = true;
+		Equal(0, Runner.PutBackParked(ctx, "landscapefixer").Count, "the put-back after a park that was cut off");
+		Check(File.Exists(Path.Combine(mod, "old one.txt")) && File.Exists(Path.Combine(mod, "old two.txt")), "both of the player's old files are in the mod again");
+		Check(!Directory.Exists(Path.Combine(ctx.BackupFolder, "unfinished", "Output A")), "none of them was taken for half-written output");
+
+		// a file a tool writes new, straight into a mod: kept as "was not there", gone again when the step fails, and on record
+		// as built in the same write that settles it
+		var fresh = Path.Combine(mod, "New Patch.esp");
+		StepKit.KeepInPlace(ctx, "Output A", "New Patch.esp");
+		Check(ctx.Journal.Kept.Any(k => k.Path == fresh && k.Backup == null && !k.Done), "a file that is not there yet is kept as not there");
+		File.WriteAllText(fresh, "half written");
+		Equal(0, StepKit.PutFilesBack(ctx, fresh).Count, "the step failed: its files go back");
+		Check(!File.Exists(fresh), "the half-written new file is taken out");
+		StepKit.KeepInPlace(ctx, "Output A", "New Patch.esp");
+		File.WriteAllText(fresh, "whole");
+		ctx.Journal.Built.Clear();
+		StepKit.Settled(ctx, "Output A", [fresh]);
+		var saved = Journal.Load(ctx.Journal.Folder);
+		Check(saved.Built.Contains("Output A") && saved.Kept.Any(k => k.Path == fresh && k.Settled && k.Done), "settled and on record as built, in one write");
+		Equal(0, StepKit.PutFilesBack(ctx).Count, "the step's own clean-up");
+		Check(File.Exists(fresh), "leaves the settled file where it is");
+
+		// the folder a Mod Organizer plugin maps SKSE's logs to, made only later by the game
+		var plugins = Path.Combine(f.Root, "mo2 plugins");
+		Directory.CreateDirectory(plugins);
+		var later = Path.Combine(f.Root, "redirected logs");
+		File.WriteAllText(Path.Combine(plugins, "skse log redirector.py"), "class Redirect(mobase.IPluginFileMapper):\n    # SKSE logs\n    target = r\"" + later + "\"\n");
+		Equal(0, InGame.MappedLogFolders(plugins).Count, "not there yet: not searched");
+		Directory.CreateDirectory(later);
+		File.WriteAllText(Path.Combine(later, "skse64.log"), "x");
+		Equal(1, InGame.MappedLogFolders(plugins).Count, "there now: found, though the plugin's own file did not change");
+
+		// the start-up pass of a shader mod, read out of its log in its folder (the call once handed the log's lines on as folders)
+		var logs = Path.Combine(f.Root, "shader logs");
+		Directory.CreateDirectory(logs);
+		var stamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+		File.WriteAllText(Path.Combine(logs, "BottledShaders.log"), $"[{stamp}.123] [info] [DDC] 120 entries queued for trim\n");
+		Check(InGame.BootPassOverIn([logs], DateTime.Now.AddSeconds(-5)), "the pass is over, by this start's own line");
+		Check(!InGame.BootPassOverIn([logs], DateTime.Now.AddMinutes(5)), "a log from before this start says nothing");
+
+		// a Learn cut off under ANOTHER setup of the same profile: this setup's start switches that mod off too
+		var profile = ProfileOf(f);
+		profile.SetMods(["Base Mod"], []);
+		var setups = Path.GetDirectoryName(f.SetupFile)!;
+		var others = Path.Combine(setups, "Other.json.tool on");
+		var elsewhere = Path.Combine(setups, "Third.json.tool on");
+		File.WriteAllText(others, ToolSettings.SwitchText("Base Mod", ctx.Mo2, "Test"));
+		File.WriteAllText(elsewhere, ToolSettings.SwitchText("Base Mod", ctx.Mo2, "Another Profile"));
+		ToolSettings.UndoLeftSwitch(ctx.Setup, profile, ctx.Log);
+		Check(!profile.IsOn("Base Mod") && !File.Exists(others), "the mod another setup's Learn left on in this profile is off again, its record gone");
+		Check(File.Exists(elsewhere), "a record for another profile is left for that profile");
+
+		Check(RunnerErrors.All.Select(e => e.Code).Distinct().Count() == RunnerErrors.All.Count, "every catalog code is given once");
+
+		// a Mod Organizer set up for another game is said before anything runs
+		Equal(0, Preflight.Run(Setup.Load(f.SetupFile), Mo2Instance.Load(f.Exe, f.Instance), ["landscapefixer"]).Count(i => i.Text.Contains("another game", StringComparison.Ordinal)), "Skyrim Special Edition: nothing said");
+		var ini = Path.Combine(f.Instance, "ModOrganizer.ini");
+		File.WriteAllText(ini, File.ReadAllText(ini).Replace("gameName=Skyrim Special Edition", "gameName=Skyrim VR", StringComparison.Ordinal));
+		var vr = Preflight.Run(Setup.Load(f.SetupFile), Mo2Instance.Load(f.Exe, f.Instance), ["landscapefixer"]);
+		Check(vr.Any(i => i.Blocking && i.Text.Contains("Skyrim VR", StringComparison.Ordinal)), "Skyrim VR's Mod Organizer stops the start, named: " + string.Join(" | ", vr.Select(i => i.Text)));
+		Check(Explain.For("", vr.First(i => i.Text.Contains("Skyrim VR", StringComparison.Ordinal)).Text)?.Code == "TR-213", "with its entry in the catalog");
 	}
 
 	static void T_NewGameLeavesOutTheSaveSteps()
@@ -6578,7 +6908,9 @@ public static class Program
 		File.WriteAllText(save, "");
 		var written = DateTime.Now.AddHours(-2);
 		File.SetLastWriteTime(save, written);
+		var mine = Setup.Load(f.SetupFile);
 		var made = new Journal { Id = "made", Folder = Path.Combine(Runner.RunsDir(f.Data), "2026-01-01 the run that made it"), Profile = "Test", State = RunState.Failed,
+			Mo2Exe = mine.Mo2Exe, Mo2Instance = mine.Mo2Instance,
 			Started = written.AddMinutes(-10), ReturnMarker = "FF000801",
 			Steps = [new StepRecord { Key = "cleansave", State = StepState.Done, Started = written.AddMinutes(-8), Ended = written.AddSeconds(40) }] };
 		Directory.CreateDirectory(made.Folder);
@@ -6586,6 +6918,12 @@ public static class Program
 		var ctx = StepContext(f, "landscapefixer");
 		try {
 			Equal<string?>("FF000801", InGame.MarkerOfCleanSave(ctx), "the place on record in the run whose clean save it is");
+			// a profile of the same name under another Mod Organizer is another profile
+			made.Mo2Instance = Path.Combine(f.Root, "Another MO2");
+			made.Save();
+			Equal<string?>(null, InGame.MarkerOfCleanSave(ctx), "never the place of a run of another Mod Organizer");
+			made.Mo2Instance = mine.Mo2Instance;
+			made.Save();
 			File.SetLastWriteTime(save, written.AddHours(1));
 			Equal<string?>(null, InGame.MarkerOfCleanSave(ctx), "never the place of a run that made another clean save");
 		} finally {

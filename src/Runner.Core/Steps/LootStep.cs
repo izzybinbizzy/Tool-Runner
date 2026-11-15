@@ -37,8 +37,14 @@ public sealed class LootStep : IStep
 
 	public void Run(RunContext a_ctx, StepSettings a_s) => Run(a_ctx, (sorted, report, skipUpdate) => {
 		a_ctx.Activity(StepKey, "LOOT is sorting your plugins");
-		using var proc = a_ctx.Control.RunExecutable(Program(a_ctx.Mo2), Image, Arguments(a_ctx.Mo2, a_ctx.Setup.Profile, sorted, report, skipUpdate), a_ctx.Cancel, null, true);
-		Waits.Tool(a_ctx, StepKey, proc, a_s.Deadline(10), () => proc.HasExited ? Waits.Poll.Done : Waits.Poll.Wait);
+		try {
+			using var proc = a_ctx.Control.RunExecutable(Program(a_ctx.Mo2), Image, Arguments(a_ctx.Mo2, a_ctx.Setup.Profile, sorted, report, skipUpdate), a_ctx.Cancel, null, true);
+			Waits.Tool(a_ctx, StepKey, proc, a_s.Deadline(10), () => proc.HasExited ? Waits.Poll.Done : Waits.Poll.Wait);
+		} finally {
+			// a wait that gave up (idle, past its limit) leaves it running, and this step's settings name no image for the
+			// run's own clean-up to close
+			StepKit.CloseTool(a_ctx, Image);
+		}
 	});
 
 	// a_start: one run of lootcli to its end (the two files it should write, whether it skips its masterlist update)

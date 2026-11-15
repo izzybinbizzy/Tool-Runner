@@ -242,7 +242,7 @@
                        Visibility="{Binding VerdictLine, Converter={StaticResource NotEmpty}}"/>
             <!-- the run that ended, in a few rows: what finished, what it built, what to do next (held to a few lines so the log keeps its room) -->
             <ScrollViewer MaxHeight="172" Margin="0,10,0,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                          Visibility="{Binding HasSummary, Converter={StaticResource Vis}}" Focusable="False">
+                          Visibility="{Binding HasSummary, Converter={StaticResource Vis}}" Focusable="True" IsTabStop="True" AutomationProperties.Name="What the run did">
               <ItemsControl ItemsSource="{Binding SummaryRows}" Focusable="False" AutomationProperties.Name="What the run did">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>

@@ -57,6 +57,15 @@ public partial class MainWindow : Window
 		// nothing moves in a window nobody sees (minimized, or put away while a run goes)
 		void SeenOrNot() => _vm.WindowAway = WindowState == WindowState.Minimized || !IsVisible;
 		StateChanged += (_, _) => SeenOrNot();
+		// Windows' own "show animations" switch, changed while the window is up: the moving bar follows at once
+		void MotionChanged(object? a_sender, System.ComponentModel.PropertyChangedEventArgs a_e)
+		{
+			if (a_e.PropertyName == nameof(SystemParameters.ClientAreaAnimation)) {
+				_vm.MotionChanged();
+			}
+		}
+		SystemParameters.StaticPropertyChanged += MotionChanged;
+		Closed += (_, _) => SystemParameters.StaticPropertyChanged -= MotionChanged;
 		IsVisibleChanged += (_, _) => SeenOrNot();
 		_vm.WantsLook += Wake;
 		// the off-screen pictures show a made-up run: nothing is watched for them

@@ -77,6 +77,8 @@ public static class RunnerErrors
 			"Close the other Mod Organizer, then start again."),
 		E("TR-212", "full plugins are switched on - the game loads at most|light plugins (.esl or ESL-flagged) are switched on - the game loads at most", "More plugins are switched on than the game can load.",
 			"Untick plugins you do not need, or make small ones light (ESL-flag them with xEdit where they allow it), until you are under the limit."),
+		E("TR-213", "this Mod Organizer manages another game", "The Mod Organizer this setup points at is set up for another game (Skyrim VR, Enderal, the 2011 Skyrim, Fallout).",
+			"Tool Runner works with Skyrim Special Edition and its Anniversary Edition (Steam and GOG). Point the setup at the Mod Organizer instance of that game: Settings > Mod Organizer."),
 
 		// ---- the check before a run: a step's own settings and its tool
 		E("TR-301", "no output mod is set|no output folder is set|the terrain LOD folder it reads is not set|no shader cache is set", "A step has no place to put what it makes.",
@@ -141,6 +143,11 @@ public static class RunnerErrors
 			"Run again from this step. If it happens every time, switch \"Hidden\" off for that step in Settings > A step, so the tool runs in the open."),
 		E("TR-414", "LOOT wrote no sorted list|LOOT's sorted list is empty|LOOT did not see", "LOOT could not sort this load order, so your order was left as it was.",
 			"Press Sort in Mod Organizer itself to read LOOT's own message (a rule that goes in a circle, no masterlist yet while offline), put that right, then run again from this step - or untick the LOOT sort step."),
+		E("TR-415", "the game shows a box this run does not know|the game's box did not close after its answer was pressed", "A mod, or the game, asked a question the run cannot answer for you, so the game was closed and the step stopped.",
+			"Start the game yourself once and answer it (many such questions come only once), or switch off that mod's own setting that asks; then run again from this step. " +
+			"While you are at the PC you can also answer it during the run: the window names the box and waits a minute before the step stops."),
+		E("TR-416", "Faster Archives closed the game to ask", "Faster Archives closes the game at its start when it finds archives it can repack, and asks in a window of its own. That is no crash.",
+			"Choose in its window (Repack now, or Don't offer these again) and run again from this step - or set Settings > Faster Archives' offer during a run to pass it over, and it asks the next time you start the game yourself."),
 		E("TR-413", "its learned settings name a file outside their folder|saved no settings file while it was open", "The settings kept from the tool's own window are missing or damaged.",
 			"Learn them again: Settings > A step > Learn its settings, change something in the tool's window, save, and close it."),
 

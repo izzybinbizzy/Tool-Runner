@@ -3,7 +3,8 @@ using ToolRunner.Steps;
 
 namespace ToolRunner;
 
-public sealed record RunRequest(string SetupFile, string DataDir, string? Only = null, string? From = null, string? Until = null);
+// Echo: every line of the run's detailed log as it is written (the command line shows a run while it goes)
+public sealed record RunRequest(string SetupFile, string DataDir, string? Only = null, string? From = null, string? Until = null, Action<string>? Echo = null);
 
 public sealed record RunOutcome(RunState State, string Verdict, string? Folder);
 
@@ -164,12 +165,12 @@ public static class Runner
 		Mo2Instance mo2;
 		try {
 			mo2 = c.Mo2 = Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance);
-		} catch (Exception e) when (e is IOException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			return c.No(e.Message);
 		}
 		string? pgNote = null;
 		try {
-			pgNote = setup.ApplyPgLiteRule(new Profile(mo2, setup.Profile, () => false).IsOn(Setup.PgLiteMod));
+			pgNote = setup.ApplyPgLiteRule(PgLiteTicked(new Profile(mo2, setup.Profile, () => false)));
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			// a profile that does not read is refused by the check below, in words
 		}
@@ -240,6 +241,7 @@ public static class Runner
 		}
 		RunLog log = opened;
 		log.Mirror(Path.Combine(runs, "current log.txt"));
+		log.Echo = a_req.Echo;
 		using var cts = new CancellationTokenSource();
 		var commands = new Commands(journal, cts.Cancel);
 		Mo2Control? forThisRun = null;
@@ -262,15 +264,40 @@ public static class Runner
 			journal.Doing = a_what == "" ? "" : WaitingPrefix + a_what;
 			journal.TrySave();
 		};
+		// every box of every process the run starts, from its first step to its last (BoxWatch)
+		var family = new RunWindows.Family();
+		var reader = new RunWindows.Reader();
+		using var boxes = new BoxWatch(() => reader.Boxes(family.Now(control.RunProcesses(), control.Started.Contains)), log,
+			a_open => {
+				journal.Box = a_open;
+				// the run's own thread may change the record under this save: tried again, so the window gets the line now
+				for (var again = 0; again < 3; ++again) {
+					try {
+						journal.TrySave();
+						break;
+					} catch (InvalidOperationException) {
+						Thread.Sleep(50);
+					}
+				}
+			},
+			() => {
+				foreach (var pid in control.Started.Live().Where(p => Procs.Image(p).Equals(InGame.GameImage, StringComparison.OrdinalIgnoreCase))) {
+					log.Warn($"ending the game (process {pid}): nobody here can answer its box");
+					Procs.KillTree(pid);
+				}
+			}) { Wait = TimeSpan.FromSeconds(Setup.Int(setup.Root, "boxWaitSeconds") ?? 60) };
 		var ctx = new RunContext {
 			Setup = setup, Mo2 = mo2, Profile = profile, Control = control, Log = log, Journal = journal, Cancel = cts.Token,
 			BackupFolder = journal.BackupDir, Guide = a_guide?.Invoke(journal) ?? new FileGuide(journal, commands.TakeContinue, commands.ClearContinue),
+			Boxes = boxes,
 		};
 		log.Say($"Tool Runner - {setup.Name} (profile {setup.Profile}), steps: {string.Join(", ", todo.Select(s => StepCatalog.Name(s.Key)))}");
 		log.Simple($"{setup.Name} started: {todo.Count} step(s) - {string.Join(", ", todo.Select(s => StepCatalog.Name(s.Key)))}");
 		foreach (var w in check) {
-			log.Warn($"{StepCatalog.Name(w.Step)}: {w.Text}");
-			log.Simple($"Note: {StepCatalog.Name(w.Step)}: {w.Text}");
+			// a finding about the run itself has no step to name (the log of a real run began its lines with a bare ": ")
+			var whose = w.Step == "" ? "" : StepCatalog.Name(w.Step) + ": ";
+			log.Warn(whose + w.Text);
+			log.Simple("Note: " + whose + w.Text);
 		}
 		// Stop ends this run's own game and tools at once - only a process it started, still the same process (started after
 		// this run began - a PID can be reused), and never Mod Organizer itself (the put-back closes that the normal way)
@@ -293,6 +320,7 @@ public static class Runner
 		try {
 			Native.KeepAwake(true);
 			commands.Start();
+			boxes.Start();
 			// what changed outside the runner is looked at before the setup's own before-run commands can change anything (Mod
 			// Organizer may still be open: its files as saved); what those commands change, and Mod Organizer's last save as it
 			// closes, is the run's (MO2 is closed only after them - one may be the claim that makes closing it safe)
@@ -431,6 +459,14 @@ public static class Runner
 					log.Simple("Note: " + i.Text);
 				}
 			});
+			// a mod that keeps its own list of the game's files must make it again after what this run built (GameMods.cs)
+			Chore("the note for Cached Recursive Directory Walk", () => {
+				if (Crdw.AfterRun(setup, Crdw.Read(profile), journal.Built.Count > 0, playsave) is { } note) {
+					journal.Notes.Add(note);
+					log.Warn(note);
+					log.Simple("Note: " + note);
+				}
+			});
 			journal.Verdict = $"finished: {todo.Count} step(s) in {total.Elapsed.TotalMinutes.ToString("0", InvariantCulture)} min";
 			journal.Ended = DateTime.Now;
 			journal.TrySave();
@@ -485,26 +521,35 @@ public static class Runner
 			return Finish(ctx, snap0, commands.Stopped ? RunState.Stopped : RunState.Failed, Plain(e));
 		} finally {
 			commands.Dispose();
+			boxes.Dispose();
 			Native.KeepAwake(false);
 			// the run is over: it no longer has an owner (a run that still needs its profile put back is then offered at once)
 			journal.Pid = 0;
 			journal.FinishingUp = false;
 			journal.Doing = "";
+			journal.Box = "";
 			journal.TrySave();
 			// after a run that did not finish (or whose ending never reached them) the setup's after-run commands still run, once:
 			// they give back what the before-run commands took. No Stop can cut them short here - the run is already over
 			if (!afterRan) {
 				foreach (var cmd in setup.AfterRun) {
+					// whatever one of them throws (a command Windows cannot even start): the next one still runs, and the run's
+					// own outcome is what the caller gets
 					try {
 						Hook(ctx, cmd, "after the run", CancellationToken.None);
-					} catch (StepFailedException e) {
-						log.Warn(e.Message);
+					} catch (Exception e) when (e is not OutOfMemoryException) {
+						log.Warn("the command after the run did not work: " + Plain(e));
 					}
 				}
 			}
 			NoteChanges(mo2, a_req.DataDir, RunWho(journal), log);
 		}
 	}
+
+	// PGLite in the profile: by its own plugin in a ticked mod (a player's mod folder can carry any name: "PGLite 2.4", a merge),
+	// or a ticked mod of that very name
+	public static bool PgLiteTicked(Profile a_profile) =>
+		a_profile.IsOn(Setup.PgLiteMod) || GameStart.Winning(a_profile, @"SKSE\Plugins\PGLite.dll") != null;
 
 	public static string RunWho(Journal a_j) => $"the run of {a_j.Started.ToString("MMM d HH:mm", InvariantCulture)} ({a_j.SetupName})";
 
@@ -870,7 +915,8 @@ public static class Runner
 				}
 				// a folder whose move into the backup failed half way: what still stands there is the player's own, never the
 				// step's half-written output - the part that moved simply joins it again
-				if (Directory.Exists(p.From) && (!p.IsFolder || p.Moved)) {
+				// (a mod whose park was cut off part way - Parking - is the same case: the rest of the player's old output)
+				if (Directory.Exists(p.From) && (p.IsFolder ? p.Moved : !p.Parking)) {
 					var half = Path.Combine(a_ctx.BackupFolder, "unfinished", p.Mod);
 					var moved = Directory.EnumerateFileSystemEntries(p.From).Any(e => !Path.GetFileName(e).Equals("meta.ini", StringComparison.OrdinalIgnoreCase));
 					if (moved) {
@@ -1261,6 +1307,10 @@ public static class Runner
 				if (k.Backup != null && File.Exists(k.Backup)) {
 					Files.WriteAtomic(k.Path, File.ReadAllBytes(k.Backup));
 					log.Detail($"{Path.GetFileName(k.Path)}: back as it was before this run");
+				} else if (k.Backup == null && File.Exists(k.Path)) {
+					// a file this run made new, straight into a mod that holds other things: only that file goes
+					Files.Delete(k.Path);
+					log.Detail($"{Path.GetFileName(k.Path)}: taken out again (this run made it)");
 				}
 			}
 			// only what had no old output: one that had came back above, and pressed again it holds that old output

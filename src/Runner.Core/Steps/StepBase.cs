@@ -117,7 +117,8 @@ public static class StepKit
 		var dst = FreeFolder(Path.Combine(a_ctx.BackupFolder, "outputs", a_mod));
 		Directory.CreateDirectory(dst);
 		// recorded BEFORE the first move: a move that fails half way still has its record, so the put-back finds what moved
-		a_ctx.Journal.Parked.Add(new ParkRecord { Step = a_step, Mod = a_mod, From = d, To = dst });
+		var park = new ParkRecord { Step = a_step, Mod = a_mod, From = d, To = dst, Parking = true };
+		a_ctx.Journal.Parked.Add(park);
 		a_ctx.Journal.Save();
 		var n = 0;
 		foreach (var e in Directory.EnumerateFileSystemEntries(d).ToList()) {
@@ -132,6 +133,9 @@ public static class StepKit
 			}
 			++n;
 		}
+		// all of it is in the backup: from here what appears in the mod is the tool's own
+		park.Parking = false;
+		a_ctx.Journal.Save();
 		a_ctx.Log.Detail($"old {a_mod} moved to the backup ({n} item(s))");
 		return n;
 	}
@@ -154,6 +158,21 @@ public static class StepKit
 		a_ctx.Journal.Save();
 	}
 
+	// Is the kept copy there? False only when Windows says the file is not there. A copy that cannot be looked at right now (no
+	// access, a share that does not answer) throws: File.Exists says "no" for both, and a file written off on that answer was
+	// never put back, not even once its backup could be read again
+	static bool BackupThere(string a_backup)
+	{
+		try {
+			using var s = new FileStream(a_backup, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+			return true;
+		} catch (FileNotFoundException) {
+			return false;
+		} catch (DirectoryNotFoundException) {
+			return false;
+		}
+	}
+
 	// the kept files back as they were (one, or every one still out when a_path is null); returns those it could not put back
 	public static List<string> PutFilesBack(RunContext a_ctx, string? a_path = null)
 	{
@@ -164,7 +183,7 @@ public static class StepKit
 					if (File.Exists(k.Path)) {
 						Files.Delete(k.Path);
 					}
-				} else if (!File.Exists(k.Backup)) {
+				} else if (!BackupThere(k.Backup)) {
 					// On a drive that is not there its old copy may come back with the drive: not put back, and asked again (as an
 					// old output is). In a backup that is there it was cleared away: nothing can bring it back, and counting it as
 					// "could not be put back" would keep every later put-back from ever finishing
@@ -198,7 +217,10 @@ public static class StepKit
 	// half-written plugin as the only copy.
 	public static void KeepInPlace(RunContext a_ctx, string a_mod, params string?[] a_files)
 	{
-		foreach (var f in a_files.OfType<string>().Select(f => Path.Combine(a_ctx.Mo2.ModDir(a_mod), f)).Where(File.Exists)) {
+		// a file that is not there yet is kept as "was not there": a tool that writes it straight into a mod holding other
+		// things leaves a record all the same, so a failed step takes its half-written file out and an undo takes only that
+		// file - never the whole mod set aside as if the run had made all of it
+		foreach (var f in a_files.OfType<string>().Select(f => Path.Combine(a_ctx.Mo2.ModDir(a_mod), f))) {
 			KeepFile(a_ctx, f);
 		}
 	}
@@ -216,6 +238,21 @@ public static class StepKit
 	{
 		if (a_paths.Count == 0) {
 			return;
+		}
+		foreach (var k in a_ctx.Journal.Kept.Where(k => !k.Done && a_paths.Contains(k.Path, StringComparer.OrdinalIgnoreCase))) {
+			k.Done = true;
+			k.Settled = true;
+		}
+		a_ctx.Journal.Save();
+	}
+
+	// The same, with the output mod on record as built in the SAME write. In two writes, a crash between them left a plugin
+	// replaced in place that no record called this run's: the put-back passed over the settled file, and an undo found
+	// nothing this run had left
+	public static void Settled(RunContext a_ctx, string a_builtMod, IReadOnlyCollection<string> a_paths)
+	{
+		if (!a_ctx.Journal.Built.Contains(a_builtMod, StringComparer.OrdinalIgnoreCase)) {
+			a_ctx.Journal.Built.Add(a_builtMod);
 		}
 		foreach (var k in a_ctx.Journal.Kept.Where(k => !k.Done && a_paths.Contains(k.Path, StringComparer.OrdinalIgnoreCase))) {
 			k.Done = true;

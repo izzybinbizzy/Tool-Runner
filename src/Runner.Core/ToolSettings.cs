@@ -204,22 +204,50 @@ public static partial class ToolSettings
 	// the mod "Learn its settings" switched on for the tool's window, named until it is off again: a crash in between leaves this for the next look
 	public static string SwitchRecord(Setup a_setup) => a_setup.File + ".tool on";
 
-	// with Mod Organizer closed, before a run or a Learn reads the profile as the player's
+	// what a record holds: the mod, then the Mod Organizer and the profile it was switched on in (an older record holds the mod
+	// alone - it is its own setup's)
+	public static string SwitchText(string a_mod, Mo2Instance a_mo2, string a_profile) => a_mod + "\n" + a_mo2.BaseDir + "\n" + a_profile;
+
+	static (string Mod, string? Instance, string? Profile) ReadSwitch(string a_record)
+	{
+		var lines = Files.ReadSharedText(a_record).Split('\n').Select(l => l.Trim()).Where(l => l != "").ToList();
+		return (lines.ElementAtOrDefault(0) ?? "", lines.ElementAtOrDefault(1), lines.ElementAtOrDefault(2));
+	}
+
+	// With Mod Organizer closed, before a run or a Learn reads the profile as the player's. Every record beside this setup that
+	// names this Mod Organizer and profile counts: two setups can share a profile, and a mod one of them left on would be read
+	// by the other as the player's own tick and kept on at every put-back. A record that cannot be undone stops what asked,
+	// for the same reason - and so that a later Learn never writes over a record that still stands.
 	public static void UndoLeftSwitch(Setup a_setup, Profile a_profile, RunLog a_log)
 	{
-		var record = SwitchRecord(a_setup);
+		var own = SwitchRecord(a_setup);
+		List<string> records;
 		try {
-			if (!File.Exists(record)) {
-				return;
+			var dir = Path.GetDirectoryName(a_setup.File);
+			records = string.IsNullOrEmpty(dir) || !Directory.Exists(dir) ? [] : [.. Directory.EnumerateFiles(dir, "*.tool on")];
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			records = [own];
+		}
+		foreach (var record in records) {
+			try {
+				if (!File.Exists(record)) {
+					continue;
+				}
+				var (mod, instance, profile) = ReadSwitch(record);
+				var here = instance != null && profile != null ? Files.SamePath(instance, a_profile.Mo2.BaseDir) && profile.Equals(a_profile.Name, StringComparison.OrdinalIgnoreCase)
+					: Files.SamePath(record, own);
+				if (!here) {
+					continue;
+				}
+				if (mod != "" && a_profile.IsOn(mod)) {
+					a_profile.SetMods([], [mod], a_log);
+					a_log.Warn($"the mod \"{mod}\" was left on when learning a tool's settings was cut off - it is off again");
+				}
+				Files.Delete(record);
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or KeyNotFoundException) {
+				throw new StepFailedException($"a mod left on when learning a tool's settings was cut off could not be switched off ({e.Message}) - " +
+					$"close what holds the profile's files and start again (or untick it in Mod Organizer yourself and delete \"{Path.GetFileName(record)}\" beside the setups)");
 			}
-			var mod = Files.ReadSharedText(record).Trim();
-			if (a_profile.IsOn(mod)) {
-				a_profile.SetMods([], [mod], a_log);
-				a_log.Warn($"the mod \"{mod}\" was left on when learning a tool's settings was cut off - it is off again");
-			}
-			Files.Delete(record);
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or KeyNotFoundException) {
-			a_log.Warn($"a mod left on when learning a tool's settings was cut off could not be switched off ({e.Message}) - look for it in Mod Organizer");
 		}
 	}
 
@@ -250,7 +278,7 @@ public static partial class ToolSettings
 		var toolMod = StepKit.ToolMod(mo2, profile, title);
 		if (toolMod != null) {
 			StepKit.NoPluginIn(mo2, toolMod, tool);
-			Files.WriteAtomic(SwitchRecord(a_setup), toolMod);
+			Files.WriteAtomic(SwitchRecord(a_setup), SwitchText(toolMod, mo2, a_setup.Profile));
 			profile.SetMods([toolMod], [], a_log);
 		}
 		try {

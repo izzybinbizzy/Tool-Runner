@@ -110,7 +110,9 @@ public static class QuietGame
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 				// a file another program holds: left as it is and said - the game then starts with what could be set, never a
 				// failed step over an option
-				StepKit.Forget(a_ctx, path);
+				// the write may have landed before it failed (the file is swapped, then its read-only mark put back): the kept copy
+				// goes back now, and stays on record until it has
+				StepKit.PutFilesBack(a_ctx, path);
 				a_ctx.Log.Warn($"{Path.GetFileName(path)} could not be changed for the small window ({e.Message}) - the game may start as it usually does");
 			}
 		}

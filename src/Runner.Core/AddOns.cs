@@ -275,7 +275,7 @@ public sealed class AddOnStep(string a_key) : IStep
 			if (a_makes != null && a_ctx.Journal.Step(a_step)?.Started is { } since && Path.Combine(a_ctx.Mo2.ModDir(a_mod), a_makes) is var inMod && File.Exists(inMod) && File.GetLastWriteTime(inMod) >= since) {
 				a_ctx.Log.Detail($"{StepCatalog.Name(a_step)} wrote {a_makes} straight into {a_mod}");
 				// its old bytes (kept before the tool started) are what an undo puts back
-				StepKit.Settled(a_ctx, [inMod]);
+				StepKit.Settled(a_ctx, a_mod, [inMod]);
 				return true;
 			}
 			if (a_nothingIsFine) {
@@ -298,7 +298,7 @@ public sealed class AddOnStep(string a_key) : IStep
 		a_ctx.Log.Detail($"{fresh.Count} file(s) moved from overwrite into {a_mod}");
 		// the whole old mod is in the backup now: a file kept on its own before the tool started is covered by that
 		if (a_makes != null) {
-			StepKit.Settled(a_ctx, [Path.Combine(a_ctx.Mo2.ModDir(a_mod), a_makes)]);
+			StepKit.Settled(a_ctx, a_mod, [Path.Combine(a_ctx.Mo2.ModDir(a_mod), a_makes)]);
 		}
 		return true;
 	}

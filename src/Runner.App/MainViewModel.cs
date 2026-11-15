@@ -122,6 +122,9 @@ public sealed partial class MainViewModel : Observable
 
 	// the window is minimized or hidden (set by the window itself)
 	public bool WindowAway { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(ProgressBusy)); } }
+
+	// Windows' "show animations" switch changed (the window hears it)
+	public void MotionChanged() => OnPropertyChanged(nameof(ProgressBusy));
 	public string NowTitle { get; set { if (Set(ref field, value)) { OnPropertyChanged(nameof(WindowTitle)); OnPropertyChanged(nameof(HeadTitle)); } } } = "Ready";
 	// the card's big line: what runs now, or how the last run ended ("Finished in 1 h 41 min")
 	public string HeadTitle => Summary?.Title ?? NowTitle;
@@ -622,7 +625,9 @@ public sealed partial class MainViewModel : Observable
 		var act = outside ? _run.Doing : cur?.Activity ?? (IsRunning ? _run.Doing : "");
 		WaitingInGame = !outside;
 		Waiting = act.StartsWith(Runner.WaitingPrefix, StringComparison.Ordinal) ? act[Runner.WaitingPrefix.Length..] : "";
-		NowActivity = Waiting != "" ? "" : act;
+		// a box the run does not answer itself is said beside what the step does (the run's watch names it)
+		var box = IsRunning && _run.Box != "" ? "ON SCREEN: " + _run.Box : "";
+		NowActivity = Waiting != "" ? "" : box == "" ? act : act == "" ? box : act + " - " + box;
 		ProgressKnown = cur?.Progress != null;
 		Progress = cur?.Progress ?? 0;
 		var steps = _run.Steps.Count;

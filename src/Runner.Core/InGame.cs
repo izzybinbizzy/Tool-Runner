@@ -124,7 +124,9 @@ public static partial class InGame
 				}
 				foreach (Match m in PathLiteral().Matches(text)) {
 					var dir = m.Groups[2].Value.Replace(@"\\", @"\", StringComparison.Ordinal).Replace('/', '\\').TrimEnd('\\');
-					if (dir.Length > 3 && Directory.Exists(dir) && !found.Contains(dir, StringComparer.OrdinalIgnoreCase)) {
+					// kept whether or not it stands yet: the game may make the folder later, and the plugin's file (what this
+					// list is remembered by) does not change when it does - HoldsALog judges each time it is asked
+					if (dir.Length > 3 && !found.Contains(dir, StringComparer.OrdinalIgnoreCase)) {
 						found.Add(dir);
 					}
 				}
@@ -151,7 +153,12 @@ public static partial class InGame
 	// and Tullius CTD Logger SKSE\Plugins\...\SkyrimDiag_Crash_<time>_SkyrimDiagReport.txt, the last two in Mod Organizer's
 	// overwrite), so the failure points at the cause instead of only saying the game went
 	public static StepFailedException GameClosed(RunContext a_ctx, string a_while) =>
-		new($"the game closed {a_while}" + CrashNote(LogFolders(a_ctx.Setup, a_ctx.Mo2), a_ctx.Mo2.OverwriteDir, a_ctx.GameLaunched ?? a_ctx.Journal.Started));
+		// a game the run's watch ended under a box nobody could answer is named by that box, never as a close of its own
+		new(a_ctx.BlockedBy ?? $"the game closed {a_while}" + CrashNote(LogFolders(a_ctx.Setup, a_ctx.Mo2), a_ctx.Mo2.OverwriteDir, a_ctx.GameLaunched ?? a_ctx.Journal.Started) + LastBox(a_ctx));
+
+	// what the game itself said in a box just before it went (a plugin that failed to load, a version it refuses)
+	public static string LastBox(RunContext a_ctx) =>
+		a_ctx.Boxes?.GameSaidWithin(TimeSpan.FromMinutes(2)) is { } said ? " - the last box it showed: " + said : "";
 
 	public static string CrashNote(string a_skseLogs, string a_overwrite, DateTime a_since) => CrashNote([a_skseLogs], a_overwrite, a_since);
 
@@ -161,9 +168,11 @@ public static partial class InGame
 
 	public static string? CrashLog(string a_skseLogs, string a_overwrite, DateTime a_since) => CrashReports([a_skseLogs], a_overwrite, a_since).FirstOrDefault();
 
-	// a crash logger's own report file, by its name (a dump or a helper's log beside it is not the report a player reads)
+	// A crash logger's own report file, by its name (a dump or a helper's log beside it is not the report a player reads). A
+	// report carries its time in its name ("crash-2026-11-07-23-07-14.log"); the logger's own plugin log ("CrashLogger.log",
+	// written at every start) is none - a run once named it as the crash report of a game that had only closed.
 	public static bool IsCrashReport(string a_fileName) =>
-		Regex.IsMatch(a_fileName, @"^(crash.*\.log|Crash_.*\.txt|SkyrimDiag_Crash_.*_SkyrimDiagReport\.txt)$", RegexOptions.IgnoreCase);
+		Regex.IsMatch(a_fileName, @"^(crash[-_ ]?\d.*\.log|Crash_.*\.txt|SkyrimDiag_Crash_.*_SkyrimDiagReport\.txt)$", RegexOptions.IgnoreCase);
 
 	// every crash report written since a_since, newest first - one per crash logger that wrote one
 	public static List<string> CrashReports(IReadOnlyList<string> a_logFolders, string a_overwrite, DateTime a_since)
@@ -287,7 +296,9 @@ public static partial class InGame
 		return false;
 	}
 
-	static bool BootPassOver(IReadOnlyList<string> a_logFolders, DateTime a_since)
+	// (its own name: called "BootPassOver" too, the call below picked this method again - a DateTime fits it better than the
+	// parser's DateTime? - and handed it the log's lines as folders, so the parser never ran)
+	public static bool BootPassOverIn(IReadOnlyList<string> a_logFolders, DateTime a_since)
 	{
 		var log = NewestShaderLog(a_logFolders);
 		if (log == null || File.GetLastWriteTimeUtc(log) < a_since.ToUniversalTime()) {
@@ -409,6 +420,9 @@ public static partial class InGame
 		try {
 			return Journal.All(Path.GetDirectoryName(a_ctx.Journal.Folder)!)
 				.Where(j => j.Id != a_ctx.Journal.Id && j.ReturnMarker != null && j.Profile.Equals(a_ctx.Profile.Name, StringComparison.OrdinalIgnoreCase))
+				// of this Mod Organizer: every run of the data folder is in one list, and another instance can have a profile of the same name
+				.Where(j => (string.IsNullOrEmpty(j.Mo2Instance) ? Path.GetDirectoryName(j.Mo2Exe) : j.Mo2Instance) is { } theirs &&
+					(string.IsNullOrEmpty(a_ctx.Journal.Mo2Instance) ? Path.GetDirectoryName(a_ctx.Journal.Mo2Exe) : a_ctx.Journal.Mo2Instance) is { } mine && Files.SamePath(theirs, mine))
 				.Where(j => j.Step("cleansave")?.Ended is { } ended && Math.Abs((ended.ToUniversalTime() - saved).TotalMinutes) < 5)
 				.OrderByDescending(j => j.Started).Select(j => j.ReturnMarker).FirstOrDefault();
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
@@ -845,7 +859,7 @@ public static partial class InGame
 	static void LaunchGame(RunContext a_ctx, StepSettings a_s)
 	{
 		NoGameRunning(a_ctx);
-		QuietGame.Apply(a_ctx);
+		GameStart.Prepare(a_ctx);
 		a_ctx.Control.LaunchGame(a_s.Str("launch_executable") ?? "SKSE", FreshGamePid(), a_ctx.Cancel);
 	}
 
@@ -853,22 +867,41 @@ public static partial class InGame
 	// returns whether the shaders compiled at this start
 	public static bool StartAndLoad(RunContext a_ctx, string a_step, StepSettings a_s, string a_save)
 	{
-		var launched = DateTime.Now;
-		a_ctx.GameLaunched = launched;
-		LaunchGame(a_ctx, a_s);
 		var limit = TimeSpan.FromMinutes(a_s.Int("start_min", 8));
-		var sw = Stopwatch.StartNew();
-		var started = DateTime.Now;
-		while (!a_ctx.DevBench.Answers()) {
-			a_ctx.Cancel.ThrowIfCancellationRequested();
-			if (sw.Elapsed > limit) {
-				throw new StepFailedException($"the game (or DevBench) did not answer within {limit.TotalMinutes:0} minutes");
+		var offers = 0;
+		Stopwatch sw;
+		DateTime started;
+		while (true) {
+			var launched = DateTime.Now;
+			a_ctx.GameLaunched = launched;
+			LaunchGame(a_ctx, a_s);
+			sw = Stopwatch.StartNew();
+			started = DateTime.Now;
+			var offered = false;
+			while (!a_ctx.DevBench.Answers()) {
+				a_ctx.Cancel.ThrowIfCancellationRequested();
+				if (sw.Elapsed > limit) {
+					throw new StepFailedException($"the game (or DevBench) did not answer within {limit.TotalMinutes:0} minutes");
+				}
+				// Faster Archives closes the game itself, a second into its start, to show its offer: no crash - the game is
+				// started again once its window has closed
+				if (sw.Elapsed > TimeSpan.FromSeconds(5) && !GameUp(a_ctx) && FasterArchives.Offered(LogFolders(a_ctx.Setup, a_ctx.Mo2), launched)) {
+					offered = true;
+					break;
+				}
+				if (sw.Elapsed > TimeSpan.FromSeconds(30) && !GameUp(a_ctx)) {
+					throw GameClosed(a_ctx, "while it was starting");
+				}
+				// the run's own watch answers these the whole run; a step run without one looks here
+				if (a_ctx.Boxes == null) {
+					AnswerNativeBoxes(RunBoxes(a_ctx, launched), a_ctx.Log);
+				}
+				a_ctx.Pause(TimeSpan.FromSeconds(2));
 			}
-			if (sw.Elapsed > TimeSpan.FromSeconds(30) && !GameUp(a_ctx)) {
-				throw GameClosed(a_ctx, "while it was starting");
+			if (!offered) {
+				break;
 			}
-			AnswerNativeBoxes(RunBoxes(a_ctx, launched), a_ctx.Log);
-			a_ctx.Pause(TimeSpan.FromSeconds(2));
+			FasterArchives.Wait(a_ctx, a_step, a_s, ++offers, launched);
 		}
 		a_ctx.Log.Detail($"the game is up after {sw.Elapsed.TotalSeconds:0} s");
 		var compiled = WaitCompile(a_ctx, a_step, a_s, started);
@@ -969,7 +1002,7 @@ public static partial class InGame
 			if (!GameUp(a_ctx)) {
 				throw GameClosed(a_ctx, "while its shaders compiled");
 			}
-			if (!seen && BootPassOver(logs, a_since) && !Compiling(logs, a_ctx.Mo2.OverwriteDir, a_since)) {
+			if (!seen && BootPassOverIn(logs, a_since) && !Compiling(logs, a_ctx.Mo2.OverwriteDir, a_since)) {
 				passOverSince ??= sw.Elapsed;
 				if (sw.Elapsed - passOverSince >= TimeSpan.FromSeconds(30)) {
 					a_ctx.Log.Detail("the shader mod says its start-up pass is over - no compile to wait for");
@@ -1242,7 +1275,14 @@ public static partial class InGame
 			foreach (var f in files) {
 				a_ctx.Cancel.ThrowIfCancellationRequested();
 				var dest = Path.Combine(part, f.Name);
-				if (Same(f) is not { } same || !Native.HardLink(dest, same.FullName)) {
+				if (Same(f) is not { } same) {
+					f.CopyTo(dest, false);
+				} else if (!Native.HardLink(dest, same.FullName)) {
+					// a link that cannot be made (another disk, a file system without links) is a copy after all, and its room was
+					// not counted above: never taken out of what the run's outputs were promised
+					if (FreeBytes(a_ctx.BackupFolder) < f.Length + margin * 1073741824L) {
+						throw new IOException($"an unchanged save could not be linked to the last run's copy, and copying it would not leave the {margin} GB this run needs free");
+					}
 					f.CopyTo(dest, false);
 				}
 			}

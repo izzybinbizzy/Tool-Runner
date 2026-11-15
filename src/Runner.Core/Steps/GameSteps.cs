@@ -178,6 +178,7 @@ public sealed class GrassStep : IStep
 			File.WriteAllText(flag, "");
 			var launches = 0;
 			var idle = 0;
+			var offers = 0;
 			try {
 				while (File.Exists(flag)) {
 					a_ctx.Cancel.ThrowIfCancellationRequested();
@@ -187,8 +188,9 @@ public sealed class GrassStep : IStep
 					a_ctx.Activity(Key, $"the game builds the grass cache - start {launches} ({have} files so far)");
 					InGame.NoGameRunning(a_ctx);
 					var sw = Stopwatch.StartNew();
-					a_ctx.GameLaunched = DateTime.Now;
-					QuietGame.Apply(a_ctx);
+					var launched = DateTime.Now;
+					a_ctx.GameLaunched = launched;
+					GameStart.Prepare(a_ctx);
 					using var g = Mo2Control.Open(a_ctx.Control.LaunchGame(a_s.Str("launch_executable") ?? "SKSE", InGame.FreshGamePid(), a_ctx.Cancel), "the game");
 					var lastN = -1;
 					var still = Stopwatch.StartNew();
@@ -209,6 +211,15 @@ public sealed class GrassStep : IStep
 							break;
 						}
 						a_ctx.Pause(TimeSpan.FromSeconds(10));
+					}
+					if (a_ctx.BlockedBy is { } box) {
+						throw new StepFailedException(box);
+					}
+					// Faster Archives closed the game for its offer: no crash, and not one of the cache's own starts
+					if (File.Exists(flag) && FasterArchives.Offered(InGame.LogFolders(a_ctx.Setup, a_ctx.Mo2), launched)) {
+						FasterArchives.Wait(a_ctx, Key, a_s, ++offers, launched);
+						--launches;
+						continue;
 					}
 					if (File.Exists(flag)) {
 						if (launches == 1 && sw.Elapsed < TimeSpan.FromMinutes(a_s.Int("first_start_min", 5))) {
@@ -570,10 +581,15 @@ public sealed class ShaderStep : IStep
 	// "crash_wait_min" stops the step), "restart" (carry on at once, for a run nobody watches) or "stop".
 	public static void GameEnded(RunContext a_ctx, StepSettings a_s, Cache a_c, int a_start, int a_files)
 	{
+		// the run's watch ended the game under a box nobody could answer: the step stops with that box, never as a crash
+		if (a_ctx.BlockedBy is { } box) {
+			throw new StepFailedException(box);
+		}
 		var reports = InGame.CrashReports(InGame.LogFolders(a_ctx.Setup, a_ctx.Mo2), a_ctx.Mo2.OverwriteDir, a_ctx.GameLaunched ?? a_ctx.Journal.Started);
 		var what = reports.Count > 0
 			? $"the game CRASHED while it compiled the {a_c.ShaderMod} shaders (start {a_start}, {a_files} shader(s) written so far) - its crash report: {string.Join(" and ", reports)}"
 			: $"the game closed while it compiled the {a_c.ShaderMod} shaders (start {a_start}, {a_files} shader(s) written so far) - no crash report was written (a crash logger such as Crash Logger SSE names the cause of the next one)";
+		what += InGame.LastBox(a_ctx);
 		a_ctx.Log.Warn(what);
 		a_ctx.Log.Simple("Note: " + what);
 		a_ctx.Note("shaders: " + what);
@@ -590,6 +606,7 @@ public sealed class ShaderStep : IStep
 			return;
 		}
 		var wait = TimeSpan.FromMinutes(a_s.Num("crash_wait_min", 30));
+		a_ctx.Log.Warn($"waiting up to {wait.TotalMinutes:0} minutes for your answer: Done (the window's button, or the command \"continue\") starts the game again, Stop ends the run");
 		using var asked = CancellationTokenSource.CreateLinkedTokenSource(a_ctx.Cancel);
 		asked.CancelAfter(wait);
 		try {
@@ -616,6 +633,7 @@ public sealed class ShaderStep : IStep
 		var states = a_ctx.Profile.States();
 		using (new Toggle(a_ctx, a_b.On, a_b.Off.Where(states.ContainsKey).ToList(), "the shader cache", a_ctx.Cancel)) {
 			var restarts = 0;
+			var offers = 0;
 			var total = Stopwatch.StartNew();
 			var minFiles = a_s.Int("min_files", 50);
 			var quiet = TimeSpan.FromMinutes(a_s.Int("quiet_min", 5));
@@ -630,10 +648,11 @@ public sealed class ShaderStep : IStep
 					InGame.NoGameRunning(a_ctx);
 					var sw = Stopwatch.StartNew();
 					g?.Dispose();
-					a_ctx.GameLaunched = DateTime.Now;
+					var launched = DateTime.Now;
+					a_ctx.GameLaunched = launched;
 					// shaders already in the cache came from an earlier start of this step: only new ones show THIS start works
 					var atLaunch = Files.CountFiles(owCache);
-					QuietGame.Apply(a_ctx);
+					GameStart.Prepare(a_ctx);
 					g = Mo2Control.Open(a_ctx.Control.LaunchGame(a_s.Str("launch_executable") ?? "SKSE", InGame.FreshGamePid(), a_ctx.Cancel), "the game");
 					a_ctx.Activity("shaders", $"{c.ShaderMod}: the game compiles the shader cache at its main menu");
 					var sane = false;
@@ -717,7 +736,12 @@ public sealed class ShaderStep : IStep
 					a_ctx.Cancel.ThrowIfCancellationRequested();
 					// the time spent waiting for the player's answer is not the compile's: it never counts against the step's limit
 					total.Stop();
-					GameEnded(a_ctx, a_s, c, ++restarts, Files.CountFiles(owCache));
+					// Faster Archives closed the game for its offer: no crash, and not one of the step's restarts
+					if (a_ctx.BlockedBy == null && FasterArchives.Offered(logs, launched)) {
+						FasterArchives.Wait(a_ctx, "shaders", a_s, ++offers, launched);
+					} else {
+						GameEnded(a_ctx, a_s, c, ++restarts, Files.CountFiles(owCache));
+					}
 					total.Start();
 					a_ctx.Pause(TimeSpan.FromSeconds(5));
 				}

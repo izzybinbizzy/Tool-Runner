@@ -341,6 +341,11 @@ public static class SettingsPanel
 		// his checklist 460
 		work["quietGame"] ??= false;
 		Field(stack, apply, "Run the game steps in a small, muted window, so you can keep using the PC (your game settings go back after each step)", work, "quietGame", JsonValueKind.True);
+		// two mods that put a window of their own in front of a game start (GameMods.cs); each line matters only with that mod ticked
+		Choice(stack, apply, "Faster Archives' offer during a run (it closes the game to ask about repacking)", work, FasterArchives.SettingName,
+			[("ask", "wait for my choice in its window"), ("skip", "pass it over during the run - it asks again when I start the game")]);
+		Choice(stack, apply, "Cached Recursive Directory Walk with its question switched off", work, Crdw.SettingName,
+			[("leave", "only tell me its cache will be old"), ("refresh", "make a new cache at the run's game starts, then put its setting back")]);
 		Field(stack, apply, "Commands before a run (one per line, each must succeed)", work, "beforeRun", JsonValueKind.Array);
 		Field(stack, apply, "Commands after a run (one per line)", work, "afterRun", JsonValueKind.Array);
 		// History > What MO2 changed: a profile only tests use, or test mods, can be left out of the view (nothing is lost)
@@ -865,6 +870,12 @@ public static class SettingsPanel
 			break;
 		case ContentControl { Content: string c }:
 			yield return c;
+			break;
+		// a tick box whose words are a wrapping text block of its own
+		case ContentControl { Content: DependencyObject inner }:
+			foreach (var w in Words(inner)) {
+				yield return w;
+			}
 			break;
 		case ItemsControl items:
 			foreach (var i in items.Items.OfType<object>()) {
