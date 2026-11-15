@@ -109,7 +109,7 @@ public static class RunnerErrors
 			"Set DynDOLOD's folder in Settings > A step > AnvilLOD."),
 		E("TR-310", "the PGPatcher settings set is missing|but the PGPatcher settings have PGLite Mode", "PGPatcher's saved settings do not match this profile.",
 			"Learn PGPatcher's settings again from its own window (Settings > A step > PGPatcher > Learn its settings), or tick / untick PGLite in Mod Organizer to match."),
-		E("TR-311", "its add-on file is gone|its add-on file:|changed since you allowed it|the mod that holds it", "An add-on step's file is missing, changed, or its mod is switched off.",
+		E("TR-311", "its add-on file is gone|its add-on file:|changed since you allowed it|the mod that holds it|its program could not be opened|its add-on file changed while it was being read","An add-on step's file is missing, changed, or its mod is switched off.",
 			"Tick the add-on's mod in Mod Organizer and look at the add-on again in Settings > ADD-ONS; allow it only if you trust what it starts."),
 		E("TR-317", "Mod Organizer's LOOT is not there", "The LOOT sort step runs the LOOT that ships inside Mod Organizer, and it is missing from Mod Organizer's folder.",
 			"Reinstall Mod Organizer over itself (it brings its loot folder back), or untick the LOOT sort step."),

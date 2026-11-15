@@ -44,11 +44,12 @@ public sealed class RunContext
 	// put-back - even when a later part of the same step fails or is stopped (a step's failure used to lose its finished part)
 	public void Finished(string a_mod)
 	{
-		Steps.StepKit.MarkReplaced(this, a_mod);
+		// "built" and "its old output stays in the backup" go on record in ONE write (MarkReplaced saves): in two, a crash
+		// between them left a finished output that no record called this run's - never switched on, its old one never back
 		if (!Journal.Built.Contains(a_mod, StringComparer.OrdinalIgnoreCase)) {
 			Journal.Built.Add(a_mod);
 		}
-		Journal.Save();
+		Steps.StepKit.MarkReplaced(this, a_mod);
 		SetAfter(a_mod);
 	}
 
@@ -189,6 +190,10 @@ public sealed class Toggle : IDisposable
 			// 2026-11-10: a Stop seen right after the start left the step FAILED on "Mod Organizer is open"): closed, then once more
 			_ctx.Log.Detail("Mod Organizer came up while the mods were being put back - closing it, then putting them back");
 			_ctx.Control.Close();
+			// looked at again: nothing was put back yet (the refusal comes before the first file is written), and the Mod
+			// Organizer that came up may have saved a change of the player's since the look above
+			theirs = _ctx.Profile.ChangedByOthers();
+			marks = theirs.Count > 0 ? _ctx.Profile.PluginMarks() : [];
 			_ctx.Profile.Restore(_snap);
 		}
 		_ctx.Profile.OursBack(_oursBefore);

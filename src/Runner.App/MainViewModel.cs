@@ -1105,6 +1105,10 @@ public sealed partial class MainViewModel : Observable
 		var setup = Setup;
 		try {
 			var found = await Task.Run(() => Preflight.Run(setup, Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance), setup.EnabledSteps.Select(s => s.Key).ToList()));
+			// another setup was picked while this one was being checked: its findings are not the new one's, and "checked" is not either
+			if (!string.Equals(setup.File, Setup?.File, StringComparison.OrdinalIgnoreCase)) {
+				return;
+			}
 			foreach (var i in found) {
 				var todo = i.Blocking && Explain.For(i.Step, i.Text) is { } a ? "\n      What to do: " + a.Todo : "";
 				Issues.Add($"{(i.Blocking ? Theme.Glyph("IssueBlocks") : Theme.Glyph("IssueNote"))}  {(i.Step == "" ? "" : StepCatalog.Name(i.Step) + ": ")}{i.Text}{todo}");

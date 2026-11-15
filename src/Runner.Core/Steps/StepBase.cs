@@ -149,13 +149,16 @@ public static class StepKit
 			return;
 		}
 		string? backup = null;
+		// its number in the run's record names its copy too: it is given once and never again. Named by how many files were
+		// kept so far, a record taken out again (Forget) gave the next file of that name the copy of another - and wrote over it
+		var seq = a_ctx.Journal.NextSeq();
 		if (File.Exists(a_path)) {
 			var dir = Path.Combine(a_ctx.BackupFolder, "files");
 			Directory.CreateDirectory(dir);
-			backup = Path.Combine(dir, $"{a_ctx.Journal.Kept.Count + 1} {Path.GetFileName(a_path)}");
-			Files.Copy(a_path, backup, true);
+			backup = Files.FreeFile(Path.Combine(dir, $"{seq} {Path.GetFileName(a_path)}"));
+			Files.Copy(a_path, backup);
 		}
-		a_ctx.Journal.Kept.Add(new KeptFile { Path = a_path, Backup = backup, Seq = a_ctx.Journal.NextSeq() });
+		a_ctx.Journal.Kept.Add(new KeptFile { Path = a_path, Backup = backup, Seq = seq });
 		a_ctx.Journal.Save();
 	}
 

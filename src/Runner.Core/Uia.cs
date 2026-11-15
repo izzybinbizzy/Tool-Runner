@@ -125,22 +125,32 @@ public static class Uia
 
 	static string OwnWords(AutomationElement a_b) => Name(a_b).Replace("&", "", StringComparison.Ordinal).Trim();
 
-	// A box's buttons as the checks know them. Its ONE button is named by its own words unless those say Cancel: Windows gives
-	// the lone OK of a plain notice the control id of Cancel (so that Esc closes the box), and the lone Cancel of a progress
-	// window has that id too - only the words tell a notice to acknowledge from a button that must not be pressed
+	// A box's buttons as the checks know them. Its ONE button under Cancel's control id is a special case: Windows gives the
+	// lone OK of a plain notice that id (so that Esc closes the box), and the lone Cancel of a progress window has it too -
+	// only the words tell a notice to acknowledge from a button that must not be pressed
 	public static List<string> BoxNames(IReadOnlyList<AutomationElement> a_buttons) =>
-		BoxNames([.. a_buttons.Select(b => (StandardName(AutomationId(b)), OwnWords(b)))], Native.CancelWord());
+		BoxNames([.. a_buttons.Select(b => (StandardName(AutomationId(b)), OwnWords(b)))], Native.ButtonWord(Native.CancelButton), Native.AcknowledgeWords());
 
-	// a_cancelWord: what Windows' own Cancel button reads in this Windows' language ("" when it would not say)
-	public static List<string> BoxNames(IReadOnlyList<(string? Standard, string Own)> a_buttons, string a_cancelWord)
+	// what a notice's one button reads when all it does is acknowledge
+	static readonly string[] Acknowledges = ["OK", "Okay", "Close", "Continue"];
+
+	// a_cancelWord: what Windows' own Cancel button reads in this Windows' language ("" when it would not say);
+	// a_acknowledge: what its own OK, Close and Continue read there
+	public static List<string> BoxNames(IReadOnlyList<(string? Standard, string Own)> a_buttons, string a_cancelWord, IReadOnlyCollection<string>? a_acknowledge = null)
 	{
+		static bool Is(string a_words, string a_word) => a_word != "" && a_words.Equals(a_word, StringComparison.OrdinalIgnoreCase);
 		if (a_buttons is [var (standard, own)]) {
 			// its words first: a Cancel in English or in Windows' own language, whatever its control id
-			if (own.Equals("Cancel", StringComparison.OrdinalIgnoreCase) || (a_cancelWord != "" && own.Equals(a_cancelWord, StringComparison.OrdinalIgnoreCase))) {
+			if (Is(own, "Cancel") || Is(own, a_cancelWord)) {
 				return ["Cancel"];
 			}
-			// Cancel's id under other words is a notice's button: named by those words
-			return [standard == "Cancel" && own != "" ? own : standard ?? own];
+			if (standard == "Cancel") {
+				// Cancel's id under other words: a notice's button only when those words are known to acknowledge, in English or
+				// as Windows itself words them. Any other words stay a Cancel - a program's language need not be Windows', and
+				// its progress window's Cancel must never be pressed for a notice's OK (the step then stops, naming the box)
+				return [Acknowledges.Any(a => Is(own, a)) || (a_acknowledge ?? []).Any(a => Is(own, a)) ? own : "Cancel"];
+			}
+			return [standard ?? own];
 		}
 		return [.. a_buttons.Select(b => b.Standard ?? b.Own)];
 	}

@@ -67,6 +67,19 @@ public static class AddOns
 		return Convert.ToHexString(sha.GetHashAndReset());
 	}
 
+	// The program's file held open from the look at its bytes until it runs. Between the two (Mod Organizer may take minutes
+	// to be ready) a mod update, or anything else that writes in that mod, could put another program under the name the
+	// player allowed. While it is held nothing can write over, rename or delete it; reading and starting it stay possible,
+	// and once it runs Windows itself holds the file.
+	public static FileStream Hold(string a_program)
+	{
+		try {
+			return new FileStream(a_program, FileMode.Open, FileAccess.Read, FileShare.Read);
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			throw new StepFailedException($"its program could not be opened ({e.Message}) - is {Path.GetFileName(a_program)} still in its mod, and does nothing else hold it open?");
+		}
+	}
+
 	static bool RelativeInside(string a_path) =>
 		!Path.IsPathRooted(a_path) && !a_path.Replace('\\', '/').Split('/').Contains("..");
 
@@ -237,7 +250,14 @@ public sealed class AddOnStep(string a_key) : IStep
 	public void Run(RunContext a_ctx, StepSettings a_s)
 	{
 		var file = a_s.Req("file");
+		// read once for where its program is, that program then held (AddOns.Hold), and the add-on read AGAIN under the hold:
+		// the bytes that are compared with what the player allowed are the bytes that start
+		var first = AddOns.Read(file, ModDirOf(file)) ?? throw new StepFailedException("its add-on file has problems - Settings > ADD-ONS names them");
+		using var held = AddOns.Hold(first.ProgramPath);
 		var addOn = AddOns.Read(file, ModDirOf(file)) ?? throw new StepFailedException("its add-on file has problems - Settings > ADD-ONS names them");
+		if (!Files.SamePath(addOn.ProgramPath, first.ProgramPath)) {
+			throw new StepFailedException("its add-on file changed while it was being read - run again from this step");
+		}
 		// the file as it stands now is what starts: changed since the pre-check, it is not what the player allowed
 		if (addOn.Hash != a_s.Str("sha") && Setup.Bool(a_ctx.Setup.Root, AddOns.NoAskSetting) != true) {
 			throw new StepFailedException("its add-on file or the program it starts changed since you allowed it: look at it again in Settings > ADD-ONS");
@@ -250,6 +270,8 @@ public sealed class AddOnStep(string a_key) : IStep
 		StepKit.KeepInPlace(a_ctx, output, addOn.Makes);
 		try {
 			using var proc = a_ctx.Control.RunExecutable(addOn.ProgramPath, image, addOn.Arguments == "" ? null : addOn.Arguments, a_ctx.Cancel, null, true);
+			// it runs: Windows holds its file from here
+			held.Dispose();
 			a_ctx.Activity(Key, addOn.Name + " is working");
 			Waits.Tool(a_ctx, Key, proc, a_s.Deadline(addOn.Minutes), () => proc.HasExited ? Waits.Poll.Done : Waits.Poll.Wait);
 			if (proc.HasExited && proc.ExitCode != 0) {

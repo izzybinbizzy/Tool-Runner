@@ -490,6 +490,22 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 
 	public Func<List<(int Pid, string Image)>>? ForeignProbe { get; set; }
 
+	public Func<List<int>>? RepackProbe { get; set; }
+
+	// Faster Archives' own program, started by the run's game or under this Mod Organizer. Mod Organizer ends the programs
+	// under it when it closes, and a repack cut off leaves archives half written: the close waits for it like for a
+	// program of the player's (a Stop during a repack leaves it running on purpose - FasterArchives.Wait)
+	List<int> Repackers()
+	{
+		var running = Procs.Pids(FasterArchives.ToolImage);
+		if (running.Count == 0) {
+			return running;
+		}
+		Started.Sweep();
+		var owned = Started.Owned();
+		return running.Where(p => owned.Contains(p) || IsMo2s(p)).ToList();
+	}
+
 	public void Close(TimeSpan? a_timeout = null, CancellationToken a_ct = default)
 	{
 		if (!IsRunning()) {
@@ -519,11 +535,13 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 			var dl = DownloadsInProgress();
 			var game = GameRunning();
 			var theirs = (ForeignProbe ?? (() => ForeignChildren(true)))();
-			if (dl.Count == 0 && game.Count == 0 && theirs.Count == 0) {
+			var repack = (RepackProbe ?? Repackers)();
+			if (dl.Count == 0 && game.Count == 0 && theirs.Count == 0 && repack.Count == 0) {
 				break;
 			}
 			var why = dl.Count > 0 ? "Mod Organizer is downloading (" + string.Join(", ", dl.Take(3)) + ")" :
 				game.Count > 0 ? "the game is running (" + string.Join(", ", game) + ")" :
+				repack.Count > 0 ? "Faster Archives' own program is still open (it repacks the game's archives, or waits for a choice in its window)" :
 				"a program you started runs under Mod Organizer (" + string.Join(", ", theirs.Select(t => t.Image).Distinct()) + ")";
 			if (waited.Elapsed > BusyWait) {
 				throw new Mo2BusyException($"{why} for {BusyWait.TotalMinutes:0} minutes - Mod Organizer is never closed under it");
@@ -758,7 +776,9 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		var pid = LaunchTool(cmd, Watch, startLimit, a_ct) ?? throw new StepFailedException(
 			$"{a_image} did not start within {startLimit.TotalMinutes:0} minutes - is MO2's executable \"{a_title}\" right?" +
 			WhatMo2Said(a_title, a_image, logAt) + KeepEvidence(a_title, logAt, asked, started));
-		_log.Detail($"{a_image} started (process {pid})");
+		// Said, not yet required: a program of a name nobody else uses counts as the tool as soon as it is new. Whether every
+		// tool can be traced back to Mod Organizer at first sight is read off real runs before that is made a condition
+		_log.Detail($"{a_image} started (process {pid}){(IsMo2s(pid) ? "" : " - its start could not be traced back to Mod Organizer")}");
 		Ours(pid);
 		return Open(pid, a_image);
 	}

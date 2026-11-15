@@ -43,18 +43,23 @@ public static partial class Native
 	[LibraryImport("user32.dll", EntryPoint = "MB_GetString")]
 	private static partial nint MessageBoxWord(uint a_button);
 
-	static readonly Lazy<string> TheCancelWord = new(() => {
+	// Windows' own numbers for the words its message boxes put on their buttons
+	public const uint OkButton = 0, CancelButton = 1, CloseButton = 7, ContinueButton = 10;
+
+	static readonly System.Collections.Concurrent.ConcurrentDictionary<uint, string> ButtonWords = new();
+
+	// what one of Windows' own message-box buttons reads in this Windows' language, its "&" taken out ("" when Windows does not say)
+	public static string ButtonWord(uint a_button) => ButtonWords.GetOrAdd(a_button, static b => {
 		try {
-			// the words Windows' own message boxes put on their buttons, in Windows' language: 1 is Cancel
-			var p = MessageBoxWord(1);
+			var p = MessageBoxWord(b);
 			return p == 0 ? "" : (Marshal.PtrToStringUni(p) ?? "").Replace("&", "", StringComparison.Ordinal).Trim();
 		} catch (EntryPointNotFoundException) {
 			return "";
 		}
 	});
 
-	// what Windows' own Cancel button reads in this Windows' language ("" when Windows does not say)
-	public static string CancelWord() => TheCancelWord.Value;
+	// what Windows' own OK, Close and Continue buttons read here: a notice's one button that only acknowledges
+	public static IReadOnlyCollection<string> AcknowledgeWords() => [.. new[] { OkButton, CloseButton, ContinueButton }.Select(ButtonWord).Where(w => w != "")];
 
 	[LibraryImport("user32.dll")]
 	[return: MarshalAs(UnmanagedType.Bool)]
@@ -426,6 +431,31 @@ public static partial class Procs
 		} catch (InvalidOperationException) {
 		} catch (Win32Exception) {
 		}
+	}
+
+	// The same for the very process that was put on record: opened once, its start time read and the end made through that
+	// one handle. Asked by number twice - "is it still the one?", then "end it" - a number that changed hands in between
+	// would end somebody else's program. False: it was no longer that process (or could not be opened), and nothing was ended.
+	public static bool KillTree(int a_root, DateTime a_startedUtc)
+	{
+		try {
+			using var p = Process.GetProcessById(a_root);
+			// (the handle is taken here and kept by the object: what follows speaks of this one process, whatever becomes of its number)
+			_ = p.SafeHandle;
+			if (p.HasExited || p.StartTime.ToUniversalTime() != a_startedUtc) {
+				return false;
+			}
+			p.Kill(true);
+			p.WaitForExit(10000);
+			return true;
+		} catch (ArgumentException) {
+		} catch (InvalidOperationException) {
+		} catch (Win32Exception) {
+		} catch (AggregateException) {
+			// the process itself is ended first; one of the programs under it would not go
+			return true;
+		}
+		return false;
 	}
 
 	// when a process started (null = gone or not readable) - a PID alone can be reused by a new process after a crash

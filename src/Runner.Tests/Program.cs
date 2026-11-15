@@ -555,8 +555,37 @@ public static class Program
 			stuck.Dispose();
 			Check(ending.Elapsed < TimeSpan.FromSeconds(5), "the run's end does not wait for a look that sits in a hung window: " + ending.Elapsed);
 			hung.Set();
-			Thread.Sleep(400);
+			Check(stuck.Ended(TimeSpan.FromSeconds(20)), "the look has come back and the watch's thread has ended");
 			Equal(0, late, "a look that comes back after the run let go of the watch presses nothing, ends no game and tells the window nothing");
+
+			// ... and a look held up INSIDE its acting (a log line the disk holds up) while the run ends: the end does not
+			// wait for it for ever, and when the look goes on, no press and no game's end begins any more
+			using var release = new ManualResetEventSlim(false);
+			using var inLog = new ManualResetEventSlim(false);
+			using var slowLog = new RunLog(Path.Combine(f.Data, "box log held up"));
+			slowLog.Line += (t, _) => {
+				if (t.StartsWith("a box is open", StringComparison.Ordinal) && !inLog.IsSet) {
+					inLog.Set();
+					release.Wait(TimeSpan.FromSeconds(30));
+				}
+			};
+			var lateActs = 0;
+			var heldUp = new BoxWatch(() => [
+				new BoxWatch.Open(10, new BoxSeen("SkyrimSE.exe", true, "Notice", "Your settings were reset.", ["OK"]), _ => Interlocked.Increment(ref lateActs)),
+				new BoxWatch.Open(11, new BoxSeen("SkyrimSE.exe", true, "Some Mod", "Reset every setting?", ["Yes", "No"]), _ => Interlocked.Increment(ref lateActs))],
+				slowLog, _ => Interlocked.Increment(ref lateActs), () => Interlocked.Increment(ref lateActs)) { Wait = TimeSpan.Zero };
+			heldUp.Start();
+			Check(inLog.Wait(TimeSpan.FromSeconds(5)), "the look is held up in its log line");
+			var letGo = Stopwatch.StartNew();
+			heldUp.Dispose();
+			Check(letGo.Elapsed < TimeSpan.FromSeconds(5), "the run's end does not wait for it for ever: " + letGo.Elapsed);
+			release.Set();
+			Check(heldUp.Ended(TimeSpan.FromSeconds(20)), "the look has gone on and the watch's thread has ended");
+			Equal(0, lateActs, "held up inside its acting while the run ended: no press, no game's end and no line for the window begins after");
+
+			// a game the player started under the run's Mod Organizer is theirs with everything it starts
+			Check(RunWindows.GameFlag(true, 5, pid => pid == 5) && !RunWindows.GameFlag(true, 5, pid => pid == 6), "a program under the run's own game is the game's; under the player's game it is not");
+			Check(RunWindows.GameFlag(true, null, _ => false) && !RunWindows.GameFlag(false, 5, _ => true) && RunWindows.GameFlag(true, 5, null), "one under no game keeps its own flag, and none is made up");
 
 			pressed.Clear();
 			var live = new List<BoxWatch.Open>();
@@ -782,6 +811,20 @@ public static class Program
 				Check(lines.Any(l => l.Contains("this time it is repacking", StringComparison.Ordinal)), "past the limit, a program that works is said to be repacking: " + string.Join(" | ", lines.TakeLast(4)));
 			}
 			Check(aliveWhenEnded, "and was never cut off: it ran until it ended by itself");
+
+			// ... and one that only sits there past the limit is LEFT OPEN, the run's own too: whether the player is choosing
+			// "Repack now" in it this very moment cannot be told for certain, so a late choice is never cut off
+			var sinceLate = DateTime.Now;
+			using var late = Process.Start(new ProcessStartInfo(tool, "-n 60 127.0.0.1") { UseShellExecute = false, CreateNoWindow = true })!;
+			using var endLate = new StandIn(late);
+			string? atLimit = null;
+			try {
+				FasterArchives.Wait(ctx, "shaders", new StepSettings([]), 4, sinceLate);
+			} catch (StepFailedException e) {
+				atLimit = e.Message;
+			}
+			Check(atLimit?.Contains("left open", StringComparison.Ordinal) == true && !late.HasExited, "past the limit the step stops and its window stays open: " + atLimit);
+			late.Kill();
 		} finally {
 			FasterArchives.OfferLook = look;
 		}
@@ -1648,15 +1691,20 @@ public static class Program
 		DateTime? StartOf(int a_pid) => starts.GetValueOrDefault(a_pid);
 		var launcher = new Dictionary<int, DateTime> { [10] = t };
 		// 11 the launcher's child, 12 that one's child, 13 older than the launcher under the same parent number, 14 somebody else's
-		var kids = StartedSet.Children(launcher, [(10, 1), (11, 10), (12, 11), (13, 10), (14, 99)], StartOf);
+		var listed = t.AddMinutes(5);
+		var kids = StartedSet.Children(launcher, [(10, 1), (11, 10), (12, 11), (13, 10), (14, 99)], StartOf, listed);
 		Equal("11,12", string.Join(",", kids.Keys.Order()), "a child and its child are the run's; one older than its \"parent\" and a stranger are not");
 		// the launcher has ended and nothing has its number
 		starts.Remove(10);
-		Equal("11,12", string.Join(",", StartedSet.Children(launcher, [(11, 10), (12, 11)], StartOf).Keys.Order()), "found all the same once the launcher has ended");
+		Equal("11,12", string.Join(",", StartedSet.Children(launcher, [(11, 10), (12, 11)], StartOf, listed).Keys.Order()), "found all the same once the launcher has ended");
 		// the launcher's number is another program's by now: what that one started is never the run's
 		starts[10] = t.AddSeconds(30);
 		starts[15] = t.AddSeconds(40);
-		Equal("11", string.Join(",", StartedSet.Children(launcher, [(10, 1), (11, 10), (15, 10)], StartOf).Keys.Order()), "a child started after the number changed hands is the new owner's");
+		Equal("11", string.Join(",", StartedSet.Children(launcher, [(10, 1), (11, 10), (15, 10)], StartOf, listed).Keys.Order()), "a child started after the number changed hands is the new owner's");
+		// a child's own number changed hands after the list was taken: the row named the child that has ended, not the newcomer
+		starts.Remove(10);
+		starts[11] = listed.AddSeconds(2);
+		Equal("", string.Join(",", StartedSet.Children(launcher, [(11, 10)], StartOf, listed).Keys.Order()), "a process that started after the list was taken is nobody's child by that list");
 
 		// for real: a launcher starts its program and ends (ping stands in for the program)
 		using var f = new FakeMo2();
@@ -1681,6 +1729,13 @@ public static class Program
 		}
 		ctx.Control.Started.Sweep();
 		Check(!ctx.Control.Started.Owned().Contains(mine.FirstOrDefault()), "once it has ended it is no longer on record");
+
+		// a number that changed hands: a program is ended only as the very process on record - its number AND its start time
+		using var bystander = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "PING.EXE"), "-n 30 127.0.0.1") { UseShellExecute = false, CreateNoWindow = true })!;
+		using var endBystander = new StandIn(bystander);
+		var began = Procs.StartTime(bystander.Id) ?? throw new InvalidOperationException("the stand-in's start time could not be read");
+		Check(!Procs.KillTree(bystander.Id, began.AddSeconds(-90)) && !bystander.HasExited, "a process that has the number of one on record but started at another time is never ended as that one");
+		Check(Procs.KillTree(bystander.Id, began) && bystander.WaitForExit(5000), "the very process on record is");
 	}
 
 	// what a run's backup holds is never written over: not by a put-back that is tried again, not by a second failed step
@@ -1709,6 +1764,61 @@ public static class Program
 		Equal(Path.Combine(free, "tool (2).log"), Files.FreeFile(name), "one that is taken gets a number");
 		File.WriteAllText(Path.Combine(free, "tool (2).log"), "2");
 		Equal(Path.Combine(free, "tool (3).log"), Files.FreeFile(name), "and the next one the next");
+
+		// three files of one name kept, the first taken out of the record again: each copy stays its own file's
+		var kept1 = Path.Combine(f.Root, "one", "settings.ini");
+		var kept2 = Path.Combine(f.Root, "two", "settings.ini");
+		var kept3 = Path.Combine(f.Root, "three", "settings.ini");
+		foreach (var (path, text) in new[] { (kept1, "one"), (kept2, "two"), (kept3, "three") }) {
+			Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+			File.WriteAllText(path, text);
+		}
+		StepKit.KeepFile(ctx, kept1);
+		StepKit.KeepFile(ctx, kept2);
+		StepKit.Forget(ctx, kept1);
+		StepKit.KeepFile(ctx, kept3);
+		var copies = ctx.Journal.Kept.Where(k => k.Path == kept2 || k.Path == kept3).Select(k => k.Backup!).ToList();
+		Check(copies.Count == 2 && copies.Distinct(StringComparer.OrdinalIgnoreCase).Count() == 2, "two kept files of one name have a copy each, also after a record was taken out: " + string.Join(" | ", copies));
+		File.WriteAllText(kept2, "changed");
+		File.WriteAllText(kept3, "changed");
+		Equal(0, StepKit.PutFilesBack(ctx).Count, "both go back");
+		Check(File.ReadAllText(kept2) == "two" && File.ReadAllText(kept3) == "three", "each to its own old bytes");
+
+		// a finished part of a step: built, and its old output kept out, in ONE write of the record
+		StepKit.ParkMod(ctx, "landscapefixer", "Output B");
+		ctx.Journal.Built.Clear();
+		ctx.Journal.Save();
+		ctx.Finished("Output B");
+		var onDisk = Journal.Load(ctx.Journal.Folder);
+		Check(onDisk.Built.Contains("Output B") && onDisk.Parked.Any(p => p.Mod == "Output B" && p.Replaced), "on record as built and as replaced together");
+
+		// an add-on's program held from the look at its bytes until it runs: read and hashed under the hold, never replaced
+		var program = Path.Combine(f.Root, "addon tool.exe");
+		File.WriteAllText(program, "the program the player allowed");
+		using (AddOns.Hold(program)) {
+			Equal("the program the player allowed", File.ReadAllText(program), "it can still be read while it is held");
+			Throws<IOException>(() => File.WriteAllText(program, "another program"), "nothing writes over it while it is held");
+			Throws<IOException>(() => File.Move(program, program + ".old"), "nor moves it away");
+		}
+		File.WriteAllText(program, "an update");
+		Equal("an update", File.ReadAllText(program), "and it is free again afterwards");
+		Throws<StepFailedException>(() => AddOns.Hold(Path.Combine(f.Root, "no such tool.exe")), "a program that is not there says so");
+
+		// Mod Organizer is never closed under Faster Archives' own program: it would end a repack half way
+		var mo2 = Mo2Instance.Load(f.Exe, f.Instance);
+		var busyWait = Mo2Control.BusyWait;
+		Mo2Control.BusyWait = TimeSpan.FromSeconds(1);
+		try {
+			var c = new Mo2Control(mo2, "Test", RunLog.Null) { RunningProbe = () => true, ForeignProbe = () => [], RepackProbe = () => [4242] };
+			try {
+				c.Close();
+				Check(false, "Mod Organizer was closed under a repack");
+			} catch (Mo2BusyException e) {
+				Check(e.Message.Contains("Faster Archives", StringComparison.Ordinal), "the reason is named: " + e.Message);
+			}
+		} finally {
+			Mo2Control.BusyWait = busyWait;
+		}
 	}
 
 	// the command line's live copy of the log is written by a thread of its own: output nobody reads never holds the run
@@ -3332,7 +3442,10 @@ public static class Program
 			"a lone Cancel is never pressed, and the box is named: " + why);
 		// Windows gives a plain notice's lone OK the control id of Cancel: only the button's own words tell the two apart
 		Equal("OK", string.Join(",", Uia.BoxNames([("Cancel", "OK")], "Abbrechen")), "a notice's lone OK is named by its words");
-		Equal("Aceptar", string.Join(",", Uia.BoxNames([("Cancel", "Aceptar")], "Cancelar")), "in any language");
+		Equal("Aceptar", string.Join(",", Uia.BoxNames([("Cancel", "Aceptar")], "Cancelar", ["Aceptar", "Cerrar"])), "in Windows' own language too");
+		Equal("Cancel", string.Join(",", Uia.BoxNames([("Cancel", "Aceptar")], "Cancel", [])), "words nobody here knows under Cancel's id stay a Cancel");
+		Equal("Cancel", string.Join(",", Uia.BoxNames([("Cancel", "Abbrechen")], "Cancel", ["OK", "Close"])), "a program's own language need not be Windows': its Cancel is never taken for a notice's button");
+		Equal("Close", string.Join(",", Uia.BoxNames([("Cancel", "Close")], "Abbrechen")), "a lone Close under Cancel's id acknowledges");
 		Equal("Cancel", string.Join(",", Uia.BoxNames([("Cancel", "Cancel")], "")), "a lone Cancel is a Cancel");
 		Equal("Cancel", string.Join(",", Uia.BoxNames([("Cancel", "abbrechen")], "Abbrechen")), "in Windows' own language too");
 		Equal("Yes,No", string.Join(",", Uia.BoxNames([("Yes", "Ja"), ("No", "Nein")], "Abbrechen")), "two buttons: each by what it is");
@@ -6500,6 +6613,26 @@ public static class Program
 			open = 1;
 			toggle.Dispose();
 			Equal(before, f.Text("modlist.txt"), "put back all the same");
+
+			// ... and that Mod Organizer saved a change of the player's before it was closed again: looked at again, and kept
+			var comesUp = false;
+			var listFile = Path.Combine(f.ProfileDir, "modlist.txt");
+			var watched = new Profile(mo2, "Test", () => {
+				if (!comesUp) {
+					return false;
+				}
+				comesUp = false;
+				File.WriteAllText(listFile, File.ReadAllText(listFile).Replace("+Replaced", "-Replaced", StringComparison.Ordinal));
+				return true;
+			});
+			watched.WatchForOthers();
+			var changed = new RunContext { Setup = ctx.Setup, Mo2 = mo2, Profile = watched, Control = new Mo2Control(mo2, "Test", RunLog.Null) { RunningProbe = () => false },
+				Log = ctx.Log, Journal = ctx.Journal, Cancel = CancellationToken.None, BackupFolder = ctx.BackupFolder };
+			var second = new Toggle(changed, [], ["Base Mod"], "a test");
+			comesUp = true;
+			second.Dispose();
+			Check(f.Text("modlist.txt").Contains("-Replaced", StringComparison.Ordinal) && f.Text("modlist.txt").Contains("+Base Mod", StringComparison.Ordinal),
+				"what the player changed in the Mod Organizer that came up is kept, and the step's own switch is back: " + f.Text("modlist.txt").Replace("\r\n", " "));
 			ctx.Log.Dispose();
 			cancelled.Log.Dispose();
 		} finally {
@@ -8099,12 +8232,14 @@ public static class Program
 					psi.ArgumentList.Add(a);
 				}
 				using var p = Process.Start(psi)!;
-				var text = p.StandardOutput.ReadToEnd();
-				if (!p.WaitForExit(90_000)) {
-					p.Kill(true);
-					throw new InvalidOperationException("it was still running after 90 s: " + string.Join(" ", a_args));
+				using var endP = new StandIn(p);
+				// read beside a wait that ends: read first and to its end, a child that hangs with its output open held this
+				// test - and every test after it - for good
+				var reading = p.StandardOutput.ReadToEndAsync();
+				if (!p.WaitForExit(90_000) || !reading.Wait(TimeSpan.FromSeconds(30))) {
+					throw new InvalidOperationException("it was still running, or its output still open, after 90 s: " + string.Join(" ", a_args));
 				}
-				return (p.ExitCode, text);
+				return (p.ExitCode, reading.Result);
 			}
 			var (exit, text) = Ask("status", "--json");
 			var o = JsonNode.Parse(text)!;

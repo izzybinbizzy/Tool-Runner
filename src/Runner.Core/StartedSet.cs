@@ -85,14 +85,29 @@ public sealed class StartedSet : IEnumerable<int>
 
 	// those, and what they started that is on record (Sweep) and still that very process - what "the run's own" means for
 	// closing a tool, for a Stop, and for telling the player's programs under Mod Organizer from the run's
-	public List<int> Owned()
+	public List<int> Owned() => [.. OwnedAt().Keys];
+
+	// the same, each with the start time on its record: who ends one of them names it by both (Procs.KillTree), so a number
+	// that changes hands after this look is never taken for it
+	public Dictionary<int, DateTime> OwnedAt()
 	{
+		KeyValuePair<int, DateTime?>[] roots;
 		KeyValuePair<int, DateTime>[] kin;
 		lock (_gate) {
+			roots = [.. _pids];
 			kin = [.. _kin];
 		}
-		var live = Live();
-		live.AddRange(kin.Where(k => !live.Contains(k.Key) && Procs.StartTime(k.Key) == k.Value).Select(k => k.Key));
+		var live = new Dictionary<int, DateTime>();
+		foreach (var (pid, at) in roots) {
+			if (at is { } t && Procs.StartTime(pid) == t) {
+				live[pid] = t;
+			}
+		}
+		foreach (var (pid, at) in kin) {
+			if (!live.ContainsKey(pid) && Procs.StartTime(pid) == at) {
+				live[pid] = at;
+			}
+		}
 		return live;
 	}
 
@@ -117,8 +132,26 @@ public sealed class StartedSet : IEnumerable<int>
 		if (Procs.LookFailed) {
 			return;
 		}
-		var found = Children(parents, rows, StartOf);
+		var found = Children(parents, rows, StartOf, DateTime.UtcNow);
 		var ended = parents.Where(p => StartOf(p.Key) != p.Value).ToList();
+		if (ended.Count > 0) {
+			// One that has ended may have started a child after the list above was taken (it was still alive then). It starts
+			// nothing more now, so one more list - read fresh - holds everything it ever started: only then is it retired.
+			// Without that list nothing is retired; the next look tries again.
+			var last = Procs.Snapshot();
+			if (Procs.LookFailed) {
+				ended.Clear();
+			} else {
+				starts.Clear();
+				var all = new Dictionary<int, DateTime>(parents);
+				foreach (var (pid, at) in found) {
+					all.TryAdd(pid, at);
+				}
+				foreach (var (pid, at) in Children(all, last, StartOf, DateTime.UtcNow)) {
+					found.TryAdd(pid, at);
+				}
+			}
+		}
 		lock (_gate) {
 			foreach (var (pid, at) in found) {
 				// one the run recorded itself meanwhile stays that
@@ -142,8 +175,11 @@ public sealed class StartedSet : IEnumerable<int>
 	// - it started no earlier than its parent (Windows keeps a dead parent's number in its children, and hands that number
 	//   out again: one that started before is a child of whoever had the number before), and
 	// - the parent's number is not another process's by now, or it started before that one did (a child started since the
-	//   number changed hands is the new owner's - a program of the player's, never the run's).
-	public static Dictionary<int, DateTime> Children(IReadOnlyDictionary<int, DateTime> a_parents, IReadOnlyCollection<(int Pid, int Parent)> a_rows, Func<int, DateTime?> a_startOf)
+	//   number changed hands is the new owner's - a program of the player's, never the run's), and
+	// - it had started when the list was taken (a_listedUtc, read right after the list): a row names the process that had
+	//   the number THEN. One that started later only has the number of a child that has ended since, and is nobody's child.
+	public static Dictionary<int, DateTime> Children(IReadOnlyDictionary<int, DateTime> a_parents, IReadOnlyCollection<(int Pid, int Parent)> a_rows, Func<int, DateTime?> a_startOf,
+		DateTime a_listedUtc)
 	{
 		var found = new Dictionary<int, DateTime>();
 		var grew = true;
@@ -156,7 +192,7 @@ public sealed class StartedSet : IEnumerable<int>
 				if (!found.TryGetValue(parent, out var pat) && !a_parents.TryGetValue(parent, out pat)) {
 					continue;
 				}
-				if (a_startOf(pid) is not { } at || at < pat) {
+				if (a_startOf(pid) is not { } at || at < pat || at > a_listedUtc) {
 					continue;
 				}
 				// a parent on record itself, still that very process

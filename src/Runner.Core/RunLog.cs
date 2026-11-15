@@ -95,9 +95,11 @@ public sealed class RunLog : IDisposable
 					}
 					line = _lines.Dequeue();
 				}
+				// whatever the callback throws stays here: an error that leaves a thread of its own ends the whole program, and a
+				// run that ends that way never puts the profile back
 				try {
 					_to(line);
-				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ObjectDisposedException) {
+				} catch (Exception e) when (e is not OutOfMemoryException) {
 				}
 			}
 		}

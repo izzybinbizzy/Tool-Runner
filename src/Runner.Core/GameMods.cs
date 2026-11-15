@@ -97,12 +97,19 @@ public static partial class FasterArchives
 		if (running.Count == 0) {
 			return found;
 		}
-		List<int>? owned = null;
 		if (a_owned) {
+			// with the start time on the run's own record, never one read again by number: the two stay one identity up to the
+			// moment the program is ended (End)
 			a_started.Sweep();
-			owned = a_started.Owned();
+			var owned = a_started.OwnedAt();
+			foreach (var p in running) {
+				if (owned.TryGetValue(p, out var at) && at >= a_sinceUtc.AddSeconds(-2)) {
+					found[p] = at;
+				}
+			}
+			return found;
 		}
-		foreach (var p in running.Where(p => owned?.Contains(p) != false)) {
+		foreach (var p in running) {
 			if (Procs.StartTime(p) is { } t && t >= a_sinceUtc.AddSeconds(-2)) {
 				found[p] = t;
 			}
@@ -138,7 +145,7 @@ public static partial class FasterArchives
 	public static void Wait(RunContext a_ctx, string a_step, StepSettings a_s, int a_time, DateTime a_since)
 	{
 		var most = a_s.Int("max_offers", 3);
-		// What is ENDED here (a window that only waits: at the offer limit, when nobody chose, at a Stop) is only a program the
+		// What is ENDED here (a window that only sits there: when nobody chose within the wait, at a Stop) is only a program the
 		// run can prove its own. What is WAITED for may be less sure: when the game closed for the offer and no such program
 		// is on the run's record (its program was not started by the game directly), its program of that name started since
 		// this game start is waited for all the same - and never ended
@@ -147,11 +154,12 @@ public static partial class FasterArchives
 		if (tools.Count == 0) {
 			tools = ToolSince(a_ctx.Control.Started, a_since.ToUniversalTime(), false);
 		}
-		// returns whether every one of them was the run's to end
+		// returns whether every one of them was the run's to end. Each is ended as the process on record - its number AND its
+		// start time, through one handle - never by its number alone
 		bool End(List<int> a_pids)
 		{
 			foreach (var p in a_pids.Where(mine.Contains)) {
-				Procs.KillTree(p);
+				Procs.KillTree(p, tools[p]);
 			}
 			return a_pids.All(mine.Contains);
 		}
@@ -174,6 +182,17 @@ public static partial class FasterArchives
 			sampled.Restart();
 			return worked;
 		}
+		// Does its window only sit there? Not having worked since the last look, AND not in one more short slice right now: a
+		// choice made in the last moment of a long look would otherwise read as "idle" by the look's average. A window is
+		// only ever closed on this answer.
+		bool SitsIdle(List<int> a_live)
+		{
+			if (Worked(a_live)) {
+				return false;
+			}
+			Thread.Sleep(300);
+			return !Worked(a_live);
+		}
 		// A Stop: a window that only waits for a choice is closed with it (Mod Organizer cannot close under a program of the
 		// game's); one that is repacking is never cut off - half-written archives are worse than a wait
 		// (looked at over one more second, so a Stop in the first seconds of the wait judges by what it does now)
@@ -181,7 +200,7 @@ public static partial class FasterArchives
 		{
 			Thread.Sleep(1000);
 			var left = Live();
-			if (Worked(left)) {
+			if (!SitsIdle(left)) {
 				a_ctx.Log.Warn("Faster Archives is repacking - it is left to finish; close Mod Organizer when it is done");
 			} else if (!End(left)) {
 				a_ctx.Log.Warn("Faster Archives: " + stillOpen);
@@ -189,10 +208,10 @@ public static partial class FasterArchives
 		}
 		var repacking = false;
 		if (a_time > most) {
-			// Its window of this offer opened seconds ago. One that only waits for a choice is closed, as its Cancel would, so that
-			// Mod Organizer can close for the put-back (it cannot under a program the game started). But the player may have
-			// chosen "Repack now" in those seconds, and a repack is never cut off: it is looked at for a moment first, and one
-			// that works is waited out like any other
+			// Past the limit the game is not started again. Its window of this offer, opened seconds ago, is LEFT OPEN: a
+			// player who has answered it this often is at the PC, and whether they are choosing "Repack now" this very moment
+			// cannot be told for certain - a repack is never cut off. One that works by now is waited out like any other; one
+			// that sits there stays, the step stops, and Mod Organizer's close waits for it (Mo2Control.Repackers)
 			if (tools.Count > 0) {
 				try {
 					a_ctx.Pause(OfferLook);
@@ -203,8 +222,9 @@ public static partial class FasterArchives
 			}
 			var open = Live();
 			if (!Worked(open)) {
-				var closed = End(open);
-				throw new StepFailedException($"{What} - {a_time} times in this step{(closed ? "" : " - " + stillOpen)}. Choose \"Repack now\" or \"Don't offer these again\" in its window when it next asks, or {HowToPass}; then run again from this step");
+				throw new StepFailedException($"{What} - {a_time} times in this step. " +
+					(open.Count > 0 ? "Its window is left open: choose \"Repack now\" or \"Don't offer these again\" there (Mod Organizer closes once that window has)"
+						: "Choose \"Repack now\" or \"Don't offer these again\" in its window when it next asks") + $", or {HowToPass}; then run again from this step");
 			}
 			repacking = true;
 			a_ctx.Log.Warn($"{What} - {a_time} times in this step, and this time it is repacking: the run waits for it to finish, then starts the game again");
@@ -225,6 +245,11 @@ public static partial class FasterArchives
 			while (Live() is { Count: > 0 } live) {
 				// it works (repacking): nobody is being waited for
 				if (Worked(live)) {
+					quiet.Restart();
+				}
+				// nobody chose: its window is closed, as its Cancel would, so that Mod Organizer can close and the profile be put
+				// back in a run nobody watches - but only one that sits idle to the last moment
+				if (quiet.Elapsed > limit && !SitsIdle(live)) {
 					quiet.Restart();
 				}
 				if (quiet.Elapsed > limit) {

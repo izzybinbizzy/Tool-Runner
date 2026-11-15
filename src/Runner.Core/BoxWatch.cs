@@ -27,9 +27,15 @@ public sealed class BoxWatch : IDisposable
 	readonly Action? _endGame;
 	readonly Dictionary<long, Known> _open = [];
 	// held while a look acts on what it saw (a press, a game ended, a line for the window), and by the run's end while it
-	// lets go of the watch: once Dispose has returned nothing is pressed or ended any more. The watch's sleep waits on it too
+	// lets go of the watch. The watch's sleep waits on it too
 	readonly object _gate = new();
-	volatile bool _disposed;
+	// Idle, Acting (a press, a game's end or a line for the window is under way) or Released (the run let go of the watch).
+	// To begin an act and to release are one step each (Do, Dispose): no act BEGINS once the watch is released - also when
+	// the run's end could wait no longer for the gate (a look held up in a log line or in a dead window). Only an act that
+	// was under way by then still finishes.
+	int _state;
+	const int Idle = 0, Acting = 1, Released = 2;
+	bool Gone => Volatile.Read(ref _state) == Released;
 	Thread? _thread;
 	string _shown = "";
 	string _lastFault = "";
@@ -81,12 +87,12 @@ public sealed class BoxWatch : IDisposable
 
 	void Loop()
 	{
-		while (!_disposed) {
+		while (!Gone) {
 			try {
 				LookOnce(DateTime.UtcNow);
 			} catch (Exception e) when (e is not OutOfMemoryException) {
 				// a look that could not be made is made again; the watch is never what ends a run. Said once per kind of fault
-				if (e.Message != _lastFault && !_disposed) {
+				if (e.Message != _lastFault && !Gone) {
 					_lastFault = e.Message;
 					_log.Detail($"the watch for boxes could not look this time ({e.GetType().Name}: {e.Message}) - it looks again");
 				}
@@ -94,11 +100,26 @@ public sealed class BoxWatch : IDisposable
 			// nothing here is ever disposed under a look that is still out (a wait handle was, and the look that came back to it
 			// took the whole program down): the sleep is a wait on the gate, which the run's end pulses
 			lock (_gate) {
-				if (!_disposed) {
+				if (!Gone) {
 					Monitor.Wait(_gate, Every);
 				}
 			}
 		}
+	}
+
+	// One thing the watch does to the world. It begins only while the run still holds the watch, and "begun" is taken in the
+	// same step that Dispose's "released" is given in: a check and then the act would let the act start after the release.
+	bool Do(Action a_act)
+	{
+		if (Interlocked.CompareExchange(ref _state, Acting, Idle) != Idle) {
+			return false;
+		}
+		try {
+			a_act();
+		} finally {
+			Interlocked.CompareExchange(ref _state, Idle, Acting);
+		}
+		return true;
 	}
 
 	// one look (the offline tests call it with a clock of their own)
@@ -120,7 +141,7 @@ public sealed class BoxWatch : IDisposable
 		var waiting = new List<string>();
 		foreach (var b in a_boxes) {
 			// the run let go of the watch (while this look read the windows, or while it was held up in a press): nothing more
-			if (_disposed) {
+			if (Gone) {
 				return;
 			}
 			var v = KnownBoxes.Judge(b.Box);
@@ -146,7 +167,7 @@ public sealed class BoxWatch : IDisposable
 					}
 					k.Pressed = a_now;
 					++k.Presses;
-					b.Press(v.Button!);
+					Do(() => b.Press(v.Button!));
 				}
 				continue;
 			}
@@ -171,27 +192,30 @@ public sealed class BoxWatch : IDisposable
 			_blocked = v.Move == BoxMove.Stop ? v.Note :
 				$"the game's box did not close after its answer was pressed {PressTries} times - {KnownBoxes.Describe(b.Box)}. Answer it in the game once, then run again from this step";
 			_log.Warn(_blocked);
-			_endGame?.Invoke();
+			Do(() => _endGame?.Invoke());
 		}
 		var show = string.Join("; ", waiting.Distinct(StringComparer.Ordinal));
 		// (never after the run let go of the watch: a look that was stuck in a hung window would write into a finished run's record)
-		if (show != _shown && !_disposed) {
+		if (show != _shown && Do(() => _show(show))) {
 			_shown = show;
-			_show(show);
 		}
 	}
 
-	// The run lets go of the watch. A look that is acting holds the gate: it is waited for, so that nothing is pressed and no
-	// game ended once this has returned - but never without end (a press that hangs in a dead window must not hold the end of
-	// a run). The one act that was already under way then is all that may still finish; the look sees the flag before its next.
+	// has the watch's own thread ended (within a_within)? For who must know that a look still out has come back
+	public bool Ended(TimeSpan a_within) => _thread == null || _thread.Join(a_within);
+
+	// The run lets go of the watch. A look that is acting holds the gate: it is waited for, so that nothing is under way when
+	// this returns - but never without end (a press that hangs in a dead window, a log line the disk holds up, must not hold
+	// the end of a run). Released is given in one step either way, and no act begins after it (Do); one that was under way
+	// when the wait ran out is all that may still finish.
 	public void Dispose()
 	{
-		if (_disposed) {
+		if (Gone) {
 			return;
 		}
 		var held = Monitor.TryEnter(_gate, EndWait);
 		try {
-			_disposed = true;
+			Interlocked.Exchange(ref _state, Released);
 			if (held) {
 				Monitor.PulseAll(_gate);
 			}
@@ -207,7 +231,14 @@ public sealed class BoxWatch : IDisposable
 // What the watch reads off Windows: the box windows of the run's own processes.
 public static class RunWindows
 {
-	sealed record Proc(DateTime? Started, bool Game, string Image);
+	// GameOf: the Skyrim this process is, or runs under (null: none - Mod Organizer, a tool, SKSE's loader)
+	sealed record Proc(DateTime? Started, bool Game, string Image, int? GameOf);
+
+	// Is a box of this process the run's game's? Its own game flag, unless the Skyrim it is or runs under is one the run did
+	// not start: a game the player started under the run's Mod Organizer is theirs with everything it starts - never
+	// answered for them, and never what stops a step or ends the run's own game
+	public static bool GameFlag(bool a_game, int? a_gameOf, Func<int, bool>? a_runsGame) =>
+		a_game && (a_runsGame == null || a_gameOf is not { } game || a_runsGame(game));
 
 	// Every process the run started and everything those started, kept across looks: a program the game started (Faster
 	// Archives' own, which outlives the game it closed) has lost its parent by the time its window matters.
@@ -215,8 +246,9 @@ public static class RunWindows
 	{
 		readonly Dictionary<int, Proc> _known = [];
 
-		static bool IsGame(string a_image) =>
-			a_image.Equals(InGame.GameImage, StringComparison.OrdinalIgnoreCase) || a_image.StartsWith("skse64_loader", StringComparison.OrdinalIgnoreCase);
+		static bool IsSkyrim(string a_image) => a_image.Equals(InGame.GameImage, StringComparison.OrdinalIgnoreCase);
+
+		static bool IsGame(string a_image) => IsSkyrim(a_image) || a_image.StartsWith("skse64_loader", StringComparison.OrdinalIgnoreCase);
 
 		// the family now: a_roots (what the run started itself) and their children, each with whether it is the game's
 		// a_runsGame: is this Skyrim the one the run started? One the player starts under the run's Mod Organizer is only ever
@@ -232,7 +264,7 @@ public static class RunWindows
 			foreach (var r in a_roots) {
 				if (!_known.ContainsKey(r) && Procs.StartTime(r) is { } at) {
 					var image = Procs.Image(r);
-					_known[r] = new Proc(at, IsGame(image), image);
+					_known[r] = new Proc(at, IsGame(image), image, IsSkyrim(image) ? r : null);
 				}
 			}
 			var parents = Procs.Snapshot();
@@ -248,18 +280,17 @@ public static class RunWindows
 						continue;
 					}
 					var image = Procs.Image(pid);
-					_known[pid] = new Proc(at, p.Game || IsGame(image), image);
+					_known[pid] = new Proc(at, p.Game || IsGame(image), image, IsSkyrim(image) ? pid : p.GameOf);
 					grew = true;
 				}
 			}
 			foreach (var o in a_orphans ?? []) {
 				if (!_known.ContainsKey(o) && Procs.StartTime(o) is { } at) {
 					var image = Procs.Image(o);
-					_known[o] = new Proc(at, IsGame(image), image);
+					_known[o] = new Proc(at, IsGame(image), image, IsSkyrim(image) ? o : null);
 				}
 			}
-			return _known.ToDictionary(p => p.Key, p => (p.Value.Game && (a_runsGame == null ||
-				!p.Value.Image.Equals(InGame.GameImage, StringComparison.OrdinalIgnoreCase) || a_runsGame(p.Key)), p.Value.Image));
+			return _known.ToDictionary(p => p.Key, p => (GameFlag(p.Value.Game, p.Value.GameOf, a_runsGame), p.Value.Image));
 		}
 	}
 

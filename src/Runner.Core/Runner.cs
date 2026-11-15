@@ -309,8 +309,8 @@ public static class Runner
 			// what the run started and what those started (a launcher that has ended leaves its child on record), each still the
 			// very process that was recorded - never one that got its PID since
 			control.Started.Sweep();
-			foreach (var pid in control.Started.Owned()) {
-				if (Procs.StartTime(pid) is not { } t || t < journal.Started.ToUniversalTime().AddSeconds(-2)) {
+			foreach (var (pid, at) in control.Started.OwnedAt()) {
+				if (at < journal.Started.ToUniversalTime().AddSeconds(-2)) {
 					continue;
 				}
 				var image = Procs.Image(pid);
@@ -322,8 +322,10 @@ public static class Runner
 				if (!control.Started.Contains(pid) && !control.Started.StartedImage(image)) {
 					continue;
 				}
-				log.Warn($"Stop: ending {image} (process {pid}), started by this run");
-				Procs.KillTree(pid);
+				// (by its number and the start time on record, through one handle: never a program that got the number since)
+				if (Procs.KillTree(pid, at)) {
+					log.Warn($"Stop: ended {image} (process {pid}), started by this run");
+				}
 			}
 		};
 		Dictionary<string, byte[]>? snap0 = null;
