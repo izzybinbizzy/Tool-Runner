@@ -129,13 +129,13 @@ public static class RunUndo
 		Files.MoveContents(a_from, dst, Meta);
 	}
 
-	// did this run leave anything an undo would take back? (one that built nothing and put everything back did not)
 	// Of the files a run changed in place, the state each one had BEFORE the run: its first record. Two steps that wrote the
 	// same file leave two records, and the second one's "before" is the first step's output - put back in order, an undo ended
 	// on that, not on what the player had
 	public static List<KeptFile> FirstStates(IEnumerable<KeptFile> a_settled) =>
 		a_settled.GroupBy(k => k.Path, StringComparer.OrdinalIgnoreCase).Select(g => g.First()).ToList();
 
+	// did this run leave anything an undo would take back? (one that built nothing and put everything back did not)
 	public static bool LeftSomething(Journal a_j) => a_j.OrderChanged || a_j.Built.Count > 0 || a_j.Retire.Count > 0 || a_j.Parked.Any(p => p.Replaced && !p.PutBack);
 
 	// a later run still standing that changed what undoing a_j would put back: the same setup's, one that moved the same output or tool
