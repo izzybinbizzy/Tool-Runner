@@ -346,6 +346,8 @@ public static class SettingsPanel
 		// two mods that put a window of their own in front of a game start (GameMods.cs); each line matters only with that mod ticked
 		Choice(stack, apply, "Faster Archives' offer during a run (it closes the game to ask about repacking)", work, FasterArchives.SettingName,
 			[("ask", "wait for my choice in its window"), ("skip", "pass it over during the run - it asks again when I start the game")]);
+		// shown as the run reads it (a setup of the first builds may still say it under their old key), so a save keeps it
+		work[Crdw.SettingName] ??= Crdw.When(a_vm.Setup!) switch { Crdw.Renew.Always => "always", Crdw.Renew.Never => "never", _ => "changed" };
 		Choice(stack, apply, "Cached Recursive Directory Walk with its question switched off", work, Crdw.SettingName,
 			[("changed", "make a new cache when the run changed the game's files, then put its setting back"), ("always", "make a new cache at every game start of the run, then put its setting back"),
 				("never", "leave it alone - only tell me its cache will be old")]);
