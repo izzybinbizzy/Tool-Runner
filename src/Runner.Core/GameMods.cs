@@ -65,6 +65,7 @@ public static partial class FasterArchives
 	public const string SettingName = "fasterArchives";
 
 	public const string Asks = "Faster Archives asks what to do with the archives it can repack - choose in its own window (Cancel there puts it off); the run goes on by itself when that window has closed";
+	public const string LeftAtStop = "Faster Archives' window is left open (a repack is never cut off) - choose Cancel in it, or let it finish; Mod Organizer closes once that window has";
 	const string What = "Faster Archives closed the game to ask what to do with the archives it can repack (this is no crash)";
 	const string HowToPass = "set this setup to pass its offer over during a run (Settings > Faster Archives' offer)";
 
@@ -102,6 +103,13 @@ public static partial class FasterArchives
 			// moment the program is ended (End)
 			a_started.Sweep();
 			var owned = a_started.OwnedAt();
+			// One that started in the very tick of that look's clock is not taken by it (StartedSet) but by a look a tick
+			// later: asked once more, so a program started an instant ago is not missed
+			if (running.Any(p => !owned.ContainsKey(p) && Procs.StartTime(p) is { } began && began >= Procs.StartClock().AddMilliseconds(-50))) {
+				Thread.Sleep(20);
+				a_started.Sweep();
+				owned = a_started.OwnedAt();
+			}
 			foreach (var p in running) {
 				if (owned.TryGetValue(p, out var at) && at >= a_sinceUtc.AddSeconds(-2)) {
 					found[p] = at;
@@ -145,23 +153,28 @@ public static partial class FasterArchives
 	public static void Wait(RunContext a_ctx, string a_step, StepSettings a_s, int a_time, DateTime a_since)
 	{
 		var most = a_s.Int("max_offers", 3);
-		// What is ENDED here (a window that only sits there: when nobody chose within the wait, at a Stop) is only a program the
+		// What is ENDED here (a window that only sits there, when nobody chose within the whole wait) is only a program the
 		// run can prove its own. What is WAITED for may be less sure: when the game closed for the offer and no such program
 		// is on the run's record (its program was not started by the game directly), its program of that name started since
 		// this game start is waited for all the same - and never ended
 		var tools = ToolSince(a_ctx.Control.Started, a_since.ToUniversalTime(), true);
-		var mine = tools.Keys.ToHashSet();
+
 		if (tools.Count == 0) {
 			tools = ToolSince(a_ctx.Control.Started, a_since.ToUniversalTime(), false);
 		}
 		// returns whether every one of them was the run's to end. Each is ended as the process on record - its number AND its
-		// start time, through one handle - never by its number alone
+		// start time, through one handle - never by its number alone. Whose they are is asked NOW, not when the wait began:
+		// a program that had started only an instant before the wait is put on the run's record a look later (StartedSet
+		// takes no process younger than its reading of the clock), and one never on record is never ended.
 		bool End(List<int> a_pids)
 		{
-			foreach (var p in a_pids.Where(mine.Contains)) {
-				Procs.KillTree(p, tools[p]);
+			var mine = ToolSince(a_ctx.Control.Started, a_since.ToUniversalTime(), true);
+			foreach (var p in a_pids) {
+				if (mine.TryGetValue(p, out var at)) {
+					Procs.KillTree(p, at);
+				}
 			}
-			return a_pids.All(mine.Contains);
+			return a_pids.All(mine.ContainsKey);
 		}
 		const string stillOpen = "its window is still open (the run could not tell that its own game opened it, so it is left alone): choose Cancel there, so that Mod Organizer can close";
 		var cpu = tools.Keys.ToDictionary(p => p, p => Procs.CpuOrNull(p) ?? TimeSpan.Zero);
@@ -193,17 +206,15 @@ public static partial class FasterArchives
 			Thread.Sleep(300);
 			return !Worked(a_live);
 		}
-		// A Stop: a window that only waits for a choice is closed with it (Mod Organizer cannot close under a program of the
-		// game's); one that is repacking is never cut off - half-written archives are worse than a wait
-		// (looked at over one more second, so a Stop in the first seconds of the wait judges by what it does now)
+		// A Stop never closes its window. Whether it only waits, or the player chose "Repack now" a moment ago, cannot be told
+		// for certain from outside: a look at its processor use misses a repack that begins as the look ends, or between the
+		// look and the close - and a repack cut off leaves archives half written, which is worse than any wait. So it stays,
+		// said in words; Mod Organizer's close waits for it (Mo2Control.Repackers). Who pressed Stop is at the PC.
 		void AtStop()
 		{
-			Thread.Sleep(1000);
-			var left = Live();
-			if (!SitsIdle(left)) {
-				a_ctx.Log.Warn("Faster Archives is repacking - it is left to finish; close Mod Organizer when it is done");
-			} else if (!End(left)) {
-				a_ctx.Log.Warn("Faster Archives: " + stillOpen);
+			if (Live().Count > 0) {
+				a_ctx.Log.Warn("Stop: " + LeftAtStop);
+				a_ctx.Log.Simple("Note: " + LeftAtStop);
 			}
 		}
 		var repacking = false;
@@ -321,13 +332,42 @@ public static partial class FasterArchives
 // folders at each start. At a start it asks "Do you want to generate CRDW cache files?" (Yes = walk and make the list again,
 // No = load the old list); with its question switched off it does what its Mode says. A run changes the game's files, and an
 // old list hides them from the game (its page: tools that write into Data mean the cache must be made again). So its question
-// is answered Yes at every game start of a run (KnownBoxes). With its question off and Mode LOAD the run only says so - or,
-// when the setup says "refresh", sets its Mode to CACHE for the run's own game starts and puts the file back after each step.
+// is answered Yes at every game start of a run (KnownBoxes). With its question off and Mode LOAD it loads its old list
+// blind; then the run has it make a new list (its Mode set to CACHE) at the run's own game starts that come after the run
+// changed the game's files, and puts the mod's own setting back after each step (his answer of 2026-11-15: "mod makes a new
+// list when files are changed during the run"). The setup can ask for a new list at every game start instead, or for the
+// mod to be left alone and the player only told.
 public static partial class Crdw
 {
 	public const string IniRel = @"SKSE\Plugins\CRDW.ini";
-	public const string SettingName = "crdwCache";
+	public const string SettingName = "directoryCache";
+	// The key the first builds of 1.0 wrote. Every save of the settings wrote its "leave" whether the player chose it or not,
+	// so that value says nothing; only its "refresh", which had to be picked, still speaks
+	const string OldSettingName = "crdwCache";
 	const string Name = "Cached Recursive Directory Walk";
+
+	// when the run has it make a new list, for a mod that loads its old one blind
+	public enum Renew
+	{
+		// at the run's own game starts after the run changed the game's files
+		Changed,
+		// at every game start of the run
+		Always,
+		// never: the player is only told
+		Never,
+	}
+
+	public static Renew When(Setup a_setup)
+	{
+		var set = (Setup.Str(a_setup.Root, SettingName) ?? "").Trim();
+		if (set.Equals("always", StringComparison.OrdinalIgnoreCase)) {
+			return Renew.Always;
+		}
+		if (set.Equals("never", StringComparison.OrdinalIgnoreCase)) {
+			return Renew.Never;
+		}
+		return set == "" && (Setup.Str(a_setup.Root, OldSettingName) ?? "").Trim().Equals("refresh", StringComparison.OrdinalIgnoreCase) ? Renew.Always : Renew.Changed;
+	}
 
 	public const string Answered = Name + " asked whether to make its cache again - answered Yes: a run changes the game's files, and its old cache would hide the new ones from the game";
 
@@ -362,8 +402,6 @@ public static partial class Crdw
 		}
 	}
 
-	public static bool Refresh(Setup a_setup) => (Setup.Str(a_setup.Root, SettingName) ?? "leave").Trim().Equals("refresh", StringComparison.OrdinalIgnoreCase);
-
 	// it loads its old list without asking
 	public static bool LoadsBlind(State a_s) => !a_s.PopUp && a_s.Mode == "LOAD";
 
@@ -373,29 +411,57 @@ public static partial class Crdw
 			return null;
 		}
 		return new Issue("", false, Name + " loads its cache without asking (its question is switched off and its Mode is LOAD): the game then sees the files as they were when that cache was made, not what this run builds. " +
-			(Refresh(a_setup) ? "This setup has it make a new cache at each game start of the run and puts its setting back after." :
-				"Make its cache again after the run (its Mode set to CACHE for one game start), or let the run do it (Settings > " + Name + ")."));
+			When(a_setup) switch {
+				Renew.Always => "This setup has it make a new cache at every game start of the run and puts its setting back after each step.",
+				Renew.Never => "This setup leaves it alone: make its cache again after the run (its Mode set to CACHE for one game start), or let the run do it (Settings > " + Name + ").",
+				_ => "The run has it make a new cache at its own game starts after it changed the game's files, and puts its setting back after each step.",
+			});
 	}
 
-	// "refresh": a new list at this step's game starts
+	// Before a game start of the step in hand: a new list at this step's game starts, when the setup asks for one at every
+	// start, or (unless it says never) when the run changed the game's files since the game last made its list in this run.
+	// The mod's own file goes back when the step ends (GameStart.Change)
 	public static void Apply(RunContext a_ctx)
 	{
-		if (!Refresh(a_ctx.Setup) || Read(a_ctx.Profile) is not { Ini: { } ini } s || !LoadsBlind(s)) {
+		var when = When(a_ctx.Setup);
+		if (when == Renew.Never || (when == Renew.Changed && a_ctx.Journal.FilesChanged == 0) || Read(a_ctx.Profile) is not { Ini: { } ini } s || !LoadsBlind(s)) {
 			return;
 		}
-		GameStart.Change(a_ctx, ini, "General", "Mode", "s:CACHE", Name + " makes a new cache at this step's game starts (this setup asks for it) - its setting goes back after the step");
+		if (GameStart.Change(a_ctx, ini, "General", "Mode", "s:CACHE", Name + (when == Renew.Always ? " makes a new cache at this step's game starts (this setup asks for one at every start)" :
+			    " makes a new cache at this step's game starts (the run changed the game's files since its cache was made)") + " - its setting goes back after the step")) {
+			a_ctx.FreshList = true;
+		}
 	}
 
-	// What the player still has to do for it once the run is over, or null. a_lastWasGame: the run's last step that finished
-	// started the game with everything the run built switched on (the save to play).
-	public static string? AfterRun(Setup a_setup, State? a_state, bool a_built, bool a_lastWasGame)
+	// A step ended. a_done: it finished. a_writes: it is a step that changes the files the game lists (every step but the
+	// ones that only start the game and save). A step that finished after game starts with a new list leaves the list
+	// current - as of those starts: what the step itself wrote afterwards counts as changed again.
+	public static void StepEnded(RunContext a_ctx, bool a_done, bool a_writes)
 	{
-		if (a_state is not { } s || !a_built) {
+		if (a_ctx.FreshList && a_done) {
+			a_ctx.Journal.FilesChanged = 0;
+		}
+		a_ctx.FreshList = false;
+		if (a_writes) {
+			++a_ctx.Journal.FilesChanged;
+		}
+	}
+
+	// all but the steps that only start the game and save, compile shaders (a shader cache is no file the mod lists), or
+	// sort the load order
+	public static bool Writes(string a_step) => a_step is not ("cleansave" or "playsave" or "shaders" or Steps.LootStep.StepKey);
+
+	// What the player still has to do for it once the run is over, or null. a_changed: the run built something or switched
+	// mods off and on again. a_current: the game made its list anew in this run after the last thing the run changed (the
+	// put-back's switching counts). a_lastWasGame: the run's last step that finished started the game with everything the
+	// run built switched on (the save to play).
+	public static string? AfterRun(State? a_state, bool a_changed, bool a_current, bool a_lastWasGame)
+	{
+		if (a_state is not { } s || !a_changed) {
 			return null;
 		}
 		if (LoadsBlind(s)) {
-			return a_lastWasGame && Refresh(a_setup) ? null :
-				Name + ": its cache is older than what this run built, and it loads it without asking - set its Mode to CACHE for one game start before you play";
+			return a_current ? null : Name + ": its cache is older than what this run changed, and it loads it without asking - set its Mode to CACHE for one game start before you play";
 		}
 		return s.PopUp && !a_lastWasGame ? Name + ": answer Yes to its question at your next game start - this run changed the game's files after the game last ran" : null;
 	}

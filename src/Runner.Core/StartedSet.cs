@@ -20,10 +20,15 @@ public sealed class StartedSet : IEnumerable<int>
 	readonly HashSet<int> _ended = [];
 	// the program names of what the run started itself ("DynDOLODx64.exe")
 	readonly HashSet<string> _images = new(StringComparer.OrdinalIgnoreCase);
+	// when the process under a number started (null: gone, or closed to this user)
+	readonly Func<int, DateTime?> _startOf;
+
+	// (the offline tests hand in start times of their own)
+	public StartedSet(Func<int, DateTime?>? a_startOf = null) => _startOf = a_startOf ?? Procs.StartTime;
 
 	public void Add(int a_pid)
 	{
-		var at = Procs.StartTime(a_pid);
+		var at = _startOf(a_pid);
 		var image = Procs.Image(a_pid);
 		lock (_gate) {
 			_pids[a_pid] = at;
@@ -70,7 +75,7 @@ public sealed class StartedSet : IEnumerable<int>
 				return false;
 			}
 		}
-		return at != null && Procs.StartTime(a_pid) == at;
+		return at != null && _startOf(a_pid) == at;
 	}
 
 	// every recorded process that is still that very process - what the run started itself
@@ -80,7 +85,7 @@ public sealed class StartedSet : IEnumerable<int>
 		lock (_gate) {
 			copy = [.. _pids];
 		}
-		return copy.Where(p => p.Value != null && Procs.StartTime(p.Key) == p.Value).Select(p => p.Key).ToList();
+		return copy.Where(p => p.Value != null && _startOf(p.Key) == p.Value).Select(p => p.Key).ToList();
 	}
 
 	// those, and what they started that is on record (Sweep) and still that very process - what "the run's own" means for
@@ -99,12 +104,12 @@ public sealed class StartedSet : IEnumerable<int>
 		}
 		var live = new Dictionary<int, DateTime>();
 		foreach (var (pid, at) in roots) {
-			if (at is { } t && Procs.StartTime(pid) == t) {
+			if (at is { } t && _startOf(pid) == t) {
 				live[pid] = t;
 			}
 		}
 		foreach (var (pid, at) in kin) {
-			if (!live.ContainsKey(pid) && Procs.StartTime(pid) == at) {
+			if (!live.ContainsKey(pid) && _startOf(pid) == at) {
 				live[pid] = at;
 			}
 		}
@@ -113,7 +118,14 @@ public sealed class StartedSet : IEnumerable<int>
 
 	// One look at Windows' process list: the children of everything on record are put on record too. Made every few seconds
 	// by the run's watch, and by whoever is about to ask Owned.
-	public void Sweep()
+	public void Sweep() => Sweep(static () => {
+		var rows = Procs.Snapshot();
+		return Procs.LookFailed ? null : rows;
+	}, Procs.StartClock);
+
+	// a_list: Windows' process list as (process, its parent's number) rows, null when Windows would not give it.
+	// a_clock: the clock process start times are stamped with (the offline tests hand in both)
+	public void Sweep(Func<IReadOnlyCollection<(int Pid, int Parent)>?> a_list, Func<DateTime> a_clock)
 	{
 		Dictionary<int, DateTime> parents;
 		lock (_gate) {
@@ -126,20 +138,27 @@ public sealed class StartedSet : IEnumerable<int>
 			return;
 		}
 		var starts = new Dictionary<int, DateTime?>();
-		DateTime? StartOf(int a_pid) => starts.TryGetValue(a_pid, out var t) ? t : starts[a_pid] = Procs.StartTime(a_pid);
-		var rows = Procs.Snapshot();
+		DateTime? StartOf(int a_pid) => starts.TryGetValue(a_pid, out var t) ? t : starts[a_pid] = _startOf(a_pid);
+		// The clock is read BEFORE each list is taken, and a row counts only for a process that had started before that
+		// reading (Children). A row names whoever had the number when the list was taken, and a number can change hands the
+		// moment after: read after the list, the clock let through a newcomer that took an ended child's number in between.
+		// A child that started in the instant between the reading and the list is found by the next look.
+		var before = a_clock();
+		var rows = a_list();
 		// Windows would not give its list this time: nothing is learned from that, least of all that an ended parent left no child
-		if (Procs.LookFailed) {
+		if (rows == null) {
 			return;
 		}
-		var found = Children(parents, rows, StartOf, DateTime.UtcNow);
+		var found = Children(parents, rows, StartOf, before);
 		var ended = parents.Where(p => StartOf(p.Key) != p.Value).ToList();
 		if (ended.Count > 0) {
 			// One that has ended may have started a child after the list above was taken (it was still alive then). It starts
 			// nothing more now, so one more list - read fresh - holds everything it ever started: only then is it retired.
-			// Without that list nothing is retired; the next look tries again.
-			var last = Procs.Snapshot();
-			if (Procs.LookFailed) {
+			// Without that list nothing is retired; the next look tries again. (It had ended before this second reading of
+			// the clock, so everything it ever started had started before it too.)
+			var beforeLast = a_clock();
+			var last = a_list();
+			if (last == null) {
 				ended.Clear();
 			} else {
 				starts.Clear();
@@ -147,8 +166,14 @@ public sealed class StartedSet : IEnumerable<int>
 				foreach (var (pid, at) in found) {
 					all.TryAdd(pid, at);
 				}
-				foreach (var (pid, at) in Children(all, last, StartOf, DateTime.UtcNow)) {
+				foreach (var (pid, at) in Children(all, last, StartOf, beforeLast)) {
 					found.TryAdd(pid, at);
+				}
+				// A row under an ended parent whose process started at or after this reading was not taken (it may be a real
+				// child that young - the clock has ticks, and both readings can fall in one). Its parent is kept for the
+				// next look, whose later reading can take it; retired now, that child would never be found again.
+				if (last.Any(r => ended.Any(e => e.Key == r.Parent) && StartOf(r.Pid) is { } began && began >= beforeLast)) {
+					ended.Clear();
 				}
 			}
 		}
@@ -176,10 +201,11 @@ public sealed class StartedSet : IEnumerable<int>
 	//   out again: one that started before is a child of whoever had the number before), and
 	// - the parent's number is not another process's by now, or it started before that one did (a child started since the
 	//   number changed hands is the new owner's - a program of the player's, never the run's), and
-	// - it had started when the list was taken (a_listedUtc, read right after the list): a row names the process that had
-	//   the number THEN. One that started later only has the number of a child that has ended since, and is nobody's child.
+	// - it had started before a_beforeListUtc, a reading of the clock made BEFORE the list was taken: a row names the process
+	//   that had the number when the list was taken. One that started at or after the reading may only have the number of a
+	//   child that has ended since, and is taken for nobody's child (a real child that young is found by the next look).
 	public static Dictionary<int, DateTime> Children(IReadOnlyDictionary<int, DateTime> a_parents, IReadOnlyCollection<(int Pid, int Parent)> a_rows, Func<int, DateTime?> a_startOf,
-		DateTime a_listedUtc)
+		DateTime a_beforeListUtc)
 	{
 		var found = new Dictionary<int, DateTime>();
 		var grew = true;
@@ -192,7 +218,7 @@ public sealed class StartedSet : IEnumerable<int>
 				if (!found.TryGetValue(parent, out var pat) && !a_parents.TryGetValue(parent, out pat)) {
 					continue;
 				}
-				if (a_startOf(pid) is not { } at || at < pat || at > a_listedUtc) {
+				if (a_startOf(pid) is not { } at || at < pat || at >= a_beforeListUtc) {
 					continue;
 				}
 				// a parent on record itself, still that very process

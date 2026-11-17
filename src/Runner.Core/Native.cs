@@ -471,6 +471,18 @@ public static partial class Procs
 		return null;
 	}
 
+	[LibraryImport("kernel32.dll")]
+	private static partial void GetSystemTimeAsFileTime(out long a_time);
+
+	// The clock Windows stamps a process's start with: the system time as of its last timer tick. DateTime.UtcNow reads the
+	// precise time, which runs up to a tick ahead of that - a process started right after such a reading can carry a start
+	// time from before it. Read from this clock, no process created after the reading has a start time before it.
+	public static DateTime StartClock()
+	{
+		GetSystemTimeAsFileTime(out var time);
+		return DateTime.FromFileTimeUtc(time);
+	}
+
 	// the process's image name as Windows lists it, "ModOrganizer.exe" ("" when gone): asked of the process itself through a
 	// handle that reads nothing else, and off the process list for one this user may not open
 	public static string Image(int a_pid)

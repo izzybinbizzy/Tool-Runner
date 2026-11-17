@@ -90,6 +90,9 @@ public sealed class BoxWatch : IDisposable
 		while (!Gone) {
 			try {
 				LookOnce(DateTime.UtcNow);
+			} catch (OutOfMemoryException) {
+				// no memory for this look (nor for a line about it): it is made again at the next beat. Left to leave this thread
+				// it would end the whole program, and a run that ends that way never puts the profile back
 			} catch (Exception e) when (e is not OutOfMemoryException) {
 				// a look that could not be made is made again; the watch is never what ends a run. Said once per kind of fault
 				if (e.Message != _lastFault && !Gone) {
@@ -188,11 +191,14 @@ public sealed class BoxWatch : IDisposable
 				waiting.Add(words + $" - answer it within {Wait.TotalSeconds:0} seconds, or the step stops here");
 				continue;
 			}
-			k.Blocked = true;
-			_blocked = v.Move == BoxMove.Stop ? v.Note :
+			// on record as blocked only once the game's end is under way: a look cut short before that (no memory for the line
+			// below) leaves the box as it was, and the next look does this again
+			var why = v.Move == BoxMove.Stop ? v.Note :
 				$"the game's box did not close after its answer was pressed {PressTries} times - {KnownBoxes.Describe(b.Box)}. Answer it in the game once, then run again from this step";
-			_log.Warn(_blocked);
+			_blocked = why;
+			_log.Warn(why);
 			Do(() => _endGame?.Invoke());
+			k.Blocked = true;
 		}
 		var show = string.Join("; ", waiting.Distinct(StringComparer.Ordinal));
 		// (never after the run let go of the watch: a look that was stuck in a hung window would write into a finished run's record)

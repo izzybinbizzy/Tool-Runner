@@ -22,6 +22,9 @@ public sealed partial class StepRow : Observable
 	public string LastRun { get; set => Set(ref field, value); } = "";
 	public string LastKind { get; set => Set(ref field, value); } = "";
 	public bool Runs => On && !LeftOut;
+	// while a step is dragged over this row: the line that shows where it would land (above or below it)
+	public bool DropAbove { get; set => Set(ref field, value); }
+	public bool DropBelow { get; set => Set(ref field, value); }
 
 	// the row in words for a screen reader (the glyph and its color say it to the eye)
 	public string Status => A11y.StepStatus(On, LeftOut, State, Elapsed, Usual, Note);
@@ -1117,11 +1120,49 @@ public sealed partial class MainViewModel : Observable
 			_checkedClean = blocks == 0;
 			ShowGuide();
 			Say(blocks > 0 ? $"{blocks} thing(s) would stop the run." : found.Count > 0 ? "Ready - with notes." : "Ready - everything checks out.", blocks > 0 ? "bad" : "good");
+			// his list of 2026-11-16: the check also looks for updates - each tool's and the program's own. Their pages are
+			// asked only on this press; a setup can switch it off (Settings > Tools)
+			if (!App.Headless && ToolRunner.Setup.Bool(setup.Root, "checkUpdates") != false) {
+				await LookForUpdates(setup);
+			}
 		} catch (Exception e) {
 			Say("The check could not finish: " + e.Message, "bad");
 		} finally {
 			_checking = false;
 		}
+	}
+
+	// The tools of the setup and the program itself, asked for a newer version. Each newer one is a line among the check's
+	// findings, with where to get it: a tool is installed by hand from its own page (the runner replaces no other author's
+	// program on its own), and its settings are learned again after. A look that fails is one plain line, never an error.
+	async Task LookForUpdates(Setup a_setup)
+	{
+		List<ToolUpdates.Result> res;
+		try {
+			res = await Task.Run(async () => await ToolUpdates.Check(a_setup, Mo2Instance.Load(a_setup.Mo2Exe, a_setup.Mo2Instance), CancellationToken.None)).ConfigureAwait(true);
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or System.Net.Http.HttpRequestException or TaskCanceledException) {
+			Issues.Add($"{Theme.Glyph("IssueNote")}  Updates: the tools' pages could not be asked ({e.Message})");
+			return;
+		}
+		if (!string.Equals(a_setup.File, Setup?.File, StringComparison.OrdinalIgnoreCase)) {
+			return;
+		}
+		foreach (var line in UpdateLines(res)) {
+			Issues.Add($"{Theme.Glyph("IssueNote")}  {line}");
+		}
+		await LookForNewVersion(MainWindow.AppVersion).ConfigureAwait(true);
+	}
+
+	// what the check says about the tools' versions: one line per tool with a newer version, else one line for all
+	public static List<string> UpdateLines(IReadOnlyCollection<ToolUpdates.Result> a_res)
+	{
+		var lines = a_res.Where(r => r.Newer).Select(r =>
+			$"Update: {r.Tool} {r.Newest} is out (you have {r.Yours}). Install it by hand from its page (Settings > Tools > Check its tools for updates opens it), then learn its settings again.").ToList();
+		if (lines.Count == 0 && a_res.Count > 0) {
+			var unasked = a_res.Where(r => r.Problem != null).Sum(r => r.Tools);
+			lines.Add(unasked > 0 ? $"Updates: {unasked} tool(s) could not be checked for a newer version; the others are up to date." : "Updates: every tool is up to date.");
+		}
+		return lines;
 	}
 
 	// a step switched on / off for the setup (saved at once)
@@ -1146,22 +1187,28 @@ public sealed partial class MainViewModel : Observable
 	}
 
 	// the order the setup would have after moving a step; the warnings it would break (empty = fine)
-	public List<string> WarningsIfMoved(StepRow a_row, int a_delta)
+	public List<string> WarningsIfMoved(StepRow a_row, int a_delta) => WarningsIfMovedTo(a_row, Steps.IndexOf(a_row) + a_delta);
+
+	// the same for a step put at any place (a_to: its place in the list afterwards) - a step dragged there
+	public List<string> WarningsIfMovedTo(StepRow a_row, int a_to)
 	{
 		// each row keeps its own tick: a step listed twice is two rows, and the moved one is this very row
 		var rows = Steps.Select(s => (s.Key, s.On)).ToList();
 		var i = Steps.IndexOf(a_row);
-		var j = i + a_delta;
-		if (i < 0 || j < 0 || j >= rows.Count) {
+		if (i < 0 || a_to < 0 || a_to >= rows.Count || a_to == i) {
 			return [];
 		}
 		var before = StepCatalog.OrderWarnings(rows.Where(r => r.On).Select(r => r.Key).ToList()).ToHashSet();
-		(rows[i], rows[j]) = (rows[j], rows[i]);
+		var moved = rows[i];
+		rows.RemoveAt(i);
+		rows.Insert(a_to, moved);
 		var on = rows.Where(r => r.On).Select(r => r.Key).ToList();
 		return StepCatalog.OrderWarnings(on).Where(w => !before.Contains(w)).ToList();
 	}
 
-	public void Move(StepRow a_row, int a_delta)
+	public void Move(StepRow a_row, int a_delta) => MoveTo(a_row, Steps.IndexOf(a_row) + a_delta);
+
+	public void MoveTo(StepRow a_row, int a_to)
 	{
 		if (Setup?.Root["steps"] is not JsonArray arr) {
 			return;
@@ -1171,8 +1218,8 @@ public sealed partial class MainViewModel : Observable
 			return;
 		}
 		var i = Steps.IndexOf(a_row);
-		var j = i + a_delta;
-		if (j < 0 || j >= Steps.Count) {
+		var j = a_to;
+		if (i < 0 || j < 0 || j >= Steps.Count || j == i) {
 			return;
 		}
 		// the file's own places of the rows, in the list's order (the list shows exactly the entries that name a step; one that
@@ -1182,8 +1229,14 @@ public sealed partial class MainViewModel : Observable
 		if (shown.Count != Steps.Count) {
 			return;
 		}
-		var (fi, fj) = (shown[i], shown[j]);
-		(items[fi], items[fj]) = (items[fj], items[fi]);
+		// the step entries in their new order, written back into the very places step entries stood in
+		var entries = shown.Select(x => items[x]).ToList();
+		var entry = entries[i];
+		entries.RemoveAt(i);
+		entries.Insert(j, entry);
+		for (var k = 0; k < shown.Count; ++k) {
+			items[shown[k]] = entries[k];
+		}
 		arr.Clear();
 		foreach (var it in items) {
 			arr.Add(it);

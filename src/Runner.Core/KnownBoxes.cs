@@ -39,11 +39,13 @@ public static class KnownBoxes
 		if (FasterArchives.IsTool(a_b.Image)) {
 			return new(BoxMove.Leave, null, FasterArchives.Asks);
 		}
-		if ((Has(a_b.Title, "Recursive Directory Walk") || Has(a_b.Text, "CRDW cache")) && Button(a_b, "Yes") is { } yes) {
-			return new(BoxMove.Press, yes, Crdw.Answered);
-		}
+		// Not the run's own game's: only named. That is a tool's or Mod Organizer's own box - and every box of a Skyrim the
+		// player started under the run's Mod Organizer, the directory cache's question too: their game is never answered for them
 		if (!a_b.Game) {
 			return new(BoxMove.Name, null, "");
+		}
+		if ((Has(a_b.Title, "Recursive Directory Walk") || Has(a_b.Text, "CRDW cache")) && Button(a_b, "Yes") is { } yes) {
+			return new(BoxMove.Press, yes, Crdw.Answered);
 		}
 		var (press, note) = InGame.NativeBoxVerdict(a_b.Title, a_b.Text, a_b.Buttons);
 		return press != null ? new(BoxMove.Press, press, note) :

@@ -38,6 +38,9 @@ public sealed class RunContext
 	// this step made nothing of its output mod (a guided tool wrote elsewhere): the mod is not this run's, so a put-back and Undo leave it as it was
 	public bool OutputUntouched { get; set; }
 
+	// the step in hand starts the game with a mod set to list the game's files anew (Crdw.Apply): when it finishes, that list is current
+	public bool FreshList { get; set; }
+
 	public void SetAfter(params string[] a_mods) => PendingEnable.AddRange(a_mods);
 
 	// one output of a step that makes several is complete: on record as built at once, so it stays - and is switched on at the

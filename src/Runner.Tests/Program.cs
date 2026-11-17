@@ -479,6 +479,22 @@ public static class Program
 			Equal(0, ended, "and the game goes on");
 		}
 
+		// the same question from a Skyrim the PLAYER started under the run's Mod Organizer: theirs to answer - only named
+		pressed.Clear();
+		shown.Clear();
+		lines.Clear();
+		using (var w = Watch()) {
+			open.Add(Box(11, "SkyrimSE.exe", false, "Cache Recursive Directory Walk", "Do you want to generate CRDW cache files?", "Yes", "No"));
+			w.LookOnce(t0);
+			w.LookOnce(t0.AddSeconds(61));
+			Equal(0, pressed.Count, "the cache mod's question in a game the player started is never answered for them");
+			Check(lines.Any(l => l.StartsWith("a box is open - SkyrimSE.exe: \"Cache Recursive Directory Walk\"", StringComparison.Ordinal)) && !lines.Contains(Crdw.Answered), "it is named, and not said to be answered: " + string.Join(" | ", lines));
+			Check(w.Blocked == null && ended == 0, "and it neither stops a step nor ends a game");
+			open.Clear();
+		}
+		Equal(BoxMove.Press, KnownBoxes.Judge(new BoxSeen("SkyrimSE.exe", true, "Cache Recursive Directory Walk", "Do you want to generate CRDW cache files?", ["Yes", "No"])).Move, "the run's own game's is answered");
+		Equal(BoxMove.Name, KnownBoxes.Judge(new BoxSeen("SkyrimSE.exe", false, "Cache Recursive Directory Walk", "Do you want to generate CRDW cache files?", ["Yes", "No"])).Move, "the player's game's is only named");
+
 		pressed.Clear();
 		shown.Clear();
 		using (var w = Watch()) {
@@ -633,15 +649,21 @@ public static class Program
 		Equal((false, "CACHE"), Crdw.Parse("[General]\nShowPopUp = b:false\nMode = s:cache\n"), "spaces and case");
 		var blind = new Crdw.State("x", false, "LOAD");
 		var asks = new Crdw.State("x", true, "LOAD");
-		var s0 = Setup.FromJson(new JsonObject());
-		var sRefresh = Setup.FromJson(new JsonObject { [Crdw.SettingName] = "refresh" });
-		Equal(null, Crdw.AfterRun(s0, null, true, false), "the mod is not there: nothing to say");
-		Equal(null, Crdw.AfterRun(s0, blind, false, false), "a run that built nothing made nothing old");
-		Check(Crdw.AfterRun(s0, blind, true, true)?.Contains("CACHE", StringComparison.Ordinal) == true, "it loads its old list without asking: said after the run");
-		Equal(null, Crdw.AfterRun(sRefresh, blind, true, true), "the run made its list anew at the save to play: nothing left to do");
-		Check(Crdw.AfterRun(sRefresh, blind, true, false) != null, "no game start after the last tool: still to do");
-		Equal(null, Crdw.AfterRun(s0, asks, true, true), "its question was answered Yes at the run's last game start");
-		Check(Crdw.AfterRun(s0, asks, true, false)?.Contains("answer Yes", StringComparison.Ordinal) == true, "no game start after the last tool: answer Yes next time");
+		Equal(null, Crdw.AfterRun(null, true, false, false), "the mod is not there: nothing to say");
+		Equal(null, Crdw.AfterRun(blind, false, false, false), "a run that built nothing made nothing old");
+		Check(Crdw.AfterRun(blind, true, false, true)?.Contains("CACHE", StringComparison.Ordinal) == true, "it loads its old list without asking, and the game made none anew after the run's last change: said after the run");
+		Equal(null, Crdw.AfterRun(blind, true, true, true), "the game made its list anew after the last thing the run changed: nothing left to do");
+		Equal(null, Crdw.AfterRun(asks, true, false, true), "its question was answered Yes at the run's last game start");
+		Check(Crdw.AfterRun(asks, true, false, false)?.Contains("answer Yes", StringComparison.Ordinal) == true, "no game start after the last tool: answer Yes next time");
+		// when the run has it make a new list: his answer ("mod makes a new list when files are changed during the run") is
+		// the rule for a setup that says nothing
+		Equal(Crdw.Renew.Changed, Crdw.When(Setup.FromJson(new JsonObject())), "a setup that says nothing: a new list when the run changed files");
+		Equal(Crdw.Renew.Always, Crdw.When(Setup.FromJson(new JsonObject { [Crdw.SettingName] = "always" })), "at every game start, when the setup says so");
+		Equal(Crdw.Renew.Never, Crdw.When(Setup.FromJson(new JsonObject { [Crdw.SettingName] = "Never" })), "or never");
+		Equal(Crdw.Renew.Changed, Crdw.When(Setup.FromJson(new JsonObject { ["crdwCache"] = "leave" })), "the first builds' \"leave\" was written by every save of the settings, chosen or not: it says nothing");
+		Equal(Crdw.Renew.Always, Crdw.When(Setup.FromJson(new JsonObject { ["crdwCache"] = "refresh" })), "their \"refresh\" had to be picked: it still counts");
+		Equal(Crdw.Renew.Never, Crdw.When(Setup.FromJson(new JsonObject { ["crdwCache"] = "refresh", [Crdw.SettingName] = "never" })), "and what is picked now outranks it");
+		Check(Crdw.Writes("landscapefixer") && Crdw.Writes("grass") && !Crdw.Writes("cleansave") && !Crdw.Writes("playsave") && !Crdw.Writes("shaders"), "a step that only starts the game and saves changes no file the mod lists");
 
 		using var f = new FakeMo2();
 		f.Mod("CRDW Low");
@@ -681,13 +703,47 @@ public static class Program
 		var me = Environment.ProcessId;
 		Check(fam.Now([me]).ContainsKey(me) && !fam.Now([me])[me].Game, "a process that is no game is none");
 
-		// left alone unless the setup says so
+		// a run that has changed nothing yet touches neither mod's own settings; once it has changed the game's files, the
+		// cache mod makes a new list at the next step's game starts, and its own file goes back after that step
+		var crdwOwn = Path.Combine(f.Overwrite, Crdw.IniRel);
+		var crdwAsWas = File.ReadAllBytes(crdwOwn);
 		var ctx = StepContext(f, "landscapefixer");
 		using (ctx.Log) {
 			GameStart.Prepare(ctx);
-			Equal(0, ctx.Journal.Kept.Count, "by default a run changes neither mod's own settings");
+			Equal(0, ctx.Journal.Kept.Count, "a run that has changed nothing yet changes neither mod's own settings");
+			Crdw.StepEnded(ctx, true, true);
+			Equal(1, ctx.Journal.FilesChanged, "a step that writes files ended: the game's files have changed");
+			GameStart.Prepare(ctx);
+			Equal((false, "CACHE"), Crdw.Parse(File.ReadAllText(crdwOwn)), "the next game start makes the list anew");
+			Equal(1, ctx.Journal.Kept.Count, "only the cache mod's file is touched for it");
+			Crdw.StepEnded(ctx, false, false);
+			Equal(1, ctx.Journal.FilesChanged, "a game step that did not finish leaves the list as old as it was");
+			Equal(0, StepKit.PutFilesBack(ctx).Count, "its file goes back after the failed step");
+			GameStart.Prepare(ctx);
+			GameStart.Prepare(ctx);
+			Equal((false, "CACHE"), Crdw.Parse(File.ReadAllText(crdwOwn)), "set again for the next step, and a second game start of that step changes nothing more");
+			Crdw.StepEnded(ctx, true, false);
+			Equal(0, ctx.Journal.FilesChanged, "a game step that finished with a new list: the list is current");
+			Equal(0, StepKit.PutFilesBack(ctx).Count, "the mod's own file goes back when the step ends");
+			Check(File.ReadAllBytes(crdwOwn).SequenceEqual(crdwAsWas), "byte for byte as the player had it");
+			GameStart.Prepare(ctx);
+			Equal((false, "LOAD"), Crdw.Parse(File.ReadAllText(crdwOwn)), "nothing changed since: the next game start leaves the mod as the player set it");
+			// a step that starts the game with a new list and then writes files itself (the grass cache): changed again
+			ctx.Journal.FilesChanged = 1;
+			GameStart.Prepare(ctx);
+			Crdw.StepEnded(ctx, true, true);
+			Equal(1, ctx.Journal.FilesChanged, "what a step wrote after its own game start counts as changed again");
+			Equal(0, StepKit.PutFilesBack(ctx).Count, "and its file goes back as well");
 		}
-		setup.Root[Crdw.SettingName] = "refresh";
+		setup.Root[Crdw.SettingName] = "never";
+		setup.Save();
+		ctx = StepContext(f, "landscapefixer");
+		using (ctx.Log) {
+			ctx.Journal.FilesChanged = 3;
+			GameStart.Prepare(ctx);
+			Equal(0, ctx.Journal.Kept.Count, "a setup that says never: the mod is left alone whatever the run changed");
+		}
+		setup.Root[Crdw.SettingName] = "always";
 		setup.Root[FasterArchives.SettingName] = "skip";
 		setup.Save();
 		Check(!Preflight.Run(Setup.Load(f.SetupFile), mo2, ["landscapefixer"]).Any(i => i.Text.StartsWith("Faster Archives is ticked", StringComparison.Ordinal)), "a setup that passes the offer over is not warned of it");
@@ -698,7 +754,7 @@ public static class Program
 		ctx = StepContext(f, "landscapefixer");
 		using (ctx.Log) {
 			GameStart.Prepare(ctx);
-			Equal((false, "CACHE"), Crdw.Parse(File.ReadAllText(crdwFile)), "refresh: it makes its list anew at this step's game starts");
+			Equal((false, "CACHE"), Crdw.Parse(File.ReadAllText(crdwFile)), "always: it makes its list anew at this step's game starts, whether or not anything changed");
 			Check(!FasterArchives.OfferOn(File.ReadAllText(faFile)), "skip: no offer at this step's game starts");
 			Check(File.ReadAllText(faFile).Contains("bEnableParallel=1", StringComparison.Ordinal) && File.ReadAllText(faFile).Contains("; 1 = offer", StringComparison.Ordinal), "every other line of the file as it was");
 			GameStart.Prepare(ctx);
@@ -842,7 +898,8 @@ public static class Program
 		Check(gaveUp?.Contains("nobody chose", StringComparison.Ordinal) == true, "nobody chose within the wait: the step stops and says so: " + gaveUp);
 		Check(idle.WaitForExit(5000), "and the window that only waited is closed, so Mod Organizer can close");
 
-		// a Stop while its window only waits closes that window too
+		// a Stop never closes its window, the run's own too: whether it only waits or a repack began a moment ago cannot be
+		// told for certain from outside, and a repack cut off leaves archives half written
 		var since3 = DateTime.Now;
 		using var stopMe = Process.Start(new ProcessStartInfo(tool, "-n 60 127.0.0.1") { UseShellExecute = false, CreateNoWindow = true })!;
 		using var endStopMe = new StandIn(stopMe);
@@ -850,8 +907,37 @@ public static class Program
 		var stopping = StepContext(f, "shaders", a_cancel: stop.Token);
 		stopping.Control.Started.Add(Environment.ProcessId);
 		using var log2 = stopping.Log;
+		var atStop = new List<string>();
+		stopping.Log.Line += (t, _) => {
+			lock (atStop) {
+				atStop.Add(t);
+			}
+		};
 		Throws<OperationCanceledException>(() => FasterArchives.Wait(stopping, "shaders", new StepSettings([]), 1, since3), "a Stop ends the wait");
-		Check(stopMe.WaitForExit(5000), "and closes a window that only waits for a choice");
+		Check(!stopMe.WaitForExit(1500), "and leaves its window open, one that only waits too");
+		lock (atStop) {
+			Check(atStop.Any(l => l.Contains(FasterArchives.LeftAtStop, StringComparison.Ordinal)), "said in words, with what to do: " + string.Join(" | ", atStop.TakeLast(3)));
+		}
+		stopMe.Kill();
+
+		// ... and the choice at the edge: a window that sits idle up to the Stop and starts to work right after it (the
+		// player chose "Repack now" as Stop was pressed) is not cut off, at the offer limit either
+		var edgeDir = Path.Combine(f.Root, "edge");
+		Directory.CreateDirectory(edgeDir);
+		var edgeTool = Path.Combine(edgeDir, FasterArchives.ToolImage);
+		File.Copy(Path.Combine(Environment.SystemDirectory, "cmd.exe"), edgeTool);
+		foreach (var time in new[] { 1, 4 }) {
+			var sinceEdge = DateTime.Now;
+			// idle for about a second, then busy (a loop that ends by itself after a few minutes at most)
+			using var edge = Process.Start(new ProcessStartInfo(edgeTool, "/d /c \"ping -n 2 127.0.0.1 >nul & for /l %i in (1,1,200000000) do @rem\"") { UseShellExecute = false, CreateNoWindow = true })!;
+			using var endEdge = new StandIn(edge);
+			using var stopEdge = new CancellationTokenSource(TimeSpan.FromMilliseconds(600));
+			var edgeCtx = StepContext(f, "shaders", a_cancel: stopEdge.Token);
+			edgeCtx.Control.Started.Add(Environment.ProcessId);
+			using var edgeLog = edgeCtx.Log;
+			Throws<OperationCanceledException>(() => FasterArchives.Wait(edgeCtx, "shaders", new StepSettings([]), time, sinceEdge), $"a Stop ends the wait (offer {time})");
+			Check(!edge.WaitForExit(2000), $"a window that began to work as the Stop came is left to it (offer {time})");
+		}
 	}
 
 	// CodeRabbit's first round on 1.0 (pull request 32): the points a test can hold
@@ -1705,6 +1791,53 @@ public static class Program
 		starts.Remove(10);
 		starts[11] = listed.AddSeconds(2);
 		Equal("", string.Join(",", StartedSet.Children(launcher, [(11, 10)], StartOf, listed).Keys.Order()), "a process that started after the list was taken is nobody's child by that list");
+		starts[11] = listed;
+		Equal("", string.Join(",", StartedSet.Children(launcher, [(11, 10)], StartOf, listed).Keys.Order()), "nor one that started at the very reading of the clock: only before it is certain");
+
+		// A number that changes hands between the list and the clock. The look reads its clock BEFORE each list, so a
+		// newcomer that took an ended child's number right after the list never passes for that child - at the first list
+		// and at the second one (made when a parent has ended) alike.
+		var world = new Dictionary<int, DateTime?> { [10] = t, [13] = t.AddSeconds(1) };
+		var set = new StartedSet(p => world.GetValueOrDefault(p));
+		set.Add(10);
+		var tick = 0;
+		DateTime Clock() => t.AddSeconds(10 + ++tick);
+		var lists = 0;
+		IReadOnlyCollection<(int Pid, int Parent)>? List()
+		{
+			if (++lists == 1) {
+				// the first list names child 11 and child 13; right after it 11 ends and a stranger gets its number - and the
+				// launcher ends too, so a second list is made
+				world[11] = Clock();
+				world.Remove(10);
+				return [(10, 1), (11, 10), (13, 10)];
+			}
+			// the second list names child 12 (and the stranger under 11 with its own parent); right after it 12 ends and
+			// another stranger gets its number
+			world[12] = Clock();
+			return [(11, 99), (12, 10), (13, 10)];
+		}
+		set.Sweep(List, Clock);
+		Equal(2, lists, "a parent that has ended is looked for once more, in a list read fresh");
+		Equal("13", string.Join(",", set.Owned().Order()), "a number that changed hands right after a list was taken is nobody's child; the child that had started before the clock was read is the run's");
+		// Windows would not give its list: nothing is learned from that look, and nothing forgotten
+		set.Sweep(() => null, Clock);
+		Equal("13", string.Join(",", set.Owned().Order()), "a look Windows would not answer changes nothing");
+		// The clock has ticks: both readings of one look can fall in the tick a child started in. That child is not taken
+		// at that look - and its ended parent is NOT retired over it, so the next look, with a later reading, finds it.
+		var tickWorld = new Dictionary<int, DateTime?> { [20] = t, [21] = t.AddSeconds(30) };
+		var tickSet = new StartedSet(p => tickWorld.GetValueOrDefault(p));
+		tickSet.Add(20);
+		tickWorld.Remove(20);
+		var sameTick = t.AddSeconds(30);
+		tickSet.Sweep(() => [(21, 20)], () => sameTick);
+		Equal("", string.Join(",", tickSet.Owned().Order()), "a child that started in the very tick of the reading is not taken yet");
+		tickSet.Sweep(() => [(21, 20)], () => sameTick.AddSeconds(3));
+		Equal("21", string.Join(",", tickSet.Owned().Order()), "its parent was kept for it: the next look, a tick later, puts it on record");
+		Check(Procs.StartClock() <= DateTime.UtcNow.AddSeconds(1) && Procs.StartClock() > DateTime.UtcNow.AddMinutes(-1), "the clock process starts are stamped with is the PC's own");
+		using (var self = Process.GetCurrentProcess()) {
+			Check(self.StartTime.ToUniversalTime() < Procs.StartClock(), "and a process that runs started before a reading of it");
+		}
 
 		// for real: a launcher starts its program and ends (ping stands in for the program)
 		using var f = new FakeMo2();
@@ -1816,8 +1949,27 @@ public static class Program
 			} catch (Mo2BusyException e) {
 				Check(e.Message.Contains("Faster Archives", StringComparison.Ordinal), "the reason is named: " + e.Message);
 			}
+			// ... nor when Windows would not list the running programs: that is no answer, least of all "no repack runs"
+			var blind = new Mo2Control(mo2, "Test", RunLog.Null) { RunningProbe = () => true, ForeignProbe = () => [], RepackProbe = () => null };
+			try {
+				blind.Close();
+				Check(false, "Mod Organizer was closed on a process list Windows would not give");
+			} catch (Mo2BusyException e) {
+				Check(e.Message.Contains("would not list the running programs", StringComparison.Ordinal), "the reason is named: " + e.Message);
+			}
+			var real = new Mo2Control(mo2, "Test", RunLog.Null);
+			Check(real.Repackers() != null, "the look for a repack, read off Windows, is an answer");
+			Procs.FailLooks = 1;
+			Check(real.Repackers() == null, "a look that failed is told apart from \"none runs\"");
+			Check(real.Repackers() != null, "and read again once Windows answers");
+			Procs.FailLooks = 1;
+			_ = real.ForeignChildren(false);
+			Check(real.ForeignBlind, "the look for the player's own programs under Mod Organizer says when Windows would not answer it");
+			_ = real.ForeignChildren(false);
+			Check(!real.ForeignBlind, "and when it did");
 		} finally {
 			Mo2Control.BusyWait = busyWait;
+			Procs.FailLooks = 0;
 		}
 	}
 
@@ -1837,6 +1989,20 @@ public static class Program
 			}
 		}
 		Check(got.Count == 50 && got[0].EndsWith("line 0", StringComparison.Ordinal) && got[49].EndsWith("line 49", StringComparison.Ordinal), $"every line reaches the command line, in order, before the run's end returns ({got.Count})");
+		// whatever the reader of the live copy throws stays on its thread - out of memory too: left to leave it, it would end
+		// the whole program before the profile is put back (this test would not get past the next lines)
+		var reached = 0;
+		using (var log = new RunLog(Path.Combine(f.Data, "echo log 3"))) {
+			log.EchoTo(_ => {
+				Interlocked.Increment(ref reached);
+				throw new OutOfMemoryException("no memory for the live copy");
+			});
+			for (var i = 0; i < 20; ++i) {
+				log.Say("line " + i);
+			}
+		}
+		Check(reached >= 1, "the live copy was handed a line");
+		Equal(20, File.ReadAllLines(Path.Combine(f.Data, "echo log 3", "log.txt")).Length, "the run's own log has every line, and the program lives on");
 		var wait = RunLog.EchoWait;
 		RunLog.EchoWait = TimeSpan.FromMilliseconds(300);
 		using var stuck = new ManualResetEventSlim(false);
@@ -5492,6 +5658,38 @@ public static class Program
 		Equal("TexGen", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "output_mod", -1)), "a setting's own name");
 		Equal("", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "TexGen Output", 0)), "never the step already open");
 		Equal(0, ToolRunner.App.SettingsPanel.StepsWith(steps, " ", -1).Count, "no word, no steps");
+	}
+
+	// his list of 2026-11-16: a step dragged to any place, a check that also looks for updates, windows that keep their size
+	static void T_TheWindowListOfNovember()
+	{
+		// where a dragged row lands: its place in the list afterwards (taking it out first moves the rows after it up by one)
+		Equal(0, ToolRunner.App.MainWindow.DropPlace(3, 0, false), "on the first row's upper half: it becomes the first");
+		Equal(1, ToolRunner.App.MainWindow.DropPlace(3, 0, true), "on its lower half: the second");
+		Equal(3, ToolRunner.App.MainWindow.DropPlace(1, 3, true), "from above, under the last of four rows: the last");
+		Equal(2, ToolRunner.App.MainWindow.DropPlace(1, 3, false), "from above, on a row's upper half: right before that row");
+		Equal(1, ToolRunner.App.MainWindow.DropPlace(1, 1, true), "on its own lower half: it stays");
+		Equal(1, ToolRunner.App.MainWindow.DropPlace(1, 1, false), "on its own upper half: it stays");
+		Equal(1, ToolRunner.App.MainWindow.DropPlace(1, 0, true), "right under the row above it: it stays");
+		Equal(1, ToolRunner.App.MainWindow.DropPlace(1, 2, false), "right above the row below it: it stays");
+
+		// what the check says about the tools' versions
+		var newer = new ToolUpdates.Result("synthesis", "Synthesis", "0.35", "0.36", true, "https://example.invalid/synthesis", null);
+		var same = new ToolUpdates.Result("dyndolod", "TexGen / DynDOLOD", "3.0", "3.0", false, "https://example.invalid/dyndolod", null, 2);
+		var unasked = new ToolUpdates.Result("pandora", "Pandora", "?", "", false, "https://example.invalid/pandora", "could not ask its page: offline");
+		var lines = ToolRunner.App.MainViewModel.UpdateLines([newer, same]);
+		Check(lines.Count == 1 && lines[0].Contains("Synthesis 0.36 is out (you have 0.35)", StringComparison.Ordinal) && lines[0].Contains("by hand", StringComparison.Ordinal),
+			"a newer tool is one line with both versions and how it is installed: " + string.Join(" | ", lines));
+		Equal("Updates: every tool is up to date.", string.Join(" | ", ToolRunner.App.MainViewModel.UpdateLines([same])), "nothing newer: one line for all");
+		Check(string.Join(" | ", ToolRunner.App.MainViewModel.UpdateLines([same, unasked])).Contains("1 tool(s) could not be checked", StringComparison.Ordinal), "a tool that could not be asked is never counted as up to date");
+		Equal(0, ToolRunner.App.MainViewModel.UpdateLines([]).Count, "a setup with no tool to ask: nothing said");
+
+		// a remembered size is held to what the screen has room for now
+		Equal(900.0, ToolRunner.App.UiState.Fit(900, 780, 420, 1920), "a kept size that fits is used");
+		Equal(780.0, ToolRunner.App.UiState.Fit(null, 780, 420, 1920), "none kept: the usual one");
+		Equal(1280.0, ToolRunner.App.UiState.Fit(2400, 780, 420, 1280), "kept on a bigger screen: held to this one");
+		Equal(420.0, ToolRunner.App.UiState.Fit(100, 780, 420, 1920), "never under the least it needs");
+		Equal(300.0, ToolRunner.App.UiState.Fit(100, 780, 420, 300), "unless the screen itself is smaller");
 	}
 
 	// a tool that never appeared keeps Mod Organizer's whole log since the request: every line after the place the request was made,

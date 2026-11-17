@@ -90,11 +90,24 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	public List<(int Pid, string Image)> ForeignChildren(bool a_windowed)
 	{
 		Started.Sweep();
-		var ours = new HashSet<int>(Started.Live().SelectMany(Procs.Tree));
+		var blind = false;
+		List<int> TreeOf(int a_root)
+		{
+			var tree = Procs.Tree(a_root);
+			blind |= Procs.LookFailed;
+			return tree;
+		}
+		var ours = new HashSet<int>(Started.Live().SelectMany(TreeOf));
 		ours.UnionWith(Started.Owned());
-		var mo2 = Pids().Concat(Unreadable()).ToHashSet();
+		var mine = Pids();
+		blind |= Procs.LookFailed;
+		var closed = Unreadable();
+		blind |= Procs.LookFailed;
+		var mo2 = mine.Concat(closed).ToHashSet();
+		var under = mo2.SelectMany(TreeOf).Distinct().ToList();
+		ForeignBlind = blind;
 		var outList = new List<(int, string)>();
-		foreach (var pid in mo2.SelectMany(Procs.Tree).Distinct()) {
+		foreach (var pid in under) {
 			if (mo2.Contains(pid) || ours.Contains(pid)) {
 				continue;
 			}
@@ -109,6 +122,10 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		}
 		return outList;
 	}
+
+	// Windows would not give its list of processes at one of the last ForeignChildren's looks: what it returned may be short,
+	// and "nothing of the player's runs under Mod Organizer" was not learned
+	public bool ForeignBlind { get; private set; }
 
 	// a program anyone can be running: being new is not enough to make one the tool
 	public static bool IsShared(string a_image) => IsJava(a_image) || a_image.Equals("cmd.exe", StringComparison.OrdinalIgnoreCase);
@@ -246,10 +263,14 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 
 	public static readonly string[] GameImages = ["SkyrimSE.exe", "skse64_loader.exe"];
 
-	public static Func<List<string>> GameProbe { get; set; } = () => {
+	// the look itself; Procs.LookFailed right after it says whether Windows gave its list
+	static List<string> GameLook()
+	{
 		var up = Procs.Running(GameImages);
 		return GameImages.Where((_, i) => up[i]).ToList();
-	};
+	}
+
+	public static Func<List<string>> GameProbe { get; set; } = GameLook;
 
 	public static List<string> GameRunning() => GameProbe();
 
@@ -490,20 +511,37 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 
 	public Func<List<(int Pid, string Image)>>? ForeignProbe { get; set; }
 
-	public Func<List<int>>? RepackProbe { get; set; }
+	public Func<List<int>?>? RepackProbe { get; set; }
 
 	// Faster Archives' own program, started by the run's game or under this Mod Organizer. Mod Organizer ends the programs
 	// under it when it closes, and a repack cut off leaves archives half written: the close waits for it like for a
-	// program of the player's (a Stop during a repack leaves it running on purpose - FasterArchives.Wait)
-	List<int> Repackers()
+	// program of the player's (a Stop leaves its window open on purpose - FasterArchives.Wait).
+	// null: Windows would not give its list of processes. That is no answer - least of all "none runs" - and Mod Organizer
+	// stays open on it
+	public List<int>? Repackers()
 	{
 		var running = Procs.Pids(FasterArchives.ToolImage);
+		if (Procs.LookFailed) {
+			return null;
+		}
 		if (running.Count == 0) {
 			return running;
 		}
 		Started.Sweep();
 		var owned = Started.Owned();
-		return running.Where(p => owned.Contains(p) || IsMo2s(p)).ToList();
+		var found = new List<int>();
+		foreach (var p in running) {
+			if (owned.Contains(p)) {
+				found.Add(p);
+				continue;
+			}
+			var under = IsMo2s(p, out var blind);
+			// whose it is could not be read: counted, so the close waits rather than ends a repack that may be this instance's
+			if (under || blind) {
+				found.Add(p);
+			}
+		}
+		return found;
 	}
 
 	public void Close(TimeSpan? a_timeout = null, CancellationToken a_ct = default)
@@ -534,15 +572,27 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 			a_ct.ThrowIfCancellationRequested();
 			var dl = DownloadsInProgress();
 			var game = GameRunning();
-			var theirs = (ForeignProbe ?? (() => ForeignChildren(true)))();
+			// A list of processes Windows would not give is no answer: neither "no game runs" nor "no repack does" nor "nothing of
+			// yours runs under Mod Organizer" was learned, and Mod Organizer ends what runs under it when it closes. Each look
+			// is judged right after it; the close waits and looks again.
+			var blind = GameProbe == GameLook && Procs.LookFailed;
+			List<(int Pid, string Image)> theirs;
+			if (ForeignProbe != null) {
+				theirs = ForeignProbe();
+			} else {
+				theirs = ForeignChildren(true);
+				blind |= ForeignBlind;
+			}
 			var repack = (RepackProbe ?? Repackers)();
-			if (dl.Count == 0 && game.Count == 0 && theirs.Count == 0 && repack.Count == 0) {
+			blind |= repack == null;
+			if (dl.Count == 0 && game.Count == 0 && theirs.Count == 0 && repack is { Count: 0 } && !blind) {
 				break;
 			}
 			var why = dl.Count > 0 ? "Mod Organizer is downloading (" + string.Join(", ", dl.Take(3)) + ")" :
 				game.Count > 0 ? "the game is running (" + string.Join(", ", game) + ")" :
-				repack.Count > 0 ? "Faster Archives' own program is still open (it repacks the game's archives, or waits for a choice in its window)" :
-				"a program you started runs under Mod Organizer (" + string.Join(", ", theirs.Select(t => t.Image).Distinct()) + ")";
+				repack is { Count: > 0 } ? "Faster Archives' own program is still open (it repacks the game's archives, or waits for a choice in its window)" :
+				theirs.Count > 0 ? "a program you started runs under Mod Organizer (" + string.Join(", ", theirs.Select(t => t.Image).Distinct()) + ")" :
+				"Windows would not list the running programs, so a game, a repack or a program of yours may run under Mod Organizer";
 			if (waited.Elapsed > BusyWait) {
 				throw new Mo2BusyException($"{why} for {BusyWait.TotalMinutes:0} minutes - Mod Organizer is never closed under it");
 			}
@@ -703,11 +753,17 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 				}
 				throw new Mo2BusyException("Mod Organizer asked about downloads in progress - answered Cancel, left open: " + Trim(box.Text));
 			}
-			if ((box.Text.Contains("running", StringComparison.OrdinalIgnoreCase) || cameAfter) && ForeignChildren(false) is { Count: > 0 } theirs) {
-				if ((Uia.Button(box.Element, "No", "Cancel") ?? (cameAfter ? Uia.NoByPlace(box.Buttons) : null)) is { } no) {
-					Uia.Press(no);
+			if (box.Text.Contains("running", StringComparison.OrdinalIgnoreCase) || cameAfter) {
+				var theirs = ForeignChildren(false);
+				// (whose they are could not be read: never Yes on that)
+				if (theirs.Count > 0 || ForeignBlind) {
+					if ((Uia.Button(box.Element, "No", "Cancel") ?? (cameAfter ? Uia.NoByPlace(box.Buttons) : null)) is { } no) {
+						Uia.Press(no);
+					}
+					throw new Mo2BusyException("Mod Organizer asked to end programs that are still running, " +
+						(theirs.Count > 0 ? $"among them yours ({string.Join(", ", theirs.Select(t => t.Image).Distinct())})" : "and Windows would not say whose they are") +
+						$" - answered No, left open: {Trim(box.Text)}");
 				}
-				throw new Mo2BusyException($"Mod Organizer asked to end programs that are still running, among them yours ({string.Join(", ", theirs.Select(t => t.Image).Distinct())}) - answered No, left open: {Trim(box.Text)}");
 			}
 			// only the boxes MO2 itself shows on closing are answered (a quit question, its own error / notice); any other box
 			// may be the player's own work in MO2 and is left alone - the close then waits, and names it at its limit
@@ -937,13 +993,18 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	}
 
 	// started under Mod Organizer, or hooked into its virtual folder (the shell that started it may have ended). A process ends only by a PID this run started
-	bool IsMo2s(int a_pid)
+	bool IsMo2s(int a_pid) => IsMo2s(a_pid, out _);
+
+	// a_blind: Windows would not give its list of processes, so "not under Mod Organizer" was not learned
+	bool IsMo2s(int a_pid, out bool a_blind)
 	{
 		var mo2 = Pids().ToHashSet();
+		a_blind = Procs.LookFailed;
 		var parents = new Dictionary<int, int>();
 		foreach (var (pid, parent) in Procs.Snapshot()) {
 			parents[pid] = parent;
 		}
+		a_blind |= Procs.LookFailed;
 		var at = a_pid;
 		for (var up = 0; up < 8 && parents.TryGetValue(at, out var parent); ++up, at = parent) {
 			if (mo2.Contains(parent)) {

@@ -231,9 +231,9 @@ public partial class App : Application
 			}
 			w.DemoReady();
 			w.DemoHistory(rows);
-			w.ShowPanel("history", true);
+			var past = w.ShowPanel("history", true);
 			Pump(w, 800);
-			Picture(w, a_dir, "4 past runs");
+			Picture(past, a_dir, "4 past runs");
 		} finally {
 			try {
 				Directory.Delete(runs, true);
@@ -252,8 +252,8 @@ public partial class App : Application
 			new(t, run, "Old Grass Cache", "unticked", [name]),
 		]);
 		Pump(w, 600);
-		Picture(w, a_dir, "5 what MO2 changed");
-		w.CloseDrawerNow();
+		Picture(w.ShowPanel("changes"), a_dir, "5 what MO2 changed");
+		w.ClosePanels();
 		var demo = new RunPreview();
 		demo.Steps.AddRange([new("synthesis", "Synthesis", "Synthesis - " + name, false), new("xlodgen", "xLODGen", "xLODGen Output - " + name, false),
 			new("texgen", "TexGen", "TexGen Output - " + name, false), new("dyndolod", "DynDOLOD", "DynDOLOD Output - " + name, false),
@@ -280,9 +280,9 @@ public partial class App : Application
 		Pump(w, 2500);
 		void Save(string a_name, Window? a_of = null) => Picture(a_of ?? w, a_dir, a_name);
 		Save("1 dashboard");
-		w.ShowPanel("history");
+		var history = w.ShowPanel("history");
 		Pump(w, 600);
-		Save("2 history");
+		Save("2 history", history);
 		// History > What MO2 changed, with made-up rows (nothing read from or written to a Mod Organizer)
 		var t = new DateTime(2026, 10, 27, 22, 41, 0);
 		w.ShowChangesDemo([
@@ -294,21 +294,26 @@ public partial class App : Application
 			new(t, "the run of Oct 27 22:39 (Bottled Shaders)", "Old Grass Cache", "removed from Mod Organizer", []),
 		]);
 		Pump(w, 600);
-		Save("2b what MO2 changed");
-		w.ShowPanel("settings");
+		Save("2b what MO2 changed", history);
+		// the settings: each of its pages in turn
+		var settings = w.ShowPanel("settings");
 		Pump(w, 600);
-		Save("3 settings");
-		// the settings further down: the run options, tool updates
-		foreach (var (y, name) in new[] { (420.0, "3b settings, run options"), (900.0, "3c settings, tool updates"), (1500.0, "3c2 settings, further down"), (99999.0, "3c3 settings, the end") }) {
-			w.ScrollDrawer(y);
+		Save("3 settings", settings);
+		for (var page = 1; SettingsPanel.ShowPage(page) is { } pageName; ++page) {
 			Pump(w, 400);
-			Save(name);
+			Save($"3 settings {page + 1} {pageName.ToLowerInvariant()}", settings);
 		}
 		// the theme gallery: every look as its own card (its themes are read off the window's thread, so it gets a moment)
-		w.ShowPanel("themes");
+		var themes = w.ShowPanel("themes");
 		Pump(w, 1500);
-		Save("3d themes");
-		w.CloseDrawerNow();
+		Save("3d themes", themes);
+		// the log in a window of its own, and the main window with its log hidden there
+		var logWindow = w.PopLog();
+		Pump(w, 600);
+		Save("3e the log in its own window", logWindow);
+		Save("3f dashboard, the log popped out");
+		w.ClosePanels();
+		Pump(w, 300);
 		// the preview before a run (his checklist 270), for a made-up run
 		var demo = new RunPreview();
 		demo.Steps.AddRange([new("synthesis", "Synthesis", "Synthesis Output", false), new("xlodgen", "xLODGen", "xLODGen Output", false),

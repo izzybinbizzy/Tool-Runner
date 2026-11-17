@@ -120,6 +120,11 @@ public sealed class Journal
 
 	// the marker left where the player stood before the clean save's teleport (the save to play takes them back to it)
 	public string? ReturnMarker { get; set; }
+	// How often the run changed the files the game lists (outputs switched off, a step that ended) since the game last made
+	// that list anew in this run; 0 = nothing changed since. Read by the step that starts the game next (Crdw)
+	public int FilesChanged { get; set; }
+	// the run switched mods off before its first tool: its put-back switches them on again, which changes those files once more
+	public bool SwitchedOff { get; set; }
 	public List<string> Notes { get; set; } = [];
 
 	[JsonIgnore]
