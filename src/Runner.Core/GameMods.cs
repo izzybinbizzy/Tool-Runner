@@ -103,6 +103,13 @@ public static partial class FasterArchives
 			// moment the program is ended (End)
 			a_started.Sweep();
 			var owned = a_started.OwnedAt();
+			// One that started in the very tick of that look's clock is not taken by it (StartedSet) but by a look a tick
+			// later: asked once more, so a program started an instant ago is not missed
+			if (running.Any(p => !owned.ContainsKey(p) && Procs.StartTime(p) is { } began && began >= Procs.StartClock().AddMilliseconds(-50))) {
+				Thread.Sleep(20);
+				a_started.Sweep();
+				owned = a_started.OwnedAt();
+			}
 			foreach (var p in running) {
 				if (owned.TryGetValue(p, out var at) && at >= a_sinceUtc.AddSeconds(-2)) {
 					found[p] = at;
@@ -151,18 +158,23 @@ public static partial class FasterArchives
 		// is on the run's record (its program was not started by the game directly), its program of that name started since
 		// this game start is waited for all the same - and never ended
 		var tools = ToolSince(a_ctx.Control.Started, a_since.ToUniversalTime(), true);
-		var mine = tools.Keys.ToHashSet();
+
 		if (tools.Count == 0) {
 			tools = ToolSince(a_ctx.Control.Started, a_since.ToUniversalTime(), false);
 		}
 		// returns whether every one of them was the run's to end. Each is ended as the process on record - its number AND its
-		// start time, through one handle - never by its number alone
+		// start time, through one handle - never by its number alone. Whose they are is asked NOW, not when the wait began:
+		// a program that had started only an instant before the wait is put on the run's record a look later (StartedSet
+		// takes no process younger than its reading of the clock), and one never on record is never ended.
 		bool End(List<int> a_pids)
 		{
-			foreach (var p in a_pids.Where(mine.Contains)) {
-				Procs.KillTree(p, tools[p]);
+			var mine = ToolSince(a_ctx.Control.Started, a_since.ToUniversalTime(), true);
+			foreach (var p in a_pids) {
+				if (mine.TryGetValue(p, out var at)) {
+					Procs.KillTree(p, at);
+				}
 			}
-			return a_pids.All(mine.Contains);
+			return a_pids.All(mine.ContainsKey);
 		}
 		const string stillOpen = "its window is still open (the run could not tell that its own game opened it, so it is left alone): choose Cancel there, so that Mod Organizer can close";
 		var cpu = tools.Keys.ToDictionary(p => p, p => Procs.CpuOrNull(p) ?? TimeSpan.Zero);
