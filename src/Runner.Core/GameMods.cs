@@ -439,16 +439,17 @@ public static partial class Crdw
 	// sort the load order
 	public static bool Writes(string a_step) => a_step is not ("cleansave" or "playsave" or "shaders" or Steps.LootStep.StepKey);
 
-	// What the player still has to do for it once the run is over, or null. a_current: the game made its list anew in this
-	// run after the last thing the run changed. a_lastWasGame: the run's last step that finished started the game with
-	// everything the run built switched on (the save to play).
-	public static string? AfterRun(State? a_state, bool a_built, bool a_current, bool a_lastWasGame)
+	// What the player still has to do for it once the run is over, or null. a_changed: the run built something or switched
+	// mods off and on again. a_current: the game made its list anew in this run after the last thing the run changed (the
+	// put-back's switching counts). a_lastWasGame: the run's last step that finished started the game with everything the
+	// run built switched on (the save to play).
+	public static string? AfterRun(State? a_state, bool a_changed, bool a_current, bool a_lastWasGame)
 	{
-		if (a_state is not { } s || !a_built) {
+		if (a_state is not { } s || !a_changed) {
 			return null;
 		}
 		if (LoadsBlind(s)) {
-			return a_current ? null : Name + ": its cache is older than what this run built, and it loads it without asking - set its Mode to CACHE for one game start before you play";
+			return a_current ? null : Name + ": its cache is older than what this run changed, and it loads it without asking - set its Mode to CACHE for one game start before you play";
 		}
 		return s.PopUp && !a_lastWasGame ? Name + ": answer Yes to its question at your next game start - this run changed the game's files after the game last ran" : null;
 	}

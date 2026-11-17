@@ -478,7 +478,7 @@ public static class Runner
 			});
 			// a mod that keeps its own list of the game's files must make it again after what this run built (GameMods.cs)
 			Chore("the note for Cached Recursive Directory Walk", () => {
-				if (Crdw.AfterRun(Crdw.Read(profile), journal.Built.Count > 0, journal.FilesChanged == 0, playsave) is { } note) {
+				if (Crdw.AfterRun(Crdw.Read(profile), journal.Built.Count > 0 || journal.SwitchedOff, journal.FilesChanged == 0, playsave) is { } note) {
 					journal.Notes.Add(note);
 					log.Warn(note);
 					log.Simple("Note: " + note);
@@ -644,6 +644,7 @@ public static class Runner
 		// the game now finds other files than a list made before the run names
 		if (off.Count + deps.Count > 0) {
 			++a_ctx.Journal.FilesChanged;
+			a_ctx.Journal.SwitchedOff = true;
 		}
 	}
 
@@ -1111,6 +1112,12 @@ public static class Runner
 		var theirs = a_ctx.Profile.ChangedByOthers().Where(p => !own.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase);
 		if (a_snap != null && a_snap.Count > 0) {
 			a_ctx.Log.Say("the profile as it was before the run, with this run's finished outputs on:");
+			// The mods the run had switched off come back on, and what it built with them: the game now finds other files than
+			// at its last start in this run. A list of them made before this is old again (the save to play, which starts the
+			// game after this, makes it anew).
+			if (a_ctx.Journal.SwitchedOff || a_ctx.Journal.Built.Count > 0) {
+				++a_ctx.Journal.FilesChanged;
+			}
 			foreach (var a in a_ctx.Journal.Added) {
 				a_ctx.Profile.Added.Add(a);
 			}
