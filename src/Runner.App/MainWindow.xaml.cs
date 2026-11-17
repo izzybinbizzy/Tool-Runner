@@ -22,8 +22,19 @@ public partial class MainWindow : Window
 	RunsWatch? _watch;
 	int _woken;
 	bool _demo;
-	string _panel = "";
 	Tray? _tray;
+	// History (the MO2 Changelog is its second view), Settings and Themes: each in a window of its own while it is open
+	readonly Dictionary<string, PanelWindow> _panels = [];
+	// which of the history window's two views is shown
+	string _historyView = "history";
+	// the log in a window of its own, with its text box and its Follow tick there
+	PanelWindow? _logWindow;
+	TextBox? _logOut;
+	CheckBox? _followOut;
+	// whether the log was shown in the main window before it went into its own
+	bool _logWasHere = true;
+	// the main window is closing: its panels go with it and ask nothing more
+	bool _closingAll;
 
 	// his version scheme is two parts (1.0, 1.1)
 	public static string AppVersion => typeof(App).Assembly.GetName().Version?.ToString(2) ?? "";
@@ -31,6 +42,7 @@ public partial class MainWindow : Window
 	public MainWindow()
 	{
 		InitializeComponent();
+		RestoreSize();
 		FitTheScreen();
 		DataContext = _vm;
 		_vm.Alert += Notify;
@@ -72,7 +84,7 @@ public partial class MainWindow : Window
 		if (!App.Headless) {
 			_watch = new RunsWatch(AppPaths.Runs, Wake);
 		}
-		Footer.Text = $"Ctrl+Enter start  ·  F5 check  ·  Ctrl+D dry run  ·  Ctrl+H history  ·  Ctrl+T themes  ·  Ctrl+, settings   ·   version {AppVersion}";
+		Footer.Text = $"Ctrl+Enter start  ·  F5 check  ·  Ctrl+D dry run  ·  Ctrl+H history  ·  Ctrl+L log  ·  Ctrl+T themes  ·  Ctrl+, settings   ·   version {AppVersion}";
 		Footer.ToolTip = "Data folder: " + AppPaths.Data;
 		PreviewKeyDown += OnKeys;
 		// a mod ticked in Mod Organizer while the window was in the background: each step's last run is worked out again
@@ -94,6 +106,10 @@ public partial class MainWindow : Window
 			}
 		};
 		Theme.Applied += _vm.Repaint;
+		// the log as the player left it: shown here, or hidden with its room given to the card above
+		if (UiState.Flag("log.hidden")) {
+			ShowLogHere(false);
+		}
 	}
 
 	public void Say(string a_text) => _vm.Say(a_text, "warn");
@@ -190,31 +206,65 @@ public partial class MainWindow : Window
 		Height = Math.Min(Height, area.Height);
 	}
 
+	// the size it had last time (never for the off-screen pictures, which draw at sizes of their own)
+	void RestoreSize()
+	{
+		if (App.Headless) {
+			return;
+		}
+		if (UiState.Number("main.width") is { } w && UiState.Number("main.height") is { } h) {
+			Width = Math.Max(MinWidth, w);
+			Height = Math.Max(MinHeight, h);
+		}
+		if (UiState.Flag("main.maximized")) {
+			WindowState = WindowState.Maximized;
+		}
+	}
+
+	void KeepSize()
+	{
+		if (App.Headless) {
+			return;
+		}
+		UiState.Set("main.maximized", WindowState == WindowState.Maximized);
+		if (WindowState == WindowState.Normal) {
+			UiState.Set("main.width", ActualWidth);
+			UiState.Set("main.height", ActualHeight);
+		}
+	}
+
+	// the window's keys - from one of its panel windows too, so Ctrl+H or Ctrl+, work wherever the keyboard is
 	void OnKeys(object a_s, KeyEventArgs a_e)
 	{
-		var ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
-		if (a_e.Key == Key.Escape && Drawer.Visibility == Visibility.Visible) {
-			CloseDrawer();
-			a_e.Handled = true;
-		} else if (ctrl && a_e.Key == Key.H) {
-			ShowPanel("history");
-			a_e.Handled = true;
-		} else if (ctrl && a_e.Key == Key.M) {
-			ShowPanel("changes");
-			a_e.Handled = true;
-		} else if (ctrl && a_e.Key == Key.OemComma) {
-			ShowPanel("settings");
-			a_e.Handled = true;
-		} else if (ctrl && a_e.Key == Key.T) {
-			ShowPanel("themes");
-			a_e.Handled = true;
-		} else if (ctrl && a_e.Key == Key.F && _panel == "settings" && Drawer.Visibility == Visibility.Visible) {
-			SettingsPanel.FocusFind();
-			a_e.Handled = true;
-		} else if (ctrl && a_e.Key == Key.N && Drawer.Visibility != Visibility.Visible) {
-			NewSetup_Click(this, new RoutedEventArgs());
-			a_e.Handled = true;
+		if (!Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) {
+			return;
 		}
+		switch (a_e.Key) {
+		case Key.H:
+			ShowPanel("history");
+			break;
+		case Key.M:
+			ShowPanel("changes");
+			break;
+		case Key.OemComma:
+			ShowPanel("settings");
+			break;
+		case Key.T:
+			ShowPanel("themes");
+			break;
+		case Key.L:
+			PopLog();
+			break;
+		case Key.F when _panels.TryGetValue("settings", out var settings) && ReferenceEquals(a_s, settings):
+			SettingsPanel.FocusFind();
+			break;
+		case Key.N when ReferenceEquals(a_s, this):
+			NewSetup_Click(this, new RoutedEventArgs());
+			break;
+		default:
+			return;
+		}
+		a_e.Handled = true;
 	}
 
 	// ---------------------------------------------------------------- alerts (his pick: notification + sound on, flash off by default)
@@ -284,22 +334,140 @@ public partial class MainWindow : Window
 		}
 	}
 
-	// his rule: players may reorder, behind a warning window saying things could go wrong out of order
 	void Move(StepRow? a_row, int a_delta)
 	{
-		if (a_row == null || _vm.IsRunning) {
+		if (a_row != null) {
+			MoveTo(a_row, _vm.Steps.IndexOf(a_row) + a_delta);
+		}
+	}
+
+	// his rule: players may reorder, behind a warning window saying things could go wrong out of order - the buttons, the
+	// keys and a drag all come through here
+	void MoveTo(StepRow a_row, int a_to)
+	{
+		if (_vm.IsRunning || a_to < 0 || a_to >= _vm.Steps.Count || a_to == _vm.Steps.IndexOf(a_row)) {
 			return;
 		}
-		var warn = _vm.WarningsIfMoved(a_row, a_delta);
+		var warn = _vm.WarningsIfMovedTo(a_row, a_to);
 		if (warn.Count > 0 && !Ask.Show(this, "Out of the recommended order",
 			    "Moving this step breaks the order the tools' own instructions give. Things could go wrong if they run out of order:\n\n• " +
 			    string.Join("\n• ", warn) + "\n\nMove it anyway?", "Move anyway", "Keep the order")) {
 			return;
 		}
-		_vm.Move(a_row, a_delta);
+		_vm.MoveTo(a_row, a_to);
 		StepList.Focus();
 	}
 
+	// ---------------------------------------------------------------- a step dragged to another place
+	// His list of 2026-11-16: a step is dragged in the list to wherever the player wants it. The handlers sit on the list
+	// itself (never in its row template: WPF numbers handlers wrongly there). A press on a row's tick box, or a move shorter
+	// than Windows' own drag distance, is no drag; nothing moves while a run goes.
+	const string DragFormat = "ToolRunner.Step";
+	Point? _pressAt;
+	StepRow? _pressed;
+	StepRow? _dragging;
+	StepRow? _marked;
+
+	static T? Up<T>(DependencyObject? a_from) where T : DependencyObject
+	{
+		for (var d = a_from; d != null;
+		     d = d is System.Windows.Media.Visual or System.Windows.Media.Media3D.Visual3D ? System.Windows.Media.VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d)) {
+			if (d is T hit) {
+				return hit;
+			}
+		}
+		return null;
+	}
+
+	void StepList_Press(object a_s, MouseButtonEventArgs a_e)
+	{
+		var from = a_e.OriginalSource as DependencyObject;
+		var onControl = Up<System.Windows.Controls.Primitives.ButtonBase>(from) != null || Up<System.Windows.Controls.Primitives.ScrollBar>(from) != null;
+		_pressed = _vm.IsRunning || onControl ? null : Up<ListBoxItem>(from)?.DataContext as StepRow;
+		_pressAt = _pressed == null ? null : a_e.GetPosition(StepList);
+	}
+
+	void StepList_Release(object a_s, MouseButtonEventArgs a_e) => (_pressed, _pressAt) = (null, null);
+
+	void StepList_Drag(object a_s, MouseEventArgs a_e)
+	{
+		if (_pressed is not { } row || _pressAt is not { } at || a_e.LeftButton != MouseButtonState.Pressed) {
+			return;
+		}
+		var now = a_e.GetPosition(StepList);
+		if (Math.Abs(now.X - at.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(now.Y - at.Y) < SystemParameters.MinimumVerticalDragDistance) {
+			return;
+		}
+		(_pressed, _pressAt) = (null, null);
+		_vm.SelectedStep = row;
+		_dragging = row;
+		try {
+			// the row itself stays here (_dragging): what travels is only a mark that this is a step of this list
+			DragDrop.DoDragDrop(StepList, new DataObject(DragFormat, row.Key), DragDropEffects.Move);
+		} finally {
+			_dragging = null;
+			Mark(null, false);
+		}
+	}
+
+	// the line that shows where the dragged step would land: above or below the row under the pointer
+	void Mark(StepRow? a_row, bool a_below)
+	{
+		if (_marked != null && !ReferenceEquals(_marked, a_row)) {
+			_marked.DropAbove = _marked.DropBelow = false;
+		}
+		_marked = a_row;
+		if (a_row != null) {
+			a_row.DropAbove = !a_below;
+			a_row.DropBelow = a_below;
+		}
+	}
+
+	// the row under the pointer and whether the pointer is in its lower half; under the last row = after the last
+	(StepRow Row, bool Below)? Target(DragEventArgs a_e)
+	{
+		if (Up<ListBoxItem>(a_e.OriginalSource as DependencyObject) is { DataContext: StepRow over } item) {
+			return (over, a_e.GetPosition(item).Y > item.ActualHeight / 2);
+		}
+		return _vm.Steps.Count > 0 ? (_vm.Steps[^1], true) : null;
+	}
+
+	void StepList_DragOver(object a_s, DragEventArgs a_e)
+	{
+		a_e.Handled = true;
+		if (_dragging == null || !a_e.Data.GetDataPresent(DragFormat) || _vm.IsRunning || Target(a_e) is not { } t) {
+			a_e.Effects = DragDropEffects.None;
+			Mark(null, false);
+			return;
+		}
+		a_e.Effects = DragDropEffects.Move;
+		Mark(t.Row, t.Below);
+	}
+
+	void StepList_DragLeave(object a_s, DragEventArgs a_e) => Mark(null, false);
+
+	void StepList_Drop(object a_s, DragEventArgs a_e)
+	{
+		a_e.Handled = true;
+		var target = Target(a_e);
+		Mark(null, false);
+		if (_dragging is not { } row || !a_e.Data.GetDataPresent(DragFormat) || target is not { } t || _vm.IsRunning) {
+			return;
+		}
+		var to = DropPlace(_vm.Steps.IndexOf(row), _vm.Steps.IndexOf(t.Row), t.Below);
+		// once the drag itself has ended: the order warning is a window of its own
+		Dispatcher.BeginInvoke(DispatcherPriority.Background, () => MoveTo(row, to));
+	}
+
+	// Where a row dragged from a_from lands when it is dropped on the row at a_over (on its lower half: a_below) - its
+	// place in the list afterwards. Taking the row out first moves every row after it up by one.
+	public static int DropPlace(int a_from, int a_over, bool a_below)
+	{
+		var to = a_over + (a_below ? 1 : 0);
+		return to > a_from ? to - 1 : to;
+	}
+
+	// ---------------------------------------------------------------- the log
 	// the log grows by appending (re-setting a long text every second re-lays the whole box); kept under 200,000 characters
 	// the box's length, counted as text is added: reading LogBox.Text to measure it copies the whole box (up to 400 KB, a fresh
 	// large-object allocation) every second of a run
@@ -308,74 +476,170 @@ public partial class MainWindow : Window
 	void OnLog(string a_add, bool a_reset)
 	{
 		if (a_reset) {
-			LogBox.Clear();
 			_logChars = 0;
 		}
-		if (a_add.Length > 0) {
-			LogBox.AppendText(a_add);
-			_logChars += a_add.Length;
-			if (_logChars > 200_000) {
-				LogBox.Text = LogBox.Text[^150_000..];
-				_logChars = 150_000;
+		_logChars += a_add.Length;
+		var trim = _logChars > 200_000;
+		void Into(TextBox a_box, bool a_follow)
+		{
+			if (a_reset) {
+				a_box.Clear();
+			}
+			if (a_add.Length > 0) {
+				a_box.AppendText(a_add);
+				if (trim) {
+					a_box.Text = a_box.Text[^Math.Min(150_000, a_box.Text.Length)..];
+				}
+			}
+			if (a_follow) {
+				a_box.ScrollToEnd();
 			}
 		}
-		if (Follow.IsChecked == true) {
-			LogBox.ScrollToEnd();
+		Into(LogBox, Follow.IsChecked == true);
+		// the log's own window shows the same text
+		if (_logOut is { } outBox) {
+			Into(outBox, _followOut?.IsChecked == true);
+		}
+		if (trim) {
+			_logChars = 150_000;
 		}
 	}
 
-	// ---------------------------------------------------------------- drawers
+	bool LogHere => LogBox.Visibility == Visibility.Visible;
+
+	// The log shown in the main window, or hidden there (his list of 2026-11-16: "the progress box above should fill the
+	// space if the log box is minimized"). Hidden, its row gives its room to the card above, and that card's lists lose the
+	// heights they were held to so the log kept its room.
+	void ShowLogHere(bool a_show)
+	{
+		LogBox.Visibility = a_show ? Visibility.Visible : Visibility.Collapsed;
+		Follow.Visibility = a_show ? Visibility.Visible : Visibility.Collapsed;
+		LogHide.Content = a_show ? "Hide" : "Show";
+		LogHide.ToolTip = a_show ? "Hides the log here; the card above takes its room" : "Shows the log here again";
+		LogRow.Height = a_show ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
+		NowRow.Height = a_show ? GridLength.Auto : new GridLength(1, GridUnitType.Star);
+		SummaryScroll.MaxHeight = a_show ? 172 : double.PositiveInfinity;
+		IssuesList.MaxHeight = a_show ? 220 : 420;
+		LastScroll.MaxHeight = a_show ? 200 : 400;
+	}
+
+	void LogHide_Click(object a_s, RoutedEventArgs a_e)
+	{
+		var show = !LogHere;
+		ShowLogHere(show);
+		UiState.Set("log.hidden", !show);
+		A11y.Say(this, show ? "The log is shown." : "The log is hidden.");
+	}
+
+	void LogPop_Click(object a_s, RoutedEventArgs a_e)
+	{
+		if (_logWindow is { } open) {
+			open.Close();
+		} else {
+			PopLog();
+		}
+	}
+
+	// The log in a window of its own (his list: "popped out and expanded so users can fully read and scroll through it in a
+	// new window"): sized and moved as the player likes, on another screen too. The log hides in the main window while it is
+	// out and comes back as it was when that window closes.
+	public PanelWindow PopLog()
+	{
+		if (_logWindow is { } open) {
+			Front(open);
+			return open;
+		}
+		var w = new PanelWindow(this, "log", "LOG", 960, 640);
+		var box = new TextBox { IsReadOnly = true, IsUndoEnabled = false, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+			TextWrapping = TextWrapping.NoWrap, Text = LogBox.Text };
+		box.SetResourceReference(FontFamilyProperty, "MonoFont");
+		box.SetResourceReference(FontSizeProperty, "SizeLog");
+		box.SetResourceReference(BackgroundProperty, "Panel2");
+		box.SetResourceReference(ForegroundProperty, "Text");
+		box.SetResourceReference(BorderBrushProperty, "Line");
+		AutomationPropertiesName(box, "Run log");
+		var follow = new CheckBox { Content = "Follow", IsChecked = true, Margin = new Thickness(0, 0, 14, 0), VerticalAlignment = VerticalAlignment.Center, ToolTip = "Keeps the newest line in view" };
+		var detailed = new CheckBox { Content = "Detailed", Margin = new Thickness(0, 0, 14, 0), VerticalAlignment = VerticalAlignment.Center,
+			ToolTip = "Every line of the run, for finding a fault. Unticked: the run step by step in plain words." };
+		detailed.SetBinding(System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty, new System.Windows.Data.Binding(nameof(MainViewModel.DetailedLog)) { Source = _vm, Mode = System.Windows.Data.BindingMode.TwoWay });
+		var wrap = new CheckBox { Content = "Wrap lines", Margin = new Thickness(0, 0, 14, 0), VerticalAlignment = VerticalAlignment.Center };
+		wrap.Click += (_, _) => box.TextWrapping = wrap.IsChecked == true ? TextWrapping.Wrap : TextWrapping.NoWrap;
+		var copy = new Button { Content = "Copy all", Style = (Style)FindResource("Ghost"), ToolTip = "The whole log shown here, to the clipboard" };
+		copy.Click += (_, _) => {
+			try {
+				Clipboard.SetText(box.Text);
+				_vm.Say("The log is on the clipboard.", "good");
+			} catch (System.Runtime.InteropServices.ExternalException) {
+				_vm.Say("The clipboard is in use by another program - try again.", "warn");
+			}
+		};
+		var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+		foreach (var c in new UIElement[] { detailed, follow, wrap, copy }) {
+			bar.Children.Add(c);
+		}
+		var dock = new DockPanel();
+		DockPanel.SetDock(bar, Dock.Top);
+		dock.Children.Add(bar);
+		dock.Children.Add(box);
+		w.Body = dock;
+		_logWindow = w;
+		_logOut = box;
+		_followOut = follow;
+		_logWasHere = LogHere;
+		ShowLogHere(false);
+		LogHide.IsEnabled = false;
+		LogPop.Content = "_Bring back";
+		LogPop.ToolTip = "Closes the log's own window and shows the log here again (Ctrl+L brings that window forward)";
+		w.PreviewKeyDown += OnKeys;
+		w.Closed += (_, _) => {
+			_logWindow = null;
+			_logOut = null;
+			_followOut = null;
+			LogHide.IsEnabled = true;
+			LogPop.Content = "_Pop out";
+			LogPop.ToolTip = "The log in a window of its own: size it, move it to another screen (Ctrl+L)";
+			if (!_closingAll) {
+				ShowLogHere(_logWasHere);
+			}
+		};
+		w.Show();
+		box.ScrollToEnd();
+		return w;
+	}
+
+	// ---------------------------------------------------------------- panels, each in a window of its own
 	void History_Click(object a_s, RoutedEventArgs a_e) => ShowPanel("history");
 	void Settings_Click(object a_s, RoutedEventArgs a_e) => ShowPanel("settings");
 	void Themes_Click(object a_s, RoutedEventArgs a_e) => ShowPanel("themes");
-	void CloseDrawer_Click(object a_s, RoutedEventArgs a_e) => CloseDrawer();
-	void Shade_MouseDown(object a_s, MouseButtonEventArgs a_e) => CloseDrawer();
 
-	public void CloseDrawerNow() => CloseDrawer();
-
-	// the off-screen pictures only: the open drawer scrolled to a_y
-	public void ScrollDrawer(double a_y)
+	// every panel window closed (the off-screen pictures between two of them)
+	public void ClosePanels()
 	{
-		// the drawer's own scroller - never the one inside a text box (Settings' search box comes first in the tree)
-		static ScrollViewer? Find(DependencyObject a_d)
-		{
-			for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(a_d); ++i) {
-				var c = System.Windows.Media.VisualTreeHelper.GetChild(a_d, i);
-				if (c is System.Windows.Controls.Primitives.TextBoxBase) {
-					continue;
-				}
-				if ((c as ScrollViewer ?? Find(c)) is { } s) {
-					return s;
-				}
-			}
-			return null;
+		foreach (var w in _panels.Values.ToList()) {
+			w.Close();
 		}
-		Find(DrawerBody)?.ScrollToVerticalOffset(a_y);
+		_logWindow?.Close();
 	}
 
-	void CloseDrawer()
+	// a window the player asked for is brought forward (never for the off-screen pictures: nothing of theirs comes to the front)
+	static void Front(Window a_w)
 	{
-		if (!LeaveSettings()) {
+		if (App.Headless) {
 			return;
 		}
-		Drawer.Visibility = Shade.Visibility = Visibility.Collapsed;
-		_panel = "";
-		// the keyboard goes back where it was before the drawer opened
-		if (_beforeDrawer is UIElement { IsVisible: true, IsEnabled: true } back) {
-			back.Focus();
-		} else {
-			StepList.Focus();
+		if (a_w.WindowState == WindowState.Minimized) {
+			a_w.WindowState = WindowState.Normal;
 		}
-		_beforeDrawer = null;
+		a_w.Activate();
 	}
 
-	// what had the keyboard before a drawer opened (it gets it back when the drawer closes)
-	IInputElement? _beforeDrawer;
+	// the window a question about a panel's content belongs to: that panel's own, else this one
+	Window Over(string a_group) => _panels.TryGetValue(a_group, out var w) ? w : this;
 
 	// settings typed but not saved: asked before they are thrown away
 	bool LeaveSettings() =>
-		_panel != "settings" || !SettingsPanel.HasChanges ||
-		Ask.Show(this, "Settings not saved", "You changed settings and did not press Save. Leave without saving them?", "Leave without saving", "Keep editing");
+		!_panels.ContainsKey("settings") || !SettingsPanel.HasChanges ||
+		Ask.Show(Over("settings"), "Settings not saved", "You changed settings and did not press Save. Leave without saving them?", "Leave without saving", "Keep editing");
 
 	// the off-screen pictures only: the live view stops and a made-up run is shown (a_frame moves it on a minute a frame)
 	public void Demo(bool a_waiting, int a_frame = 0)
@@ -418,63 +682,73 @@ public partial class MainWindow : Window
 
 	public void DemoHistory(IEnumerable<HistoryRow> a_rows) => _vm.DemoHistory(a_rows);
 
-	// a_fresh: rebuild an open drawer (Save, Undo changes); otherwise pressing Settings again keeps what is typed
-	public void ShowPanel(string a_which, bool a_fresh = false)
+	// History, Settings and Themes each open in a window of their own (his list of 2026-11-16: "pop out boxes like queue is
+	// instead of stuck to the right of the app", resizable). The History window has two views, the runs and the MO2
+	// Changelog. Pressing a panel's button again brings its window forward as it is; a_fresh builds its content anew (Save,
+	// Undo changes). The main window stays usable beside them.
+	public PanelWindow ShowPanel(string a_which, bool a_fresh = false)
 	{
-		if (a_which == _panel && Drawer.Visibility == Visibility.Visible && !a_fresh) {
-			return;
+		var group = a_which == "changes" ? "history" : a_which;
+		var isNew = !_panels.TryGetValue(group, out var w);
+		if (w != null && !a_fresh && (group != "history" || a_which == _historyView)) {
+			Front(w);
+			return w;
 		}
-		if (a_which != _panel && !LeaveSettings()) {
-			return;
+		if (w == null) {
+			var (width, height) = group switch { "settings" => (900.0, 720.0), "themes" => (780.0, 700.0), _ => (780.0, 680.0) };
+			w = new PanelWindow(this, group, "", width, height);
+			_panels[group] = w;
+			w.PreviewKeyDown += OnKeys;
+			w.Closing += (_, e) => {
+				if (group == "settings" && !_closingAll && !LeaveSettings()) {
+					e.Cancel = true;
+				}
+			};
+			w.Closed += (_, _) => {
+				_panels.Remove(group);
+				if (group == "settings") {
+					SettingsPanel.Closed();
+				}
+			};
 		}
-		_panel = a_which;
-		DrawerTitle.Text = a_which switch { "history" => "PAST RUNS", "changes" => "WHAT MO2 CHANGED", "themes" => "THEMES", _ => "SETTINGS" };
-		DrawerBody.Content = a_which switch {
+		if (group == "history") {
+			_historyView = a_which;
+		}
+		w.Head(a_which switch { "history" => "HISTORY", "changes" => "MO2 CHANGELOG", "themes" => "THEMES", _ => "SETTINGS" });
+		w.Body = a_which switch {
 			"history" => WithSwitch(HistoryPanel(), a_which),
 			"changes" => WithSwitch(ChangesPanel(null), a_which),
 			"themes" => ThemeGallery.Build(this, _vm),
 			_ => SettingsPanel.Build(this, _vm),
 		};
-		if (DrawerBody.Content is DependencyObject drawn) {
+		if (w.Body is DependencyObject drawn) {
 			WindowWords.Tree(drawn);
 		}
-		var opening = Drawer.Visibility != Visibility.Visible;
-		if (opening) {
-			_beforeDrawer = Keyboard.FocusedElement;
+		if (isNew) {
+			w.Show();
+			A11y.Say(w, "Opened: " + w.Title + ". Escape closes it.");
+		} else {
+			Front(w);
 		}
-		System.Windows.Automation.AutomationProperties.SetName(Drawer, a_which switch { "history" => "Past runs", "changes" => "What MO2 changed", "themes" => "Themes", _ => "Settings" });
-		Drawer.Visibility = Shade.Visibility = Visibility.Visible;
-		// the keyboard moves into the drawer (Tab then stays inside it - its own cycle - until Esc or Close), and a screen reader
-		// hears which one opened
-		Dispatcher.BeginInvoke(DispatcherPriority.Input, () => {
-			if (Drawer.IsKeyboardFocusWithin) {
-				return;
-			}
-			// Settings: its search box; elsewhere the first thing in the drawer's own content, else its Close button
-			if (a_which == "settings") {
-				SettingsPanel.FocusFind();
-			}
-			if (!Drawer.IsKeyboardFocusWithin && !DrawerBody.MoveFocus(new TraversalRequest(FocusNavigationDirection.First))) {
-				Drawer.MoveFocus(new TraversalRequest(FocusNavigationDirection.First));
-			}
-		});
-		A11y.Say(this, (opening ? "Opened: " : "") + System.Windows.Automation.AutomationProperties.GetName(Drawer) + ". Escape closes it.");
+		w.TakeKeyboard(a_which == "settings" ? SettingsPanel.FocusFind : null);
+		return w;
 	}
 
-	// the off-screen pictures only: the changes view filled with made-up rows (nothing read or written)
-	public void ShowChangesDemo(IReadOnlyList<Mo2Changes.Change> a_rows)
+	// the off-screen pictures only: the changelog view filled with made-up rows (nothing read or written)
+	public PanelWindow ShowChangesDemo(IReadOnlyList<Mo2Changes.Change> a_rows)
 	{
-		ShowPanel("history");
-		_panel = "changes";
-		DrawerTitle.Text = "WHAT MO2 CHANGED";
-		DrawerBody.Content = WithSwitch(ChangesPanel(a_rows), "changes");
+		var w = ShowPanel("history");
+		_historyView = "changes";
+		w.Head("MO2 CHANGELOG");
+		w.Body = WithSwitch(ChangesPanel(a_rows), "changes");
+		return w;
 	}
 
-	// the history drawer's two views: the past runs and their logs, and what Mod Organizer changed
+	// the history window's two views: the runs with their logs, and what changed in Mod Organizer
 	DockPanel WithSwitch(FrameworkElement a_body, string a_which)
 	{
 		var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 12) };
-		foreach (var (key, text, tip) in new[] { ("history", "Past runs", "Ctrl+H"), ("changes", "What MO2 changed", "Ctrl+M") }) {
+		foreach (var (key, text, tip) in new[] { ("history", "Runs", "Ctrl+H"), ("changes", "MO2 Changelog", "Ctrl+M") }) {
 			var b = new Button { Content = text, Style = (Style)FindResource(key == a_which ? "Primary" : "Ghost"), Margin = new Thickness(0, 0, 8, 0), ToolTip = tip };
 			b.Click += (_, _) => ShowPanel(key);
 			bar.Children.Add(b);
@@ -504,7 +778,7 @@ public partial class MainWindow : Window
 		tools.Children.Add(look);
 		var list = new ListBox { Background = Brushes2.Get("Panel2"), BorderBrush = Brushes2.Get("Line") };
 		ScrollViewer.SetHorizontalScrollBarVisibility(list, ScrollBarVisibility.Disabled);
-		AutomationPropertiesName(list, "What MO2 changed");
+		AutomationPropertiesName(list, "MO2 Changelog");
 		list.ItemTemplate = (DataTemplate)System.Windows.Markup.XamlReader.Parse(
 			"<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><StackPanel Margin='2,4'>" +
 			"<TextBlock TextWrapping='Wrap'><Run Text='{Binding Mod, Mode=OneWay}' FontWeight='SemiBold'/><Run Text='   '/><Run Text='{Binding What, Mode=OneWay}'/></TextBlock>" +
@@ -574,7 +848,7 @@ public partial class MainWindow : Window
 		list.SetResourceReference(BorderBrushProperty, "Line");
 		// a long verdict wraps instead of running off the right edge
 		ScrollViewer.SetHorizontalScrollBarVisibility(list, ScrollBarVisibility.Disabled);
-		AutomationPropertiesName(list, "Past runs");
+		AutomationPropertiesName(list, "Runs");
 		list.ItemTemplate = (DataTemplate)System.Windows.Markup.XamlReader.Parse(
 			"<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><StackPanel Margin='2,4'>" +
 			"<TextBlock><Run Text='{Binding When, Mode=OneWay}' FontWeight='SemiBold'/><Run Text='   '/><Run Text='{Binding Setup, Mode=OneWay}'/><Run Text='   '/><Run Text='{Binding Took, Mode=OneWay}'/></TextBlock>" +
@@ -582,16 +856,16 @@ public partial class MainWindow : Window
 		var log = new TextBox { IsReadOnly = true, FontFamily = (System.Windows.Media.FontFamily)FindResource("MonoFont"), FontSize = (double)FindResource("SizeLog"), Background = Brushes2.Get("Panel2"),
 			Foreground = Brushes2.Get("Text"), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
 		AutomationPropertiesName(log, "The run's log");
-		var open = new Button { Content = "Open its folder", Style = (Style)FindResource("Ghost"), Margin = new Thickness(0, 0, 8, 0) };
+		var open = new Button { Content = "Open folder", Style = (Style)FindResource("Ghost"), Margin = new Thickness(0, 0, 8, 0), ToolTip = "This run's folder: its logs and its record" };
 		// his checklist 482: one zip for a bug report, names masked; made on the player's press, never sent anywhere
-		var report = new Button { Content = "Make a bug report ...", Style = (Style)FindResource("Ghost"),
+		var report = new Button { Content = "Bug report ...", Style = (Style)FindResource("Ghost"),
 			ToolTip = "Puts this run's logs, its setup and the versions of everything into one zip, with your Windows name and PC name masked - for a GitHub issue" };
 		report.Click += async (_, _) => {
 			var row = list.SelectedItem as HistoryRow;
 			report.IsEnabled = false;
 			try {
 				var zip = await Task.Run(() => BugReport.Make(AppPaths.Data, row == null ? null : Journal.Load(row.Folder), Path.Combine(AppPaths.Data, "Bug reports"), AppVersion));
-				if (Ask.Show(this, "Bug report made", $"It is ready: {Path.GetFileName(zip)}\n\nIt holds {(row == null ? "the program's own notes" : "this run's logs and record")}, the setup it ran and the " +
+				if (Ask.Show(Over("history"), "Bug report made", $"It is ready: {Path.GetFileName(zip)}\n\nIt holds {(row == null ? "the program's own notes" : "this run's logs and record")}, the setup it ran and the " +
 				    "versions of Windows, Mod Organizer, the game and each tool. Your Windows user name and your PC's name are masked. Nothing was sent anywhere.\n\n" +
 				    "To report the bug: open an issue on the program's GitHub page, say what happened and what you expected, and attach this zip.",
 				    "Show the zip and open the issue page", "Close")) {
@@ -624,7 +898,7 @@ public partial class MainWindow : Window
 					_vm.Say("It cannot be undone: " + e.Message, "bad");
 					return;
 				}
-				if (!Ask.Show(this, "Undo this run?", "Each output goes back to what it was before this run, and your mod and plugin lists too. Mod Organizer closes for it. The mods you " +
+				if (!Ask.Show(Over("history"), "Undo this run?", "Each output goes back to what it was before this run, and your mod and plugin lists too. Mod Organizer closes for it. The mods you " +
 					"ticked, unticked or installed since stay as you left them; a change of order goes back with the lists. This run's outputs stay in its backup.", "Undo the run", "Keep it")) {
 					return;
 				}
@@ -779,6 +1053,11 @@ public partial class MainWindow : Window
 			}
 			a_e.Cancel = true;
 		}
+		// it really closes: its panel windows go with it without a question of their own, and its size is kept
+		if (!a_e.Cancel) {
+			_closingAll = true;
+			KeepSize();
+		}
 		base.OnClosing(a_e);
 	}
 
@@ -832,7 +1111,7 @@ public static class Ask
 	{
 		var w = new Window {
 			Owner = a_owner, Title = a_title, Width = 560, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner,
-			Background = Brushes2.Get("Panel"), Foreground = Brushes2.Get("Text"), ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false,
+			Background = Brushes2.Get("Panel"), Foreground = Brushes2.Get("Text"), ResizeMode = ResizeMode.CanResize, ShowInTaskbar = false, MinWidth = 380,
 			FontFamily = (System.Windows.Media.FontFamily)a_owner.FindResource("UiFont"), FontSize = (double)a_owner.FindResource("SizeBody"),
 		};
 		var yes = new Button { Content = a_yes, Style = (Style)a_owner.FindResource("Primary"), Margin = new Thickness(0, 0, a_no == null ? 0 : 10, 0) };
@@ -851,17 +1130,26 @@ public static class Ask
 		if (a_no != null) {
 			buttons.Children.Add(no);
 		}
-		var body = new StackPanel { Margin = new Thickness(22) };
-		body.Children.Add(new TextBlock { Text = a_title, Style = (Style)a_owner.FindResource("H1"), Margin = new Thickness(0, 0, 0, 12), FontSize = (double)a_owner.FindResource("SizeHeading1") });
+		// its heading on top, its buttons at the bottom, its text in between taking whatever room the box is given
+		var body = new DockPanel { Margin = new Thickness(22) };
+		var head = new TextBlock { Text = a_title, Style = (Style)a_owner.FindResource("H1"), Margin = new Thickness(0, 0, 0, 12), FontSize = (double)a_owner.FindResource("SizeHeading1") };
+		DockPanel.SetDock(head, Dock.Top);
+		DockPanel.SetDock(buttons, Dock.Bottom);
+		body.Children.Add(head);
+		body.Children.Add(buttons);
 		// a long text (a run's preview) scrolls inside the box instead of growing past the screen
 		var scroll = new ScrollViewer { MaxHeight = 460, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Focusable = true,
 			Content = new TextBlock { Text = a_text, TextWrapping = TextWrapping.Wrap } };
 		System.Windows.Automation.AutomationProperties.SetName(scroll, a_title);
 		body.Children.Add(scroll);
-		body.Children.Add(buttons);
 		w.Content = new Border { Background = Brushes2.Get("Panel"), Child = body };
 		// the safe answer has the keyboard; a screen reader hears the whole question, not only the button
 		w.Loaded += (_, _) => {
+			// it opened as tall as its text needs (a long one held to the scroller's limit); from here its size is the
+			// player's to change, and the text follows the box
+			w.MinHeight = Math.Min(w.ActualHeight, 200);
+			w.SizeToContent = SizeToContent.Manual;
+			scroll.MaxHeight = double.PositiveInfinity;
 			(a_no == null ? yes : no).Focus();
 			A11y.Say(w, a_title + ". " + a_text, true);
 		};

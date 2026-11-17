@@ -577,7 +577,7 @@ public static class Runner
 		try {
 			var rows = Mo2Changes.Record(a_mo2, a_dataDir, a_who);
 			if (rows.Count > 0) {
-				a_log.Detail($"{rows.Count} change(s) in Mod Organizer {(a_who == Mo2Changes.Outside ? "made outside the runner since its last look" : "by this run")} - History > What MO2 changed");
+				a_log.Detail($"{rows.Count} change(s) in Mod Organizer {(a_who == Mo2Changes.Outside ? "made outside the runner since its last look" : "by this run")} - History > MO2 Changelog");
 			}
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) {
 			a_log.Warn("could not note what Mod Organizer changed: " + e.Message);

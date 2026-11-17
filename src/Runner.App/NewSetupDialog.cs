@@ -12,7 +12,7 @@ public static class NewSetupDialog
 		string? made = null;
 		var w = new Window {
 			Owner = a_owner, Title = "New setup", Width = 640, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner,
-			Background = Brushes2.Get("Panel"), Foreground = Brushes2.Get("Text"), ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false,
+			Background = Brushes2.Get("Panel"), Foreground = Brushes2.Get("Text"), ResizeMode = ResizeMode.CanResize, MinWidth = 480, MinHeight = 320, ShowInTaskbar = false,
 		};
 		var stack = new StackPanel { Margin = new Thickness(22) };
 		stack.Children.Add(new TextBlock { Text = "NEW SETUP", Style = (Style)a_owner.FindResource("H1"), Margin = new Thickness(0, 0, 0, 6), FontSize = (double)a_owner.FindResource("SizeHeading1") });
@@ -219,7 +219,8 @@ public static class NewSetupDialog
 		bar.Children.Add(create);
 		bar.Children.Add(cancel);
 		stack.Children.Add(bar);
-		w.Content = stack;
+		// the box can be sized; its content scrolls when it is made smaller than it needs
+		w.Content = new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
 		w.ShowDialog();
 		return made;
 	}

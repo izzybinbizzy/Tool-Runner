@@ -5649,6 +5649,38 @@ public static class Program
 		Equal(0, ToolRunner.App.SettingsPanel.StepsWith(steps, " ", -1).Count, "no word, no steps");
 	}
 
+	// his list of 2026-11-16: a step dragged to any place, a check that also looks for updates, windows that keep their size
+	static void T_TheWindowListOfNovember()
+	{
+		// where a dragged row lands: its place in the list afterwards (taking it out first moves the rows after it up by one)
+		Equal(0, ToolRunner.App.MainWindow.DropPlace(3, 0, false), "on the first row's upper half: it becomes the first");
+		Equal(1, ToolRunner.App.MainWindow.DropPlace(3, 0, true), "on its lower half: the second");
+		Equal(3, ToolRunner.App.MainWindow.DropPlace(1, 3, true), "from above, under the last of four rows: the last");
+		Equal(2, ToolRunner.App.MainWindow.DropPlace(1, 3, false), "from above, on a row's upper half: right before that row");
+		Equal(1, ToolRunner.App.MainWindow.DropPlace(1, 1, true), "on its own lower half: it stays");
+		Equal(1, ToolRunner.App.MainWindow.DropPlace(1, 1, false), "on its own upper half: it stays");
+		Equal(1, ToolRunner.App.MainWindow.DropPlace(1, 0, true), "right under the row above it: it stays");
+		Equal(1, ToolRunner.App.MainWindow.DropPlace(1, 2, false), "right above the row below it: it stays");
+
+		// what the check says about the tools' versions
+		var newer = new ToolUpdates.Result("synthesis", "Synthesis", "0.35", "0.36", true, "https://example.invalid/synthesis", null);
+		var same = new ToolUpdates.Result("dyndolod", "TexGen / DynDOLOD", "3.0", "3.0", false, "https://example.invalid/dyndolod", null, 2);
+		var unasked = new ToolUpdates.Result("pandora", "Pandora", "?", "", false, "https://example.invalid/pandora", "could not ask its page: offline");
+		var lines = ToolRunner.App.MainViewModel.UpdateLines([newer, same]);
+		Check(lines.Count == 1 && lines[0].Contains("Synthesis 0.36 is out (you have 0.35)", StringComparison.Ordinal) && lines[0].Contains("by hand", StringComparison.Ordinal),
+			"a newer tool is one line with both versions and how it is installed: " + string.Join(" | ", lines));
+		Equal("Updates: every tool is up to date.", string.Join(" | ", ToolRunner.App.MainViewModel.UpdateLines([same])), "nothing newer: one line for all");
+		Check(string.Join(" | ", ToolRunner.App.MainViewModel.UpdateLines([same, unasked])).Contains("1 tool(s) could not be checked", StringComparison.Ordinal), "a tool that could not be asked is never counted as up to date");
+		Equal(0, ToolRunner.App.MainViewModel.UpdateLines([]).Count, "a setup with no tool to ask: nothing said");
+
+		// a remembered size is held to what the screen has room for now
+		Equal(900.0, ToolRunner.App.UiState.Fit(900, 780, 420, 1920), "a kept size that fits is used");
+		Equal(780.0, ToolRunner.App.UiState.Fit(null, 780, 420, 1920), "none kept: the usual one");
+		Equal(1280.0, ToolRunner.App.UiState.Fit(2400, 780, 420, 1280), "kept on a bigger screen: held to this one");
+		Equal(420.0, ToolRunner.App.UiState.Fit(100, 780, 420, 1920), "never under the least it needs");
+		Equal(300.0, ToolRunner.App.UiState.Fit(100, 780, 420, 300), "unless the screen itself is smaller");
+	}
+
 	// a tool that never appeared keeps Mod Organizer's whole log since the request: every line after the place the request was made,
 	// the whole log when it was started again meanwhile, the last lines only when there are many
 	static void T_AFailedStartKeepsMo2sWholeLog()

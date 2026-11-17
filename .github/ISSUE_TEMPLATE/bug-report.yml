@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for reporting it. The fastest way to an answer: in the program, open History, pick the run, press "Make a bug report", and attach that zip below. It holds the run's logs, its setup and the versions of everything, with your Windows name and PC name masked. Nothing is ever sent by the program itself.
+        Thank you for reporting it. The fastest way to an answer: in the program, open History, pick the run, press "Bug report", and attach that zip below. It holds the run's logs, its setup and the versions of everything, with your Windows name and PC name masked. Nothing is ever sent by the program itself.
   - type: textarea
     id: what
     attributes:
@@ -24,7 +24,7 @@ body:
     id: zip
     attributes:
       label: The bug report zip or log
-      description: Drag the zip from "Make a bug report" here. Without it, paste the run's simple log (steps.txt) instead. If the program never got as far as a run, say so here.
+      description: Drag the zip from "Bug report" here. Without it, paste the run's simple log (steps.txt) instead. If the program never got as far as a run, say so here.
     validations:
       required: true
   - type: dropdown
