@@ -169,6 +169,12 @@ public sealed class StartedSet : IEnumerable<int>
 				foreach (var (pid, at) in Children(all, last, StartOf, beforeLast)) {
 					found.TryAdd(pid, at);
 				}
+				// A row under an ended parent whose process started at or after this reading was not taken (it may be a real
+				// child that young - the clock has ticks, and both readings can fall in one). Its parent is kept for the
+				// next look, whose later reading can take it; retired now, that child would never be found again.
+				if (last.Any(r => ended.Any(e => e.Key == r.Parent) && StartOf(r.Pid) is { } began && began >= beforeLast)) {
+					ended.Clear();
+				}
 			}
 		}
 		lock (_gate) {

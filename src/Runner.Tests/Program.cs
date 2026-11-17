@@ -1823,6 +1823,17 @@ public static class Program
 		// Windows would not give its list: nothing is learned from that look, and nothing forgotten
 		set.Sweep(() => null, Clock);
 		Equal("13", string.Join(",", set.Owned().Order()), "a look Windows would not answer changes nothing");
+		// The clock has ticks: both readings of one look can fall in the tick a child started in. That child is not taken
+		// at that look - and its ended parent is NOT retired over it, so the next look, with a later reading, finds it.
+		var tickWorld = new Dictionary<int, DateTime?> { [20] = t, [21] = t.AddSeconds(30) };
+		var tickSet = new StartedSet(p => tickWorld.GetValueOrDefault(p));
+		tickSet.Add(20);
+		tickWorld.Remove(20);
+		var sameTick = t.AddSeconds(30);
+		tickSet.Sweep(() => [(21, 20)], () => sameTick);
+		Equal("", string.Join(",", tickSet.Owned().Order()), "a child that started in the very tick of the reading is not taken yet");
+		tickSet.Sweep(() => [(21, 20)], () => sameTick.AddSeconds(3));
+		Equal("21", string.Join(",", tickSet.Owned().Order()), "its parent was kept for it: the next look, a tick later, puts it on record");
 		Check(Procs.StartClock() <= DateTime.UtcNow.AddSeconds(1) && Procs.StartClock() > DateTime.UtcNow.AddMinutes(-1), "the clock process starts are stamped with is the PC's own");
 		using (var self = Process.GetCurrentProcess()) {
 			Check(self.StartTime.ToUniversalTime() < Procs.StartClock(), "and a process that runs started before a reading of it");

@@ -191,11 +191,14 @@ public sealed class BoxWatch : IDisposable
 				waiting.Add(words + $" - answer it within {Wait.TotalSeconds:0} seconds, or the step stops here");
 				continue;
 			}
-			k.Blocked = true;
-			_blocked = v.Move == BoxMove.Stop ? v.Note :
+			// on record as blocked only once the game's end is under way: a look cut short before that (no memory for the line
+			// below) leaves the box as it was, and the next look does this again
+			var why = v.Move == BoxMove.Stop ? v.Note :
 				$"the game's box did not close after its answer was pressed {PressTries} times - {KnownBoxes.Describe(b.Box)}. Answer it in the game once, then run again from this step";
-			_log.Warn(_blocked);
+			_blocked = why;
+			_log.Warn(why);
 			Do(() => _endGame?.Invoke());
+			k.Blocked = true;
 		}
 		var show = string.Join("; ", waiting.Distinct(StringComparer.Ordinal));
 		// (never after the run let go of the watch: a look that was stuck in a hung window would write into a finished run's record)

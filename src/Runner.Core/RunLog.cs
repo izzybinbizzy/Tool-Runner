@@ -104,8 +104,8 @@ public sealed class RunLog : IDisposable
 					// (the log file has every line) and still reaches its put-back
 					lock (_gate) {
 						_closing = true;
+						// (nothing here may ask for memory: Clear lets the lines go and allocates nothing)
 						_lines.Clear();
-						_lines.TrimExcess();
 					}
 					return;
 				} catch (Exception e) when (e is not OutOfMemoryException) {
