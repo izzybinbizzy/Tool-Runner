@@ -90,6 +90,9 @@ public sealed class BoxWatch : IDisposable
 		while (!Gone) {
 			try {
 				LookOnce(DateTime.UtcNow);
+			} catch (OutOfMemoryException) {
+				// no memory for this look (nor for a line about it): it is made again at the next beat. Left to leave this thread
+				// it would end the whole program, and a run that ends that way never puts the profile back
 			} catch (Exception e) when (e is not OutOfMemoryException) {
 				// a look that could not be made is made again; the watch is never what ends a run. Said once per kind of fault
 				if (e.Message != _lastFault && !Gone) {

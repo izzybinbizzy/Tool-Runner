@@ -347,7 +347,8 @@ public static class SettingsPanel
 		Choice(stack, apply, "Faster Archives' offer during a run (it closes the game to ask about repacking)", work, FasterArchives.SettingName,
 			[("ask", "wait for my choice in its window"), ("skip", "pass it over during the run - it asks again when I start the game")]);
 		Choice(stack, apply, "Cached Recursive Directory Walk with its question switched off", work, Crdw.SettingName,
-			[("leave", "only tell me its cache will be old"), ("refresh", "make a new cache at the run's game starts, then put its setting back")]);
+			[("changed", "make a new cache when the run changed the game's files, then put its setting back"), ("always", "make a new cache at every game start of the run, then put its setting back"),
+				("never", "leave it alone - only tell me its cache will be old")]);
 		Field(stack, apply, "Commands before a run (one per line, each must succeed)", work, "beforeRun", JsonValueKind.Array);
 		Field(stack, apply, "Commands after a run (one per line)", work, "afterRun", JsonValueKind.Array);
 		// History > What MO2 changed: a profile only tests use, or test mods, can be left out of the view (nothing is lost)

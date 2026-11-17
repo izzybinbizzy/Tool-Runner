@@ -478,7 +478,7 @@ public static class Runner
 			});
 			// a mod that keeps its own list of the game's files must make it again after what this run built (GameMods.cs)
 			Chore("the note for Cached Recursive Directory Walk", () => {
-				if (Crdw.AfterRun(setup, Crdw.Read(profile), journal.Built.Count > 0, playsave) is { } note) {
+				if (Crdw.AfterRun(Crdw.Read(profile), journal.Built.Count > 0, journal.FilesChanged == 0, playsave) is { } note) {
 					journal.Notes.Add(note);
 					log.Warn(note);
 					log.Simple("Note: " + note);
@@ -641,6 +641,10 @@ public static class Runner
 		}
 		a_ctx.Control.Close(null, a_ctx.Cancel);
 		a_ctx.Profile.SetMods([], off.Concat(deps.Keys), a_ctx.Log);
+		// the game now finds other files than a list made before the run names
+		if (off.Count + deps.Count > 0) {
+			++a_ctx.Journal.FilesChanged;
+		}
 	}
 
 	// the ticked mods a run switches off before its first tool, each with why (the run itself and its preview use this one list)
@@ -821,6 +825,7 @@ public static class Runner
 			r.Note = Plain(e);
 			r.Ended = DateTime.Now;
 			r.Activity = "";
+			Crdw.StepEnded(a_ctx, false, Crdw.Writes(a_s.Key));
 			a_ctx.Journal.TrySave();
 			a_ctx.Log.Error($"{StepCatalog.Name(a_s.Key)} {(stopped ? "STOPPED" : "FAILED")}: {r.Note}");
 			var why = stopped ? null : ToolErrors.Explain(a_s.Key, r.Note);
@@ -861,6 +866,7 @@ public static class Runner
 		r.Ended = DateTime.Now;
 		r.Activity = "";
 		r.Progress = null;
+		Crdw.StepEnded(a_ctx, true, Crdw.Writes(a_s.Key));
 		a_ctx.Journal.Save();
 		Measure(a_ctx, r);
 		a_ctx.Log.Say($"=== {StepCatalog.Name(a_s.Key)} done in {sw.Elapsed.TotalMinutes:0.0} min ===");
