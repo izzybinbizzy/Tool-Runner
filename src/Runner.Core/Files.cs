@@ -67,6 +67,22 @@ public static partial class Files
 		}
 	}
 
+	// One file put in another's place whole, as WriteAtomic does it, for a file too big to hold in memory: copied beside the
+	// target (its time and marks come with it), then swapped in. A crash leaves the old file or the new one.
+	public static void CopyAtomic(string a_src, string a_dst)
+	{
+		var dir = Path.GetDirectoryName(Path.GetFullPath(a_dst)) ?? throw new ArgumentException("no folder: " + a_dst);
+		Directory.CreateDirectory(dir);
+		var tmp = Path.Combine(dir, "." + Path.GetFileName(a_dst) + "." + Environment.ProcessId + ".tmp");
+		try {
+			Retry(() => File.Copy(a_src, tmp, true));
+			Swap(tmp, a_dst);
+		} catch {
+			TryDelete(tmp);
+			throw;
+		}
+	}
+
 	public static void WriteAtomic(string a_path, string a_text, Encoding? a_encoding = null) =>
 		WriteAtomic(a_path, (a_encoding ?? new UTF8Encoding(false)).GetBytes(a_text));
 

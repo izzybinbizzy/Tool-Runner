@@ -165,6 +165,17 @@ public sealed class DiskForecast
 				Add(dir, new Part(b.Step, $"the new {b.Mod}, beside the old one in the run's backup", grown, surely));
 			}
 		}
+		// a tool let into the player's own mods: a copy of every file it can change goes into the run's backup before it starts,
+		// and without that room the step does not start its tool at all
+		if (backup != "") {
+			try {
+				foreach (var (step, mod, bytes) in Steps.RewriteKit.Copies(a_mo2, a_todo).Where(c => c.Bytes > 0)) {
+					Add(backup, new Part(step, $"a copy of {mod}'s files, kept before {StepCatalog.Name(step)} changes them", bytes, true));
+				}
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+				f.NotMeasured.Add($"the mods a tool is to rewrite could not be measured ({e.Message})");
+			}
+		}
 		if (backup != "" && oldOutputs > 0 && Setup.Bool(a_setup.Root, "zipBackups") != false) {
 			Add(backup, new Part("", "packing the old outputs into one file at the end", oldOutputs, false));
 		}

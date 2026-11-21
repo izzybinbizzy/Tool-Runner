@@ -1071,6 +1071,9 @@ public static class Runner
 			}
 			PutBackParked(a_ctx, a_s.Key);
 			StepKit.PutFilesBack(a_ctx);
+			// a tool cut off inside a mod of the player's: its files back as they were (what will not go back yet is tried again
+			// at the put-back, and said there)
+			Rewrites.PutBack(a_ctx, a_s.Key);
 			a_ctx.QuietFiles.Clear();
 			// overwrite could not even be listed before the step: nothing in it can be told as the step's, so nothing is moved
 			if (overwriteBefore != null) {
@@ -1259,6 +1262,8 @@ public static class Runner
 		}
 		var notBack = PutBackParked(a_ctx, null);
 		var filesNotBack = StepKit.PutFilesBack(a_ctx);
+		// a mod of the player's that a tool was cut off in: named with the rest, and Restore stays on offer for it too
+		filesNotBack.AddRange(Rewrites.PutBack(a_ctx, null));
 		if (notBack.Count > 0 || filesNotBack.Count > 0) {
 			// a mod whose old output could not come back is kept OFF (never ticked half empty, PutBack) and Restore stays on offer
 			j.NeedsRestore = true;
@@ -1579,6 +1584,7 @@ public static class Runner
 			control.Close();
 			notBack = PutBackParked(ctx, null);
 			filesNotBack = StepKit.PutFilesBack(ctx);
+			filesNotBack.AddRange(Rewrites.PutBack(ctx, null));
 			PutBack(ctx, a_j.LoadSnapshot());
 		} catch (Exception e) {
 			log.Error("restore failed: " + Plain(e));
@@ -1706,6 +1712,9 @@ public static class Runner
 					log.Detail($"{Path.GetFileName(k.Path)}: taken out again (this run made it)");
 				}
 			}
+			// the mods of the player's own that a step let a tool rewrite files in: each changed file as it was before the run, what
+			// the tool made new moved out
+			Rewrites.Undo(a_j, log, aside);
 			// only what had no old output: one that had came back above, and pressed again it holds that old output
 			foreach (var m in a_j.Built.Except(parkedMods.Select(p => p.Mod), StringComparer.OrdinalIgnoreCase).Where(m => Directory.Exists(mo2.ModDir(m)) && !inPlace.Any(k => Files.IsUnder(k.Path, mo2.ModDir(m))))) {
 				RunUndo.SetAside(mo2.ModDir(m), aside, m);

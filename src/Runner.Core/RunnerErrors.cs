@@ -125,6 +125,10 @@ public static class RunnerErrors
 			"Press F5 in Mod Organizer so it lists that mod again (or put the mod back in its mods folder), then start the run again the way you started it - the step stays set to use its old output."),
 		E("TR-312", "is not in this profile's mod list", "A mod this step names is not in this profile's mod list.",
 			"Install the mod or correct its name: in Mod Organizer, or in Settings > Steps where the step names it."),
+		E("TR-318", "no mod is named for it to work on", "A step that lets a tool rewrite files in your mods has no mod named, and it never picks one for you.",
+			"Open Settings > Steps, pick the step, and list the mods it may work on (one per line) - or untick the step."),
+		E("TR-319", "is not a mod of this Mod Organizer|is made by this setup's own steps|holds the tool itself", "A mod named for a tool to rewrite is not in Mod Organizer's mods folder, is one this setup remakes at every run, or is the tool's own.",
+			"Open Settings > Steps and correct the list: each line the exact name of one of your own mods, as Mod Organizer's left pane shows it."),
 
 		// ---- a run that stopped part way
 		E("TR-401", "could NOT be put back|the profile is back except|put back except|could not put the profile back", "The run ended, but a file was held by another program, so part of your profile is not back yet.",
@@ -160,6 +164,14 @@ public static class RunnerErrors
 			"Choose in its window (Repack now, or Don't offer these again) and run again from this step - or set Settings > Game steps > Faster Archives' repack offer to skip it during the run, and it asks the next time you start the game yourself."),
 		E("TR-413", "its learned settings name a file outside their folder|" + ToolSettings.SavedNothing, "The settings kept from the tool's own window are missing or damaged.",
 			"Set the tool up again: Tools (at the top of the window) > Set up again - or Settings > Steps > Learn its settings -, change something in the tool's window, save, and close it."),
+		E("TR-417", "not enough room to keep a copy of", "A tool is about to rewrite files in one of your mods, and the run's backup has no room for a copy of them first. The tool was not started.",
+			"Free room on the disk the backups are on, or remove old run backups (Settings > Backups > Keep only the newest now), or take that mod off the step's list; then run again from this step."),
+		E("TR-418", "LOOT wrote no report|LOOT's report does not read", "xEdit cleaning asks LOOT which plugins are dirty, and LOOT gave no answer.",
+			"Press Sort in Mod Organizer itself to read LOOT's own message (a rule that goes in a circle, no masterlist yet while offline), put that right, then run again from this step - or untick the xEdit cleaning step."),
+		E("TR-419", "wrote no cleaned file in its place|ended before it had finished cleaning", "xEdit did not finish cleaning a plugin. Every plugin of this step was put back as it was.",
+			"Open the log the message names for xEdit's own words. A plugin xEdit cannot clean goes on the step's \"Plugins never cleaned\" list (Settings > Steps); then run again from this step."),
+		E("TR-420", "SSE NIF Optimizer wrote no log for|SSE NIF Optimizer ended before it had finished|SSE NIF Optimizer could not save", "SSE NIF Optimizer did not finish a mod. That mod's meshes were put back as they were; the mods it finished before stay as it left them.",
+			"Open the log the message names for the meshes it failed on. Take that mod off the step's list, or run the tool on it in its own window (switch \"Run by itself\" off); then run again from this step."),
 
 		// ---- putting back and undoing
 		E("TR-501", "that run is still going|a run or another put-back is going|a run or a put-back is going", "A run or a put-back is still at work.",

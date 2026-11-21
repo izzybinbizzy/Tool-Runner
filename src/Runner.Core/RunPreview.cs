@@ -17,6 +17,8 @@ public sealed class RunPreview
 	public List<(string Mod, string Why)> OffForTheRun { get; } = [];
 	public List<string> ReplacedForGood { get; } = [];
 	public List<string> StartsTheGame { get; } = [];
+	// the steps that let a tool rewrite files inside the player's own mods, each with what it is let into
+	public List<(string Tool, string Where)> RewritesIn { get; } = [];
 	public bool ClosesMo2 { get; private init; }
 	// the ticked save steps a new game leaves out
 	public List<string> LeftOutForNewGame { get; } = [];
@@ -46,6 +48,12 @@ public sealed class RunPreview
 			p.Steps.Add(new StepLine(s.Key, StepCatalog.Name(s.Key), ss.OutputMod, ss.OutputMod is { } om && !st.ContainsKey(om)));
 			if (s.Key is "shaders" or "cleansave" or "playsave" || (s.Key == "grass" && ss.Str("by") == "game")) {
 				p.StartsTheGame.Add(StepCatalog.Name(s.Key));
+			}
+			if (s.Key == XEditCleanStep.StepKey) {
+				p.RewritesIn.Add((StepCatalog.Name(s.Key), "the plugins LOOT calls dirty, in whichever of your mods they are" +
+					(ss.Bool("clean_game_plugins", false) ? " (the game's own as copies in its output mod)" : " (the game's own are left alone)")));
+			} else if (StepRegistry.For(s.Key) is RewriteToolStep) {
+				p.RewritesIn.Add((StepCatalog.Name(s.Key), string.Join(", ", ss.List("mods"))));
 			}
 		}
 		// the same list the run switches off (Runner.OutputsOff), only when a step past the shader caches runs
@@ -94,6 +102,11 @@ public sealed class RunPreview
 		if (Steps.Any(s => s.Key == "loot")) {
 			l.Add("");
 			l.Add("LOOT sorts your plugins. The new order stays; Undo the last run takes it back.");
+		}
+		if (RewritesIn.Count > 0) {
+			l.Add("");
+			l.Add("Files inside your own mods are rewritten where they stand. A copy of each file changed is kept in the run's backup first; Undo the last run puts them back:");
+			l.AddRange(RewritesIn.Select(r => $"  - {r.Tool}: {r.Where}"));
 		}
 		if (Forecast?.Lines() is { Count: > 0 } room) {
 			l.Add("");

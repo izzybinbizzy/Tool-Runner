@@ -53,6 +53,12 @@ public static class SettingsPanel
 		["max_restarts"] = "Restarts allowed",
 		["build_min"] = "Patcher build limit (minutes)",
 		["extra_args"] = "Extra arguments (one per line)",
+		["mods"] = "Your mods it may rewrite files in (one per line)",
+		["skip"] = "Plugins never cleaned (one per line)",
+		["clean_game_plugins"] = "Also clean the game's own plugins (as copies in the output mod; the game's folder is never changed)",
+		["loot_min"] = "LOOT's look: give up after (minutes)",
+		["unattended"] = "Run by itself (its options stay as its window starts with them: Remove Parallax is on)",
+		["headparts"] = "Run by itself: treat the meshes as head parts",
 	};
 
 	// an edit not saved yet (the window asks before the drawer closes over it)
@@ -83,6 +89,10 @@ public static class SettingsPanel
 		["landscapefixer"] = [("min_files", JsonValueKind.Number, "3")],
 		["acmos"] = [("hidden", JsonValueKind.True, "on")],
 		["synthesis"] = [("build_min", JsonValueKind.Number, "15")],
+		["xeditclean"] = [("clean_game_plugins", JsonValueKind.False, "off"), ("output_mod", JsonValueKind.String, "none"), ("skip", JsonValueKind.Array, "none"),
+			("loot_min", JsonValueKind.Number, "10")],
+		["cao"] = [("mods", JsonValueKind.Array, "none")],
+		["nifoptimizer"] = [("mods", JsonValueKind.Array, "none"), ("unattended", JsonValueKind.False, "off"), ("headparts", JsonValueKind.False, "off")],
 	};
 
 	// the mods a LOD step builds from and the LOD tool's own help, each a page to open (the runner never guesses their values)
@@ -1187,11 +1197,13 @@ public static class SettingsPanel
 		} else {
 			var t = new TextBox { Text = cur?.ToString() ?? "" };
 			a_apply.Add(() => {
-				if (a_key is "output_mod" or "then_move_to_mod" or "executable" && t.Text.Trim() == "") {
-					return $"{a_label}: cannot be empty";
-				}
+				// a setting the setup does not hold, shown only so it can be filled in, stays unset when left empty (xEdit cleaning's
+				// output mod is needed only for the game's own plugins)
 				if (t.Text == "" && cur == null) {
 					return null;
+				}
+				if (a_key is "output_mod" or "then_move_to_mod" or "executable" && t.Text.Trim() == "") {
+					return $"{a_label}: cannot be empty";
 				}
 				a_obj[a_key] = t.Text;
 				return null;

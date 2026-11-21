@@ -28,6 +28,9 @@ public static partial class ToolUpdates
 		["easynpc"] = new("52313", null, "https://www.nexusmods.com/skyrimspecialedition/mods/52313?tab=files"),
 		["smash"] = new("39378", null, "https://www.nexusmods.com/skyrimspecialedition/mods/39378?tab=files"),
 		["reqtificator"] = new("60888", null, "https://www.nexusmods.com/skyrimspecialedition/mods/60888?tab=files"),
+		["xeditclean"] = new("164", null, "https://www.nexusmods.com/skyrimspecialedition/mods/164?tab=files"),
+		["cao"] = new("23316", null, "https://www.nexusmods.com/skyrimspecialedition/mods/23316?tab=files"),
+		["nifoptimizer"] = new("4089", null, "https://www.nexusmods.com/skyrimspecialedition/mods/4089?tab=files"),
 		["upf"] = new(null, "z-edit/zedit", "https://github.com/z-edit/zedit/releases"),
 		// its Nexus page says "MOVED" (read 2026-10-27): its releases are on GitHub
 		["wryebash"] = new(null, "wrye-bash/wrye-bash", "https://github.com/wrye-bash/wrye-bash/releases"),

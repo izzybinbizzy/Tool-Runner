@@ -135,6 +135,8 @@ public sealed class Journal
 	[JsonIgnore]
 	public IEnumerable<string> ParkedMods => Parked.Where(p => !p.IsFolder).Select(p => p.Mod);
 	public List<KeptFile> Kept { get; set; } = [];
+	// the folders of the player's own a step let a tool rewrite files in (Rewrites.cs)
+	public List<RewriteRecord> Rewritten { get; set; } = [];
 	// the last number given to a park or file record of this run
 	public int LastSeq { get; set; }
 

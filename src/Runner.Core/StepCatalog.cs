@@ -10,6 +10,9 @@ public static class StepCatalog
 		new("shaders", "Shader caches", "The game compiles each shader mod's cache at its main menu (Community Shaders and its forks).", InGame: true),
 		new("cleansave", "Clean save", "DynDOLOD's clean save: switched off in game, your place noted, to QASmoke, saved; the old outputs off; loaded, saved.", InGame: true),
 		new("loot", "LOOT sort", "Sorts your plugins the way Mod Organizer's Sort button does, before the first tool, so every tool builds on that order. The new order stays; Undo the last run takes it back."),
+		new("xeditclean", "xEdit cleaning", "xEdit's Quick Auto Clean on the plugins LOOT calls dirty, where they stand in your mods. A copy of each is kept first; Undo the last run puts them back."),
+		new("cao", "Cathedral Assets Optimizer", "Optimizes the files of the mods you name, where they stand - guided: you run it in its own window and press Done. A copy of every file it changes is kept first.", NeedsMo2: false),
+		new("nifoptimizer", "SSE NIF Optimizer", "Optimizes the meshes of the mods you name, where they stand - in its own window with you, or by itself. A copy of every mesh is kept first.", NeedsMo2: false),
 		new("easynpc", "EasyNPC", "Merges the NPC looks you pick - guided: the picks are yours, so you build it and press Done."),
 		new("upf", "zEdit's patchers", "Builds zEdit's Unified Patching Framework patch - guided: it has no unattended mode, so you build it and press Done."),
 		new("smash", "Mator Smash", "Builds the Smashed Patch - guided: Smash has no unattended mode, so you build it and press Done."),
@@ -39,12 +42,17 @@ public static class StepCatalog
 	public static string Name(string a_key) => Info(a_key).Name;
 
 	const string SortedFirst = "every tool should build on the sorted order";
+	const string CleanedFirst = "the tools that read your plugins should read the cleaned ones";
+	const string OptimizedFirst = "the tools that read your meshes and textures should read the optimized ones";
 
 	// steps that must come before another for the outputs to be right - a setup that breaks one gets the warning window
 	public static readonly IReadOnlyList<(string Before, string After, string Why)> MustPrecede = [
 		("cleansave", "xlodgen", "the clean save is made before any output is rebuilt"),
 		.. new[] { "easynpc", "upf", "smash", "wryebash", "synthesis", "reqtificator", "landscapefixer", "pgpatcher", "xlodgen", "texgen", "dyndolod", "anvillod" }
 			.Select(k => ("loot", k, SortedFirst)),
+		.. new[] { "easynpc", "upf", "smash", "wryebash", "synthesis", "reqtificator", "landscapefixer", "pgpatcher", "xlodgen", "texgen", "dyndolod", "anvillod" }
+			.Select(k => ("xeditclean", k, CleanedFirst)),
+		.. new[] { "cao", "nifoptimizer" }.SelectMany(o => new[] { "pgpatcher", "xlodgen", "treelodgen", "texgen", "dyndolod", "anvillod" }.Select(k => (o, k, OptimizedFirst))),
 		("synthesis", "dyndolod", "DynDOLOD should be generated after every other patch (dyndolod.info)"),
 		("wryebash", "dyndolod", "DynDOLOD should be generated after every other patch (dyndolod.info)"),
 		("easynpc", "dyndolod", "DynDOLOD should be generated after every other patch (dyndolod.info)"),

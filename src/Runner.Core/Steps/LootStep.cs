@@ -35,17 +35,60 @@ public sealed class LootStep : IStep
 			$"--pluginListOutputPath {Mo2Control.Quote(a_sorted)} --language {language}" + (a_skipUpdate ? " --skipUpdateMasterlist" : "");
 	}
 
-	public void Run(RunContext a_ctx, StepSettings a_s) => Run(a_ctx, (sorted, report, skipUpdate) => {
-		a_ctx.Activity(StepKey, "LOOT is sorting your plugins");
+	public void Run(RunContext a_ctx, StepSettings a_s) => Run(a_ctx, Starter(a_ctx, StepKey, "LOOT is sorting your plugins", a_s.Deadline(10)));
+
+	// one run of Mod Organizer's lootcli to its end, for the step a_step: the sort itself, or a step that only reads LOOT's report
+	public static Action<string, string, bool> Starter(RunContext a_ctx, string a_step, string a_doing, TimeSpan a_limit) => (sorted, report, skipUpdate) => {
+		a_ctx.Activity(a_step, a_doing);
 		try {
 			using var proc = a_ctx.Control.RunExecutable(Program(a_ctx.Mo2), Image, Arguments(a_ctx.Mo2, a_ctx.Setup.Profile, sorted, report, skipUpdate), a_ctx.Cancel, null, true);
-			Waits.Tool(a_ctx, StepKey, proc, a_s.Deadline(10), () => proc.HasExited ? Waits.Poll.Done : Waits.Poll.Wait);
+			Waits.Tool(a_ctx, a_step, proc, a_limit, () => proc.HasExited ? Waits.Poll.Done : Waits.Poll.Wait);
 		} finally {
 			// a wait that gave up (idle, past its limit) leaves it running, and this step's settings name no image for the
 			// run's own clean-up to close
 			StepKit.CloseTool(a_ctx, Image);
 		}
-	});
+	};
+
+	public const string LookSortedFile = "loot look sorted.txt";
+	public const string LookReportFile = "loot look report.json";
+
+	// LOOT's report alone, for a step that only wants to know what LOOT says of the plugins: lootcli run as for a sort, into
+	// files of its own, and its sorted list is not laid - the order files stay as they are. Returns the report's path
+	public static string Report(RunContext a_ctx, Action<string, string, bool> a_start)
+	{
+		var sorted = Path.Combine(a_ctx.Journal.Folder, LookSortedFile);
+		var report = Path.Combine(a_ctx.Journal.Folder, LookReportFile);
+		// as for the sort: its exit code says nothing, what it wrote is the verdict, and never what an earlier try left
+		bool Ask(bool a_skipUpdate)
+		{
+			Files.Delete(sorted);
+			Files.Delete(report);
+			a_start(sorted, report, a_skipUpdate);
+			return File.Exists(report) && ReadSorted(sorted).Count > 0;
+		}
+		if (!Ask(false)) {
+			a_ctx.Log.Warn("LOOT wrote no report - trying again with the masterlist it already has");
+			if (!Ask(true)) {
+				throw new StepFailedException("LOOT wrote no report, so no plugin was looked at. Mod Organizer's own Sort button shows why (a rule that goes in a circle, or no masterlist yet)");
+			}
+		}
+		return report;
+	}
+
+	// The plugins LOOT's report calls dirty, in the report's order. LOOT matches its cleaning data to each plugin's own checksum
+	// (Mod Organizer's lootcli asks for the metadata with its conditions evaluated), so a plugin already cleaned is not named
+	public static List<string> Dirty(string a_report)
+	{
+		JsonObject? root;
+		try {
+			root = JsonNode.Parse(Files.ReadSharedText(a_report)) as JsonObject;
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) {
+			throw new StepFailedException("LOOT's report does not read (" + e.Message + "), so no plugin was looked at");
+		}
+		return (root?["plugins"] as JsonArray ?? []).OfType<JsonObject>().Where(p => p["dirty"] is JsonArray { Count: > 0 })
+			.Select(p => Text(p["name"])).OfType<string>().ToList();
+	}
 
 	// a_start: one run of lootcli to its end (the two files it should write, whether it skips its masterlist update)
 	public static void Run(RunContext a_ctx, Action<string, string, bool> a_start)

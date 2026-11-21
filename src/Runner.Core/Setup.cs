@@ -203,7 +203,7 @@ public sealed class Setup
 
 	// the settings whose value the engine takes as a mod's name (or, "settings", as a file's own name in a fixed folder)
 	static readonly string[] NameKeys = ["output_mod", "then_move_to_mod", "tool_writes", "pgpatcher_mod", "shader_mod", "settings_mod", "settings",
-		"replaces", "enable_during", "disable_during"];
+		"replaces", "enable_during", "disable_during", "mods"];
 
 	// every such value in the setup (a cache list's too), with where it stands
 	public IEnumerable<(string Where, string Name)> ModNames()

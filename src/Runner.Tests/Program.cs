@@ -9810,6 +9810,383 @@ public static class Program
 		Check(missing.Count == 0, $"{missing.Count} refusal(s) with no catalog entry (RunnerErrors.cs) - " + string.Join(" || ", missing.Take(6)));
 	}
 
+	// ---- the tools that rewrite files inside the player's own mods (Rewrites.cs, RewriteSteps.cs)
+
+	// a mod with meshes at two depths, a terrain mesh and a texture
+	static string RewriteFixture(FakeMo2 a_f, string a_mod = "Meshes Mod")
+	{
+		var d = Path.Combine(a_f.Mods, a_mod);
+		Directory.CreateDirectory(Path.Combine(d, "meshes", "deep"));
+		Directory.CreateDirectory(Path.Combine(d, "textures"));
+		File.WriteAllText(Path.Combine(d, "meta.ini"), "[General]\r\n");
+		File.WriteAllText(Path.Combine(d, "meshes", "a.nif"), "AAAA");
+		File.WriteAllText(Path.Combine(d, "meshes", "deep", "b.nif"), "BBBB");
+		File.WriteAllText(Path.Combine(d, "meshes", "c.btr"), "CCCC");
+		File.WriteAllText(Path.Combine(d, "textures", "t.dds"), "TTTT");
+		return d;
+	}
+
+	static string FakeTool(FakeMo2 a_f, string a_name)
+	{
+		var exe = Path.Combine(a_f.Root, "tools", a_name);
+		Directory.CreateDirectory(Path.GetDirectoryName(exe)!);
+		File.WriteAllText(exe, "");
+		return exe;
+	}
+
+	static RewriteToolStep ToolStep(string a_key) => (RewriteToolStep)StepRegistry.All[a_key];
+
+	// his checklist 534: a tool let into one of the player's own mods. A copy of every file it can change is in the run's backup before it starts; once it is
+	// done only the copies of what it changed stay; an undo lays those back and moves out what the tool made new
+	static void T_AToolsRewriteIsKeptSettledAndUndone()
+	{
+		using var f = new FakeMo2();
+		var mod = RewriteFixture(f);
+		var a = Path.Combine(mod, "meshes", "a.nif");
+		var b = Path.Combine(mod, "meshes", "deep", "b.nif");
+		var c = Path.Combine(mod, "meshes", "c.btr");
+		var made = Path.Combine(mod, "meshes", "made.nif");
+		var cTime = File.GetLastWriteTimeUtc(c);
+		f.WriteSetup((NifOptimizerStep.StepKey, new JsonObject { ["exe"] = FakeTool(f, "SSE NIF Optimizer.exe"), ["mods"] = new JsonArray("Meshes Mod") }));
+		var step = ToolStep(NifOptimizerStep.StepKey);
+		var copiedFirst = false;
+		step.Stand = (ctx, s, folder) => {
+			var kept = ctx.Journal.Rewritten.Single();
+			copiedFirst = !kept.Keeping && File.ReadAllText(Path.Combine(kept.Backup, "meshes", "a.nif")) == "AAAA" && File.Exists(Path.Combine(kept.Backup, "meshes", "deep", "b.nif")) &&
+				File.Exists(Path.Combine(kept.Backup, "meshes", "c.btr")) && !File.Exists(Path.Combine(kept.Backup, "textures", "t.dds")) && !File.Exists(Path.Combine(kept.Backup, "meta.ini"));
+			File.WriteAllText(a, "A, optimized");
+			// the same length and its old time back, as xEdit leaves a plugin it cleaned: still a changed file
+			File.WriteAllText(c, "cccc");
+			File.SetLastWriteTimeUtc(c, cTime);
+			File.WriteAllText(made, "new");
+		};
+		try {
+			var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+			Equal(RunState.Finished, r.State, "finished: " + r.Verdict);
+			Check(copiedFirst, "a copy of every mesh, and of nothing else, was in the backup before the tool started");
+			var j = Journal.Load(r.Folder!);
+			var rec = j.Rewritten.Single();
+			Check(rec.Settled && !rec.PutBack && rec.Kept == 2, $"settled, with the copies of the two changed files ({rec.Kept})");
+			Check(rec.Added == 1 && string.Join(", ", Rewrites.AddedOf(rec)) == Path.Combine("meshes", "made.nif"), "what the tool made new is on record, by name beside the copies: " + string.Join(", ", Rewrites.AddedOf(rec)));
+			Check(File.ReadAllText(Path.Combine(rec.Backup, "meshes", "a.nif")) == "AAAA" && File.ReadAllText(Path.Combine(rec.Backup, "meshes", "c.btr")) == "CCCC", "the copies hold the files as they were");
+			Check(!Directory.Exists(Path.Combine(rec.Backup, "meshes", "deep")), "the copy of a mesh the tool left alone is gone again, its folder too");
+			Equal("A, optimized", File.ReadAllText(a), "the tool's work stays");
+			Check(RunUndo.LeftSomething(j) && RunUndo.WhyNot(j, Journal.All(Runner.RunsDir(f.Data)).ToList()) == null, "the run can be undone");
+			Check(j.Notes.Any(n => n.Contains("2 file(s) changed", StringComparison.Ordinal) && n.Contains("1 new", StringComparison.Ordinal)), "the run says what the tool did: " + string.Join(" | ", j.Notes));
+			var u = Runner.Undo(j);
+			Equal(RunState.Restored, u.State, "undone: " + u.Verdict);
+			Check(File.ReadAllText(a) == "AAAA" && File.ReadAllText(c) == "CCCC" && File.ReadAllText(b) == "BBBB", "every mesh as it was before the run");
+			Check(!File.Exists(made) && File.ReadAllText(Path.Combine(j.BackupDir, "undone", "Meshes Mod", "meshes", "made.nif")) == "new", "what the tool made new is moved out, never erased");
+			Equal("TTTT", File.ReadAllText(Path.Combine(mod, "textures", "t.dds")), "what the tool cannot change was never touched");
+			Check(RunUndo.WhyNot(Journal.Load(r.Folder!), Journal.All(Runner.RunsDir(f.Data)).ToList()) != null, "and it is undone only once");
+		} finally {
+			step.Stand = null;
+		}
+	}
+
+	// a tool that fails part way leaves the mod it was in as it was - its changed files back, what it took away back, what it made moved out - and a mod it had
+	// finished before stays as the tool left it, for an undo to take back
+	static void T_AToolCutOffLeavesTheModAsItWas()
+	{
+		using var f = new FakeMo2();
+		var first = RewriteFixture(f, "First Mod");
+		var second = RewriteFixture(f, "Second Mod");
+		f.WriteSetup((CaoStep.StepKey, new JsonObject { ["exe"] = FakeTool(f, "Cathedral_Assets_Optimizer.exe"), ["mods"] = new JsonArray("First Mod", "Second Mod") }));
+		var step = ToolStep(CaoStep.StepKey);
+		step.Stand = (ctx, s, folder) => {
+			File.WriteAllText(Path.Combine(folder, "textures", "t.dds"), "smaller");
+			if (folder.EndsWith("Second Mod", StringComparison.Ordinal)) {
+				File.Delete(Path.Combine(folder, "meshes", "a.nif"));
+				File.WriteAllText(Path.Combine(folder, "packed.bsa"), "archive");
+				throw new StepFailedException("the tool fell over");
+			}
+		};
+		try {
+			var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+			Equal(RunState.Failed, r.State, "failed: " + r.Verdict);
+			var j = Journal.Load(r.Folder!);
+			Check(File.ReadAllText(Path.Combine(second, "textures", "t.dds")) == "TTTT" && File.ReadAllText(Path.Combine(second, "meshes", "a.nif")) == "AAAA", "the mod it failed in is as it was");
+			Check(!File.Exists(Path.Combine(second, "packed.bsa")) && File.ReadAllText(Path.Combine(j.BackupDir, "unfinished", "Second Mod", "packed.bsa")) == "archive", "what it had made there is moved out");
+			Equal("smaller", File.ReadAllText(Path.Combine(first, "textures", "t.dds")), "the mod it had finished stays as the tool left it");
+			Check(j.Rewritten.Count == 2 && j.Rewritten[0].Settled && !j.Rewritten[0].PutBack && j.Rewritten[1].PutBack && !j.Rewritten[1].Settled, "one settled, one put back");
+			Check(!j.NeedsRestore && r.Verdict.Contains("the tool fell over", StringComparison.Ordinal), "nothing is left to put back: " + r.Verdict);
+			Check(File.ReadAllText(Path.Combine(j.Rewritten[0].Backup, "textures", "t.dds")) == "TTTT" && j.Rewritten[0].Kept == 1, "the first mod's one changed file is kept as it was");
+			var u = Runner.Undo(j);
+			Equal(RunState.Restored, u.State, "the mod it finished can still be undone: " + u.Verdict);
+			Equal("TTTT", File.ReadAllText(Path.Combine(first, "textures", "t.dds")), "and is then as it was");
+		} finally {
+			step.Stand = null;
+		}
+	}
+
+	// two tools let into the same mod in one run: the second kept the first one's result as its "before", so an undo lays the newest back first and ends on the
+	// files as they were before the run
+	static void T_TwoToolsInOneModAreUndoneInOrder()
+	{
+		using var f = new FakeMo2();
+		var mod = RewriteFixture(f);
+		var a = Path.Combine(mod, "meshes", "a.nif");
+		f.WriteSetup((CaoStep.StepKey, new JsonObject { ["exe"] = FakeTool(f, "Cathedral_Assets_Optimizer.exe"), ["mods"] = new JsonArray("Meshes Mod") }),
+			(NifOptimizerStep.StepKey, new JsonObject { ["exe"] = FakeTool(f, "SSE NIF Optimizer.exe"), ["mods"] = new JsonArray("Meshes Mod") }));
+		var cao = ToolStep(CaoStep.StepKey);
+		var nif = ToolStep(NifOptimizerStep.StepKey);
+		cao.Stand = (ctx, s, folder) => {
+			File.WriteAllText(a, "by the first tool");
+			File.WriteAllText(Path.Combine(folder, "first.txt"), "1");
+		};
+		nif.Stand = (ctx, s, folder) => {
+			File.WriteAllText(a, "by the second tool");
+			File.WriteAllText(Path.Combine(folder, "meshes", "second.nif"), "2");
+		};
+		try {
+			var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+			Equal(RunState.Finished, r.State, "finished: " + r.Verdict);
+			var j = Journal.Load(r.Folder!);
+			Equal("by the second tool", File.ReadAllText(a), "both tools worked on the mesh");
+			Check(j.Rewritten.Count == 2 && File.ReadAllText(Path.Combine(j.Rewritten[1].Backup, "meshes", "a.nif")) == "by the first tool", "the second tool's copy is the first tool's result");
+			Check(Rewrites.AddedOf(j.Rewritten[1]).SequenceEqual([Path.Combine("meshes", "second.nif")]), "and what the first tool made is not counted as the second's");
+			var u = Runner.Undo(j);
+			Equal(RunState.Restored, u.State, "undone: " + u.Verdict);
+			Equal("AAAA", File.ReadAllText(a), "the mesh as it was before the run, not as the first tool left it");
+			Check(!File.Exists(Path.Combine(mod, "first.txt")) && !File.Exists(Path.Combine(mod, "meshes", "second.nif")), "what either tool made new is out of the mod");
+		} finally {
+			cao.Stand = null;
+			nif.Stand = null;
+		}
+	}
+
+	// what a cut-off run leaves for the put-back: copies still being made are no reason to touch the mod; a tool cut off mid-way is undone file by file; copies gone
+	// from the backup are said once and never hold the put-back up
+	static void T_ARewritePutBackKnowsWhatItHas()
+	{
+		using var f = new FakeMo2();
+		f.WriteSetup((CaoStep.StepKey, new JsonObject { ["exe"] = "x", ["mods"] = new JsonArray("Mod") }));
+		var mod = RewriteFixture(f, "Mod");
+		var ctx = StepContext(f, CaoStep.StepKey);
+		using (ctx.Log) {
+			var rec = Rewrites.Keep(ctx, CaoStep.StepKey, "Mod", mod);
+			Check(!rec.Keeping && rec.Kept == 5 && File.Exists(Path.Combine(rec.Backup, "meta.ini")), "handed the whole mod, every file is copied");
+			// a crash while the copies were being made: the tool never started
+			rec.Keeping = true;
+			File.WriteAllText(Path.Combine(mod, "meshes", "a.nif"), "the player's own edit, made since");
+			Equal(0, Rewrites.PutBack(ctx, null).Count, "nothing failed");
+			Check(rec.PutBack && File.ReadAllText(Path.Combine(mod, "meshes", "a.nif")).StartsWith("the player's", StringComparison.Ordinal), "a mod no tool was let into is not written over");
+
+			File.WriteAllText(Path.Combine(mod, "meshes", "a.nif"), "AAAA");
+			var cut = Rewrites.Keep(ctx, CaoStep.StepKey, "Mod", mod);
+			Check(cut.Backup != rec.Backup, "a second set of copies never goes over the first");
+			File.WriteAllText(Path.Combine(mod, "meshes", "a.nif"), "half writ");
+			File.Delete(Path.Combine(mod, "textures", "t.dds"));
+			File.WriteAllText(Path.Combine(mod, "stray.tmp"), "left by the tool");
+			Equal(0, Rewrites.PutBack(ctx, CaoStep.StepKey).Count, "put back");
+			Check(File.ReadAllText(Path.Combine(mod, "meshes", "a.nif")) == "AAAA" && File.ReadAllText(Path.Combine(mod, "textures", "t.dds")) == "TTTT" && !File.Exists(Path.Combine(mod, "stray.tmp")),
+				"the changed file, the one taken away and the stray one: all as before");
+			Equal("left by the tool", File.ReadAllText(Path.Combine(ctx.BackupFolder, "unfinished", "Mod", "stray.tmp")), "the stray file is in the backup");
+
+			var gone = Rewrites.Keep(ctx, CaoStep.StepKey, "Mod", mod);
+			File.WriteAllText(Path.Combine(mod, "meshes", "a.nif"), "changed");
+			Directory.Delete(gone.Backup, true);
+			Equal(0, Rewrites.PutBack(ctx, null).Count, "copies cleared out of the backup do not keep the put-back from ending");
+			Check(gone.Lost && !gone.PutBack && ctx.Journal.Notes.Any(n => n.Contains("could not be put back", StringComparison.Ordinal)), "said, and on record as lost");
+			Equal(0, Rewrites.PutBack(ctx, null).Count, "and not tried again");
+		}
+	}
+
+	// xEdit's cleaning through Mod Organizer: the original is renamed away into xEdit's backups in overwrite and the cleaned file can land in overwrite. The step
+	// puts the cleaned file where the plugin stood, takes xEdit's backups into the run's backup, leaves the game's own plugins and the listed ones alone
+	static void T_XEditCleansWhatLootCallsDirty()
+	{
+		using var f = new FakeMo2();
+		var baseEsp = Path.Combine(f.Mods, "Base Mod", "BaseMod.esp");
+		var update = Path.Combine(f.Game, "Data", "Update.esm");
+		FakeMo2.Plugin(update, true);
+		// plugins as a player has them: years old. What xEdit leaves is found by name, never by a date (the original it renames
+		// into its backups keeps the date it had, and the cleaned file is given its plugin's old time)
+		var old = new DateTime(2019, 5, 1, 12, 0, 0, DateTimeKind.Utc);
+		foreach (var p in new[] { baseEsp, update }) {
+			File.SetCreationTimeUtc(p, old);
+			File.SetLastWriteTimeUtc(p, old);
+		}
+		var updateWas = File.ReadAllBytes(update);
+		var baseWas = File.ReadAllBytes(baseEsp);
+		var masterWas = File.ReadAllBytes(Path.Combine(f.Mods, "Master Mod", "MasterMod.esm"));
+		string[] dirty = ["Update.esm", "MasterMod.esm", "BaseMod.esp", "NotInAnyMod.esp"];
+		var cleanedNames = new List<string>();
+		// xEdit as Mod Organizer shows it its files: the winning copy leaves for xEdit's backups, the cleaned one is new in overwrite
+		void Xedit(RunContext a_ctx, string a_plugin, string a_log, bool a_finishes)
+		{
+			var at = a_ctx.Profile.PluginPaths()[a_plugin];
+			var backups = Path.Combine(f.Overwrite, "SSEEdit Backups");
+			Directory.CreateDirectory(backups);
+			File.Move(at, Path.Combine(backups, a_plugin + ".backup.2026_11_21_16_00_00"));
+			File.WriteAllText(Path.Combine(f.Overwrite, a_plugin), "cleaned " + a_plugin);
+			File.SetLastWriteTimeUtc(Path.Combine(f.Overwrite, a_plugin), old);
+			if (!a_finishes) {
+				File.WriteAllText(Path.Combine(f.Overwrite, a_plugin + ".save.2026_11_21_16_00_01"), "a save it never swapped in");
+			}
+			File.WriteAllText(a_log, a_finishes ? "[00:01] Quick Clean mode finished.\r\n" : "[00:01] Removing: something\r\n");
+			cleanedNames.Add(a_plugin);
+		}
+		var finishes = true;
+		StepRegistry.Replace(new FakeStep(XEditCleanStep.StepKey, (ctx, s) => XEditCleanStep.Clean(ctx, s, dirty, (plugin, log) => Xedit(ctx, plugin, log, finishes))));
+		try {
+			f.WriteSetup((XEditCleanStep.StepKey, new JsonObject { ["executable"] = "SKSE", ["skip"] = new JsonArray("MasterMod.esm") }));
+			var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+			Equal(RunState.Finished, r.State, "finished: " + r.Verdict);
+			var j = Journal.Load(r.Folder!);
+			Equal("BaseMod.esp", string.Join(", ", cleanedNames), "only the dirty plugin of the player's own that is not on the step's list");
+			Equal("cleaned BaseMod.esp", File.ReadAllText(baseEsp), "the cleaned file is where the plugin stood");
+			Check(!File.Exists(Path.Combine(f.Overwrite, "BaseMod.esp")) && !Directory.Exists(Path.Combine(f.Overwrite, "SSEEdit Backups")), "nothing of it is left in overwrite");
+			Check(Directory.GetFiles(Path.Combine(j.BackupDir, "xedit backups"), "BaseMod.esp.backup.*").Length == 1, "xEdit's own backup is in the run's backup");
+			Check(File.ReadAllBytes(update).SequenceEqual(updateWas) && File.ReadAllBytes(Path.Combine(f.Mods, "Master Mod", "MasterMod.esm")).SequenceEqual(masterWas), "the game's own plugin and the listed one are untouched");
+			Check(j.Notes.Any(n => n.Contains("the game's own plugins are dirty", StringComparison.Ordinal) && n.Contains("Update.esm", StringComparison.Ordinal)), "the game's own are named as left alone: " + string.Join(" | ", j.Notes));
+			var rec = j.Rewritten.Single();
+			Check(rec.Settled && rec.Kept == 1 && rec.Label == "Base Mod" && File.ReadAllBytes(Path.Combine(rec.Backup, "BaseMod.esp")).SequenceEqual(baseWas), "the step's own copy of the plugin as it was");
+			var u = Runner.Undo(j);
+			Equal(RunState.Restored, u.State, "undone: " + u.Verdict);
+			Check(File.ReadAllBytes(baseEsp).SequenceEqual(baseWas), "the plugin as it was before the run");
+
+			// the game's own too, as copies in the step's output mod: the game's folder is only read
+			cleanedNames.Clear();
+			f.WriteSetup((XEditCleanStep.StepKey, new JsonObject { ["executable"] = "SKSE", ["skip"] = new JsonArray("MasterMod.esm", "BaseMod.esp"), ["clean_game_plugins"] = true, ["output_mod"] = "Cleaned" }));
+			r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+			Equal(RunState.Finished, r.State, "finished with the game's own: " + r.Verdict);
+			Equal("Update.esm", string.Join(", ", cleanedNames), "the game's plugin is cleaned");
+			Check(File.ReadAllBytes(update).SequenceEqual(updateWas), "the game's folder holds it as it was");
+			Equal("cleaned Update.esm", File.ReadAllText(Path.Combine(f.Mods, "Cleaned", "Update.esm")), "its cleaned copy is in the output mod");
+			Check(ProfileOf(f).IsOn("Cleaned") && Journal.Load(r.Folder!).Built.Contains("Cleaned"), "and that mod is switched on, as this run's output");
+
+			// xEdit cut off: every plugin of the step back as it was, whatever xEdit had moved
+			cleanedNames.Clear();
+			finishes = false;
+			f.WriteSetup((XEditCleanStep.StepKey, new JsonObject { ["executable"] = "SKSE", ["skip"] = new JsonArray("MasterMod.esm", "Update.esm") }));
+			r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+			Equal(RunState.Failed, r.State, "failed: " + r.Verdict);
+			Check(r.Verdict.Contains("ended before it had finished cleaning BaseMod.esp", StringComparison.Ordinal), "said: " + r.Verdict);
+			Check(File.ReadAllBytes(baseEsp).SequenceEqual(baseWas), "the plugin is back as it was");
+			Check(!Journal.Load(r.Folder!).NeedsRestore && !RunUndo.LeftSomething(Journal.Load(r.Folder!)), "and nothing is left of the step");
+			Check(Directory.GetFiles(f.Overwrite, "*", SearchOption.AllDirectories).Length == 0 &&
+				Directory.GetFiles(Path.Combine(Journal.Load(r.Folder!).BackupDir, "xedit backups"), "BaseMod.esp.save.*").Length == 1, "nor of xEdit in overwrite: its unfinished save is in the run's backup");
+		} finally {
+			StepRegistry.Replace(new XEditCleanStep());
+		}
+	}
+
+	// LOOT's report names the dirty plugins; a look that wrote nothing is tried once more on the masterlist it has, then said
+	static void T_LootsReportNamesTheDirtyPlugins()
+	{
+		using var f = new FakeMo2();
+		f.WriteSetup((XEditCleanStep.StepKey, new JsonObject { ["executable"] = "SKSE" }));
+		var ctx = StepContext(f, XEditCleanStep.StepKey);
+		using (ctx.Log) {
+			var tries = new List<bool>();
+			var report = LootStep.Report(ctx, (sorted, rep, skipUpdate) => {
+				tries.Add(skipUpdate);
+				if (skipUpdate) {
+					File.WriteAllText(sorted, "Skyrim.esm\nDirty.esp\n");
+					File.WriteAllText(rep, """{ "plugins": [ { "name": "Skyrim.esm" }, { "name": "Dirty.esp", "dirty": [ { "crc": 1, "itm": 3, "deletedReferences": 0, "deletedNavmesh": 0, "cleaningUtility": "xEdit", "info": "" } ] }, { "name": "Clean.esp", "dirty": [], "clean": [ { "crc": 2 } ] } ] }""");
+				}
+			});
+			Check(tries.SequenceEqual([false, true]), "asked again with the masterlist it has");
+			Equal("Dirty.esp", string.Join(", ", LootStep.Dirty(report)), "the plugins with cleaning data that matches them as they are");
+			Check(!File.Exists(Path.Combine(ctx.Journal.Folder, LootStep.SortedFile)) && !ctx.Journal.Sorted, "a look lays no order");
+			Throws<StepFailedException>(() => LootStep.Report(ctx, (_, _, _) => { }), "a look that wrote nothing fails the step");
+			File.WriteAllText(report, "{ not json");
+			Throws<StepFailedException>(() => LootStep.Dirty(report), "a report that does not read fails the step");
+		}
+	}
+
+	// SSE NIF Optimizer by itself: its command line, and its log as the verdict (its exit code is always 0)
+	static void T_NifOptimizersLogIsItsVerdict()
+	{
+		using var f = new FakeMo2();
+		f.WriteSetup((NifOptimizerStep.StepKey, new JsonObject { ["exe"] = "x", ["mods"] = new JsonArray("Mod") }));
+		Equal(@"--recursive|--headparts|--log=C:\a b\log.txt|C:\mods\My Mod", string.Join("|", NifOptimizerStep.Arguments(@"C:\mods\My Mod", @"C:\a b\log.txt", true)), "its arguments, each one whole");
+		Check(!NifOptimizerStep.Arguments("m", "l", false).Contains("--headparts"), "head parts only when asked");
+		var ctx = StepContext(f, NifOptimizerStep.StepKey);
+		using (ctx.Log) {
+			var log = Path.Combine(ctx.Journal.Folder, "nif.txt");
+			Throws<StepFailedException>(() => NifOptimizerStep.Verdict(ctx, "Mod", log), "no log: it did not run");
+			File.WriteAllText(log, "[SUCCESS] Saved file.\r\n");
+			Throws<StepFailedException>(() => NifOptimizerStep.Verdict(ctx, "Mod", log), "no last line: it was cut off");
+			File.WriteAllText(log, "[ERROR] Failed to save file.\r\nProgram finished.\r\n");
+			Throws<StepFailedException>(() => NifOptimizerStep.Verdict(ctx, "Mod", log), "a mesh it could not save may be cut short: the step fails");
+			File.WriteAllText(log, "[ERROR] Failed to load 'x.nif'.\r\n[SUCCESS] Saved file.\r\nProgram finished.\r\n");
+			NifOptimizerStep.Verdict(ctx, "Mod", log);
+			Check(ctx.Journal.Notes.Any(n => n.Contains("could not read 1 mesh", StringComparison.Ordinal)), "a mesh it could not read was left alone, and said");
+		}
+		var takes = ToolStep(NifOptimizerStep.StepKey).Takes!;
+		Check(takes("a.NIF") && takes("land.btr") && takes("obj.bto") && !takes("t.dds") && !takes("meta.ini"), "the meshes it saves, by name");
+		Check(ToolStep(CaoStep.StepKey).Takes == null, "Cathedral Assets Optimizer is handed the whole mod");
+	}
+
+	// the three steps are off in a new setup, refuse what is not a mod of the player's own, say what they are about to do, and count in the forecast and the preview
+	static void T_TheRewriteStepsRefuseWhatIsNotThePlayers()
+	{
+		using var f = new FakeMo2();
+		var mod = RewriteFixture(f);
+		var tool = FakeTool(f, "SSE NIF Optimizer.exe");
+		var setup = f.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Output A" }), (NifOptimizerStep.StepKey, new JsonObject { ["exe"] = tool, ["mods"] = new JsonArray() }));
+		var mo2 = Mo2Instance.Load(f.Exe, f.Instance);
+		var c = new CheckContext { Setup = setup, Mo2 = mo2, Profile = ProfileOf(f), States = ProfileOf(f).States() };
+		var step = StepRegistry.All[NifOptimizerStep.StepKey];
+		List<Issue> Found(params string[] a_mods) => step.Check(c, new StepSettings(new JsonObject { ["exe"] = tool, ["mods"] = new JsonArray(a_mods.Select(m => (JsonNode)m).ToArray()) })).ToList();
+		Check(Found().Single() is { Blocking: true } none && none.Text.Contains("no mod is named", StringComparison.Ordinal), "no mod named: refused");
+		Check(Found("No Such Mod").Any(i => i.Blocking && i.Text.Contains("is not a mod of this Mod Organizer", StringComparison.Ordinal)), "a mod that is not there");
+		Check(Found("Output A").Any(i => i.Blocking && i.Text.Contains("made by this setup's own steps", StringComparison.Ordinal)), "an output this setup remakes");
+		File.Copy(tool, Path.Combine(mod, "SSE NIF Optimizer.exe"));
+		Check(step.Check(c, new StepSettings(new JsonObject { ["exe"] = Path.Combine(mod, "SSE NIF Optimizer.exe"), ["mods"] = new JsonArray("Meshes Mod") })).Any(i => i.Blocking && i.Text.Contains("holds the tool itself", StringComparison.Ordinal)),
+			"the mod the tool itself is in");
+		var fine = Found("Meshes Mod");
+		Check(fine.All(i => !i.Blocking) && fine.Any(i => i.Text.Contains("rewrites files inside 1 mod(s) of yours", StringComparison.Ordinal)), "a mod of the player's own: said, not stopped");
+		Check(step.Check(c, new StepSettings(new JsonObject { ["exe"] = tool, ["mods"] = new JsonArray("Meshes Mod"), ["unattended"] = true })).Any(i => !i.Blocking && i.Text.Contains("Remove Parallax is on", StringComparison.Ordinal)),
+			"by itself, what its fixed options do is said");
+		Check(step.Check(c, new StepSettings(new JsonObject { ["exe"] = Path.Combine(f.Root, "gone.exe"), ["mods"] = new JsonArray("Meshes Mod") })).Any(i => i.Blocking && i.Text.Contains("program is not found", StringComparison.Ordinal)), "a tool that is not there");
+		foreach (var i in Found().Concat(Found("No Such Mod")).Concat(Found("Output A")).Where(i => i.Blocking)) {
+			Check(RunnerErrors.Find(i.Text) != null, "in the catalog: " + i.Text);
+		}
+		Check(Setup.FromJson(new JsonObject { ["mo2"] = new JsonObject { ["exe"] = f.Exe, ["profile"] = "Test" }, ["backups"] = f.Backups,
+			["steps"] = new JsonArray(new JsonObject { ["step"] = CaoStep.StepKey, ["settings"] = new JsonObject { ["mods"] = new JsonArray(@"..\..\profiles") } }) }).Problems()
+			.Any(p => p.Contains("is not a mod's name", StringComparison.Ordinal)), "a path in the place of a mod's name is refused with the setup");
+
+		// xEdit's cleaning: its tool in Mod Organizer's list, LOOT there, an output mod when the game's own are asked for
+		var xedit = StepRegistry.All[XEditCleanStep.StepKey];
+		Check(xedit.Check(c, new StepSettings(new JsonObject { ["executable"] = "SKSE" })).Any(i => i.Blocking && i.Text.Contains("Mod Organizer's LOOT is not there", StringComparison.Ordinal)), "no LOOT, no list of dirty plugins");
+		Directory.CreateDirectory(Path.GetDirectoryName(LootStep.Program(mo2))!);
+		File.WriteAllText(LootStep.Program(mo2), "");
+		File.WriteAllText(Path.Combine(f.Game, "skse64_loader.exe"), "");
+		Check(xedit.Check(c, new StepSettings(new JsonObject { ["executable"] = "SKSE", ["clean_game_plugins"] = true })).Any(i => i.Blocking && i.Text.Contains("no output mod is set", StringComparison.Ordinal)), "the game's own need a mod for their copies");
+		var said = xedit.Check(c, new StepSettings(new JsonObject { ["executable"] = "SKSE" })).ToList();
+		Check(said.All(i => !i.Blocking) && said.Any(i => i.Text.Contains("rewrites the plugins LOOT calls dirty", StringComparison.Ordinal)), "what it is about to do is said at every check");
+
+		// off in a new setup, each only where Mod Organizer's list holds its tool
+		var ini = Path.Combine(f.Instance, "ModOrganizer.ini");
+		var text = File.ReadAllText(ini);
+		foreach (var (title, exe) in new[] { ("SSEEdit", "SSEEdit.exe"), ("Quick Auto Clean", "SSEEditQuickAutoClean.exe"), ("CAO", "Cathedral_Assets_Optimizer.exe"), ("NIF Optimizer", "SSE NIF Optimizer.exe") }) {
+			text = ToolFinder.WithExecutable(text, title, FakeTool(f, exe), "");
+		}
+		File.WriteAllText(ini, text);
+		var made = SetupMaker.Make(f.Exe, f.Instance, "Test", "made", f.Data);
+		foreach (var key in new[] { XEditCleanStep.StepKey, CaoStep.StepKey, NifOptimizerStep.StepKey }) {
+			var s = made.Steps.Single(x => x.Key == key);
+			Check(!s.On && Setup.Str(s.Settings, "_warning") == RewriteKit.Warning, StepCatalog.Name(key) + " is off in a new setup and carries its warning");
+			Check(ToolRunner.App.SettingsPanel.HelpPage(key) is { } h && h.Url.StartsWith("https://www.nexusmods.com/", StringComparison.Ordinal), StepCatalog.Name(key) + " has its page");
+		}
+		Equal("Quick Auto Clean", Setup.Str(made.Steps.Single(x => x.Key == XEditCleanStep.StepKey).Settings, "executable"), "xEdit's own cleaning program is taken before xEdit itself");
+		Check(!made.Problems().Any(p => p.Contains("is not a mod's name", StringComparison.Ordinal)), "their empty lists are no fault of the new setup: " + string.Join("; ", made.Problems()));
+
+		// their place among the steps, the preview and the room on disk
+		var order = StepCatalog.DefaultOrder.ToList();
+		Check(order.IndexOf(LootStep.StepKey) < order.IndexOf(XEditCleanStep.StepKey) && order.IndexOf(XEditCleanStep.StepKey) < order.IndexOf("synthesis") &&
+			order.IndexOf(NifOptimizerStep.StepKey) < order.IndexOf("pgpatcher"), "cleaned plugins and optimized files before the tools that read them");
+		Check(StepCatalog.OrderWarnings(["synthesis", XEditCleanStep.StepKey]).Count == 1 && StepCatalog.OrderWarnings(["dyndolod", CaoStep.StepKey]).Count == 1, "out of that order is warned about");
+		var ready = f.WriteSetup((NifOptimizerStep.StepKey, new JsonObject { ["exe"] = tool, ["mods"] = new JsonArray("Meshes Mod") }));
+		var lines = RunPreview.Build(ready, mo2, ready.EnabledSteps).Lines(_ => null);
+		Check(lines.Any(l => l.Contains("rewritten where they stand", StringComparison.Ordinal)) && lines.Any(l => l.Contains("SSE NIF Optimizer: Meshes Mod", StringComparison.Ordinal)), "the preview says which mods: " + string.Join(" | ", lines));
+		var parts = DiskForecast.Build(ready, mo2, ready.EnabledSteps).Disks.SelectMany(d => d.Parts).Where(p => p.Step == NifOptimizerStep.StepKey).ToList();
+		Check(parts.Count == 1 && parts[0].Needed && parts[0].Bytes == 12, $"the forecast counts the meshes' copies, and only them ({parts.FirstOrDefault()?.Bytes})");
+	}
+
 	// ... and that guard is a real one: a planted refusal nobody put in the catalog is caught, a note and a known one are not
 	static void T_ARefusalWithoutAnEntryIsCaught()
 	{

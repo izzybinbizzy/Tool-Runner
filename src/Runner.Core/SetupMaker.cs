@@ -66,6 +66,20 @@ public static class SetupMaker
 		if (File.Exists(Steps.LootStep.Program(mo2))) {
 			Add(Steps.LootStep.StepKey, false, new JsonObject { ["deadline_min"] = 10 });
 		}
+		// the three that rewrite files inside the player's own mods, each only where Mod Organizer's list holds its tool: off, and
+		// switched on only by the player. xEdit's own cleaning program first - its name alone puts xEdit in that mode
+		if ((ByBinary(mo2, "SSEEditQuickAutoClean.exe") ?? ByBinary(mo2, "SSEEdit.exe", "SSEEdit64.exe")) is { } xe && File.Exists(Steps.LootStep.Program(mo2))) {
+			// no output mod until the player asks for the game's own plugins too: a step with one makes that mod at every run
+			Add(Steps.XEditCleanStep.StepKey, false, new JsonObject { ["_warning"] = Steps.RewriteKit.Warning, ["executable"] = xe.Title, ["image"] = Path.GetFileName(xe.Binary),
+				["clean_game_plugins"] = false, ["skip"] = new JsonArray(), ["deadline_min"] = 15 });
+		}
+		if (ByBinary(mo2, "Cathedral_Assets_Optimizer.exe") is { } cao) {
+			Add(Steps.CaoStep.StepKey, false, new JsonObject { ["_warning"] = Steps.RewriteKit.Warning, ["exe"] = cao.Binary, ["mods"] = new JsonArray() });
+		}
+		if (ByBinary(mo2, "SSE NIF Optimizer.exe") is { } nif) {
+			Add(Steps.NifOptimizerStep.StepKey, false, new JsonObject { ["_warning"] = Steps.RewriteKit.Warning, ["exe"] = nif.Binary, ["mods"] = new JsonArray(),
+				["unattended"] = false, ["headparts"] = false, ["deadline_min"] = 60 });
+		}
 		// the guided patchers, each only where Mod Organizer's list holds it: off, for the same reason as Wrye Bash below
 		void Guided(string a_key, string a_output, Mo2Executable? a_entry)
 		{

@@ -143,7 +143,7 @@ public static class RunUndo
 	}
 
 	// did this run leave anything an undo would take back? (one that built nothing and put everything back did not)
-	public static bool LeftSomething(Journal a_j) => a_j.OrderChanged || a_j.Built.Count > 0 || a_j.Retire.Count > 0 || a_j.Parked.Any(p => p.Replaced && !p.PutBack);
+	public static bool LeftSomething(Journal a_j) => a_j.OrderChanged || a_j.Built.Count > 0 || a_j.Retire.Count > 0 || a_j.Parked.Any(p => p.Replaced && !p.PutBack) || Rewrites.Left(a_j);
 
 	// a later run still standing that changed what undoing a_j would put back: the same setup's, one that moved the same output or tool
 	// folder, or another's on the same profile or with an output of a_j's - undoing a_j would lay its old lists and outputs over that run
@@ -161,10 +161,11 @@ public static class RunUndo
 			 (Same(a_later.Profile, a_j.Profile) || a_later.Built.Intersect(a_j.Built, StringComparer.OrdinalIgnoreCase).Any()));
 	}
 
-	// the mods and tool folders a run emptied and still holds the old content of
+	// the mods and tool folders a run emptied and still holds the old content of, and the mods it let a tool rewrite files in (a
+	// mod's folder is every profile's: a later run that changed the same one stands in the way whatever its setup)
 	static HashSet<string> FoldersMoved(Journal a_r) =>
 		a_r.Parked.Where(p => p.Replaced && !p.PutBack && (!p.IsFolder || p.Moved) && p.From != "")
-			.Select(p => Path.GetFullPath(p.From).TrimEnd('\\')).ToHashSet(StringComparer.OrdinalIgnoreCase);
+			.Select(p => Path.GetFullPath(p.From).TrimEnd('\\')).Concat(Rewrites.FoldersOf(a_r)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
 	// why this run cannot be undone now (null = it can): only the last run on its profile and outputs still standing, ended, with its backup there
 	public static string? WhyNot(Journal a_j, IEnumerable<Journal> a_runs)
@@ -190,6 +191,9 @@ public static class RunUndo
 			return "this run's copy of your mod and plugin lists is gone";
 		}
 		if (!File.Exists(Path.Combine(a_j.BackupDir, OutputsZip)) && a_j.Parked.Any(p => p.Replaced && !p.PutBack && (!p.IsFolder || p.Moved) && !Directory.Exists(p.To))) {
+			return "this run's backup is gone";
+		}
+		if (Rewrites.BackupGone(a_j)) {
 			return "this run's backup is gone";
 		}
 		return null;
