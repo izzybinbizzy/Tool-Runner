@@ -170,6 +170,16 @@ public sealed class Journal
 		}
 	}
 
+	// Several fields changed as ONE, then written: a save on another thread (the run's box watch saves the record too) waits
+	// for the whole change, so the record on disk never holds half of it - a crash right after such a save put back half a group
+	public void SaveWith(Action a_change)
+	{
+		lock (_gate) {
+			a_change();
+			Files.WriteAtomic(File, JsonSerializer.SerializeToUtf8Bytes(this, Options));
+		}
+	}
+
 	// for the paths that put things back: there the work comes first, and a record the disk will not take (it is full, or gone)
 	// is said by the caller - never the reason a profile stays half switched
 	public bool TrySave()

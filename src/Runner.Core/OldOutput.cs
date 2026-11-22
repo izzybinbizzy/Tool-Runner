@@ -318,20 +318,29 @@ public static class OldOutput
 	// At an old output's place in a run, with the run's own switches made (a_states: the profile as it stands at this
 	// moment): a plugin of it and a master of that plugin that is not switched on now, in words - the tool that runs next
 	// would find the plugin with a master missing. Null: every master is on
-	// a_with: the other old outputs that come on at the same place (they are on before the next tool runs)
-	public static string? MasterOffNow(Mo2Instance a_mo2, IReadOnlyDictionary<string, char> a_states, string a_mod, IEnumerable<string>? a_with = null) =>
-		MasterNotOn(a_mo2, a_states, a_mod, a_with) is { } m ? $"{m.Plugin} needs {m.Master}, which is not switched on at this point of the run" : null;
+	// a_active: the plugins ticked in the profile's plugin list as it is now. a_with: the other old outputs that come on at the
+	// same place (they are on, their plugins ticked, before the next tool runs)
+	public static string? MasterOffNow(Mo2Instance a_mo2, IReadOnlyDictionary<string, char> a_states, IReadOnlyCollection<string> a_active, string a_mod, IEnumerable<string>? a_with = null) =>
+		MasterNotOn(a_mo2, a_states, a_active, a_mod, a_with) is { } m ? $"{m.Plugin} needs {m.Master}, which is not switched on at this point of the run" : null;
 
-	// the same as its two parts: a plugin of the mod, and the master of it that no switched-on mod (nor a_with, nor the game's
-	// Data and overwrite folders) holds. Null: every master is on
-	public static (string Plugin, string Master)? MasterNotOn(Mo2Instance a_mo2, IReadOnlyDictionary<string, char> a_states, string a_mod, IEnumerable<string>? a_with = null)
+	// The same as its two parts: a plugin of the mod, and the master of it that the game does not load. A master is loaded when
+	// it is in the game's own Data folder (the game's own plugins load with no line in the plugin list), or when a switched-on
+	// mod or Mod Organizer's overwrite folder holds it AND it is ticked in the plugin list (a_active) - a mod switched on with
+	// that plugin unticked loads no master - or when the switch at hand ticks it: the mod itself and a_with, whose plugins are
+	// ticked together with it. Null: every master is loaded
+	public static (string Plugin, string Master)? MasterNotOn(Mo2Instance a_mo2, IReadOnlyDictionary<string, char> a_states, IReadOnlyCollection<string> a_active, string a_mod,
+		IEnumerable<string>? a_with = null)
 	{
 		HashSet<string>? on = null;
 		foreach (var (p, masters) in MastersIn(a_mo2, a_mod)) {
 			if (on == null) {
+				var ticked = new HashSet<string>(a_active, StringComparer.OrdinalIgnoreCase);
 				on = new HashSet<string>(Plugins.InMod(Path.Combine(a_mo2.GameDir, "Data")), StringComparer.OrdinalIgnoreCase);
-				on.UnionWith(Plugins.InMod(a_mo2.OverwriteDir));
-				foreach (var m in a_states.Where(s => s.Value == '+').Select(s => s.Key).Concat(a_with ?? []).Append(a_mod)) {
+				on.UnionWith(Plugins.InMod(a_mo2.OverwriteDir).Where(ticked.Contains));
+				foreach (var m in a_states.Where(s => s.Value == '+').Select(s => s.Key)) {
+					on.UnionWith(Plugins.InMod(a_mo2.ModDir(m)).Where(ticked.Contains));
+				}
+				foreach (var m in (a_with ?? []).Append(a_mod)) {
 					on.UnionWith(Plugins.InMod(a_mo2.ModDir(m)));
 				}
 			}

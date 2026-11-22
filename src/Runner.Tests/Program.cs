@@ -1194,7 +1194,14 @@ public static class Program
 			"every shader from the cache: over, and nothing compiled - " + InGame.ShaderPassSaid(whole));
 		var rebuilt = InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":false,"totalTasks":3201,"completedTasks":3201,"diskHitTasks":1589}""")!.AsObject())!;
 		Check(rebuilt.Over && rebuilt.Compiled == 1612 && InGame.ShaderPassSaid(rebuilt).Contains("1612 of 3201 compiled", StringComparison.Ordinal), "what did not come from the cache was compiled at this start");
-		Check(!InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":true,"totalTasks":3201,"completedTasks":40,"diskHitTasks":40}""")!.AsObject())!.Over, "still at it: not over");
+		var going = InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":true,"totalTasks":3201,"completedTasks":40,"diskHitTasks":40}""")!.AsObject())!;
+		Check(!going.Over, "still at it: not over");
+		// ... and while it is still at it, what it has not done yet says nothing: 40 done, all 40 from the cache, is none
+		// compiled so far - never 3,161 (a wait that can no longer ask it once took that for a cache out of date - CodeRabbit
+		// on pull request #35)
+		Equal<long?>(0, going.CompiledSoFar, "a pass still going that has read every shader so far from its cache has compiled none");
+		Equal<long?>(10, InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":true,"totalTasks":3201,"completedTasks":50,"diskHitTasks":40}""")!.AsObject())!.CompiledSoFar,
+			"one that has done more than it read from its cache has compiled the rest of what it did");
 		Check(!InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":false,"totalTasks":0,"completedTasks":0}""")!.AsObject())!.Over, "nothing queued yet (the game has only just come up): not over");
 		Equal<long?>(null, InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":false,"totalTasks":12,"completedTasks":12}""")!.AsObject())!.Compiled, "a shader mod that does not say what came from its cache");
 		Equal<InGame.ShaderPass?>(null, InGame.ReadShaderPass(JsonNode.Parse("""{"cacheFiles":3201}""")!.AsObject()), "an answer that says nothing about a pass");
@@ -2070,6 +2077,8 @@ public static class Program
 			WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp");
 			File.Delete(Path.Combine(ctx.Mo2.ModDir("Patch On Bashed"), "PatchOnBashed.esp"));
 		}));
+		var texGenRan = false;
+		StepRegistry.Replace(new FakeStep("texgen", (ctx, s) => texGenRan = true));
 		var half = g3.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("wryebash", new JsonObject { ["output_mod"] = "Bashed" }),
 			("synthesis", new JsonObject { ["output_mod"] = "Patch On Bashed" }), ("texgen", new JsonObject { ["output_mod"] = "Output C" }));
 		((JsonArray)half.Root["steps"]!)[1]![OldOutput.Key] = true;
@@ -2077,8 +2086,48 @@ public static class Program
 		half.Save();
 		ran = Runner.Run(new RunRequest(g3.SetupFile, g3.Data));
 		Equal(RunState.Failed, ran.State, ran.Verdict);
+		// (stopped by that very look, and nothing else: the verdict names the old output that is gone, and the tool after the
+		// place never ran)
+		Check(ran.Verdict.Contains("there is none to use any more - \"Patch On Bashed\" is missing or holds nothing now", StringComparison.Ordinal), "the run stopped on the old output that is gone: " + ran.Verdict);
+		Check(!texGenRan, "and the tool after that place did not run");
 		Equal(0, Journal.Load(ran.Folder!).UsedOld.Count, "when one old output of a place cannot be used, none of that place is put on the run's record");
 		Check(!ProfileOf(g3).States().ContainsKey("Bashed") && !ProfileOf(g3).States().ContainsKey("Patch On Bashed"), "and none of them is in the mod list or switched on after the run");
+
+		// ... and when one of them cannot be switched on at its place after all (its line taken out of the mod list while the
+		// run gave the other its line), none is carried out: the run stops there, and the put-back leaves both as the profile
+		// had them (CodeRabbit on pull request #35)
+		using var g4 = new FakeMo2();
+		g4.Mod("Bashed", ("Bashed Patch, 0.esp", false, []));
+		g4.Mod("Patch On Bashed", ("PatchOnBashed.esp", false, ["Bashed Patch, 0.esp"]));
+		ProfileOf(g4).EnsureMod("Bashed");
+		var g4Before = g4.Text("modlist.txt");
+		var g4List = Path.Combine(g4.ProfileDir, "modlist.txt");
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp")));
+		texGenRan = false;
+		var lineGone = g4.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("wryebash", new JsonObject { ["output_mod"] = "Bashed" }),
+			("synthesis", new JsonObject { ["output_mod"] = "Patch On Bashed" }), ("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		((JsonArray)lineGone.Root["steps"]!)[1]![OldOutput.Key] = true;
+		((JsonArray)lineGone.Root["steps"]!)[2]![OldOutput.Key] = true;
+		lineGone.Save();
+		Profile.AfterListMod = m => {
+			if (m == "Patch On Bashed") {
+				File.WriteAllText(g4List, File.ReadAllText(g4List).Replace("-Bashed\r\n", "", StringComparison.Ordinal));
+			}
+		};
+		try {
+			ran = Runner.Run(new RunRequest(g4.SetupFile, g4.Data));
+		} finally {
+			Profile.AfterListMod = null;
+		}
+		Equal(RunState.Failed, ran.State, ran.Verdict);
+		Check(ran.Verdict.Contains("the old output \"Bashed\" could not be switched on: its line is no longer in the mod list", StringComparison.Ordinal), "the run stops on the old output it could not switch on: " + ran.Verdict);
+		Equal("TR-322", RunnerErrors.Find(ran.Verdict)?.Code ?? "", "with what to do about it");
+		Check(!texGenRan, "the tool after that place did not run");
+		Check(Journal.Load(ran.Folder!).UsedOld.All(u => !u.Done), "none of the group is on record as carried out");
+		Check(!ProfileOf(g4).IsOn("Patch On Bashed") && !ProfileOf(g4).ActivePlugins().Contains("PatchOnBashed.esp", StringComparer.OrdinalIgnoreCase),
+			"and the one that was switched on is not on after the run, its plugin not ticked");
+		Check(ProfileOf(g4).States().TryGetValue("Bashed", out var bashedFlag) && bashedFlag == '-', "the other has its line back, off, as the profile had it: " + g4.Text("modlist.txt"));
+		Equal(g4Before, g4.Text("modlist.txt"), "the mod list is as it was before the run");
 
 		// What the player switches in Mod Organizer during the run counts for the profile the run's end leaves. A master's
 		// mod they untick while an earlier tool works is off at the end: the old output that needs it is refused at its
@@ -2115,7 +2164,90 @@ public static class Program
 		Check(!ProfileOf(p2).ActivePlugins().Contains("OldPatch.esp", StringComparer.OrdinalIgnoreCase), "its plugin is not ticked");
 		Check(Journal.Load(ran.Folder!).Notes.Any(n => n.Contains("\"Old Patch\" is left switched off", StringComparison.Ordinal) && n.Contains("BaseMod.esp", StringComparison.Ordinal)),
 			"and the run's notes say why: " + string.Join(" | ", Journal.Load(ran.Folder!).Notes));
+
+		// A master's mod switched on with that plugin unticked in the plugin list loads no master: at its place, with a tool
+		// after it, the old output that needs it is refused - a master counts only while its plugin is ticked (CodeRabbit on
+		// pull request #35)
+		using var p3 = new FakeMo2();
+		p3.Mod("Old Patch", ("OldPatch.esp", false, ["BaseMod.esp"]));
+		var p3Plugins = Path.Combine(p3.ProfileDir, "plugins.txt");
+		File.WriteAllText(p3Plugins, File.ReadAllText(p3Plugins).Replace("*BaseMod.esp", "BaseMod.esp", StringComparison.Ordinal));
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp")));
+		var masterUnticked = p3.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Old Patch" }), ("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		((JsonArray)masterUnticked.Root["steps"]!)[0]![OldOutput.Key] = true;
+		masterUnticked.Save();
+		ran = Runner.Run(new RunRequest(p3.SetupFile, p3.Data));
+		Equal(RunState.Failed, ran.State, ran.Verdict);
+		Check(ran.Verdict.Contains("OldPatch.esp needs BaseMod.esp, which is not switched on at this point of the run", StringComparison.Ordinal), "a master whose plugin is not ticked is not there for the tool after it: " + ran.Verdict);
+		Check(!ProfileOf(p3).IsOn("Old Patch") && !ProfileOf(p3).ActivePlugins().Contains("OldPatch.esp", StringComparer.OrdinalIgnoreCase), "the old output is not switched on");
+
+		// An old output whose mod the player switches on in Mod Organizer while an earlier tool works, its plugin left unticked:
+		// at its place its plugin is ticked all the same - the tool after it finds the plugin it was promised (CodeRabbit on
+		// pull request #35: only a mod that was off had its plugins ticked)
+		using var p4 = new FakeMo2();
+		p4.Mod("Kept", ("Kept.esp", false, []));
+		ProfileOf(p4).EnsureMod("Kept");
+		var p4List = Path.Combine(p4.ProfileDir, "modlist.txt");
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
+			WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp");
+			File.WriteAllText(p4List, File.ReadAllText(p4List).Replace("-Kept", "+Kept", StringComparison.Ordinal));
+		}));
+		bool? keptTickedForTheTool = null;
+		StepRegistry.Replace(new FakeStep("texgen", (ctx, s) => {
+			keptTickedForTheTool = ctx.Profile.ActivePlugins().Contains("Kept.esp", StringComparer.OrdinalIgnoreCase);
+			WriteOutput(ctx, "texgen", "Output C", "OutC.esp");
+		}));
+		var onByThem = p4.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("synthesis", new JsonObject { ["output_mod"] = "Kept" }),
+			("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		((JsonArray)onByThem.Root["steps"]!)[1]![OldOutput.Key] = true;
+		onByThem.Save();
+		ran = Runner.Run(new RunRequest(p4.SetupFile, p4.Data));
+		Equal(RunState.Finished, ran.State, ran.Verdict);
+		Check(keptTickedForTheTool == true, "the tool after its place found its plugin ticked");
+		Check(ProfileOf(p4).IsOn("Kept") && ProfileOf(p4).ActivePlugins().Contains("Kept.esp", StringComparer.OrdinalIgnoreCase), "and after the run it is on, its plugin ticked");
 		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => { }));
+
+		// Plugins whose masters lie in each other's mods: "Mod A" holds ABase.esp and APatch.esp, "Mod B" holds B.esp; APatch.esp
+		// needs B.esp, and B.esp needs ABase.esp. Mod by mod, either order lists a plugin before its master - plugin by plugin,
+		// never (CodeRabbit on pull request #35)
+		using var po = new FakeMo2();
+		po.Mod("Mod A", ("ABase.esp", false, []), ("APatch.esp", false, ["B.esp"]));
+		po.Mod("Mod B", ("B.esp", false, ["ABase.esp"]));
+		foreach (var given in new[] { new[] { "Mod A", "Mod B" }, new[] { "Mod B", "Mod A" } }) {
+			File.WriteAllText(Path.Combine(po.ProfileDir, "plugins.txt"), "*BaseMod.esp\r\n");
+			File.WriteAllText(Path.Combine(po.ProfileDir, "loadorder.txt"), "Skyrim.esm\r\nBaseMod.esp\r\n");
+			ProfileOf(po).ActivatePlugins(given);
+			var lo = po.Text("loadorder.txt").Replace("\r\n", "\n").Split('\n').ToList();
+			Check(lo.IndexOf("ABase.esp") > 0 && lo.IndexOf("ABase.esp") < lo.IndexOf("B.esp") && lo.IndexOf("B.esp") < lo.IndexOf("APatch.esp"),
+				$"given as {string.Join(", ", given)}: each master stands before what needs it: " + string.Join(" | ", lo));
+			Check(po.Text("plugins.txt").Replace("\r\n", "\n").Split('\n').Where(l => l.StartsWith('*')).Select(l => l[1..]).SequenceEqual(["BaseMod.esp", "ABase.esp", "B.esp", "APatch.esp"]),
+				"and ticked in that order: " + po.Text("plugins.txt"));
+		}
+
+		// The put-back never switches on a mod a later step of the run replaced for good - also not one the run had switched on
+		// as an old output before that step - and an old output whose master is in such a mod is left off, and said
+		// (CodeRabbit on pull request #35: the masters were judged by the profile as it stood before those mods went off)
+		using var pr = new FakeMo2();
+		pr.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		pr.Mod("Old Patch", ("OldPatch.esp", false, ["BaseMod.esp"]));
+		var prc = StepContext(pr, "landscapefixer");
+		try {
+			prc.Profile.EnsureMod("Old Patch");
+			prc.Profile.SetMods([], ["Output B", "Needs B"]);
+			var prSnap = prc.Profile.Snapshot();
+			prc.Journal.UsedOld.Add(new OldUse { Step = "pgpatcher", Name = "PGPatcher", Mod = "Output B", Done = true });
+			prc.Journal.UsedOld.Add(new OldUse { Step = "synthesis", Name = "Synthesis", Mod = "Old Patch", Done = true });
+			prc.Journal.Retire.AddRange(["Output B", "Base Mod"]);
+			Runner.PutBack(prc, prSnap);
+			Check(!ProfileOf(pr).IsOn("Output B"), "a used old output that a later step replaced stays off");
+			Check(!ProfileOf(pr).IsOn("Base Mod"), "(the replaced mod that holds the master is off)");
+			Check(!ProfileOf(pr).IsOn("Old Patch") && !ProfileOf(pr).ActivePlugins().Contains("OldPatch.esp", StringComparer.OrdinalIgnoreCase),
+				"an old output whose master is in a mod that went off for good is left off");
+			Check(prc.Journal.Notes.Any(n => n.Contains("\"Old Patch\" is left switched off", StringComparison.Ordinal) && n.Contains("BaseMod.esp", StringComparison.Ordinal)),
+				"and the run's notes say why: " + string.Join(" | ", prc.Journal.Notes));
+		} finally {
+			prc.Log.Dispose();
+		}
 
 		// a copy of a master in Mod Organizer's overwrite folder keeps it there when its mod goes off: what needs it stays on
 		var deps = Mo2Instance.Load(f.Exe, f.Instance);
@@ -2231,35 +2363,81 @@ public static class Program
 		// Cut off by a crash right after the run wrote that line and before it read the order files: all a put-back has is
 		// the record the RUN itself had written by then. Both are taken as they stood at that moment - the run's record and
 		// the mod list - and laid out again once this run is over: nothing of the record is written by the test but that
-		// its process is gone
+		// its process is gone. On a Mod Organizer of its own, where this run is the only one on record: the record taken is
+		// that very run's (picked from several by their times, two made within one tick could be taken for each other)
+		using var k2 = new FakeMo2();
+		k2.Mod("Shared", ("Shared.esp", false, []));
+		var both2 = k2.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("synthesis", new JsonObject { ["output_mod"] = "Shared" }),
+			("texgen", new JsonObject { ["output_mod"] = "Shared" }));
+		((JsonArray)both2.Root["steps"]!)[1]![OldOutput.Key] = true;
+		both2.Save();
+		var k2Before = k2.Text("modlist.txt");
 		byte[]? cutRecord = null, cutList = null;
+		var runsThen = -1;
 		Profile.AfterListMod = m => {
 			if (m == "Shared" && cutRecord == null) {
-				var newest = Directory.GetDirectories(Runner.RunsDir(k.Data)).OrderByDescending(Directory.GetCreationTimeUtc).First();
-				cutRecord = File.ReadAllBytes(Path.Combine(newest, "journal.json"));
-				cutList = File.ReadAllBytes(Path.Combine(k.ProfileDir, "modlist.txt"));
+				var runs = Directory.GetDirectories(Runner.RunsDir(k2.Data));
+				runsThen = runs.Length;
+				if (runs.Length == 1) {
+					cutRecord = File.ReadAllBytes(Path.Combine(runs[0], "journal.json"));
+					cutList = File.ReadAllBytes(Path.Combine(k2.ProfileDir, "modlist.txt"));
+				}
 			}
 		};
 		try {
 			how = "fail";
-			r = Runner.Run(new RunRequest(k.SetupFile, k.Data));
+			r = Runner.Run(new RunRequest(k2.SetupFile, k2.Data));
 		} finally {
 			Profile.AfterListMod = null;
 		}
 		Equal(RunState.Failed, r.State, r.Verdict);
+		Equal(1, runsThen, "(the run that wrote the line is the only run on record)");
 		Check(cutRecord != null && cutList != null, "(the run's record and the mod list were taken as the line was written)");
-		var cutFolder = Path.Combine(Runner.RunsDir(k.Data), "0002 cut off");
+		var cutFolder = Path.Combine(Runner.RunsDir(k2.Data), "0002 cut off");
 		Directory.CreateDirectory(cutFolder);
 		File.WriteAllBytes(Path.Combine(cutFolder, "journal.json"), cutRecord!);
-		File.WriteAllBytes(Path.Combine(k.ProfileDir, "modlist.txt"), cutList!);
+		File.WriteAllBytes(Path.Combine(k2.ProfileDir, "modlist.txt"), cutList!);
 		var cut = Journal.Load(cutFolder);
 		Equal("Shared", string.Join(",", cut.Listed), "the record the run had written before the line names the mod");
 		cut.Pid = 999999;
 		cut.Save();
-		Check(ProfileOf(k).States().ContainsKey("Shared"), "(the line is in the mod list, as the crash left it)");
+		Check(ProfileOf(k2).States().ContainsKey("Shared"), "(the line is in the mod list, as the crash left it)");
 		var afterCut = Runner.Restore(Journal.Load(cutFolder));
 		Equal(RunState.Restored, afterCut.State, afterCut.Verdict);
-		Equal(sharedBefore, k.Text("modlist.txt"), "put back from the run's own record alone, the mod list is as it was");
+		Equal(k2Before, k2.Text("modlist.txt"), "put back from the run's own record alone, the mod list is as it was");
+
+		// A run that lists one output's line, and then meets the mod list held by another program - its next line cannot be
+		// written, nor the first one taken out again - stops at the start with the put-back ON OFFER: the line it wrote is
+		// still there. Once the list is free, "Put my profile back" takes the line out, and the mod's folder is as it was
+		// (CodeRabbit on pull request #35)
+		using var k3 = new FakeMo2();
+		k3.Mod("Shared", ("Shared.esp", false, []));
+		k3.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Shared" }), ("texgen", new JsonObject { ["output_mod"] = "Output New" }));
+		var k3Before = k3.Text("modlist.txt");
+		var k3Bytes = File.ReadAllBytes(Path.Combine(k3.Mods, "Shared", "Shared.esp"));
+		FileStream? k3Held = null;
+		Profile.AfterListMod = m => {
+			if (m == "Shared" && k3Held == null) {
+				k3Held = new FileStream(Path.Combine(k3.ProfileDir, "modlist.txt"), FileMode.Open, FileAccess.Read, FileShare.Read);
+			}
+		};
+		try {
+			r = Runner.Run(new RunRequest(k3.SetupFile, k3.Data));
+		} finally {
+			Profile.AfterListMod = null;
+			k3Held?.Dispose();
+		}
+		Equal(RunState.Failed, r.State, r.Verdict);
+		Check(r.Verdict.Contains("the profile is back except the line this run gave \"Shared\" in the mod list", StringComparison.Ordinal), "the verdict names the line that is still there: " + r.Verdict);
+		Equal("TR-401", RunnerErrors.Find(r.Verdict)?.Code ?? "", "with what to do about it");
+		var k3Run = Journal.Load(r.Folder!);
+		Check(k3Run.NeedsRestore && k3Run.Unfinished, "the put-back stays on offer");
+		Check(ProfileOf(k3).States().ContainsKey("Shared"), "(the line the run wrote is still in the mod list)");
+		Check(Runner.CheckStart(new RunRequest(k3.SetupFile, k3.Data)) is { Starts: false } k3Gate && k3Gate.Why.Contains("did not finish", StringComparison.Ordinal), "and no new run starts over it");
+		var k3Back = Runner.Restore(Journal.Interrupted(Runner.RunsDir(k3.Data))!);
+		Equal(RunState.Restored, k3Back.State, k3Back.Verdict);
+		Equal(k3Before, k3.Text("modlist.txt"), "the list free again, the put-back takes the line out: the mod list is as it was");
+		Check(File.ReadAllBytes(Path.Combine(k3.Mods, "Shared", "Shared.esp")).SequenceEqual(k3Bytes), "and the mod's folder holds what it held");
 		// A folder that was there before the run with nothing in it but a meta.ini this program once wrote (an earlier run's
 		// empty output, its line gone): the run gives it a line, fails before its tool - and only the line goes again. The
 		// folder is not the run's to move away
@@ -2401,6 +2579,57 @@ public static class Program
 		Equal(1, OldOutput.Places(setup, setup.EnabledSteps).Single().At, "its place: before the first step of the run that stands after it");
 		Equal(0, OldOutput.Places(setup, setup.EnabledSteps.Where(x => x.Key == "texgen").ToList()).Single().At, "in a run of only a later step: before that step");
 		Equal(1, OldOutput.Places(setup, setup.EnabledSteps.Where(x => x.Key == "landscapefixer").ToList()).Single().At, "in a run of only an earlier step: after it");
+	}
+
+	// A change of several fields of the run's record made as one is written whole: a save on another thread (the run's box
+	// watch saves the record too) waits until the whole change is made. Written half way, a crash right then left half of a
+	// group of old outputs carried out (CodeRabbit on pull request #35)
+	static void T_AChangeOfTheRunsRecordIsWrittenWhole()
+	{
+		var dir = Path.Combine(Path.GetTempPath(), "mo2 tool runner tests", "record " + Guid.NewGuid().ToString("N")[..8]);
+		Directory.CreateDirectory(dir);
+		try {
+			var j = new Journal { Folder = dir, UsedOld = [new OldUse { Step = "wryebash", Mod = "Bashed" }, new OldUse { Step = "synthesis", Mod = "Patch On Bashed" }] };
+			j.Save();
+			Task? other = null;
+			var waited = false;
+			j.SaveWith(() => {
+				j.UsedOld[0].Done = true;
+				other = Task.Run(j.Save);
+				waited = !other.Wait(TimeSpan.FromMilliseconds(300));
+				j.UsedOld[1].Done = true;
+			});
+			Check(waited, "a save on another thread waits while the change is made");
+			Check(other != null && other.Wait(TimeSpan.FromSeconds(10)), "and goes on once it is done");
+			Check(Journal.Load(dir).UsedOld.All(u => u.Done), "what is on disk holds the whole change, never half of it");
+		} finally {
+			try {
+				Directory.Delete(dir, true);
+			} catch (IOException) {
+			} catch (UnauthorizedAccessException) {
+			}
+		}
+	}
+
+	// A mod list that begins with a UTF-8 mark keeps it: a line written into it and taken out again leaves the file byte for
+	// byte as it was - what the put-back of a run that only listed a mod must leave (CodeRabbit on pull request #35)
+	static void T_TheModListKeepsHowItIsWritten()
+	{
+		using var f = new FakeMo2();
+		var list = Path.Combine(f.ProfileDir, "modlist.txt");
+		var mark = Encoding.UTF8.GetPreamble();
+		File.WriteAllBytes(list, [.. mark, .. File.ReadAllBytes(list)]);
+		var before = File.ReadAllBytes(list);
+		f.Mod("Loose", ("Loose.esp", false, []));
+		var p = ProfileOf(f);
+		Check(p.ListMod("Loose") && p.States().ContainsKey("Loose"), "(its line written)");
+		Check(File.ReadAllBytes(list).AsSpan().StartsWith(mark), "the mark is kept when a line is written");
+		p.SetMods(["Loose"], []);
+		Check(File.ReadAllBytes(list).AsSpan().StartsWith(mark) && p.IsOn("Loose"), "and when a mod is switched");
+		p.SetMods([], ["Loose"]);
+		Check(p.UnlistMod("Loose") && !p.States().ContainsKey("Loose"), "(the line taken out again)");
+		Check(File.ReadAllBytes(list).SequenceEqual(before), "the mod list is byte for byte as it was");
+		Check(Profile.KeepAdded(before, new Dictionary<string, char>(), ["New One"]).AsSpan().StartsWith(mark), "a saved list put back with a line kept for a mod keeps its mark too");
 	}
 
 	// his checklist 454: a finished run's old outputs are packed, its folder gone; undoing the run puts each output and the lists back,
@@ -2827,6 +3056,25 @@ public static class Program
 		Check(!release.Wait(TimeSpan.FromMilliseconds(300)) && late.Held == 1, "the holds are not given up while that look is out");
 		letItEnd.Set();
 		Check(look.Wait(TimeSpan.FromSeconds(10)) && release.Wait(TimeSpan.FromSeconds(10)) && late.Held == 0, "they are once it is done");
+		// ... and once they are given up nothing takes a new one: a look that comes late (the watch's last beat, when its
+		// thread was slow to end) or a process put on record after it - nothing would ever give such a hold up (CodeRabbit
+		// on pull request #35). What is on record can still be asked
+		var taken = new System.Collections.Concurrent.ConcurrentBag<Hold>();
+		var over = new StartedSet(p => world.GetValueOrDefault(p), (_, _) => {
+			var hold = new Hold();
+			taken.Add(hold);
+			return hold;
+		});
+		world[50] = t;
+		over.Add(50);
+		over.Release();
+		Check(taken.Count == 1 && taken.All(h => h.GivenUp) && over.Released, "(every hold given up)");
+		world[51] = t.AddSeconds(1);
+		over.Sweep(() => [(51, 50)], () => t.AddSeconds(10));
+		world[52] = t.AddSeconds(2);
+		over.Add(52);
+		Check(taken.Count == 1 && over.Held == 0, "after that, neither a late look nor a process put on record takes a hold");
+		Check(over.Contains(50) && over.Contains(52) && over.Owned().Contains(51) && over.LiveAt().ContainsKey(52), "and what is on record can still be asked");
 	}
 
 	// what the run's processes start themselves stays the run's own after the one that started it has ended
@@ -3005,6 +3253,28 @@ public static class Program
 		var began = Procs.StartTime(bystander.Id) ?? throw new InvalidOperationException("the stand-in's start time could not be read");
 		Check(!Procs.KillTree(bystander.Id, began.AddSeconds(-90)) && !bystander.HasExited, "a process that has the number of one on record but started at another time is never ended as that one");
 		Check(Procs.KillTree(bystander.Id, began) && bystander.WaitForExit(5000), "the very process on record is");
+
+		// ... and ended ALONE: what it started keeps running (the game ended over a box it cannot have answered takes nothing
+		// under it with it that the run has no record of - CodeRabbit on pull request #35)
+		using var parent = Process.Start(new ProcessStartInfo("cmd.exe", "/d /c \"ping -n 30 127.0.0.1 >nul\"") { UseShellExecute = false, CreateNoWindow = true })!;
+		using var endParent = new StandIn(parent);
+		var parentBegan = Procs.StartTime(parent.Id) ?? throw new InvalidOperationException("the stand-in's start time could not be read");
+		var child = 0;
+		for (var i = 0; i < 100 && child == 0; ++i) {
+			child = Procs.Tree(parent.Id).FirstOrDefault(p => p != parent.Id && Procs.Image(p).Equals("PING.EXE", StringComparison.OrdinalIgnoreCase));
+			if (child == 0) {
+				Thread.Sleep(50);
+			}
+		}
+		Check(child != 0, "(the stand-in started its child)");
+		var childBegan = Procs.StartTime(child) ?? throw new InvalidOperationException("the child's start time could not be read");
+		try {
+			Check(!Procs.KillOnly(parent.Id, parentBegan.AddSeconds(-90)) && !parent.HasExited, "ended alone: never under a number that is another process's by now");
+			Check(Procs.KillOnly(parent.Id, parentBegan) && parent.WaitForExit(5000), "the very process on record is ended");
+			Check(Procs.StartTime(child) == childBegan, "and what it started is still running");
+		} finally {
+			Procs.KillTree(child, childBegan);
+		}
 	}
 
 	// what a run's backup holds is never written over: not by a put-back that is tried again, not by a second failed step
@@ -6989,6 +7259,18 @@ public static class Program
 		Equal(Setup.CopiesKept, keptNow.Count, "the newest copies of that second are kept");
 		Check(keptNow.Contains($"v{Setup.CopiesKept + 1}") && keptNow.Contains($"v{Setup.CopiesKept}") && !keptNow.Contains("v0") && !keptNow.Contains("v1"),
 			"the version each save replaced has its copy, the last one too; the oldest two went: " + string.Join(",", keptNow.Order(StringComparer.Ordinal)));
+		// The PC's clock set back: every copy there reads newer than the one this save makes. That one still stays - the
+		// version a save replaced always has its copy - with the newest of the others (CodeRabbit on pull request #35)
+		var back = Path.Combine(f.Root, "Clock backups");
+		Directory.CreateDirectory(back);
+		for (var i = 0; i < Setup.CopiesKept; ++i) {
+			File.WriteAllText(Path.Combine(back, $"My Setup 2027-01-{1 + i:00} 10-00-00.json"), "later");
+		}
+		File.WriteAllText(file, "before the clock went back");
+		Equal<string?>(null, Setup.WriteKeepingACopy(file, "after", back, new DateTime(2026, 6, 1, 12, 0, 0, DateTimeKind.Local)), "written with the clock set back");
+		var backNow = Directory.GetFiles(back, "My Setup *.json");
+		Equal(Setup.CopiesKept, backNow.Length, "as many copies are kept as ever");
+		Check(backNow.Any(p => File.ReadAllText(p) == "before the clock went back"), "and the copy of the version this save replaced is one of them");
 	}
 
 	// a tool that never appeared keeps Mod Organizer's whole log since the request: every line after the place the request was made,

@@ -436,7 +436,13 @@ public static partial class Procs
 	// The same for the very process that was put on record: opened once, its start time read and the end made through that
 	// one handle. Asked by number twice - "is it still the one?", then "end it" - a number that changed hands in between
 	// would end somebody else's program. False: it was no longer that process (or could not be opened), and nothing was ended.
-	public static bool KillTree(int a_root, DateTime a_startedUtc)
+	public static bool KillTree(int a_root, DateTime a_startedUtc) => KillVerified(a_root, a_startedUtc, true);
+
+	// That one process alone, the same way: what it started is left running (whoever ends those names each one by its own
+	// number and start time)
+	public static bool KillOnly(int a_pid, DateTime a_startedUtc) => KillVerified(a_pid, a_startedUtc, false);
+
+	static bool KillVerified(int a_root, DateTime a_startedUtc, bool a_tree)
 	{
 		try {
 			using var p = Process.GetProcessById(a_root);
@@ -445,7 +451,7 @@ public static partial class Procs
 			if (p.HasExited || p.StartTime.ToUniversalTime() != a_startedUtc) {
 				return false;
 			}
-			p.Kill(true);
+			p.Kill(a_tree);
 			p.WaitForExit(10000);
 			return true;
 		} catch (ArgumentException) {

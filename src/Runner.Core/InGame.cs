@@ -1134,6 +1134,11 @@ public static partial class InGame
 
 		// how many shaders this start had to compile itself (0: every one came from the cache; null: it does not say)
 		public long? Compiled => FromCache is { } hits ? Math.Max(0, Total - hits) : null;
+
+		// how many of those it has compiled so far: the ones done that did not come from the cache. While the pass is still
+		// going, the shaders not done yet say nothing - they may all still come from the cache (3,201 queued, 40 done, 40 of
+		// them read from disk: none compiled so far, though Compiled reads 3,161)
+		public long? CompiledSoFar => FromCache is { } hits ? Math.Max(0, Done - hits) : null;
 	}
 
 	// null: this shader mod's answer does not say (another shader mod, an older version)
@@ -1206,7 +1211,8 @@ public static partial class InGame
 			} else {
 				saidOverSince = null;
 			}
-			if (pass is { Compiled: > 0 }) {
+			// (only what it has done counts: a pass still going that has read every shader so far from the cache has compiled none)
+			if (pass is { CompiledSoFar: > 0 }) {
 				compiledSome = true;
 			}
 			if (pass is { Compiling: true }) {

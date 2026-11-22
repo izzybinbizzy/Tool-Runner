@@ -36,6 +36,9 @@ public sealed class StartedSet : IEnumerable<int>
 	// parent ended in between gave its hold up under the first, and from that moment the number could change hands while
 	// the first look still read every child under it as the run's own. Taken before _gate, never inside it.
 	readonly Lock _sweeping = new();
+	// every hold was given up (Release): set once, under both locks - a look (under _sweeping) and Add (under _gate) each read
+	// it under the lock they hold
+	bool _released;
 
 	// The offline tests only: told when a look, or the giving up of every hold, has come to the point where it waits for
 	// its turn (the next thing it does is take _sweeping). A test that must show that one waits for the other tells by this
@@ -53,9 +56,15 @@ public sealed class StartedSet : IEnumerable<int>
 	{
 		var at = _startOf(a_pid);
 		var image = Procs.Image(a_pid);
-		var pin = at is { } started ? _pin?.Invoke(a_pid, started) : null;
+		// (no new hold once every hold was given up: nothing would ever give that one up - it goes on record unheld)
+		var pin = at is { } started && !Released ? _pin?.Invoke(a_pid, started) : null;
 		IDisposable? old;
 		lock (_gate) {
+			if (_released && pin != null) {
+				// given up between the look above and here: this hold too
+				pin.Dispose();
+				pin = null;
+			}
 			_pids[a_pid] = at;
 			_ended.Remove(a_pid);
 			_kin.Remove(a_pid);
@@ -82,16 +91,28 @@ public sealed class StartedSet : IEnumerable<int>
 	// Every hold given up, when the run this set belongs to is over. What is on record stays on record; from here a number
 	// may change hands again, so nothing more is put on record under a process that has ended. A look that is still out
 	// (the watch's last beat) is waited for: its holds are not given up under it.
+	// And from then on no new hold is taken - by Add or by a look that comes late (the watch's last beat can still be on its
+	// way when the run is over: its holds were never given up). What is on record can still be asked (Contains, Live, Owned)
 	public void Release()
 	{
 		AboutToWaitForItsTurn?.Invoke();
 		lock (_sweeping) {
 			List<IDisposable> all;
 			lock (_gate) {
+				_released = true;
 				all = [.. _pins.Values];
 				_pins.Clear();
 			}
 			all.ForEach(p => p.Dispose());
+		}
+	}
+
+	public bool Released
+	{
+		get {
+			lock (_gate) {
+				return _released;
+			}
 		}
 	}
 
@@ -287,7 +308,8 @@ public sealed class StartedSet : IEnumerable<int>
 		// each one found is held open before it goes on record (asked of Windows outside the lock); one that cannot be held
 		// - it has ended since, or its number is another's already - is on record all the same, with no child of its own
 		// taken past this look's first reading
-		var pins = found.ToDictionary(c => c.Key, c => _pin?.Invoke(c.Key, c.Value));
+		// (none once every hold was given up: a look after that puts what it finds on record unheld - Release came first)
+		var pins = found.ToDictionary(c => c.Key, c => _released ? null : _pin?.Invoke(c.Key, c.Value));
 		var spare = new List<IDisposable?>();
 		lock (_gate) {
 			foreach (var (pid, at) in found) {

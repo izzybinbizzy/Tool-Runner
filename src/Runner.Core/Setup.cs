@@ -291,9 +291,12 @@ public sealed class Setup
 				// tidy below has taken the oldest of that second away, its name read as the oldest again and the copy just
 				// made under it was the next one tidied away
 				var number = Own().Where(c => c.Stamp == stamp).Select(c => c.Number).DefaultIfEmpty(0).Max() + 1;
-				System.IO.File.Copy(a_file, Path.Combine(a_copies, $"{name} {stamp}{(number == 1 ? "" : " " + number.ToString(InvariantCulture))}.json"), false);
-				// the newest first: by their time, then by the number of those made in one second
-				foreach (var old in Own().OrderByDescending(c => c.Stamp, StringComparer.Ordinal).ThenByDescending(c => c.Number).Skip(CopiesKept)) {
+				var made = Path.Combine(a_copies, $"{name} {stamp}{(number == 1 ? "" : " " + number.ToString(InvariantCulture))}.json");
+				System.IO.File.Copy(a_file, made, false);
+				// The copy just made always stays, and the newest of the others with it: by their time, then by the number of
+				// those made in one second. (With the PC's clock set back, the others all read newer than it - tidied by time
+				// alone, the copy of the version this save replaces was the one that went)
+				foreach (var old in Own().Where(c => !Files.SamePath(c.File.FullName, made)).OrderByDescending(c => c.Stamp, StringComparer.Ordinal).ThenByDescending(c => c.Number).Skip(CopiesKept - 1)) {
 					old.File.Delete();
 				}
 			}

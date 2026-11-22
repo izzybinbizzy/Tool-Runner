@@ -239,6 +239,7 @@ public static class SettingsPanel
 	{
 		var drawing = ++s_drawing;
 		s_openedFor = a_vm.Setup?.File;
+		s_errors = null;
 		if (a_vm.Setup == null) {
 			// the program's own new-version look happens with no setup too, so its switch is here as well
 			var none = new StackPanel();
@@ -289,6 +290,7 @@ public static class SettingsPanel
 		}
 		var stack = setupPage;
 		var errors = new TextBlock { Foreground = Brushes2.Get("Bad"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0) };
+		s_errors = errors;
 		var apply = new List<Func<string?>>();
 
 		void Head(string a_t) => stack.Children.Add(new TextBlock { Text = a_t, Style = (Style)a_w.FindResource("H2"), Margin = new Thickness(0, 18, 0, 8), Tag = HeadTag });
@@ -880,6 +882,13 @@ public static class SettingsPanel
 				if (NotThisSetup(openedFor, openedName, a_vm.Setup) == null) {
 					a_vm.LoadSteps();
 				}
+				// The save failed, and settings opened again for this setup while it was being written were drawn from the setup
+				// in memory - which held what was being saved, not what is in its file. They keep those values (nothing typed
+				// is lost), marked as not saved - closing them asks first - and say why in the settings themselves
+				if (!saved && MainViewModel.StillShown(openedFor, s_openedFor) && s_errors is { } now) {
+					HasChanges = true;
+					now.Text = "Not saved: " + a_vm.Message + " - what these settings show is not in the setup's file yet: press Save again.";
+				}
 				return;
 			}
 			// another setup was picked while this one was being written: its file holds what was saved (or not), and the
@@ -944,6 +953,10 @@ public static class SettingsPanel
 
 	static ListBox? s_cats;
 
+	// the line of the drawing on screen that says why its settings were not saved (a save of an earlier drawing that ends
+	// late writes its failure there)
+	static TextBlock? s_errors;
+
 	// the settings window closed: nothing typed is left to ask about
 	public static void Closed()
 	{
@@ -952,6 +965,7 @@ public static class SettingsPanel
 		s_openedFor = null;
 		s_find = null;
 		s_cats = null;
+		s_errors = null;
 	}
 
 	// the off-screen pictures only: the open settings turned to page a_page; its name, or null when there is no such page

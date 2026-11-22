@@ -897,8 +897,9 @@ public sealed partial class MainViewModel : Observable
 
 	// True: go on with the start. Shown once, for a setup that has never run and has a tool to set up; what does not read here
 	// is the start's own first finding. a_cannot: what stops the start, asked again once the box has closed (a tool may have
-	// been open for minutes).
-	async Task<bool> ToolsFirst(string a_file, Func<Setup> a_read, Func<string?> a_cannot)
+	// been open for minutes). a_stillPicked: a single run's setup is still the one picked in the window - asked once the
+	// tools are read, before the box opens: another setup picked meanwhile never gets this one's box
+	async Task<bool> ToolsFirst(string a_file, Func<Setup> a_read, Func<string?> a_cannot, Func<bool>? a_stillPicked = null)
 	{
 		var key = ToolsOfferedKey(a_file);
 		if (OfferTools == null || UiState.Flag(key)) {
@@ -917,6 +918,10 @@ public sealed partial class MainViewModel : Observable
 		}
 		if (!ToolSettings.OfferFirst(ran, false, tools.Count)) {
 			return true;
+		}
+		if (a_stillPicked != null && !a_stillPicked()) {
+			Say("Not started: another setup was picked meanwhile - press Start again.", "warn");
+			return false;
 		}
 		if (!OfferTools(setup, tools)) {
 			Say("Not started. Your tools can be set up any time: Tools, at the top of the window.", "");
@@ -973,7 +978,7 @@ public sealed partial class MainViewModel : Observable
 				// (its tools are read from a copy made here: the worker never walks the shown setup's own step list, which a
 				// step dragged meanwhile rewrites under it)
 				var asItIs = mine.Clone();
-				if (!await ToolsFirst(mine.File, () => asItIs, CannotStart)) {
+				if (!await ToolsFirst(mine.File, () => asItIs, CannotStart, () => string.Equals(SelectedSetup?.File, picked, StringComparison.OrdinalIgnoreCase))) {
 					return;
 				}
 			} finally {
