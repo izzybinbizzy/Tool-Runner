@@ -1527,6 +1527,44 @@ public static class Program
 		var apart = ShaderStep.Fingerprint(mo2, c, p);
 		File.WriteAllText(list, "+Look A\r\n+Look B\r\n" + rest);
 		Equal(apart, ShaderStep.Fingerprint(mo2, c, p), "an order that changes no winner leaves the fingerprint, and the cache, as they were");
+
+		// The shader mod's settings file counts by the features it switches off at the game's start and by nothing else in it:
+		// the game rewrites the rest by itself (a real run, 2026-11-21: three preset fields changed at a start, and the next
+		// run built the whole cache again for it)
+		var settings = Path.Combine(f.Mods, "Shader Mod", "SKSE", "Plugins", "CommunityShaders", "SettingsUser.json");
+		Directory.CreateDirectory(Path.GetDirectoryName(settings)!);
+		f.Mod("Cache Mod");
+		var withCacheMod = ShaderStep.Fingerprint(mo2, c, p);
+		File.WriteAllText(settings, """{ "Menu": { "LastSettingsSection": "General" }, "Presets": { "activePackId": "legacy:effects11" }, "Disable at Boot": { "Grass Lighting": false, "Skylighting": true } }""");
+		var set = ShaderStep.Fingerprint(mo2, c, p);
+		var setOld = ShaderStep.Fingerprint(mo2, c, p, null, null, true, false);
+		Check(set != withCacheMod, "(the settings file is part of it)");
+		File.WriteAllText(settings, """{ "Presets": { "activePackId": "" }, "Menu": { "LastSettingsSection": "ShadersCache" }, "Disable at Boot": { "Skylighting": true, "Grass Lighting": false } }""");
+		Equal(set, ShaderStep.Fingerprint(mo2, c, p), "values the game rewrites by itself (the menu's last page, the active preset) leave the cache current");
+		Check(setOld != ShaderStep.Fingerprint(mo2, c, p, null, null, true, false), "read the way an older stamp was written, every value still counts");
+		// a stamp says which way it was written, and is read that way
+		var cacheDir = Path.Combine(f.Mods, "Cache Mod", "ShaderCache");
+		Directory.CreateDirectory(cacheDir);
+		File.WriteAllText(Path.Combine(cacheDir, "a shader.bin"), "compiled");
+		var stamp = Path.Combine(f.Mods, "Cache Mod", Brand.Name + " cache.json");
+		File.WriteAllText(stamp, new JsonObject { ["fingerprint"] = set, ["files"] = 1, ["verified"] = true, ["winners"] = true, ["settings"] = "boot" }.ToJsonString());
+		Equal(null, ShaderStep.WhyStale(mo2, c, p), "a cache stamped the new way is current");
+		File.WriteAllText(settings, """{ "Presets": { "activePackId": "another" }, "Disable at Boot": { "Skylighting": true, "Grass Lighting": false } }""");
+		Check(ShaderStep.UpToDate(mo2, c, p), "and stays current when the game rewrites its settings");
+		File.WriteAllText(settings, """{ "Presets": { "activePackId": "another" }, "Disable at Boot": { "Skylighting": false, "Grass Lighting": false } }""");
+		Check((ShaderStep.WhyStale(mo2, c, p) ?? "").Contains("features switched off at the game's start", StringComparison.Ordinal),
+			"a feature switched at the game's start is another cache, and the reason is said: " + ShaderStep.WhyStale(mo2, c, p));
+		File.WriteAllText(stamp, new JsonObject { ["fingerprint"] = ShaderStep.Fingerprint(mo2, c, p, null, null, true, false), ["files"] = 1, ["verified"] = true, ["winners"] = true }.ToJsonString());
+		Equal(null, ShaderStep.WhyStale(mo2, c, p), "an older stamp (every value counted) is read the way it was written: no cache is built again for the change");
+		File.Delete(Path.Combine(cacheDir, "a shader.bin"));
+		Check((ShaderStep.WhyStale(mo2, c, p) ?? "").Contains("holds 0 shader(s)", StringComparison.Ordinal), "a cache that lost its shaders says so: " + ShaderStep.WhyStale(mo2, c, p));
+		File.Delete(stamp);
+		Check((ShaderStep.WhyStale(mo2, c, p) ?? "").Contains("no record", StringComparison.Ordinal), "no stamp: built, and the reason is said");
+		// a settings file that does not read counts whole
+		File.WriteAllText(settings, "not settings at all");
+		var unread = ShaderStep.Fingerprint(mo2, c, p);
+		File.WriteAllText(settings, "still not settings");
+		Check(unread != ShaderStep.Fingerprint(mo2, c, p), "a settings file that does not read counts with all of it");
 	}
 
 	// the fourth review, M1: his Bottled profile keeps a cache for each of two shader mods - switching the tick between them, or
