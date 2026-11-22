@@ -68,8 +68,6 @@ public partial class MainWindow : Window
 		_timer.Tick += async (_, _) => await Look();
 		_timer.Start();
 		StateChanged += (_, _) => Wake();
-		// nothing moves in a window nobody sees (minimized, or put away while a run goes)
-		void SeenOrNot() => _vm.WindowAway = WindowState == WindowState.Minimized || !IsVisible;
 		StateChanged += (_, _) => SeenOrNot();
 		// how it stood before it was minimized: closed from the taskbar while minimized, it comes back maximized if it was
 		StateChanged += (_, _) => {
@@ -122,6 +120,10 @@ public partial class MainWindow : Window
 	}
 
 	public void Say(string a_text) => _vm.Say(a_text, "warn");
+
+	// nothing moves in a window nobody sees (minimized, or put away while a run goes) - unless the compact view shows the run:
+	// it is for exactly the time the main window is minimized
+	void SeenOrNot() => _vm.WindowAway = (WindowState == WindowState.Minimized || !IsVisible) && _compact is not { IsVisible: true };
 
 	// work the window carries itself (Settings' own buttons): it is not closed in the middle of it
 	public IDisposable Working(string a_what) => _vm.Working(a_what);
@@ -1370,7 +1372,7 @@ public static class Ask
 		var room = SystemParameters.WorkArea;
 		var w = new Window {
 			Owner = a_owner, Title = a_title, Width = Math.Min(520, room.Width), SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner,
-			Background = Brushes2.Get("Panel"), Foreground = Brushes2.Get("Text"), ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false,
+			Background = Brushes2.Get("Panel"), Foreground = Brushes2.Get("Text"), ResizeMode = ResizeMode.CanResize, ShowInTaskbar = false, MinWidth = UiState.Least(360, room.Width),
 			FontFamily = (System.Windows.Media.FontFamily)a_owner.FindResource("UiFont"), FontSize = (double)a_owner.FindResource("SizeBody"),
 		};
 		var box = new TextBox { Text = a_value, Margin = new Thickness(0, 10, 0, 0) };

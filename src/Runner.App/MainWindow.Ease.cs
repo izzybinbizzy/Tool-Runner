@@ -30,6 +30,13 @@ public partial class MainWindow
 	// Settings opened (or brought forward) on its Steps page with this step's settings
 	public void OpenStepSettings(StepRow a_row)
 	{
+		// Settings standing open on another setup with changes not saved stays as it is (it does not follow the setup picked):
+		// that setup's step is not the one double-clicked
+		if (_panels.ContainsKey("settings") && SettingsPanel.HasChanges && !SettingsPanel.IsFor(_vm.Setup)) {
+			ShowPanel("settings");
+			_vm.Say($"Settings shows another setup's changes, not saved yet - save them or undo them, then open {a_row.Name}'s settings again.", "warn");
+			return;
+		}
 		ShowPanel("settings");
 		if (!SettingsPanel.ShowStep(a_row.Key)) {
 			_vm.Say($"{a_row.Name}'s settings could not be shown: the step open in Settings has a value to fix first.", "warn");
@@ -101,8 +108,9 @@ public partial class MainWindow
 		if (_renaming || _vm.SelectedSetup is not { } item) {
 			return;
 		}
-		if (_vm.IsRunning || _vm.Starting) {
-			_vm.Say("A run is going - rename the setup when it has ended.", "bad");
+		// (a queue between two setups too: the next setup it starts is read by its file)
+		if (StillGoing() || _vm.IsRunning) {
+			_vm.Say("A run or a queue is going - rename the setup when it has ended.", "bad");
 			return;
 		}
 		// Settings stands open on the setup's old file: its Save would write there - it closes first, asked about what is typed
@@ -248,9 +256,11 @@ public partial class MainWindow
 		w.PreviewKeyDown += OnKeys;
 		void MainGone(object? a_sender, EventArgs a_args) => w.Close();
 		Closed += MainGone;
+		w.IsVisibleChanged += (_, _) => SeenOrNot();
 		w.Closed += (_, _) => {
 			Closed -= MainGone;
 			_compact = null;
+			SeenOrNot();
 			if (!App.Headless) {
 				UiState.Set("compact.width", w.ActualWidth);
 				UiState.Set("compact.height", w.ActualHeight);

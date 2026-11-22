@@ -2856,6 +2856,16 @@ public static class Program
 		var cased = SetupFiles.Rename(done.File, "MAIN RUN", runs);
 		Check(Directory.GetFiles(setups, "*.json").Any(x => Path.GetFileName(x) == "MAIN RUN.json"), "a rename to other letters only takes");
 		Check(Directory.GetDirectories(Path.Combine(setups, "learned settings")).Any(d => Path.GetFileName(d) == "MAIN RUN"), "and its learned settings folder too");
+		// learned settings that cannot be moved (a file of them held open): the setup keeps its old name, the two never part
+		var heldOpen = Path.Combine(setups, "learned settings", "MAIN RUN", "texgen", "learned.json");
+		using (new FileStream(heldOpen, FileMode.Open, FileAccess.Read, FileShare.None)) {
+			Throws<IOException>(() => SetupFiles.Rename(cased.File, "Locked Away", runs), "learned settings that cannot be moved stop the rename");
+		}
+		Check(File.Exists(cased.File) && !File.Exists(Path.Combine(setups, "Locked Away.json")) && File.Exists(heldOpen), "the file is back under its old name, its learned settings where they were");
+		// a copy onto a name whose learned settings are left there by a setup that is gone is refused, nothing made
+		Directory.CreateDirectory(Path.Combine(setups, "learned settings", "Leftover", "texgen"));
+		Throws<ArgumentException>(() => SetupFiles.Duplicate(cased.File, "Leftover"), "a copy onto leftover learned settings is refused");
+		Check(!File.Exists(Path.Combine(setups, "Leftover.json")), "and no copy is left");
 		// a run that did not finish refuses it
 		new Journal { Folder = mine, SetupFile = cased.File, State = RunState.Running }.Save();
 		Throws<InvalidOperationException>(() => SetupFiles.Rename(cased.File, "Later", runs), "a run that did not finish refuses a rename");
