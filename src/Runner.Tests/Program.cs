@@ -10108,6 +10108,36 @@ public static class Program
 			"a game folder the setup names itself is the one used, once");
 	}
 
+	// LOOT's helper ends within seconds when LOOT cannot go on (a masterlist it cannot read) - too short to be seen every time.
+	// Not seen is no failure of the start: what it wrote is the verdict, the look is asked once more, and then the step says
+	// LOOT's part. (A real run waited the whole of a tool's start limit twice and said the helper "did not start".)
+	static void T_ALootHelperThatCameAndWentIsNoStartFailure() => FastReady(() => {
+		using var f = new FakeMo2();
+		f.WriteSetup((XEditCleanStep.StepKey, new JsonObject { ["executable"] = "SSEEditQuickAutoClean" }));
+		var ctx = StepContext(f, XEditCleanStep.StepKey);
+		var keep = LootStep.StartWait;
+		LootStep.StartWait = TimeSpan.FromSeconds(1);
+		try {
+			using (ctx.Log) {
+				var asked = 0;
+				// a Mod Organizer that takes the request and starts nothing that can be seen
+				var quiet = new RunContext { Setup = ctx.Setup, Mo2 = ctx.Mo2, Profile = ctx.Profile, Log = ctx.Log, Journal = ctx.Journal, Cancel = CancellationToken.None,
+					BackupFolder = ctx.BackupFolder, DevBench = ctx.DevBench, Guide = ctx.Guide,
+					Control = new Mo2Control(ctx.Mo2, "Test", ctx.Log) { RunningProbe = () => true, ReadyProbe = () => new(true, true, TimeSpan.Zero, null), Launch = (_, _) => ++asked } };
+				var start = LootStep.Starter(quiet, XEditCleanStep.StepKey, "LOOT is looking at your plugins", TimeSpan.FromMinutes(1));
+				var sw = Stopwatch.StartNew();
+				start(Path.Combine(ctx.Journal.Folder, "sorted.txt"), Path.Combine(ctx.Journal.Folder, "report.json"), false);
+				Equal(1, asked, "asked of Mod Organizer once");
+				Check(sw.Elapsed < TimeSpan.FromSeconds(20), $"and looked for no longer than its own short wait ({sw.Elapsed.TotalSeconds:0.0} s)");
+				Throws<StepFailedException>(() => LootStep.Report(quiet, start), "with nothing written twice, the step fails with LOOT's part");
+				Equal(3, asked, "the look was asked once more before the step gave up");
+				Check(Files.ReadSharedText(ctx.Log.TextPath!).Contains("was not seen running", StringComparison.Ordinal), "and the log says the helper was not seen");
+			}
+		} finally {
+			LootStep.StartWait = keep;
+		}
+	});
+
 	// SSE NIF Optimizer by itself: its command line, and its log as the verdict (its exit code is always 0)
 	static void T_NifOptimizersLogIsItsVerdict()
 	{

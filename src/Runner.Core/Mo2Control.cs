@@ -5,7 +5,12 @@ namespace ToolRunner;
 
 public sealed class Mo2BusyException(string a_message) : Exception(a_message);
 
-public sealed class StepFailedException(string a_message) : Exception(a_message);
+public class StepFailedException(string a_message) : Exception(a_message);
+
+// A program asked of Mod Organizer that was never seen running, or was gone again the moment it was seen. A step's failure
+// like any other - but a step whose tool ends within seconds when it cannot go on (Mod Organizer's own LOOT helper) takes it
+// for what it is: the tool came and went, and what it wrote is the verdict.
+public sealed class ToolNotSeenException(string a_message) : StepFailedException(a_message);
 
 // Mod Organizer itself: started detached (WMI - a child of a job-limited process makes MO2 fail to start SKSE), closed with
 // its own window message and its own questions answered, never while it downloads or the game runs, and its executables run
@@ -805,7 +810,9 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 
 	// run one of MO2's executables through the running instance; returns the tool's process once it exists
 	// a_byPath: a_title is the program's own path, for one that is in no Executables list (an add-on's)
-	public Process RunExecutable(string a_title, string a_image, string? a_args, CancellationToken a_ct, TimeSpan? a_startTimeout = null, bool a_byPath = false)
+	// a_quietLimit: see LaunchTool - a helper that lives seconds is looked for only this long after Mod Organizer went quiet
+	public Process RunExecutable(string a_title, string a_image, string? a_args, CancellationToken a_ct, TimeSpan? a_startTimeout = null, bool a_byPath = false,
+		TimeSpan? a_quietLimit = null)
 	{
 		Start(a_ct);
 		var old = Procs.Pids(a_image).ToHashSet();
@@ -838,7 +845,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 			return FreshPid(a_image, old, IsShared(a_image) ? IsMo2s : null);
 		}
 		var startLimit = StartLimit(a_startTimeout ?? TimeSpan.FromMinutes(3));
-		var pid = LaunchTool(cmd, Watch, startLimit, a_ct) ?? throw new StepFailedException(
+		var pid = LaunchTool(cmd, Watch, startLimit, a_ct, a_quietLimit) ?? throw new ToolNotSeenException(
 			$"{a_image} did not start within {startLimit.TotalMinutes:0} minutes - is MO2's executable \"{a_title}\" right?" +
 			WhatMo2Said(a_title, a_image, logAt) + KeepEvidence(a_title, logAt, asked, started));
 		// Said, not yet required: a program of a name nobody else uses counts as the tool as soon as it is new. Whether every
@@ -856,7 +863,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		try {
 			return Process.GetProcessById(a_pid);
 		} catch (ArgumentException) {
-			throw new StepFailedException($"{a_what} started and ended at once - start it yourself once to see what it says");
+			throw new ToolNotSeenException($"{a_what} started and ended at once - start it yourself once to see what it says");
 		}
 	}
 
@@ -1028,7 +1035,11 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		}
 	}
 
-	public int? LaunchTool(string a_cmd, Func<int> a_freshPid, TimeSpan a_limit, CancellationToken a_ct)
+	// a_quietLimit: for a helper that lives seconds (Mod Organizer's own LOOT helper ends within three when LOOT cannot go
+	// on): it is looked for only this long after Mod Organizer's log last grew. While Mod Organizer still writes there - Root
+	// Builder building before the start - the look goes on, up to a_limit as for any tool. Without it a helper that came and
+	// went was looked for through the whole limit, thirteen minutes where Root Builder builds.
+	public int? LaunchTool(string a_cmd, Func<int> a_freshPid, TimeSpan a_limit, CancellationToken a_ct, TimeSpan? a_quietLimit = null)
 	{
 		for (var attempt = 0; attempt < 3; ++attempt) {
 			WaitReady(a_ct);
@@ -1037,12 +1048,28 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 			_ownMo2.Add(Launch(a_cmd, Path.GetDirectoryName(Mo2.Exe)!));
 			var until = DateTime.UtcNow + a_limit;
 			var lost = false;
+			var logLength = LogLength();
+			var logGrew = DateTime.UtcNow;
 			while (DateTime.UtcNow < until && !lost) {
 				a_ct.ThrowIfCancellationRequested();
 				if (a_freshPid() is var pid && pid != 0) {
 					return pid;
 				}
 				lost = (ReadyProbe ?? ReadNow)().Box?.Contains(SecondaryBox, StringComparison.OrdinalIgnoreCase) == true;
+				// looked for again right after the look at Mod Organizer's windows: that look takes seconds while Mod Organizer
+				// is busy starting the program, and a helper that lives three seconds came and went inside it
+				if (!lost && a_freshPid() is var late && late != 0) {
+					return late;
+				}
+				if (!lost && a_quietLimit is { } quiet) {
+					var length = LogLength();
+					if (length != logLength) {
+						logLength = length;
+						logGrew = DateTime.UtcNow;
+					} else if (DateTime.UtcNow - logGrew > quiet) {
+						return null;
+					}
+				}
 				Thread.Sleep(Poll);
 			}
 			if (!lost) {

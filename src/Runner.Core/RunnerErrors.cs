@@ -156,7 +156,7 @@ public static class RunnerErrors
 		E("TR-412", "opened on the player's screen", "A tool that runs hidden showed a window on your screen, so it was ended.",
 			"Run again from this step. If it happens every time, switch \"Hidden\" off for that step in Settings > Steps, so the tool runs in the open."),
 		E("TR-414", "LOOT wrote no sorted list|LOOT's sorted list is empty|LOOT did not see", "LOOT could not sort this load order, so your order was left as it was.",
-			"Press Sort in Mod Organizer itself to read LOOT's own message (a rule that goes in a circle, no masterlist yet while offline), put that right, then run again from this step - or untick the LOOT sort step."),
+			"Press Sort in Mod Organizer itself to read LOOT's own message (a rule that goes in a circle, a masterlist it cannot read, none yet while offline), put that right, then run again from this step - or untick the LOOT sort step."),
 		E("TR-415", "the game shows a box this run does not know|the game's box did not close after its answer was pressed|the game shows a Windows box this step does not answer","A mod, or the game, asked a question the run cannot answer for you, so the game was closed and the step stopped.",
 			"Start the game yourself once and answer it (many such questions come only once), or switch off that mod's own setting that asks; then run again from this step. " +
 			"While you are at the PC you can also answer it during the run: the window names the box and waits a minute before the step stops."),
@@ -167,7 +167,7 @@ public static class RunnerErrors
 		E("TR-417", "not enough room to keep a copy of", "A tool is about to rewrite files in one of your mods, and the run's backup has no room for a copy of them first. The tool was not started.",
 			"Free room on the disk the backups are on, or remove old run backups (Settings > Backups > Keep only the newest now), or take that mod off the step's list; then run again from this step."),
 		E("TR-418", "LOOT wrote no report|LOOT's report does not read", "xEdit cleaning asks LOOT which plugins are dirty, and LOOT gave no answer.",
-			"Press Sort in Mod Organizer itself to read LOOT's own message (a rule that goes in a circle, no masterlist yet while offline), put that right, then run again from this step - or untick the xEdit cleaning step."),
+			"Press Sort in Mod Organizer itself to read LOOT's own message (a rule that goes in a circle, a masterlist it cannot read, none yet while offline), put that right, then run again from this step - or untick the xEdit cleaning step."),
 		E("TR-419", "wrote no cleaned file in its place|ended before it had finished cleaning", "xEdit did not finish cleaning a plugin. Every plugin of this step was put back as it was.",
 			"Open the log the message names for xEdit's own words. A plugin xEdit cannot clean goes on the step's \"Plugins never cleaned\" list (Settings > Steps); then run again from this step."),
 		E("TR-420", "SSE NIF Optimizer wrote no log for|SSE NIF Optimizer ended before it had finished|SSE NIF Optimizer could not save", "SSE NIF Optimizer did not finish a mod. That mod's meshes were put back as they were; the mods it finished before stay as it left them.",

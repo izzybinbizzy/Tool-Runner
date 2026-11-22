@@ -37,12 +37,29 @@ public sealed class LootStep : IStep
 
 	public void Run(RunContext a_ctx, StepSettings a_s) => Run(a_ctx, Starter(a_ctx, StepKey, "LOOT is sorting your plugins", a_s.Deadline(10)));
 
-	// one run of Mod Organizer's lootcli to its end, for the step a_step: the sort itself, or a step that only reads LOOT's report
+	// How long lootcli is looked for once Mod Organizer has gone quiet after it was asked. It is Mod Organizer's own helper
+	// and there within seconds; when LOOT cannot go on (a masterlist it cannot read) it is gone again within three - too
+	// short to be seen every time. In a real run (2026-11-21) the step looked for it through the whole of a tool's start
+	// limit (thirteen minutes on a Mod Organizer where Root Builder builds), a second time after that, and then said it
+	// "did not start".
+	public static TimeSpan StartWait { get; set; } = TimeSpan.FromMinutes(1);
+
+	// one run of Mod Organizer's lootcli to its end, for the step a_step: the sort itself, or a step that only reads LOOT's report.
+	// A helper that was not seen running is no failure here: what it wrote is the verdict, and the caller asks once more or
+	// says LOOT's part
 	public static Action<string, string, bool> Starter(RunContext a_ctx, string a_step, string a_doing, TimeSpan a_limit) => (sorted, report, skipUpdate) => {
 		a_ctx.Activity(a_step, a_doing);
 		try {
-			using var proc = a_ctx.Control.RunExecutable(Program(a_ctx.Mo2), Image, Arguments(a_ctx.Mo2, a_ctx.Setup.Profile, sorted, report, skipUpdate), a_ctx.Cancel, null, true);
-			Waits.Tool(a_ctx, a_step, proc, a_limit, () => proc.HasExited ? Waits.Poll.Done : Waits.Poll.Wait);
+			System.Diagnostics.Process proc;
+			try {
+				proc = a_ctx.Control.RunExecutable(Program(a_ctx.Mo2), Image, Arguments(a_ctx.Mo2, a_ctx.Setup.Profile, sorted, report, skipUpdate), a_ctx.Cancel, null, true, StartWait);
+			} catch (ToolNotSeenException) {
+				a_ctx.Log.Detail("LOOT's helper was not seen running - it ends within seconds when LOOT cannot go on; what it wrote is looked at");
+				return;
+			}
+			using (proc) {
+				Waits.Tool(a_ctx, a_step, proc, a_limit, () => proc.HasExited ? Waits.Poll.Done : Waits.Poll.Wait);
+			}
 		} finally {
 			// a wait that gave up (idle, past its limit) leaves it running, and this step's settings name no image for the
 			// run's own clean-up to close
@@ -70,7 +87,7 @@ public sealed class LootStep : IStep
 		if (!Ask(false)) {
 			a_ctx.Log.Warn("LOOT wrote no report - trying again with the masterlist it already has");
 			if (!Ask(true)) {
-				throw new StepFailedException("LOOT wrote no report, so no plugin was looked at. Mod Organizer's own Sort button shows why (a rule that goes in a circle, or no masterlist yet)");
+				throw new StepFailedException("LOOT wrote no report, so no plugin was looked at. Mod Organizer's own Sort button shows why (a rule that goes in a circle, a masterlist LOOT itself cannot read, or none yet)");
 			}
 		}
 		return report;
@@ -107,7 +124,7 @@ public sealed class LootStep : IStep
 		if (!Sort(false)) {
 			a_ctx.Log.Warn("LOOT wrote no sorted list - trying again with the masterlist it already has");
 			if (!Sort(true)) {
-				throw new StepFailedException("LOOT wrote no sorted list, so your order was not changed. Mod Organizer's own Sort button shows why (a rule that goes in a circle, or no masterlist yet)");
+				throw new StepFailedException("LOOT wrote no sorted list, so your order was not changed. Mod Organizer's own Sort button shows why (a rule that goes in a circle, a masterlist LOOT itself cannot read, or none yet)");
 			}
 		}
 		a_ctx.Control.Close(null, a_ctx.Cancel);
