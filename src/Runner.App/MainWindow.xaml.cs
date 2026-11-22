@@ -765,6 +765,21 @@ public partial class MainWindow : Window
 		!_panels.ContainsKey("settings") || !SettingsPanel.HasChanges ||
 		Ask.Show(Over("settings"), "Settings not saved", "You changed settings and did not press Save. Leave without saving them?", "Leave without saving", "Keep editing");
 
+	// the settings window closed without its question: it was asked and answered a line before
+	void CloseSettingsUnasked()
+	{
+		if (!_panels.TryGetValue("settings", out var open)) {
+			return;
+		}
+		var all = _closingAll;
+		_closingAll = true;
+		try {
+			open.Close();
+		} finally {
+			_closingAll = all;
+		}
+	}
+
 	// the off-screen pictures only: the live view stops and a made-up run is shown (a_frame moves it on a minute a frame)
 	public void Demo(bool a_waiting, int a_frame = 0)
 	{
@@ -1198,6 +1213,12 @@ public partial class MainWindow : Window
 			if (!Ask.Show(this, $"Install {Brand.Name} {release.Version}?", InstallText(release, folder), "Download and install", "Not now")) {
 				return;
 			}
+			// settings typed and not saved are asked about now, before anything is taken down (the program closes at the end);
+			// on "leave" their window goes at once, so nothing more is typed into it meanwhile
+			if (!LeaveSettings()) {
+				return;
+			}
+			CloseSettingsUnasked();
 			string exe;
 			// the window stays until the new files are in place (WorkInHand): closed half way, the program would stand half replaced
 			using (Working($"{Brand.Name} {release.Version} is being installed")) {
@@ -1211,9 +1232,29 @@ public partial class MainWindow : Window
 					return;
 				}
 			}
+			// (settings opened and changed again while the download ran: asked once more - on "keep editing" this window
+			// stays, and the new version starts when the player starts it)
+			if (!LeaveSettings()) {
+				_vm.Say($"{Brand.Name} {release.Version} is installed - close this window when you are done here and start it again.", "warn");
+				return;
+			}
+			// What this window remembers goes into its file NOW, before the new version starts. Both programs read and write
+			// that one file: started first, the new one wrote "the version last seen", and this window's own write as it
+			// closed put the old value back over it - what is new was then shown a second time. With everything written
+			// here (waited for), its close a moment later finds nothing left to write
+			var logWasOut = _logWindow != null;
+			_closingAll = true;
+			KeepSize();
+			ClosePanels();
+			await Task.Run(UiState.Save);
 			try {
 				System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe) { UseShellExecute = true })?.Dispose();
 			} catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) {
+				// this window stays after all: the log, when it was in a window of its own, is shown here again
+				_closingAll = false;
+				if (logWasOut) {
+					ShowLogHere(_logWasHere);
+				}
 				_vm.Say($"{Brand.Name} {release.Version} is installed, but it did not start by itself ({e.Message}) - close this window and start it again.", "warn");
 				return;
 			}
