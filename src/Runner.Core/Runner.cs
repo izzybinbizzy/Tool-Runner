@@ -552,7 +552,8 @@ public static class Runner
 			journal.Verdict = "stopped before anything was changed: " + (commands.Stopped ? "Stop was pressed" : Plain(e));
 			// an output mod made a moment ago is still empty: out of the mod list again (Mod Organizer is closed by now) - and
 			// one that was there already, and only got its line, loses that line again
-			UnlistWhatTheRunOnlyListed(profile, journal, log);
+			// (a line that could not be taken out is still in the list: named with the rest below)
+			_ = UnlistWhatTheRunOnlyListed(profile, journal, log);
 			var left = new List<string>();
 			foreach (var a in journal.Added.ToList()) {
 				try {
@@ -569,7 +570,7 @@ public static class Runner
 			journal.TrySave();
 			log.Error(journal.Verdict);
 			log.Simple("The run " + journal.Verdict + (left.Count == 0 ? ". Nothing in Mod Organizer was changed." :
-				". Your mods are as they were; the new, empty output mod(s) it had just added are still in the list: " + string.Join(", ", left) + "."));
+				". Your mods are as they were; the output mod line(s) it had just added to the mod list are still there: " + string.Join(", ", left) + "."));
 			return new RunOutcome(state, journal.Verdict, journal.Folder);
 		} catch (Exception e) when (finished) {
 			// after the put-back of a finished run (the save to play's own ending, a record the disk refused): the run stays finished
@@ -1177,12 +1178,14 @@ public static class Runner
 			a_ctx.Log.Simple("Stopped: " + j.Verdict);
 			return new RunOutcome(j.State, j.Verdict, j.Folder);
 		}
-		if (notBack.Count > 0 || filesNotBack.Count > 0) {
-			// the run did not end cleanly, whatever its steps did: said so, never "finished" or "back as it was"
+		if (notBack.Count > 0 || filesNotBack.Count > 0 || a_ctx.LinesLeft.Count > 0) {
+			// the run did not end cleanly, whatever its steps did: said so, never "finished" or "back as it was" - also when
+			// only a line the run wrote into the mod list could not be taken out again (the put-back tries that again)
 			j.State = RunState.Failed;
+			j.NeedsRestore = true;
 			j.Ended = DateTime.Now;
-			j.Verdict = "the profile is back except " + string.Join(", ", notBack.Concat(filesNotBack.Select(Path.GetFileName)).OfType<string>()) +
-				" (kept off / in the backup) - press \"Put my profile back\" once the files are free";
+			j.Verdict = "the profile is back except " + string.Join(", ", notBack.Concat(filesNotBack.Select(Path.GetFileName)).OfType<string>().Concat(LinesLeftWords(a_ctx.LinesLeft))) +
+				(notBack.Count > 0 || filesNotBack.Count > 0 ? " (kept off / in the backup)" : "") + " - press \"Put my profile back\" once the files are free";
 			Keep();
 			a_ctx.Log.Error(j.Verdict);
 			a_ctx.Log.Simple("Stopped: " + j.Verdict);
@@ -1289,7 +1292,8 @@ public static class Runner
 				a_ctx.Log.Warn($"{a}: is empty but could not be taken out ({e.Message})");
 			}
 		}
-		UnlistWhatTheRunOnlyListed(a_ctx.Profile, a_ctx.Journal, a_ctx.Log);
+		a_ctx.LinesLeft.Clear();
+		a_ctx.LinesLeft.AddRange(UnlistWhatTheRunOnlyListed(a_ctx.Profile, a_ctx.Journal, a_ctx.Log));
 		// the order files are back: a record the disk refuses right now must not be what stops the outputs being ticked
 		if (!a_ctx.Journal.TrySave()) {
 			a_ctx.Log.Warn("the run's record could not be written just now (is the disk full?) - the put-back goes on");
@@ -1337,9 +1341,12 @@ public static class Runner
 	// then left that mod as it was - not built by it, not switched on as an old output - the line goes again: the mod list
 	// is as it was before the run, byte for byte. The folder is the player's and stays as it is. Not while what the mod
 	// held is still in the run's backup (a later put-back brings that back first, and takes the line out then).
-	// a_undone: the run was undone - nothing it built or used stands any more
-	static void UnlistWhatTheRunOnlyListed(Profile a_profile, Journal a_j, RunLog a_log, bool a_undone = false)
+	// a_undone: the run was undone - nothing it built or used stands any more.
+	// Returns the mods whose line could not be taken out (the mod list held by another program): for the caller to say,
+	// and to keep the put-back on offer - the next one tries again
+	static List<string> UnlistWhatTheRunOnlyListed(Profile a_profile, Journal a_j, RunLog a_log, bool a_undone = false)
 	{
+		var left = new List<string>();
 		foreach (var m in a_j.Listed) {
 			if (!a_undone && (a_j.Built.Contains(m, StringComparer.OrdinalIgnoreCase) || a_j.UsedOld.Any(u => u.Done && u.Mod.Equals(m, StringComparison.OrdinalIgnoreCase)))) {
 				continue;
@@ -1351,9 +1358,14 @@ public static class Runner
 				a_profile.UnlistMod(m, a_log);
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) {
 				a_log.Warn($"{m}: the line this run gave it in the mod list could not be taken out again ({e.Message})");
+				left.Add(m);
 			}
 		}
+		return left;
 	}
+
+	// those lines, in a verdict's words
+	static IEnumerable<string> LinesLeftWords(IEnumerable<string> a_mods) => a_mods.Select(m => $"the line this run gave \"{m}\" in the mod list");
 
 	// an interrupted run (a crash, Stop now, a power cut): every unfinished output back, the profile as before + the finished
 	// outputs on - the window's Restore button and the command line's --restore
@@ -1426,11 +1438,12 @@ public static class Runner
 		if (data != null) {
 			NoteChanges(mo2, data, "putting back " + RunWho(a_j), log);
 		}
-		if (notBack.Count > 0 || filesNotBack.Count > 0) {
-			// something is still out: Restore stays on offer (the window keeps its button) and says what
+		if (notBack.Count > 0 || filesNotBack.Count > 0 || ctx.LinesLeft.Count > 0) {
+			// something is still out - or a line the run wrote into the mod list could not be taken out again: Restore stays
+			// on offer (the window keeps its button) and says what
 			a_j.NeedsRestore = true;
-			a_j.Verdict = "put back except " + string.Join(", ", notBack.Concat(filesNotBack.Select(Path.GetFileName)).OfType<string>()) +
-				" (kept off / in the backup) - press \"Put my profile back\" again once the files are free";
+			a_j.Verdict = "put back except " + string.Join(", ", notBack.Concat(filesNotBack.Select(Path.GetFileName)).OfType<string>().Concat(LinesLeftWords(ctx.LinesLeft))) +
+				(notBack.Count > 0 || filesNotBack.Count > 0 ? " (kept off / in the backup)" : "") + " - press \"Put my profile back\" again once the files are free";
 			a_j.Save();
 			log.Error(a_j.Verdict);
 			return new RunOutcome(RunState.Failed, a_j.Verdict, a_j.Folder);
@@ -1561,7 +1574,10 @@ public static class Runner
 			foreach (var a in a_j.Added.ToList()) {
 				ctx.Profile.TakeOutEmptyOutput(a, a_j.BackupDir, log);
 			}
-			UnlistWhatTheRunOnlyListed(ctx.Profile, a_j, log, true);
+			// (one that cannot be taken out stops the undo here, as any file it cannot put back does: undone again, it is tried again)
+			if (UnlistWhatTheRunOnlyListed(ctx.Profile, a_j, log, true) is { Count: > 0 } linesLeft) {
+				throw new IOException(string.Join(", ", LinesLeftWords(linesLeft)) + " could not be taken out again");
+			}
 		} catch (Exception e) {
 			log.Error("undo failed: " + Plain(e));
 			var left = a_j.Undoing ? "it stopped half way, and nothing new starts until it is undone again: what moved is on record, its files are in the run's backup" : "nothing was changed";

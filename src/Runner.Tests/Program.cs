@@ -2135,6 +2135,40 @@ public static class Program
 		Equal(RunState.Restored, undone.State, undone.Verdict);
 		Check(!ProfileOf(k).States().ContainsKey("Shared"), "undone, the mod has no line again");
 		Check(File.ReadAllBytes(Path.Combine(k.Mods, "Shared", "Shared.esp")).SequenceEqual(sharedBytes) && !File.Exists(Path.Combine(k.Mods, "Shared", "new.txt")), "and holds what it held before the run");
+		// The run puts that mod on record BEFORE it writes the line. With the mod list held by another program the line
+		// cannot be written: the run stops before anything was changed, and its record already names the mod
+		var listHeld = k.Text("modlist.txt");
+		using (new FileStream(Path.Combine(k.ProfileDir, "modlist.txt"), FileMode.Open, FileAccess.Read, FileShare.Read)) {
+			r = Runner.Run(new RunRequest(k.SetupFile, k.Data));
+		}
+		Equal(RunState.Failed, r.State, r.Verdict);
+		Check(r.Verdict.StartsWith("stopped before anything was changed", StringComparison.Ordinal), "a mod list that cannot be written stops the run before anything was changed: " + r.Verdict);
+		Equal("Shared", string.Join(",", Journal.Load(r.Folder!).Listed), "the mod was on the run's record before its line was written");
+		Equal(listHeld, k.Text("modlist.txt"), "and the mod list is as it was");
+
+		// A line the put-back cannot take out again (the mod list held by another program for a moment) is named as not back -
+		// the run and "Put my profile back" then stay on offer -, and the next put-back takes it out
+		using var q = new FakeMo2();
+		q.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		q.Mod("Loose", ("Loose.esp", false, []));
+		var held = StepContext(q, "landscapefixer");
+		try {
+			var looseBefore = q.Text("modlist.txt");
+			held.Profile.EnsureMod("Loose");
+			var looseSnap = held.Profile.Snapshot();
+			held.Journal.Added.Add("Loose");
+			held.Journal.Listed.Add("Loose");
+			using (new FileStream(Path.Combine(q.ProfileDir, "modlist.txt"), FileMode.Open, FileAccess.Read, FileShare.Read)) {
+				Runner.PutBack(held, looseSnap);
+			}
+			Equal("Loose", string.Join(",", held.LinesLeft), "a line that could not be taken out is named as not back");
+			Check(ProfileOf(q).States().ContainsKey("Loose"), "(it is still in the mod list)");
+			Runner.PutBack(held, looseSnap);
+			Check(held.LinesLeft.Count == 0, "the next put-back takes it out");
+			Equal(looseBefore, q.Text("modlist.txt"), "and the mod list is as it was before the run wrote the line");
+		} finally {
+			held.Log.Dispose();
+		}
 
 		// gone by the time its place comes (a tool, or a command of the setup, moved it away after the check): the run stops
 		// there, and the tool after it never runs on an output that is not there

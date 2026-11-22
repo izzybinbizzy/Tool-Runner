@@ -125,6 +125,10 @@ public sealed class RunContext
 		return true;
 	}
 
+	// After a put-back: the mods whose line in the mod list the run had written and the put-back could not take out again
+	// (the list was held by another program). The profile is not whole back while one is left: the put-back stays on offer
+	public List<string> LinesLeft { get; } = [];
+
 	public void SetAfter(params string[] a_mods) => PendingEnable.AddRange(a_mods);
 
 	// one output of a step that makes several is complete: on record as built at once, so it stays - and is switched on at the
