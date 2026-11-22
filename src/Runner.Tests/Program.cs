@@ -4491,6 +4491,8 @@ public static class Program
 		Check(StepCatalog.OrderWarnings(["dyndolod", LootStep.StepKey]).Count == 1, "a tool before the sort is warned about");
 		Check(StepCatalog.OrderWarnings(["addon:My Patcher", LootStep.StepKey, "addon:Later"]).Single().StartsWith("LOOT sort runs after My Patcher", StringComparison.Ordinal),
 			"so is an add-on before it, and none after it");
+		Check(StepCatalog.OrderWarnings(["addon:My Patcher", XEditCleanStep.StepKey, "addon:Later"]).Single().StartsWith("xEdit cleaning runs after My Patcher", StringComparison.Ordinal),
+			"and an add-on before xEdit cleaning, which would read the plugins not yet cleaned (CodeRabbit on pull request #36)");
 		Check(RunPreview.Build(setup, mo2, setup.EnabledSteps).Lines(_ => null).Any(l => l.Contains("LOOT sorts your plugins", StringComparison.Ordinal)), "the preview says so");
 	}
 
@@ -10001,6 +10003,53 @@ public static class Program
 			Equal(0, Rewrites.PutBack(ctx, null).Count, "copies cleared out of the backup do not keep the put-back from ending");
 			Check(gone.Lost && !gone.PutBack && ctx.Journal.Notes.Any(n => n.Contains("could not be put back", StringComparison.Ordinal)), "said, and on record as lost");
 			Equal(0, Rewrites.PutBack(ctx, null).Count, "and not tried again");
+
+			// CodeRabbit on pull request #36. What a tool put in a copy's way - a file where the copy's folder must be - is moved
+			// aside first, and the original comes back
+			File.WriteAllText(Path.Combine(mod, "meshes", "a.nif"), "AAAA");
+			var blocked = Rewrites.Keep(ctx, CaoStep.StepKey, "Mod", mod);
+			Directory.Delete(Path.Combine(mod, "meshes"), true);
+			File.WriteAllText(Path.Combine(mod, "meshes"), "a file where the folder stood");
+			Equal(0, Rewrites.PutBack(ctx, CaoStep.StepKey).Count, "a file in a folder's place does not stop the put-back");
+			Check(File.ReadAllText(Path.Combine(mod, "meshes", "a.nif")) == "AAAA", "the mesh is back in its folder");
+			Check(Directory.EnumerateFiles(Path.Combine(ctx.BackupFolder, "unfinished", "Mod"), "meshes*").Any(), "and the file that stood in its way is in the backup");
+			Check(blocked.PutBack, "(on record as put back)");
+
+			// a list of what stood there before that cannot be read is no "nothing stood there": the put-back stays to be done
+			var unread = Rewrites.Keep(ctx, CaoStep.StepKey, "Mod", mod);
+			File.WriteAllText(Path.Combine(mod, "new.tmp"), "made by the tool");
+			var beforeList = unread.Backup + " files before.txt";
+			var heldBack = File.ReadAllBytes(beforeList);
+			File.Delete(beforeList);
+			Equal(1, Rewrites.PutBack(ctx, CaoStep.StepKey).Count, "an unreadable list of before fails that folder's put-back");
+			Check(!unread.PutBack && File.Exists(Path.Combine(mod, "new.tmp")), "nothing is taken for the tool's on a guess, and it stays to be put back");
+			File.WriteAllBytes(beforeList, heldBack);
+			Equal(0, Rewrites.PutBack(ctx, CaoStep.StepKey).Count, "once the list reads again the put-back is done");
+			Check(unread.PutBack && !File.Exists(Path.Combine(mod, "new.tmp")), "and the tool's file is moved out");
+
+			// the same bytes with another date is a change: its copy is kept, and the date comes back with it
+			var dated = Rewrites.Keep(ctx, CaoStep.StepKey, "Mod", mod);
+			var meshFile = Path.Combine(mod, "meshes", "a.nif");
+			var wasTime = File.GetLastWriteTimeUtc(meshFile);
+			File.SetLastWriteTimeUtc(meshFile, wasTime.AddHours(3));
+			var did = Rewrites.Settle(ctx, dated);
+			Equal(1, did.Changed, "a file whose date alone changed counts as changed");
+			Check(!Rewrites.BackupGone(ctx.Journal), "(its copy is there)");
+			File.Delete(Path.Combine(dated.Backup, "meshes", "a.nif"));
+			Check(Rewrites.BackupGone(ctx.Journal), "a copy the folder kept that is gone is found by name, the backup folder still there");
+			dated.PutBack = true;
+
+			// a program on record as writing in the mod still runs: it is ended first (the very process, by number and start
+			// time), and only then is anything laid back
+			var writing = Rewrites.Keep(ctx, CaoStep.StepKey, "Mod", mod);
+			File.WriteAllText(meshFile, "being written");
+			using var writer = Process.Start(new ProcessStartInfo("ping", "-n 60 127.0.0.1") { UseShellExecute = false, CreateNoWindow = true })!;
+			using var endWriter = new StandIn(writer);
+			Rewrites.Writing(ctx, CaoStep.StepKey, writer.Id);
+			Equal(1, ctx.Journal.Writers.Count, "(on record)");
+			Equal(0, Rewrites.PutBack(ctx, CaoStep.StepKey).Count, "put back");
+			Check(writer.HasExited && ctx.Journal.Writers.Count == 0, "the program that could still write was ended first, and is off the record");
+			Check(writing.PutBack && File.ReadAllText(meshFile) == "AAAA", "then the file came back");
 		}
 	}
 
@@ -10086,15 +10135,16 @@ public static class Program
 			Check(Directory.GetFiles(f.Overwrite, "*", SearchOption.AllDirectories).Length == 0 &&
 				Directory.GetFiles(Path.Combine(Journal.Load(r.Folder!).BackupDir, "xedit backups"), "BaseMod.esp.save.*").Length == 1, "nor of xEdit in overwrite: its unfinished save is in the run's backup");
 
-			// an xEdit that left no log and touched nothing: the plugin stands as before, and the run says it cannot tell whether
-			// xEdit ever opened it - never only "left as it was"
+			// an xEdit that left no log: whether it finished with the plugin cannot be told, so the step fails and the plugin is
+			// put back as it was (CodeRabbit on pull request #36: kept, a half-written save could stay)
 			cleanedNames.Clear();
 			finishes = true;
 			silent = true;
 			r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
-			Equal(RunState.Finished, r.State, "finished without a word from xEdit: " + r.Verdict);
+			Equal(RunState.Failed, r.State, "a plugin with no log fails the step: " + r.Verdict);
+			Check(r.Verdict.Contains("xEdit wrote no log for BaseMod.esp", StringComparison.Ordinal), "said: " + r.Verdict);
 			Check(File.ReadAllBytes(baseEsp).SequenceEqual(baseWas), "the plugin stands as before");
-			Check(Journal.Load(r.Folder!).Notes.Any(n => n.Contains("xEdit wrote no log for BaseMod.esp", StringComparison.Ordinal)), "and the run's notes say xEdit left no log for it: " + string.Join(" | ", Journal.Load(r.Folder!).Notes));
+			Check(!RunUndo.LeftSomething(Journal.Load(r.Folder!)) && Journal.Load(r.Folder!).CleanOverwriteFile == "", "and nothing of the step is left, nor any overwrite still to move out");
 		} finally {
 			StepRegistry.Replace(new XEditCleanStep());
 		}
@@ -10121,6 +10171,10 @@ public static class Program
 			Throws<StepFailedException>(() => LootStep.Report(ctx, (_, _, _) => { }), "a look that wrote nothing fails the step");
 			File.WriteAllText(report, "{ not json");
 			Throws<StepFailedException>(() => LootStep.Dirty(report), "a report that does not read fails the step");
+			File.WriteAllText(report, "{}");
+			Throws<StepFailedException>(() => LootStep.Dirty(report), "a report without its list of plugins is no report that names none (CodeRabbit on pull request #36)");
+			File.WriteAllText(report, """{ "plugins": [] }""");
+			Equal(0, LootStep.Dirty(report).Count, "a list with nothing dirty names nothing");
 		}
 		// xEdit is told the very game folder Mod Organizer runs: left to the registry it would open another game's folder -
 		// with a game copy of Mod Organizer's own, the player's real one, whose own plugins a clean would rewrite where they stand
@@ -10173,9 +10227,18 @@ public static class Program
 			Throws<StepFailedException>(() => NifOptimizerStep.Verdict(ctx, "Mod", log), "no log: it did not run");
 			File.WriteAllText(log, "[SUCCESS] Saved file.\r\n");
 			Throws<StepFailedException>(() => NifOptimizerStep.Verdict(ctx, "Mod", log), "no last line: it was cut off");
-			File.WriteAllText(log, "[ERROR] Failed to save file.\r\nProgram finished.\r\n");
+			File.WriteAllText(log, "[INFO] 1 file(s) were found.\r\nLoading 'a.nif'...\r\n[ERROR] Failed to save file.\r\nProgram finished.\r\n");
 			Throws<StepFailedException>(() => NifOptimizerStep.Verdict(ctx, "Mod", log), "a mesh it could not save may be cut short: the step fails");
-			File.WriteAllText(log, "[ERROR] Failed to load 'x.nif'.\r\n[SUCCESS] Saved file.\r\nProgram finished.\r\n");
+			// closed part way, it leaves its loop and still writes its last line: every mesh it found needs its result
+			File.WriteAllText(log, "[INFO] 2 file(s) were found.\r\nLoading 'x.nif'...\r\n[SUCCESS] Saved file.\r\nProgram finished.\r\n");
+			string? partWay = null;
+			try {
+				NifOptimizerStep.Verdict(ctx, "Mod", log);
+			} catch (StepFailedException e) {
+				partWay = e.Message;
+			}
+			Check(partWay?.Contains("did not finish every mesh", StringComparison.Ordinal) == true, "a mesh it never reached fails the step, and says so (CodeRabbit on pull request #36): " + partWay);
+			File.WriteAllText(log, "[INFO] 2 file(s) were found.\r\nLoading 'x.nif'...\r\n[ERROR] Failed to load 'x.nif'.\r\nLoading 'y.nif'...\r\n[SUCCESS] Saved file.\r\nProgram finished.\r\n");
 			NifOptimizerStep.Verdict(ctx, "Mod", log);
 			Check(ctx.Journal.Notes.Any(n => n.Contains("could not read 1 mesh", StringComparison.Ordinal)), "a mesh it could not read was left alone, and said");
 		}
@@ -10248,7 +10311,8 @@ public static class Program
 		var lines = RunPreview.Build(ready, mo2, ready.EnabledSteps).Lines(_ => null);
 		Check(lines.Any(l => l.Contains("rewritten where they stand", StringComparison.Ordinal)) && lines.Any(l => l.Contains("SSE NIF Optimizer: Meshes Mod", StringComparison.Ordinal)), "the preview says which mods: " + string.Join(" | ", lines));
 		var parts = DiskForecast.Build(ready, mo2, ready.EnabledSteps).Disks.SelectMany(d => d.Parts).Where(p => p.Step == NifOptimizerStep.StepKey).ToList();
-		Check(parts.Count == 1 && parts[0].Needed && parts[0].Bytes == 12, $"the forecast counts the meshes' copies, and only them ({parts.FirstOrDefault()?.Bytes})");
+		Check(parts.Count == 2 && parts[0].Needed && parts[0].Bytes == 12, $"the forecast counts the meshes' copies, and only them ({parts.FirstOrDefault()?.Bytes})");
+		Check(parts[1].Needed && parts[1].Bytes == Rewrites.Spare, "and the room the step keeps free beside them, the same it asks for before its tool starts (CodeRabbit on pull request #36)");
 	}
 
 	// ... and that guard is a real one: a planted refusal nobody put in the catalog is caught, a note and a known one are not

@@ -137,6 +137,14 @@ public sealed class Journal
 	public List<KeptFile> Kept { get; set; } = [];
 	// the folders of the player's own a step let a tool rewrite files in (Rewrites.cs)
 	public List<RewriteRecord> Rewritten { get; set; } = [];
+	// the programs a step started that write inside those folders, while they may still run (Rewrites.Writing): nothing of them
+	// is laid back before each is gone - after a crash too
+	public List<RewriteWriter> Writers { get; set; } = [];
+	// xEdit cleaning is under way: the file (in the run folder) that holds what stood in Mod Organizer's overwrite when it began,
+	// and when that was. A run cut off before the cleaning collected its files moves out what came new there since - a cleaned
+	// plugin left in overwrite would win over the original put back. "" when none is pending
+	public string CleanOverwriteFile { get; set; } = "";
+	public DateTime CleanBeganUtc { get; set; }
 	// the last number given to a park or file record of this run
 	public int LastSeq { get; set; }
 

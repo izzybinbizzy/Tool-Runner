@@ -86,11 +86,14 @@ public static class StepCatalog
 				outList.Add($"{Name(before)} runs after {Name(after)} - {why}.");
 			}
 		}
-		// an add-on is a patcher under any name: no table can list it
-		var loot = IndexOf(a_order, "loot");
-		for (int i = 0; i < loot; ++i) {
-			if (a_order[i].StartsWith(AddOns.KeyPrefix, StringComparison.Ordinal)) {
-				outList.Add($"{Name("loot")} runs after {Name(a_order[i])} - {SortedFirst}.");
+		// an add-on is a patcher under any name: no table can list it - it reads the plugins, so it comes after the sort and the
+		// cleaning as the built-in patchers do
+		foreach (var (first, why) in new[] { ("loot", SortedFirst), ("xeditclean", CleanedFirst) }) {
+			var at = IndexOf(a_order, first);
+			for (int i = 0; i < at; ++i) {
+				if (a_order[i].StartsWith(AddOns.KeyPrefix, StringComparison.Ordinal)) {
+					outList.Add($"{Name(first)} runs after {Name(a_order[i])} - {why}.");
+				}
 			}
 		}
 		return outList;

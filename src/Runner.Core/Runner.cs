@@ -1073,11 +1073,17 @@ public static class Runner
 			StepKit.PutFilesBack(a_ctx);
 			// a tool cut off inside a mod of the player's: its files back as they were (what will not go back yet is tried again
 			// at the put-back, and said there)
-			Rewrites.PutBack(a_ctx, a_s.Key);
+			// (xEdit cleaning's folders go back as one, the ones it had settled too: a cleaning that did not finish leaves no plugin
+			// cleaned. An optimizer keeps each mod it finished, as it says)
+			Rewrites.PutBack(a_ctx, a_s.Key, a_s.Key == Steps.XEditCleanStep.StepKey);
 			a_ctx.QuietFiles.Clear();
 			// overwrite could not even be listed before the step: nothing in it can be told as the step's, so nothing is moved
 			if (overwriteBefore != null) {
 				MoveNewOverwrite(a_ctx, overwriteBefore, stepBegan);
+			}
+			if (a_ctx.Journal.CleanOverwriteFile != "") {
+				a_ctx.Journal.CleanOverwriteFile = "";
+				a_ctx.Journal.TrySave();
 			}
 			return false;
 		}
@@ -1231,8 +1237,34 @@ public static class Runner
 	{
 		var lost = a_j.Parked.Where(p => p.Lost && !p.IsFolder).Select(p => p.Mod).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 		var folders = a_j.Parked.Where(p => p.Lost && p.IsFolder).Select(p => p.Mod).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+		// a mod of the player's whose rewritten files could not come back (their copies were gone): still as the tool left it
+		var rewritten = a_j.Rewritten.Where(r => r.Lost).Select(r => r.Label).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 		return (lost.Count == 0 ? "" : $" - except {string.Join(", ", lost)}: the old output was no longer in the backup, so {(lost.Count == 1 ? "it is" : "they are")} switched off") +
-			(folders.Count == 0 ? "" : $" - what stood in {string.Join(", ", folders)} before the run was no longer in the backup");
+			(folders.Count == 0 ? "" : $" - what stood in {string.Join(", ", folders)} before the run was no longer in the backup") +
+			(rewritten.Count == 0 ? "" : $" - in {string.Join(", ", rewritten)} the files a tool changed could not be put back: their copies were no longer in the backup");
+	}
+
+	// xEdit cleaning cut off before it collected its files: what came new in Mod Organizer's overwrite since it began is moved
+	// out (a cleaned plugin left there would win over the original put back). Returns what could not be moved
+	static List<string> CleanOverwriteBack(RunContext a_ctx)
+	{
+		var j = a_ctx.Journal;
+		if (j.CleanOverwriteFile == "") {
+			return [];
+		}
+		Dictionary<string, DateTime>? before;
+		try {
+			before = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, DateTime>>(Files.ReadShared(j.CleanOverwriteFile));
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) {
+			a_ctx.Log.Error($"what stood in Mod Organizer's overwrite before xEdit cleaning does not read ({e.Message}) - nothing of it was moved");
+			return ["Mod Organizer's overwrite"];
+		}
+		var stayed = MoveNewOverwrite(a_ctx, before ?? [], j.CleanBeganUtc);
+		if (stayed.Count == 0) {
+			j.CleanOverwriteFile = "";
+			j.TrySave();
+		}
+		return stayed;
 	}
 
 	// the order files back as they were before the run, then this run's outputs on, the replaced mods off, the plugins placed
@@ -1264,6 +1296,7 @@ public static class Runner
 		var filesNotBack = StepKit.PutFilesBack(a_ctx);
 		// a mod of the player's that a tool was cut off in: named with the rest, and Restore stays on offer for it too
 		filesNotBack.AddRange(Rewrites.PutBack(a_ctx, null));
+		filesNotBack.AddRange(CleanOverwriteBack(a_ctx));
 		if (notBack.Count > 0 || filesNotBack.Count > 0) {
 			// a mod whose old output could not come back is kept OFF (never ticked half empty, PutBack) and Restore stays on offer
 			j.NeedsRestore = true;
@@ -1585,6 +1618,7 @@ public static class Runner
 			notBack = PutBackParked(ctx, null);
 			filesNotBack = StepKit.PutFilesBack(ctx);
 			filesNotBack.AddRange(Rewrites.PutBack(ctx, null));
+			filesNotBack.AddRange(CleanOverwriteBack(ctx));
 			PutBack(ctx, a_j.LoadSnapshot());
 		} catch (Exception e) {
 			log.Error("restore failed: " + Plain(e));
@@ -1680,6 +1714,11 @@ public static class Runner
 			a_j.Undoing = true;
 			a_j.Save();
 			var aside = Path.Combine(a_j.BackupDir, "undone");
+			// The mods of the player's own that a step let a tool rewrite files in, first: each changed file as it was before that
+			// tool, what the tool made new moved out. A tool works on what the run's earlier steps left (xEdit cleaning the
+			// plugin Synthesis built in this very run), so its changes are the newest and go first - the parks below then bring
+			// back what stood before the run. Laid last, a rewrite's copy (the plugin as Synthesis built it) went over that
+			Rewrites.Undo(a_j, log, aside);
 			foreach (var p in a_j.Parked.Where(p => p.Replaced && !p.PutBack).Reverse().ToList()) {
 				if (!p.SetAside && (!p.IsFolder || p.Moved)) {
 					RunUndo.SetAside(p.From, aside, p.Mod);
@@ -1712,9 +1751,6 @@ public static class Runner
 					log.Detail($"{Path.GetFileName(k.Path)}: taken out again (this run made it)");
 				}
 			}
-			// the mods of the player's own that a step let a tool rewrite files in: each changed file as it was before the run, what
-			// the tool made new moved out
-			Rewrites.Undo(a_j, log, aside);
 			// only what had no old output: one that had came back above, and pressed again it holds that old output
 			foreach (var m in a_j.Built.Except(parkedMods.Select(p => p.Mod), StringComparer.OrdinalIgnoreCase).Where(m => Directory.Exists(mo2.ModDir(m)) && !inPlace.Any(k => Files.IsUnder(k.Path, mo2.ModDir(m))))) {
 				RunUndo.SetAside(mo2.ModDir(m), aside, m);
@@ -1833,7 +1869,8 @@ public static class Runner
 
 	// a failed step's new files in overwrite would win over the output put back: moved into the run's backup ("unfinished\overwrite")
 	// - only what the step made, and a crash report among them is named with where it went
-	static void MoveNewOverwrite(RunContext a_ctx, Dictionary<string, DateTime> a_before, DateTime a_beganUtc)
+	// returns what could not be moved out (an interrupted run's put-back keeps Restore on offer for it)
+	static List<string> MoveNewOverwrite(RunContext a_ctx, Dictionary<string, DateTime> a_before, DateTime a_beganUtc)
 	{
 		var ow = a_ctx.Mo2.OverwriteDir;
 		List<string> fresh, older;
@@ -1841,7 +1878,7 @@ public static class Runner
 			(fresh, older) = NewInOverwrite(a_before, OverwriteFiles(a_ctx), a_beganUtc);
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			a_ctx.Log.Warn("overwrite could not be looked at after the failed step: " + e.Message);
-			return;
+			return ["Mod Organizer's overwrite"];
 		}
 		// In a step that started the game, a file that stood in overwrite before and changed is the game's own rewrite of something
 		// of the player's (a mod's settings, a cache it keeps, a log): left where it is. Moved out with the rest, the player's
@@ -1891,6 +1928,7 @@ public static class Runner
 			a_ctx.Log.Detail($"{older.Count} file(s) new to overwrite carry a date from before the step and were left where they are (not this run's): " +
 				string.Join(", ", older.Take(4).Select(Path.GetFileName)) + (older.Count > 4 ? " ..." : ""));
 		}
+		return stayed;
 	}
 
 	static void ReportOverwrite(RunContext a_ctx)

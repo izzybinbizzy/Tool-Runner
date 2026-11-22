@@ -76,7 +76,12 @@ public static partial class Files
 		var tmp = Path.Combine(dir, "." + Path.GetFileName(a_dst) + "." + Environment.ProcessId + ".tmp");
 		try {
 			Retry(() => File.Copy(a_src, tmp, true));
-			Swap(tmp, a_dst);
+			// The copy's own marks go in with it (a backup laid back must be the file as it was, read-only or not), never the
+			// marks of the file it replaces: that one's read-only mark is only lifted so it can be replaced
+			if (File.Exists(a_dst) && File.GetAttributes(a_dst).HasFlag(FileAttributes.ReadOnly)) {
+				File.SetAttributes(a_dst, File.GetAttributes(a_dst) & ~FileAttributes.ReadOnly);
+			}
+			Retry(() => File.Move(tmp, a_dst, true));
 		} catch {
 			TryDelete(tmp);
 			throw;

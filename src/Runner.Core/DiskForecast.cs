@@ -169,8 +169,19 @@ public sealed class DiskForecast
 		// and without that room the step does not start its tool at all
 		if (backup != "") {
 			try {
-				foreach (var (step, mod, bytes) in Steps.RewriteKit.Copies(a_mo2, a_todo).Where(c => c.Bytes > 0)) {
+				var copies = Steps.RewriteKit.Copies(a_mo2, a_todo).Where(c => c.Bytes > 0).ToList();
+				foreach (var (step, mod, bytes) in copies) {
 					Add(backup, new Part(step, $"a copy of {mod}'s files, kept before {StepCatalog.Name(step)} changes them", bytes, true));
+				}
+				var cleaning = a_todo.Any(s => s.Key == Steps.XEditCleanStep.StepKey);
+				// the room the step itself keeps free beside its copies (the run's record and log are written there too): the
+				// same as it asks for before its tool starts
+				if (copies.Count > 0 || cleaning) {
+					Add(backup, new Part(copies.Count > 0 ? copies[0].Step : Steps.XEditCleanStep.StepKey, "room left free beside those copies for the run's record and log", Rewrites.Spare, true));
+				}
+				// which plugins xEdit cleans is known only once LOOT has looked: named, never guessed (plugins are small)
+				if (cleaning) {
+					f.NotMeasured.Add($"{StepCatalog.Name(Steps.XEditCleanStep.StepKey)}: a copy of each plugin LOOT calls dirty is kept first - which ones is known only once LOOT has looked");
 				}
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 				f.NotMeasured.Add($"the mods a tool is to rewrite could not be measured ({e.Message})");

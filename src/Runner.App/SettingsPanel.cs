@@ -1200,6 +1200,8 @@ public static class SettingsPanel
 				// a setting the setup does not hold, shown only so it can be filled in, stays unset when left empty (xEdit cleaning's
 				// output mod is needed only for the game's own plugins)
 				if (t.Text == "" && cur == null) {
+					// (an earlier Save that another field refused may have put a value in already: it goes again, as the box shows)
+					a_obj.Remove(a_key);
 					return null;
 				}
 				if (a_key is "output_mod" or "then_move_to_mod" or "executable" && t.Text.Trim() == "") {

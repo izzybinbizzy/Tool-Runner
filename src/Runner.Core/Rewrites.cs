@@ -31,12 +31,22 @@ public sealed class RewriteRecord
 	public int Seq { get; set; }
 }
 
+// A program a step started that writes inside the player's own mods (an optimizer, run by itself or in its own window), by its
+// number and its start time: nothing of those mods is laid back while it may still write
+public sealed class RewriteWriter
+{
+	public string Step { get; set; } = "";
+	public int Pid { get; set; }
+	public DateTime StartedUtc { get; set; }
+}
+
 public static class Rewrites
 {
 	public const string Folder = "rewritten";
 
-	// room left on the backup's disk once the copies are made: the run's record and log are written there too
-	const long Spare = 64L << 20;
+	// room left on the backup's disk once the copies are made: the run's record and log are written there too (the forecast
+	// asks for the same room)
+	public const long Spare = 64L << 20;
 
 	// what stood under Root before the tool started, one path a line, beside the copies (never among them: a file of that name in
 	// the mod would be taken for it)
@@ -45,14 +55,21 @@ public static class Rewrites
 	// what the tool made new under Root, written when the folder is settled
 	static string AddedFile(RewriteRecord a_r) => a_r.Backup + " files added.txt";
 
+	// the copies a settled folder holds, written with it: an undo checks each is still there before it begins
+	static string KeptFile(RewriteRecord a_r) => a_r.Backup + " files kept.txt";
+
+	// The list of what the tool made new. One that is missing or does not read, or that names another number of files than the
+	// record counts, is no "nothing new": that throws, and an undo stays to be done until it reads again
 	public static List<string> AddedOf(RewriteRecord a_r)
 	{
-		try {
-			return File.Exists(AddedFile(a_r)) ? [.. Files.ReadSharedText(AddedFile(a_r)).Split('\n', StringSplitOptions.RemoveEmptyEntries)] : [];
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
-			// a list that cannot be read names nothing: nothing is moved out on a guess
+		if (a_r.Added == 0 && !File.Exists(AddedFile(a_r))) {
 			return [];
 		}
+		List<string> added = [.. Files.ReadSharedText(AddedFile(a_r)).Split('\n', StringSplitOptions.RemoveEmptyEntries)];
+		if (added.Count != a_r.Added) {
+			throw new IOException($"{a_r.Label}: the list of the files the tool made new names {added.Count}, its record counts {a_r.Added}");
+		}
+		return added;
 	}
 
 	// every file under a folder, as paths under it
@@ -74,8 +91,8 @@ public static class Rewrites
 		var keep = a_files == null ? all : a_files.Where(f => File.Exists(Path.Combine(root, f))).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 		var bytes = keep.Sum(f => new FileInfo(Path.Combine(root, f)).Length);
 		// never begun without the room for all of it: a tool let into a folder whose copies did not all fit would leave some
-		// files with no way back
-		if (Files.FreeOn(a_ctx.BackupFolder) is { } free && free < bytes + Spare) {
+		// files with no way back (asked through the forecast's own probe, which the offline tests answer)
+		if (DiskForecast.Real.Free(a_ctx.BackupFolder) is { } free && free < bytes + Spare) {
 			throw new StepFailedException($"not enough room to keep a copy of {a_label}'s files first: {DiskForecast.Size(bytes)} is needed in the run's backup " +
 				$"({Path.GetPathRoot(Path.GetFullPath(a_ctx.BackupFolder))}) and {DiskForecast.Size(free)} is free - nothing was changed");
 		}
@@ -101,52 +118,121 @@ public static class Rewrites
 		return r;
 	}
 
-	// The tool is done with this folder. Of the copies only those of files it changed or took away stay - the rest are the same
-	// bytes as what stands there - and what it made new goes on record. Told apart by their bytes: a tool can write a file of the
-	// same length and give it back its old time (xEdit does).
-	public static (int Changed, int Removed, int Added) Settle(RunContext a_ctx, RewriteRecord a_r)
+	// a program that writes inside the player's mods, on record before it can write (its number and start time)
+	public static void Writing(RunContext a_ctx, string a_step, int a_pid)
+	{
+		if (Procs.StartTime(a_pid) is not { } at) {
+			return;
+		}
+		a_ctx.Journal.Writers.Add(new RewriteWriter { Step = a_step, Pid = a_pid, StartedUtc = at });
+		a_ctx.Journal.Save();
+	}
+
+	// that program has ended: off the record
+	public static void DoneWriting(RunContext a_ctx, int a_pid)
+	{
+		if (a_ctx.Journal.Writers.RemoveAll(w => w.Pid == a_pid) > 0) {
+			a_ctx.Journal.TrySave();
+		}
+	}
+
+	// Every program on record that may write into the player's mods (of a_step, or all) is gone: one that still runs as the very
+	// process the run started (number and start time) is ended through one handle and waited for - up to a minute each. False:
+	// one is still there, and nothing may be laid back yet
+	static bool WritersGone(RunContext a_ctx, string? a_step)
+	{
+		var gone = true;
+		foreach (var w in a_ctx.Journal.Writers.Where(w => a_step == null || w.Step == a_step).ToList()) {
+			if (Procs.StartTime(w.Pid) == w.StartedUtc) {
+				Procs.KillTree(w.Pid, w.StartedUtc);
+				for (var sw = System.Diagnostics.Stopwatch.StartNew(); Procs.StartTime(w.Pid) == w.StartedUtc && sw.Elapsed < TimeSpan.FromMinutes(1);) {
+					Thread.Sleep(250);
+				}
+			}
+			if (Procs.StartTime(w.Pid) == w.StartedUtc) {
+				gone = false;
+				a_ctx.Log.Error($"a program this run started (process {w.Pid}) still runs and may write into the mods it was let into - nothing of them is laid back while it does");
+			} else {
+				a_ctx.Journal.Writers.Remove(w);
+			}
+		}
+		a_ctx.Journal.TrySave();
+		return gone;
+	}
+
+	// What the tool did to one folder, worked out without changing the run's record: the copies of files it left as they were
+	// (the same bytes and the same time) are taken out, what it made new and what is kept is listed beside the copies. A_r is
+	// then committed (Commit) - alone, or together with the other folders of one step
+	public static (int Changed, int Removed, int Added) Prepare(RunContext a_ctx, RewriteRecord a_r)
 	{
 		int changed = 0, removed = 0;
+		var kept = new List<string>();
 		foreach (var copy in Directory.EnumerateFiles(a_r.Backup, "*", SearchOption.AllDirectories).ToList()) {
 			a_ctx.Cancel.ThrowIfCancellationRequested();
-			var live = Path.Combine(a_r.Root, Path.GetRelativePath(a_r.Backup, copy));
+			var rel = Path.GetRelativePath(a_r.Backup, copy);
+			var live = Path.Combine(a_r.Root, rel);
 			if (!File.Exists(live)) {
 				++removed;
-			} else if (Same(copy, live)) {
+				kept.Add(rel);
+			} else if (AsItWas(copy, live)) {
 				Files.Delete(copy);
 			} else {
 				++changed;
+				kept.Add(rel);
 			}
 		}
 		EmptyFoldersOut(a_r.Backup);
-		List<string> added = Before(a_r) is { } before ? ListOf(a_r.Root).Where(f => !before.Contains(f)).ToList() : [];
-		// the list first, then the record that says the folder is settled: a crash between them leaves a folder that is put back whole
+		// told apart by the list of before: one that does not read throws, and the step fails with every folder put back whole
+		var before = Before(a_r);
+		var added = ListOf(a_r.Root).Where(f => !before.Contains(f)).ToList();
 		Files.WriteAtomic(AddedFile(a_r), string.Join("\n", added));
-		a_r.Added = added.Count;
-		a_r.Kept = changed + removed;
-		a_r.Settled = true;
-		a_ctx.Journal.Save();
+		Files.WriteAtomic(KeptFile(a_r), string.Join("\n", kept));
 		return (changed, removed, added.Count);
 	}
 
+	// the folders prepared, settled in ONE write of the run's record: a crash or a Stop before it leaves every one of them to be
+	// put back whole, never some settled and some not
+	public static void Commit(RunContext a_ctx, IEnumerable<(RewriteRecord Record, (int Changed, int Removed, int Added) Did)> a_done)
+	{
+		a_ctx.Journal.SaveWith(() => {
+			foreach (var (r, did) in a_done) {
+				r.Added = did.Added;
+				r.Kept = did.Changed + did.Removed;
+				r.Settled = true;
+			}
+		});
+	}
+
+	// one folder prepared and settled (an optimizer keeps each mod it finished)
+	public static (int Changed, int Removed, int Added) Settle(RunContext a_ctx, RewriteRecord a_r)
+	{
+		var did = Prepare(a_ctx, a_r);
+		Commit(a_ctx, [(a_r, did)]);
+		return did;
+	}
+
 	// A step that did not finish, or a run that was cut off: every folder a tool was let into back as it was - each copy over what
-	// stands there now, what the tool made new moved out into the run's backup. Returns the folders that could not be put back whole
-	public static List<string> PutBack(RunContext a_ctx, string? a_step)
+	// stands there now, what the tool made new moved out into the run's backup. a_settledToo: the folders of a failed step that
+	// were settled already (a step whose folders go back as one). Returns the folders that could not be put back whole
+	public static List<string> PutBack(RunContext a_ctx, string? a_step, bool a_settledToo = false)
 	{
 		var failed = new List<string>();
-		foreach (var r in a_ctx.Journal.Rewritten.Where(r => (a_step == null || r.Step == a_step) && !r.Settled && !r.PutBack && !r.Lost).Reverse().ToList()) {
+		var todo = a_ctx.Journal.Rewritten.Where(r => (a_step == null || r.Step == a_step) && (!r.Settled || a_settledToo) && !r.PutBack && !r.Lost).Reverse().ToList();
+		if (todo.Count == 0) {
+			return failed;
+		}
+		// never while a program the run started may still write into them: laid back now, its next save would undo it
+		if (!WritersGone(a_ctx, a_step)) {
+			return [.. todo.Select(r => r.Label)];
+		}
+		foreach (var r in todo) {
 			try {
 				if (r.Keeping) {
 					r.PutBack = true;
 					a_ctx.Journal.TrySave();
 					continue;
 				}
-				if (!Directory.Exists(r.Backup)) {
-					// on a drive that is not there the copies may come back with the drive: asked again. In a backup that is there
-					// they were cleared away, and counting that as "not back yet" would keep every later put-back from ending
-					if (Path.GetPathRoot(Path.GetFullPath(r.Backup)) is { Length: > 0 } drive && !Directory.Exists(drive)) {
-						throw new IOException($"the backup's drive {drive} is not there");
-					}
+				if (BackupState(r.Backup) is false) {
 					r.Lost = true;
 					var lost = $"{r.Label}: the copies of its files are no longer in this run's backup ({r.Backup}), so what the tool changed could not be put back";
 					a_ctx.Journal.Notes.Add(lost);
@@ -155,7 +241,12 @@ public static class Rewrites
 					a_ctx.Log.Simple("Note: " + lost);
 					continue;
 				}
-				var added = Before(r) is { } before ? ListOf(r.Root).Where(f => !before.Contains(f)).ToList() : [];
+				// (null: whether it is there cannot be told - the drive is away, or the folder will not be read: asked again later)
+				if (BackupState(r.Backup) is null) {
+					throw new IOException($"the backup {r.Backup} cannot be read just now");
+				}
+				var before = Before(r);
+				var added = ListOf(r.Root).Where(f => !before.Contains(f)).ToList();
 				LayBack(r, added, Path.Combine(a_ctx.BackupFolder, "unfinished"));
 				r.PutBack = true;
 				// the files are back: a record the disk refuses right now is not a put-back that failed
@@ -170,17 +261,18 @@ public static class Rewrites
 	}
 
 	// An undo: what a finished step let a tool change goes back to what it was before the run, the newest record first (a second
-	// tool in the same folder kept the first one's result as its "before")
+	// tool in the same folder kept the first one's result as its "before"). Each folder's copies and lists are checked first:
+	// one that misses a copy or a list throws, and the undo stays to be done (pressed again once it is back)
 	public static void Undo(Journal a_j, RunLog a_log, string a_aside)
 	{
 		foreach (var r in a_j.Rewritten.Where(r => r.Settled && !r.PutBack).Reverse().ToList()) {
-			// (an undo is refused while copies it needs are gone - RunUndo.WhyNot: a folder without its backup here is one the
-			// tool changed no file of, and what it made new there can then no longer be told from the mod's own)
-			if (Directory.Exists(r.Backup)) {
-				LayBack(r, AddedOf(r), a_aside);
+			if (MissingCopy(r) is { } missing) {
+				throw new IOException($"{r.Label}: its copy of {missing} is no longer in the run's backup - nothing of it was laid back");
+			}
+			var added = AddedOf(r);
+			if (r.Kept > 0 || added.Count > 0) {
+				LayBack(r, added, a_aside);
 				a_log.Detail($"{r.Label}: its files back as they were before this run");
-			} else if (r.Added > 0) {
-				a_log.Warn($"{r.Label}: this run's record of the {r.Added} file(s) the tool made new in it is no longer in the backup - they are left where they are");
 			}
 			r.PutBack = true;
 			a_j.Save();
@@ -190,20 +282,56 @@ public static class Rewrites
 	// did this run leave a tool's changes standing in a folder? (an undo has them to take back)
 	public static bool Left(Journal a_j) => a_j.Rewritten.Any(r => r.Settled && !r.PutBack && r.Kept + r.Added > 0);
 
-	// the folders whose files a run changed and still holds the old ones of
+	// The folders whose files a run changed and still holds the old ones of - also one a run was cut off in (a tool may have
+	// changed it, and its put-back is still to come), never one whose copies were still being made (no tool had started)
 	public static IEnumerable<string> FoldersOf(Journal a_j) =>
-		a_j.Rewritten.Where(r => r.Settled && !r.PutBack && r.Root != "").Select(r => Path.GetFullPath(r.Root).TrimEnd('\\'));
+		a_j.Rewritten.Where(r => !r.PutBack && !r.Lost && !r.Keeping && r.Root != "").Select(r => Path.GetFullPath(r.Root).TrimEnd('\\'));
 
-	// copies an undo needs that are no longer there
-	public static bool BackupGone(Journal a_j) => a_j.Rewritten.Any(r => r.Settled && !r.PutBack && r.Kept > 0 && !Directory.Exists(r.Backup));
+	// copies an undo needs that are no longer there: each copy a settled folder kept, checked by name
+	public static bool BackupGone(Journal a_j) => a_j.Rewritten.Any(r => r.Settled && !r.PutBack && MissingCopy(r) != null);
 
-	// The copies stay where they are (a second try finds them again); a file that already holds its copy's bytes is left alone.
-	// What the tool made new is moved out, never erased.
+	// the first copy a settled folder kept that is not in the backup (null: all there, or none kept)
+	static string? MissingCopy(RewriteRecord a_r)
+	{
+		if (a_r.Kept == 0) {
+			return null;
+		}
+		if (!File.Exists(KeptFile(a_r))) {
+			// (a folder settled before its copies were listed: its backup folder is all there is to check)
+			return Directory.Exists(a_r.Backup) ? null : "any file";
+		}
+		try {
+			return Files.ReadSharedText(KeptFile(a_r)).Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault(f => !File.Exists(Path.Combine(a_r.Backup, f)));
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			return "its list of copies";
+		}
+	}
+
+	// whether a backup folder is there: true, false (surely gone - its drive is there and says so), or null (it cannot be told:
+	// the drive is away, or the folder is there and will not be read - asked again later)
+	static bool? BackupState(string a_dir)
+	{
+		try {
+			return File.GetAttributes(a_dir).HasFlag(FileAttributes.Directory) ? true : false;
+		} catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException) {
+			return Path.GetPathRoot(Path.GetFullPath(a_dir)) is { Length: > 0 } drive && Directory.Exists(drive) ? false : null;
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			return null;
+		}
+	}
+
+	// The copies stay where they are (a second try finds them again); a file that already holds its copy's bytes and time is left
+	// alone. What the tool made new is moved out, never erased - first what stands in a copy's way (a file where a folder of the
+	// copy's path must be, or a folder where the copy's file goes), then the rest
 	static void LayBack(RewriteRecord a_r, IReadOnlyCollection<string> a_added, string a_aside)
 	{
-		foreach (var copy in Directory.EnumerateFiles(a_r.Backup, "*", SearchOption.AllDirectories)) {
-			var live = Path.Combine(a_r.Root, Path.GetRelativePath(a_r.Backup, copy));
-			if (!File.Exists(live) || !Same(copy, live)) {
+		var copies = Directory.EnumerateFiles(a_r.Backup, "*", SearchOption.AllDirectories).Select(c => (Copy: c, Rel: Path.GetRelativePath(a_r.Backup, c))).ToList();
+		foreach (var (_, rel) in copies) {
+			ClearWay(a_r, rel, a_aside);
+		}
+		foreach (var (copy, rel) in copies) {
+			var live = Path.Combine(a_r.Root, rel);
+			if (!File.Exists(live) || !AsItWas(copy, live)) {
 				Files.CopyAtomic(copy, live);
 			}
 		}
@@ -212,21 +340,47 @@ public static class Rewrites
 			if (!File.Exists(live)) {
 				continue;
 			}
-			var dst = Files.FreeFile(Path.Combine(a_aside, a_r.Label, rel));
-			Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
-			Files.Move(live, dst);
+			MoveAside(a_r, live, rel, a_aside);
 		}
 	}
 
-	static HashSet<string>? Before(RewriteRecord a_r)
+	// what the tool put in the way of a copy's path moved aside: a file standing where a folder of the path must be, a folder
+	// standing where the copy's own file goes
+	static void ClearWay(RewriteRecord a_r, string a_rel, string a_aside)
 	{
-		try {
-			return File.Exists(BeforeFile(a_r)) ? Files.ReadSharedText(BeforeFile(a_r)).Split('\n', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.OrdinalIgnoreCase) : null;
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
-			// a list that cannot be read names nothing as new: nothing is moved out on a guess
-			return null;
+		var parts = a_rel.Split(Path.DirectorySeparatorChar);
+		var at = a_r.Root;
+		for (var i = 0; i < parts.Length - 1; ++i) {
+			at = Path.Combine(at, parts[i]);
+			if (File.Exists(at)) {
+				MoveAside(a_r, at, Path.GetRelativePath(a_r.Root, at), a_aside);
+				return;
+			}
+		}
+		var live = Path.Combine(a_r.Root, a_rel);
+		if (Directory.Exists(live)) {
+			var dst = Files.FreeFile(Path.Combine(a_aside, a_r.Label, a_rel));
+			Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+			Directory.Move(live, dst);
 		}
 	}
+
+	static void MoveAside(RewriteRecord a_r, string a_live, string a_rel, string a_aside)
+	{
+		var dst = Files.FreeFile(Path.Combine(a_aside, a_r.Label, a_rel));
+		Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+		Files.Move(a_live, dst);
+	}
+
+	// What stood under Root before the tool started. A list that is missing or does not read throws: read as "nothing stood
+	// there", every file of the mod would count as the tool's and be moved out; read as "all of it", what the tool made new would
+	// stay - either way a put-back that says it is done when it is not
+	static HashSet<string> Before(RewriteRecord a_r) =>
+		Files.ReadSharedText(BeforeFile(a_r)).Split('\n', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+	// the file as its copy holds it: the same bytes and the same time (a tool that saved the same bytes changed its date, which
+	// the player's own tools may go by)
+	static bool AsItWas(string a_copy, string a_live) => File.GetLastWriteTimeUtc(a_copy) == File.GetLastWriteTimeUtc(a_live) && Same(a_copy, a_live);
 
 	// the same bytes? (the length first: most changed files differ there, and no byte is read)
 	public static bool Same(string a_a, string a_b)

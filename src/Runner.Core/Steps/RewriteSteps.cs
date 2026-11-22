@@ -19,7 +19,8 @@ public static class RewriteKit
 	{
 		var own = new HashSet<string>(a_setup.LodOutputs, StringComparer.OrdinalIgnoreCase);
 		foreach (var s in a_setup.Steps.Select(s => new StepSettings(s.Settings))) {
-			own.UnionWith(new[] { s.OutputMod, s.Str("tool_writes") }.OfType<string>());
+			// (ACMOS keeps its output under then_move_to_mod)
+			own.UnionWith(new[] { s.OutputMod, s.Str("tool_writes"), s.Str("then_move_to_mod") }.OfType<string>());
 			own.UnionWith(s.List("replaces"));
 			own.UnionWith((s.Raw["caches"] as JsonArray)?.OfType<JsonObject>().Select(c => Setup.Str(c, "output_mod")).OfType<string>() ?? []);
 		}
@@ -95,10 +96,9 @@ public sealed class XEditCleanStep : IStep
 
 	public void Run(RunContext a_ctx, StepSettings a_s)
 	{
-		// LOOT's look of this very run when its sort ran: the plugins have not changed since
-		var sortedNow = Path.Combine(a_ctx.Journal.Folder, LootStep.ReportFile);
-		var report = a_ctx.Journal.Sorted && File.Exists(sortedNow) ? sortedNow :
-			LootStep.Report(a_ctx, LootStep.Starter(a_ctx, Key, "LOOT is looking at your plugins", TimeSpan.FromMinutes(a_s.Int("loot_min", 10))));
+		// LOOT looks at the plugins as they stand now, every time: a look of the run's own sort may describe plugins a step since
+		// rewrote, or another mod's copy that wins by now - and xEdit would clean by the old verdict (a minute of LOOT's)
+		var report = LootStep.Report(a_ctx, LootStep.Starter(a_ctx, Key, "LOOT is looking at your plugins", TimeSpan.FromMinutes(a_s.Int("loot_min", 10))));
 		var title = a_s.Req("executable");
 		var image = a_s.Str("image") ?? (a_ctx.Mo2.Executable(title)?.Binary is { Length: > 0 } bin ? Path.GetFileName(bin) : "SSEEdit.exe");
 		Clean(a_ctx, a_s, LootStep.Dirty(report), (plugin, log) => {
@@ -125,6 +125,9 @@ public sealed class XEditCleanStep : IStep
 		var skip = a_s.List("skip");
 		var gameData = Path.Combine(a_ctx.Mo2.GameDir, "Data");
 		var overwrite = a_ctx.Mo2.OverwriteDir;
+		// Where each plugin stands is looked up with Mod Organizer closed: a mod moved in it while it was still open wins by now,
+		// and the file copied first must be the very one xEdit opens (looked at again before each start, below)
+		a_ctx.Control.Close(null, a_ctx.Cancel);
 		var places = a_ctx.Profile.PluginPaths();
 		var theirs = new List<(string Plugin, string At)>();
 		var games = new List<(string Plugin, string At)>();
@@ -158,9 +161,15 @@ public sealed class XEditCleanStep : IStep
 			a_ctx.Log.Say("LOOT calls none of your plugins dirty - nothing to clean");
 			return;
 		}
-		// the files are copied and the mods switched with Mod Organizer closed
-		a_ctx.Control.Close(null, a_ctx.Cancel);
+		// the files are copied and the mods switched with Mod Organizer still closed. What stands in its overwrite now goes on
+		// record first: a run cut off before Collect moves out what came new there since (a cleaned plugin would win over the
+		// original put back) - Runner.CleanOverwriteBack
 		var before = Runner.OverwriteFiles(a_ctx);
+		var beforeFile = Path.Combine(a_ctx.Journal.Folder, "xedit overwrite before.json");
+		Files.WriteAtomic(beforeFile, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(before));
+		a_ctx.Journal.CleanBeganUtc = DateTime.UtcNow;
+		a_ctx.Journal.CleanOverwriteFile = beforeFile;
+		a_ctx.Journal.Save();
 		var plan = new List<(string Plugin, string At)>(theirs);
 		if (games.Count > 0) {
 			// the old cleaned copies to the backup, then each of the game's plugins as it is now: the copy in the mod is the one
@@ -192,6 +201,13 @@ public sealed class XEditCleanStep : IStep
 				for (var i = 0; i < plan.Count; ++i) {
 					a_ctx.Cancel.ThrowIfCancellationRequested();
 					var plugin = plan[i].Plugin;
+					// the name still leads to the file whose copy was kept (xEdit is given the name; Mod Organizer, open for each
+					// start, may have been changed in between): else the step stops before xEdit opens a file with no way back
+					var now = File.Exists(Path.Combine(overwrite, plugin)) ? Path.Combine(overwrite, plugin) : a_ctx.Profile.PluginPaths().GetValueOrDefault(plugin);
+					if (now == null || !Files.SamePath(now, plan[i].At)) {
+						throw new StepFailedException($"{plugin} no longer leads to the file whose copy was kept first ({plan[i].At}, now {now ?? "no file"}) - a mod was moved in Mod Organizer during the step; " +
+							"nothing of it was cleaned, start the step again");
+					}
 					logs[plugin] = Path.Combine(a_ctx.Journal.Folder, $"xEdit {RewriteKit.AsFileName(plugin)}.txt");
 					Files.Delete(logs[plugin]);
 					a_ctx.Activity(StepKey, $"xEdit is cleaning {plugin} ({i + 1} of {plan.Count})", (double)i / plan.Count);
@@ -204,33 +220,30 @@ public sealed class XEditCleanStep : IStep
 			// is judged (and before a failed step's files are laid back - a cleaned plugin left there would win over them)
 			Collect(a_ctx, plan, before);
 		}
-		var noLog = new List<string>();
+		// Every plugin of the plan needs its log's last line before any is kept: one with no log, or a cut-off log, may hold a
+		// half-written plugin (an xEdit that ended part way through its save), and the step then fails - every plugin of it put
+		// back as it was, the ones xEdit finished too
 		foreach (var (plugin, at) in plan) {
 			// the original went into xEdit's backups and nothing took its place: its copy is laid back by the step's failure
 			if (!File.Exists(at)) {
 				throw new StepFailedException($"xEdit took {plugin} out of its folder and wrote no cleaned file in its place (its log: {logs[plugin]})");
 			}
 			if (!File.Exists(logs[plugin])) {
-				noLog.Add(plugin);
-				continue;
+				throw new StepFailedException($"xEdit wrote no log for {plugin}, so whether it finished with it cannot be told - every plugin of the step is put back as it was");
 			}
 			// its own last line: without it the cleaning was cut off, whatever it wrote
 			if (!Files.ReadSharedText(logs[plugin]).Contains(Done, StringComparison.OrdinalIgnoreCase)) {
 				throw new StepFailedException($"xEdit ended before it had finished cleaning {plugin} (its log: {logs[plugin]})");
 			}
 		}
-		// A plugin xEdit left no log for stands as it was, and that is said: "left as it was" alone would read as xEdit having
-		// looked at it and found nothing to clean, when it may never have opened it
-		if (noLog.Count > 0) {
-			var silent = $"xEdit wrote no log for {string.Join(", ", noLog)}: whether it opened {(noLog.Count == 1 ? "it" : "them")} cannot be told from here - " +
-				$"{(noLog.Count == 1 ? "it stands" : "they stand")} as before";
-			a_ctx.Note(silent);
-			a_ctx.Log.Warn(silent);
-		}
-		var cleaned = 0;
-		foreach (var r in records) {
-			cleaned += Rewrites.Settle(a_ctx, r).Changed;
-		}
+		// every folder worked out first, then all of them settled in ONE write of the run's record: a crash or a Stop between two
+		// folders leaves none of them kept as cleaned
+		var prepared = records.Select(r => (Record: r, Did: Rewrites.Prepare(a_ctx, r))).ToList();
+		Rewrites.Commit(a_ctx, prepared);
+		var cleaned = prepared.Sum(p => p.Did.Changed);
+		// (its files are collected and its folders settled: nothing of it is left for an interrupted run to move out of overwrite)
+		a_ctx.Journal.CleanOverwriteFile = "";
+		a_ctx.Journal.TrySave();
 		// a copy of one of the game's plugins is cleaned when it no longer holds the game's bytes
 		cleaned += games.Count(g => !Rewrites.Same(g.At, Path.Combine(a_ctx.Mo2.ModDir(mod!), g.Plugin)));
 		if (games.Count > 0) {
@@ -368,7 +381,10 @@ public abstract class RewriteToolStep : IStep
 	void Guided(RunContext a_ctx, string a_exe, string a_ask)
 	{
 		var image = Path.GetFileName(a_exe);
-		a_ctx.Control.Ours(Mo2Control.StartDetached(Mo2Control.Quote(a_exe), Path.GetDirectoryName(a_exe)!));
+		var pid = Mo2Control.StartDetached(Mo2Control.Quote(a_exe), Path.GetDirectoryName(a_exe)!);
+		a_ctx.Control.Ours(pid);
+		// on record as writing in this mod while it is open: no put-back lays a file back under it (Rewrites.WritersGone)
+		Rewrites.Writing(a_ctx, Key, pid);
 		try {
 			a_ctx.Guide.Ask(Key, a_ask, a_ctx.Cancel);
 			var sw = Stopwatch.StartNew();
@@ -383,6 +399,10 @@ public abstract class RewriteToolStep : IStep
 			}
 		} finally {
 			StepKit.CloseTool(a_ctx, image);
+			// off the record once it is gone (one still open stays on it, and the put-back waits for it there)
+			if (Procs.StartTime(pid) == null) {
+				Rewrites.DoneWriting(a_ctx, pid);
+			}
 		}
 	}
 }
@@ -437,24 +457,36 @@ public sealed class NifOptimizerStep : RewriteToolStep
 		a_ctx.Log.Detail(Path.GetFileName(a_exe) + " " + string.Join(" ", psi.ArgumentList.Select(Mo2Control.Quote)));
 		using var p = Process.Start(psi) ?? throw new StepFailedException("could not start " + a_exe);
 		a_ctx.Control.Ours(p.Id);
+		// on record as writing in this mod before it can write: no put-back - this step's failure, a cut-off run, a Restore after a
+		// crash - lays a file back while it still runs (Rewrites.WritersGone)
+		Rewrites.Writing(a_ctx, Key, p.Id);
 		try {
 			Waits.Tool(a_ctx, Key, p, a_s.Deadline(60), () => p.HasExited ? Waits.Poll.Done : Waits.Poll.Wait);
 		} catch {
 			// ended through the very process object started here (its number cannot change hands while this handle is held),
-			// never looked up again by number
+			// never looked up again by number - and waited for: a mesh it is saving is not laid back under it. One that will not
+			// go stays on record, and the put-back waits for it there
 			try {
 				p.Kill(true);
-				p.WaitForExit(10000);
+				if (!p.WaitForExit(60000)) {
+					a_ctx.Log.Error($"{Tool} did not end within a minute of being stopped - nothing of {a_mod} is laid back while it runs");
+				}
 			} catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException) {
-				// gone already, or one of its children would not go: the step's own failure says what matters
+				// gone already, or one of its children would not go: the put-back's own look at it decides
+			}
+			if (p.HasExited) {
+				Rewrites.DoneWriting(a_ctx, p.Id);
 			}
 			throw;
 		}
+		Rewrites.DoneWriting(a_ctx, p.Id);
 		Verdict(a_ctx, a_mod, log);
 	}
 
 	// Its exit code is always 0: its log is the verdict. A mesh it could not save was opened for writing first and may be cut
-	// short, so that fails the step (every mesh of this mod then comes back from its copy); one it could not read was left as it is
+	// short, so that fails the step (every mesh of this mod then comes back from its copy); one it could not read was left as it is.
+	// Its last line alone proves nothing: closed part way, it leaves its loop and still writes it. So the log must give every mesh
+	// it found ("[INFO] n file(s) were found.") its "Loading" line and one result - saved, could not save, could not load
 	public static void Verdict(RunContext a_ctx, string a_mod, string a_log)
 	{
 		if (!File.Exists(a_log)) {
@@ -463,6 +495,14 @@ public sealed class NifOptimizerStep : RewriteToolStep
 		var lines = Files.ReadSharedText(a_log).Split('\n');
 		if (!lines.Any(l => l.Contains(Finished, StringComparison.Ordinal))) {
 			throw new StepFailedException($"SSE NIF Optimizer ended before it had finished {a_mod} (its log: {a_log})");
+		}
+		var found = lines.Select(l => System.Text.RegularExpressions.Regex.Match(l, @"\[INFO\] (\d+) file\(s\) were found")).FirstOrDefault(m => m.Success) is { } f ? int.Parse(f.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) : -1;
+		var loading = lines.Count(l => l.StartsWith("Loading '", StringComparison.Ordinal));
+		var results = lines.Count(l => l.Contains("[SUCCESS] Saved file.", StringComparison.Ordinal) || l.Contains("[ERROR] Failed to save file.", StringComparison.Ordinal) ||
+			l.Contains("[ERROR] Failed to load '", StringComparison.Ordinal));
+		if (found < 0 || loading != found || results != found) {
+			throw new StepFailedException($"SSE NIF Optimizer did not finish every mesh of {a_mod}: it found {(found < 0 ? "an unknown number" : found.ToString(System.Globalization.CultureInfo.InvariantCulture))}, " +
+				$"began {loading} and finished {results} (closed part way?) - every mesh of the mod is put back (its log: {a_log})");
 		}
 		var unsaved = lines.Count(l => l.Contains("[ERROR] Failed to save", StringComparison.Ordinal));
 		if (unsaved > 0) {

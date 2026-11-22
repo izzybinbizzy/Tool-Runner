@@ -103,7 +103,11 @@ public sealed class LootStep : IStep
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) {
 			throw new StepFailedException("LOOT's report does not read (" + e.Message + "), so no plugin was looked at");
 		}
-		return (root?["plugins"] as JsonArray ?? []).OfType<JsonObject>().Where(p => p["dirty"] is JsonArray { Count: > 0 })
+		// a report without its list of plugins is no report that names none dirty: no plugin was looked at
+		if (root?["plugins"] is not JsonArray plugins) {
+			throw new StepFailedException("LOOT's report holds no list of plugins, so no plugin was looked at");
+		}
+		return plugins.OfType<JsonObject>().Where(p => p["dirty"] is JsonArray { Count: > 0 })
 			.Select(p => Text(p["name"])).OfType<string>().ToList();
 	}
 
