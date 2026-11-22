@@ -10100,6 +10100,12 @@ public static class Program
 			File.WriteAllText(report, "{ not json");
 			Throws<StepFailedException>(() => LootStep.Dirty(report), "a report that does not read fails the step");
 		}
+		// xEdit is told the very game folder Mod Organizer runs: left to the registry it would open another game's folder -
+		// with a game copy of Mod Organizer's own, the player's real one, whose own plugins a clean would rewrite where they stand
+		Equal("-SSE -quickautoclean -autoexit -autoload -R:\"C:\\run\\xEdit A.txt\" -d:\"C:\\Game Copy\\Data\" \"A.esp\"",
+			XEditCleanStep.Arguments("A.esp", @"C:\run\xEdit A.txt", null, @"C:\Game Copy"), "xEdit's arguments: the game's kind, the game's own folder, its log, the plugin last");
+		Equal("-SSE -quickautoclean -autoexit -autoload -R:\"l\" -d:\"X:\\Data\" \"A.esp\"", XEditCleanStep.Arguments("A.esp", "l", " -d:\"X:\\Data\" ", @"C:\Game Copy"),
+			"a game folder the setup names itself is the one used, once");
 	}
 
 	// SSE NIF Optimizer by itself: its command line, and its log as the verdict (its exit code is always 0)

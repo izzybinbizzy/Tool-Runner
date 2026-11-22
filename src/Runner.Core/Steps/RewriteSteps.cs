@@ -103,7 +103,7 @@ public sealed class XEditCleanStep : IStep
 		var image = a_s.Str("image") ?? (a_ctx.Mo2.Executable(title)?.Binary is { Length: > 0 } bin ? Path.GetFileName(bin) : "SSEEdit.exe");
 		Clean(a_ctx, a_s, LootStep.Dirty(report), (plugin, log) => {
 			try {
-				using var proc = a_ctx.Control.RunExecutable(title, image, Arguments(plugin, log, a_s.Str("args")), a_ctx.Cancel);
+				using var proc = a_ctx.Control.RunExecutable(title, image, Arguments(plugin, log, a_s.Str("args"), a_ctx.Mo2.GameDir), a_ctx.Cancel);
 				Waits.Tool(a_ctx, Key, proc, a_s.Deadline(15), () => proc.HasExited ? Waits.Poll.Done : Waits.Poll.Wait);
 			} finally {
 				StepKit.CloseTool(a_ctx, image);
@@ -111,9 +111,13 @@ public sealed class XEditCleanStep : IStep
 		});
 	}
 
-	// its game named, the plugin's selection window passed over, its log where the run keeps it, and closed by itself when done
-	public static string Arguments(string a_plugin, string a_log, string? a_extra) =>
-		$"-SSE -quickautoclean -autoexit -autoload -R:\"{a_log}\"{(string.IsNullOrWhiteSpace(a_extra) ? "" : " " + a_extra.Trim())} \"{a_plugin}\"";
+	// Its game named twice over: the kind (-SSE) and the very folder Mod Organizer runs (-d:). Left to itself xEdit takes the
+	// game the registry names; with a game copy of Mod Organizer's own that is another folder, one Mod Organizer does not map -
+	// the plugin in a mod is not found there, and one of the game's own plugins would be cleaned where it stands, in a game
+	// folder this program never writes to. Then: the plugin's selection window passed over, its log where the run keeps it,
+	// and closed by itself when done.
+	public static string Arguments(string a_plugin, string a_log, string? a_extra, string a_gameDir) =>
+		XLodGenStep.WithData($"-SSE -quickautoclean -autoexit -autoload -R:\"{a_log}\"{(string.IsNullOrWhiteSpace(a_extra) ? "" : " " + a_extra.Trim())}", a_gameDir) + $" \"{a_plugin}\"";
 
 	// a_clean: xEdit run on one plugin to its end (the plugin's file name, the file its log goes to)
 	public static void Clean(RunContext a_ctx, StepSettings a_s, IReadOnlyList<string> a_dirty, Action<string, string> a_clean)
