@@ -1342,7 +1342,8 @@ public static partial class InGame
 	public static void Deactivate(RunContext a_ctx, StepSettings a_s)
 	{
 		CopySaves(a_ctx);
-		var outs = a_ctx.Setup.EnabledSteps.Select(s => new StepSettings(s.Settings).OutputMod).OfType<string>().ToList();
+		// (an old output that is used goes off with the rest before the first tool, so what needs it is off for the clean save too)
+		var outs = a_ctx.Setup.EnabledSteps.Concat(a_ctx.Setup.KeptSteps).Select(s => new StepSettings(s.Settings).OutputMod).OfType<string>().ToList();
 		a_ctx.CleanSaveExtraOff = a_ctx.Profile.Dependents(outs);
 		var dyn = a_s.Raw["dyndolod_off"] != null ? a_s.Bool("dyndolod_off", false) : HasDynDolod(a_ctx.Profile);
 		var cell = a_s.Str("interior_cell") ?? "QASmoke";

@@ -38,6 +38,14 @@ public sealed class StepRecord
 	public long? OutputBytes { get; set; }
 }
 
+// a step a run left alone because its old output is used: the step, its name, and the mod that holds that output
+public sealed class OldUse
+{
+	public string Step { get; set; } = "";
+	public string Name { get; set; } = "";
+	public string Mod { get; set; } = "";
+}
+
 // an output moved into the run's backup before a tool rewrote it; put back when its step did not finish
 public sealed class ParkRecord
 {
@@ -103,6 +111,9 @@ public sealed class Journal
 	public bool StopAfterStep { get; set; }
 	public List<StepRecord> Steps { get; set; } = [];
 	public List<string> Built { get; set; } = [];
+	// the steps this run did not run because the setup uses their old output, each with that output's mod - on record once the
+	// run has switched it back on at the step's place (OldOutput); a put-back switches these on like what the run built
+	public List<OldUse> UsedOld { get; set; } = [];
 	// LOOT's sort finished: its list is in this run's folder (LootStep.SortedFile) and every put-back of this run keeps it
 	public bool Sorted { get; set; }
 	// that sort left the plugin files other than they were before the run: Undo has an order to take back

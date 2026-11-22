@@ -72,6 +72,8 @@ public static class Preflight
 			outList.Add(new Issue("", false, "out of the recommended order: " + w));
 		}
 		var c = new CheckContext { Setup = a_setup, Mo2 = a_mo2, Profile = profile, States = profile.States() };
+		// the steps that are not run because their old output is used: one that cannot be used stops the start
+		outList.AddRange(OldOutput.Check(a_setup, a_mo2, c.States, a_setup.EnabledSteps.Where(s => a_steps.Contains(s.Key)).ToList()));
 		HashSet<string>? rivalsOff = null;
 		foreach (var key in a_steps) {
 			var step = StepRegistry.For(key);

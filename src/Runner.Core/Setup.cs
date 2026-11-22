@@ -54,11 +54,12 @@ public sealed class Setup
 		(Root["placement"] as JsonArray)?.OfType<JsonArray>().Where(a => a.Count >= 2)
 			.Select(a => new Profile.PlaceRule(a[0]!.ToString(), a[1]!.ToString(), a.Count > 2 && a[2]?.ToString() == "active")).ToList() ?? [];
 
-	public sealed record StepEntry(string Key, bool On, JsonObject Settings);
+	// UseOld: the step is not run and the output it made before is used (OldOutput) - it counts only for a step that is on
+	public sealed record StepEntry(string Key, bool On, JsonObject Settings, bool UseOld = false);
 
 	public List<StepEntry> Steps =>
 		(Root["steps"] as JsonArray)?.OfType<JsonObject>().Select(o => new StepEntry(Str(o, "step") ?? "", Bool(o, "on") ?? true,
-			o["settings"] as JsonObject ?? new JsonObject())).Where(s => s.Key != "").ToList() ?? [];
+			o["settings"] as JsonObject ?? new JsonObject(), Bool(o, OldOutput.Key) ?? false)).Where(s => s.Key != "").ToList() ?? [];
 
 	// a new game (the player starts a new character after the run): there is no save of theirs to keep clean or to bring
 	// back, so the clean save and the save to play are left out of every run while it is on (dyndolod.info/Help/Clean-Save)
@@ -68,7 +69,14 @@ public sealed class Setup
 
 	public bool LeftOutForNewGame(string a_key) => NewGame && SaveSteps.Contains(a_key);
 
-	public List<StepEntry> EnabledSteps => Steps.Where(s => s.On && !LeftOutForNewGame(s.Key)).ToList();
+	// a step that is on, is not left out, and is set to use the output it made before: its tool does not run (OldOutput)
+	public bool UsesOld(StepEntry a_s) => a_s.On && a_s.UseOld && !LeftOutForNewGame(a_s.Key) && OldOutput.CanKeep(a_s.Key, new StepSettings(a_s.Settings));
+
+	// the steps a run runs
+	public List<StepEntry> EnabledSteps => Steps.Where(s => s.On && !LeftOutForNewGame(s.Key) && !UsesOld(s)).ToList();
+
+	// the steps a run does not run, because the output each made before is used
+	public List<StepEntry> KeptSteps => Steps.Where(UsesOld).ToList();
 
 	public const string PgLiteMod = "PGLite";
 
@@ -171,7 +179,8 @@ public sealed class Setup
 			}
 		}
 		if (Steps.Count == 0) p.Add("the setup has no steps");
-		if (EnabledSteps.Count == 0) p.Add(Steps.Any(s => s.On) ? "only the save steps are switched on, and they are left out for a new game" : "every step is switched off");
+		if (EnabledSteps.Count == 0) p.Add(KeptSteps.Count > 0 ? "every step that is switched on uses its old output - nothing would run" :
+			Steps.Any(s => s.On) ? "only the save steps are switched on, and they are left out for a new game" : "every step is switched off");
 		var dup = Steps.GroupBy(s => s.Key).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
 		if (dup.Count > 0) p.Add("a step is listed twice: " + string.Join(", ", dup));
 		// SnowFixer and AutoBlend are no longer supported: Landscape Fixer, by the same author, replaced both

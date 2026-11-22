@@ -350,6 +350,22 @@ public partial class App : Application
 		Pump(toolsBox, 600);
 		Save("7c set up your tools", toolsBox);
 		toolsBox.Close();
+		// a tool's old output used instead of building it again: the box that says what that means for this tool (his word of 2026-11-21)
+		var oldBox = w.DemoOldOutputBox();
+		oldBox.ShowActivated = false;
+		oldBox.WindowStartupLocation = WindowStartupLocation.Manual;
+		oldBox.Left = -30000;
+		oldBox.Top = -30000;
+		oldBox.Show();
+		Pump(oldBox, 600);
+		Save("7d use its old output", oldBox);
+		oldBox.Close();
+		// ... and the steps with one of them set so
+		w.DemoUsesOld("dyndolod", true);
+		Pump(w, 300);
+		Save("7e a step that uses its old output");
+		w.DemoUsesOld("dyndolod", false);
+		Pump(w, 200);
 		// the smallest window the program allows: nothing may be cut off there
 		w.Width = w.MinWidth;
 		w.Height = w.MinHeight;

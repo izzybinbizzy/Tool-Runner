@@ -18,16 +18,18 @@ public sealed partial class StepRow : Observable
 	public int Number { get; set => Set(ref field, value); }
 	// ticked, but left out of every run: the setup is set to a new game and this is a save step
 	public bool LeftOut { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(Status)); } }
+	// ticked and not run: the output its tool made before is used (the setup's "useOld", for a step that makes one)
+	public bool UsesOld { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(Status)); } }
 	// its last run in one line: when, how it ended, and whether its output is still current ("" = it never ran)
 	public string LastRun { get; set => Set(ref field, value); } = "";
 	public string LastKind { get; set => Set(ref field, value); } = "";
-	public bool Runs => On && !LeftOut;
+	public bool Runs => On && !LeftOut && !UsesOld;
 	// while a step is dragged over this row: the line that shows where it would land (above or below it)
 	public bool DropAbove { get; set => Set(ref field, value); }
 	public bool DropBelow { get; set => Set(ref field, value); }
 
 	// the row in words for a screen reader (the glyph and its color say it to the eye)
-	public string Status => A11y.StepStatus(On, LeftOut, State, Elapsed, Usual, Note);
+	public string Status => A11y.StepStatus(On, LeftOut, State, Elapsed, Usual, Note, UsesOld);
 
 	public string Glyph => State switch {
 		StepState.Running => Theme.Glyph("Running"),
@@ -108,7 +110,10 @@ public sealed partial class MainViewModel : Observable
 	public ObservableCollection<string> Issues { get; } = [];
 
 	public SetupItem? SelectedSetup { get; set { if (Set(ref field, value)) LoadSteps(); } }
-	public StepRow? SelectedStep { get; set { if (Set(ref field, value)) ShowLastCard(); } }
+	public StepRow? SelectedStep { get; set { if (Set(ref field, value)) { ShowLastCard(); OnPropertyChanged(nameof(UseOldLabel)); } } }
+
+	// the button under the steps and the right-click entry: what pressing it does for the selected step
+	public string UseOldLabel => SelectedStep?.UsesOld == true ? "Build it a_gain" : "Use o_ld output";
 	public bool Mo2Open { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(Mo2Text)); } }
 	public bool GameRunning { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(GameText)); } }
 	public string Mo2Text => Mo2Open ? "Mod Organizer open" : "Mod Organizer closed";
@@ -427,6 +432,12 @@ public sealed partial class MainViewModel : Observable
 		var stale = got.Where(g => g.Section.OutOfDate && Steps.Any(r => r.Key == g.Section.Key && r.Runs)).Select(g => StepCatalog.Name(g.Section.Key)).ToList();
 		_outOfDate = stale.Count == 0 ? "" :
 			$"Changed in Mod Organizer since they last finished: {string.Join(", ", stale)}. Run them again to bring their output up to date (right-click a step to run only it, or START for every step).";
+		// a step that uses its old output is not run again by a START: that it is out of date is said on its own
+		var oldStale = got.Where(g => g.Section.OutOfDate && Steps.Any(r => r.Key == g.Section.Key && r.UsesOld)).Select(g => StepCatalog.Name(g.Section.Key)).ToList();
+		if (oldStale.Count > 0) {
+			_outOfDate += (_outOfDate == "" ? "" : "\n\n") +
+				$"Set to use their old output, and your mods changed in Mod Organizer since it was made: {string.Join(", ", oldStale)}. START's preview says what that means for each; \"Build it again\" under the steps has a step built anew.";
+		}
 		ShowLastCard();
 	}
 
@@ -470,12 +481,85 @@ public sealed partial class MainViewModel : Observable
 		OnPropertyChanged(nameof(NewGame));
 	}
 
+	// each row's standing in the setup beyond its tick: left out for a new game, or not run because its old output is used
 	void MarkLeftOut()
 	{
+		var entries = Setup?.Steps ?? [];
 		foreach (var s in Steps) {
 			s.LeftOut = Setup?.LeftOutForNewGame(s.Key) == true;
+			s.UsesOld = entries.FirstOrDefault(x => x.Key == s.Key) is { } entry && Setup!.UsesOld(entry);
 		}
 		OnPropertyChanged(nameof(NewGame));
+		OnPropertyChanged(nameof(UseOldLabel));
+	}
+
+	// What using a step's old output means right now, read off the disk away from the window's thread: the step as it stands
+	// (null with why when it has none to use) - worked out as if the step were already set so, since the tools that still run
+	// are part of the answer
+	public async Task<(OldOutput.Look? Look, string? WhyNot)> OldOutputOf(StepRow a_row)
+	{
+		if (Setup is not { } setup || setup.Steps.FirstOrDefault(s => s.Key == a_row.Key) is not { } entry) {
+			return (null, "No setup is shown.");
+		}
+		if (OldOutput.WhyNot(entry.Key, new StepSettings(entry.Settings)) is { } no) {
+			return (null, no);
+		}
+		var with = setup.Clone();
+		foreach (var o in (with.Root["steps"] as JsonArray)?.OfType<JsonObject>().Where(o => Setup.Str(o, "step") == a_row.Key) ?? []) {
+			o["on"] = true;
+			o[OldOutput.Key] = true;
+		}
+		var look = await Task.Run(() => {
+			var mo2 = Mo2Instance.Load(with.Mo2Exe, with.Mo2Instance);
+			var control = new Mo2Control(mo2, with.Profile, RunLog.Null);
+			var states = new Profile(mo2, with.Profile, () => control.Running).States();
+			return OldOutput.LookAt(with, mo2, states, with.EnabledSteps, DryRun.LastOf(with, mo2, AppPaths.Data), with.KeptSteps.Where(k => k.Key == a_row.Key).ToList()).FirstOrDefault();
+		});
+		return look == null ? (null, $"{a_row.Name} has no old output to use.") : (look, null);
+	}
+
+	// the box's text: what happens, then every line of what it means for this tool
+	public string OldOutputText(OldOutput.Look a_look) =>
+		$"{a_look.Name} will not run. The output it made before (\"{a_look.Mod}\") stays in your game, and the tools after it build on it.\n\n" +
+		string.Join("\n\n", OldOutput.Warning(a_look, Setup?.Profile ?? "")) +
+		"\n\nYou can take this back any time: select the step and press \"Build it again\".";
+
+	// a step set to use its old output, or back to being built (saved at once)
+	public void SetUseOld(StepRow a_row, bool a_use)
+	{
+		if (Setup?.Root["steps"] is not JsonArray arr) {
+			return;
+		}
+		if (IsRunning || SetupInUse) {
+			Say("Not changed: a run is using this setup right now.", "bad");
+			return;
+		}
+		var steps = arr.OfType<JsonObject>().Where(o => Setup.Str(o, "step") == a_row.Key).ToList();
+		var before = steps.Select(o => o[OldOutput.Key]?.DeepClone()).ToList();
+		foreach (var o in steps) {
+			if (a_use) {
+				o[OldOutput.Key] = true;
+			} else {
+				o.Remove(OldOutput.Key);
+			}
+		}
+		if (!SaveSetup()) {
+			for (var i = 0; i < steps.Count; ++i) {
+				if (before[i] != null) {
+					steps[i][OldOutput.Key] = before[i];
+				} else {
+					steps[i].Remove(OldOutput.Key);
+				}
+			}
+			return;
+		}
+		MarkLeftOut();
+		Estimate();
+		// the last check's findings were for the other set of steps
+		Issues.Clear();
+		ShowReady();
+		Say(a_use ? $"{a_row.Name} is not run from now on: its old output is used. START's preview says what that means each time." : $"{a_row.Name} is built again in the next run.", a_use ? "warn" : "good");
+		_ = LoadLastRuns();
 	}
 
 	void Estimate()
@@ -1047,7 +1131,7 @@ public sealed partial class MainViewModel : Observable
 						continue;
 					}
 					var usual = Engine.UsualTimes(f);
-					parts.Add(head + "\n" + string.Join("\n", RunPreview.Build(setup, mo2, Runner.Plan(setup, null, null, null)).Lines(k => usual.TryGetValue(k, out var t) ? t : null)));
+					parts.Add(head + "\n" + string.Join("\n", RunPreview.Build(setup, mo2, Runner.Plan(setup, null, null, null), DryRun.LastOf(setup, mo2, AppPaths.Data)).Lines(k => usual.TryGetValue(k, out var t) ? t : null)));
 				}
 				string Stamp() => string.Join("|", a_files.Select(f => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Files.ReadShared(f))))
 					.Concat(profiles.Distinct(StringComparer.OrdinalIgnoreCase).Select(ProfileStamp)));
@@ -1271,6 +1355,8 @@ public sealed partial class MainViewModel : Observable
 			o["on"] = a_on;
 		}
 		SaveSetup();
+		// (a step that is off uses nothing: its "uses its old output" line goes with the tick and comes back with it)
+		MarkLeftOut();
 		Estimate();
 	}
 
@@ -1529,6 +1615,14 @@ public sealed partial class MainViewModel : Observable
 		GameRunning = false;
 		Message = "";
 		LogChanged?.Invoke("", true);
+	}
+
+	// the off-screen pictures changed a row's "uses its old output" by hand: the button's words and the estimate follow
+	public void DemoRefreshOld()
+	{
+		OnPropertyChanged(nameof(UseOldLabel));
+		Estimate();
+		ShowReady();
 	}
 
 	// the made-up runs of the pictures carry no last runs (a load still going is dropped)

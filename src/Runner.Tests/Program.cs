@@ -1743,6 +1743,166 @@ public static class Program
 		Check(packed.Entries.Any(e => e.Name == "OutA.esp"), "the old output is in it");
 	}
 
+	// His word of 2026-11-21: a step may use the output its tool made before. Its tool does not run; the old output goes off with
+	// the others before the first tool, comes back on at the step's own place - so the tool before it never reads it and the tool
+	// after it does -, is on after the run, untouched, and the run says so in its record, its log and its summary
+	static void T_AStepThatUsesItsOldOutputIsNotRunAndItsOutputComesBackAtItsPlace()
+	{
+		using var f = new FakeMo2();
+		bool? offForTheToolBefore = null, onForTheToolAfter = null, pluginOnForTheToolAfter = null;
+		var ranAnyway = false;
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
+			offForTheToolBefore = !ctx.Profile.IsOn("Output B");
+			WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp");
+		}));
+		StepRegistry.Replace(new FakeStep("pgpatcher", (ctx, s) => ranAnyway = true));
+		StepRegistry.Replace(new FakeStep("texgen", (ctx, s) => {
+			onForTheToolAfter = ctx.Profile.IsOn("Output B");
+			pluginOnForTheToolAfter = ctx.Profile.ActivePlugins().Contains("OutB.esp", StringComparer.OrdinalIgnoreCase);
+			WriteOutput(ctx, "texgen", "Output C", "OutC.esp");
+		}));
+		var setup = f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("pgpatcher", new JsonObject { ["output_mod"] = "Output B" }),
+			("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		((JsonArray)setup.Root["steps"]!)[1]![OldOutput.Key] = true;
+		setup.Save();
+		Equal("landscapefixer,texgen", string.Join(",", setup.EnabledSteps.Select(x => x.Key)), "the step that uses its old output is not among the steps that run");
+		Equal("pgpatcher", string.Join(",", setup.KeptSteps.Select(x => x.Key)), "it is the one whose old output is used");
+		var was = File.ReadAllBytes(Path.Combine(f.Mods, "Output B", "OutB.esp"));
+		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+		Equal(RunState.Finished, r.State, "finished: " + r.Verdict);
+		Check(!ranAnyway, "its tool was not run");
+		Check(offForTheToolBefore == true, "the old output was OFF while the tool before its place ran");
+		Check(onForTheToolAfter == true, "and back ON for the tool after its place");
+		Check(pluginOnForTheToolAfter == true, "with its plugin ticked");
+		var p = ProfileOf(f);
+		Check(p.IsOn("Output A") && p.IsOn("Output B") && p.IsOn("Output C") && p.IsOn("Needs B"), "after the run: what was built is on, the old output is on, and what needs it is on as before");
+		Check(was.AsSpan().SequenceEqual(File.ReadAllBytes(Path.Combine(f.Mods, "Output B", "OutB.esp"))) && !File.Exists(Path.Combine(f.Mods, "Output B", "new.txt")), "the old output is as it was, byte for byte");
+		var j = Journal.Load(r.Folder!);
+		Equal("pgpatcher:Output B", string.Join(",", j.UsedOld.Select(u => $"{u.Step}:{u.Mod}")), "the run's record names the step and the old output it used");
+		Check(j.Steps.All(x => x.Key != "pgpatcher") && !j.Built.Contains("Output B") && j.Parked.All(x => x.Mod != "Output B"), "it is no step the run ran, nothing it built, and nothing it moved into its backup");
+		Check(j.Notes.Any(n => n.Contains("PGPatcher was not run: its old output \"Output B\" is used", StringComparison.Ordinal)), "the run's notes say so: " + string.Join(" | ", j.Notes));
+		Check(RunSummary.Of(j).Lines().Any(l => l.Contains("Not built again: PGPatcher (Output B)", StringComparison.Ordinal)), "and its summary: " + string.Join(" | ", RunSummary.Of(j).Lines()));
+		var log = File.ReadAllText(Path.Combine(r.Folder!, "log.txt"));
+		// (the check's note at the run's start says "PGPatcher: not run ..." too: the step's own place is its "===" line)
+		const string place = "=== PGPatcher: not run - its old output \"Output B\" is used";
+		Check(log.Contains(place, StringComparison.Ordinal) && log.Contains("In the game: ", StringComparison.Ordinal) &&
+		      log.Contains("Built again in this run before its place: Landscape Fixer", StringComparison.Ordinal), "the log carries the whole warning at the step's place");
+		Check(log.IndexOf("=== Landscape Fixer done", StringComparison.Ordinal) < log.IndexOf(place, StringComparison.Ordinal) &&
+		      log.IndexOf(place, StringComparison.Ordinal) < log.IndexOf("=== TexGen ===", StringComparison.Ordinal), "between the tool before it and the tool after it");
+		Check(log.IndexOf("PGPatcher: not run - its old output", StringComparison.Ordinal) < log.IndexOf("=== Landscape Fixer ===", StringComparison.Ordinal), "and the run's notes at its start say it before any tool runs");
+		Check(!LastRuns.Of(Journal.All(Runner.RunsDir(f.Data)), f.SetupFile).ContainsKey("pgpatcher"), "a step that was not run has no last run: its output is not called current because of this run");
+		// asked for by name it is refused in words; set for a step that is switched off it means nothing
+		try {
+			Runner.Plan(setup, "pgpatcher", null, null);
+			Check(false, "a run of only that step is refused");
+		} catch (ArgumentException e) {
+			Check(e.Message.Contains("is set to use its old output in this setup", StringComparison.Ordinal) && RunnerErrors.Find(e.Message)?.Code == "TR-107", "refused naming why: " + e.Message);
+		}
+		((JsonArray)setup.Root["steps"]!)[1]!["on"] = false;
+		Check(setup.KeptSteps.Count == 0 && setup.EnabledSteps.All(x => x.Key != "pgpatcher"), "a step that is switched off neither runs nor has its old output switched by the run");
+	}
+
+	// ... and the two things that cannot work are refused before anything is touched: no old output there to use, and one whose
+	// plugin needs a master that is nowhere in the load order (the game would not start). One that can be used is a note. A step
+	// with nothing of its own to keep ignores the setting; a setup where nothing would run says so
+	static void T_AnOldOutputThatCannotBeUsedStopsTheStart()
+	{
+		using var f = new FakeMo2();
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp")));
+		StepRegistry.Replace(new FakeStep("synthesis", (ctx, s) => { }));
+		Setup With(string a_output, params string[] a_old)
+		{
+			var setup = f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("synthesis", new JsonObject { ["output_mod"] = a_output }), ("cleansave", []));
+			var steps = (JsonArray)setup.Root["steps"]!;
+			foreach (var o in steps.OfType<JsonObject>().Where(o => a_old.Contains(o["step"]!.ToString()))) {
+				o[OldOutput.Key] = true;
+			}
+			steps[2]!["on"] = a_old.Contains("cleansave");
+			setup.Save();
+			return setup;
+		}
+		With("No Such Output", "synthesis");
+		var gate = Runner.CheckStart(new RunRequest(f.SetupFile, f.Data));
+		Check(!gate.Starts && gate.Why.Contains("there is none to use: \"No Such Output\" is missing or holds nothing", StringComparison.Ordinal), "no old output there: " + gate.Why);
+		Equal("TR-320", RunnerErrors.Find(gate.Why)?.Code ?? "", "with what to do about it");
+		// an output mod that holds only Mod Organizer's own file is as good as none
+		f.Mod("Empty Output");
+		With("Empty Output", "synthesis");
+		Check(Runner.CheckStart(new RunRequest(f.SetupFile, f.Data)).Why.Contains("\"Empty Output\" is missing or holds nothing", StringComparison.Ordinal), "an empty one is none");
+		f.Mod("Old Patch", ("OldPatch.esp", false, ["BaseMod.esp", "Gone.esp"]));
+		With("Old Patch", "synthesis");
+		gate = Runner.CheckStart(new RunRequest(f.SetupFile, f.Data));
+		Check(!gate.Starts && gate.Why.Contains("its old output cannot be used: OldPatch.esp needs Gone.esp, which is no longer in your load order", StringComparison.Ordinal), "a master that is gone: " + gate.Why);
+		Equal("TR-321", RunnerErrors.Find(gate.Why)?.Code ?? "", "with what to do about it");
+		// (the mod list does not name "Old Patch" yet: the run adds its line and switches it on)
+		With("Output B", "synthesis");
+		gate = Runner.CheckStart(new RunRequest(f.SetupFile, f.Data));
+		Check(gate.Starts, "an old output that is there, with every master in the load order, starts: " + gate.Why);
+		Check(gate.Check.Any(i => !i.Blocking && i.Step == "synthesis" && i.Text.Contains("not run - its old output \"Output B\" is used", StringComparison.Ordinal)), "and is a note of the run");
+		// a master the run itself builds is there (Output B's plugin needs Output A's, which is built again in this run)
+		Check(OldOutput.LookAt(Setup.Load(f.SetupFile), Mo2Instance.Load(f.Exe, f.Instance), ProfileOf(f).States(), Setup.Load(f.SetupFile).EnabledSteps).Single().Usable, "a master in an output the run builds is not called gone");
+		var odd = With("Output B", "cleansave");
+		Check(odd.KeptSteps.Count == 0 && odd.EnabledSteps.Any(x => x.Key == "cleansave"), "a step with no output of its own runs as ever, whatever the setting says");
+		Check(OldOutput.WhyNot("cleansave", new StepSettings([])) is { } why && why.Contains("makes no output of its own", StringComparison.Ordinal), "and the window says why it has nothing to use");
+		Check(OldOutput.WhyNot("shaders", new StepSettings([]))!.Contains("Rebuild shader caches", StringComparison.Ordinal), "the shader caches point at their own setting");
+		var none = Setup.FromJson(new JsonObject { ["mo2"] = new JsonObject { ["exe"] = f.Exe, ["profile"] = "Test" }, ["backups"] = f.Backups,
+			["steps"] = new JsonArray(new JsonObject { ["step"] = "synthesis", [OldOutput.Key] = true, ["settings"] = new JsonObject { ["output_mod"] = "Output B" } }) });
+		Check(none.Problems().Any(x => x.Contains("uses its old output - nothing would run", StringComparison.Ordinal) && RunnerErrors.Find(x)?.Code == "TR-112"), "a setup where every step uses its old output has nothing to run: " + string.Join(" | ", none.Problems()));
+	}
+
+	// The warning is the tool's own: every tool that makes an output says what an old one of ITS kind does in the game, and the
+	// program adds what it can work out - when it was made, what changed in the profile since, which tools of this run it was made
+	// before, which build on it. START's preview and the command line's report carry it
+	static void T_TheOldOutputWarningSaysWhatItMeansForThatTool()
+	{
+		var general = OldOutput.Of("addon:somebody's patcher");
+		foreach (var s in StepCatalog.All.Where(s => OldOutput.MakesOutput(s.Key))) {
+			var m = OldOutput.Of(s.Key);
+			Check(m != general && m.Holds.Length > 30 && m.WhenOld.Length > 60 && m.WhenOld.EndsWith('.') && !m.Holds.EndsWith('.'), $"{s.Name} has words of its own for what its old output holds and does");
+			Check(!(m.Holds + m.WhenOld).Contains("colour", StringComparison.OrdinalIgnoreCase), $"{s.Name}: color, as everywhere");
+		}
+		Check(general.WhenOld.Length > 20, "an add-on's output gets the general words");
+		var made = new DateTime(2026, 10, 27, 21, 52, 0, DateTimeKind.Local);
+		var look = new OldOutput.Look("dyndolod", "DynDOLOD", "DynDOLOD Output", true, false, made, true,
+			[("Blubbos Trees", "added"), ("Skyland AIO", "ticked"), ("Old Town", "removed"), ("Fourth", "added")], ["xLODGen", "TexGen"], [], null);
+		var w = OldOutput.Warning(look, "My Profile");
+		Check(w.Any(l => l.StartsWith("Made Tue Oct 27 21:52 by a run of this setup", StringComparison.Ordinal)), "when it was made: " + string.Join(" | ", w));
+		Check(w.Any(l => l.StartsWith("4 changes in the profile My Profile since then (2 added, 1 removed, 1 ticked), e.g. Blubbos Trees added; Skyland AIO ticked; Old Town removed - none of them is in it", StringComparison.Ordinal)), "what changed since, counted and named");
+		Check(w.Any(l => l.StartsWith("Built again in this run before its place: xLODGen, TexGen. This old output was made from what those tools made before, not from what they make now", StringComparison.Ordinal)), "the tools of this run it no longer fits");
+		Check(w.Any(l => l.StartsWith("In the game: ", StringComparison.Ordinal) && l.Contains("the distance shows things that are not there up close", StringComparison.Ordinal)), "what the player sees, for this tool");
+		Check(w.Any(l => l.Contains("the settings its tool had then", StringComparison.Ordinal)) && w.Any(l => l.Contains("switched off in Mod Organizer now: the run switches it on", StringComparison.Ordinal)), "its old settings, and that the run switches it on");
+		var unknown = OldOutput.Warning(look with { ChangedSince = null, ByRun = false, BuiltAgainBefore = [], BuiltOnIt = ["DynDOLOD"], On = true, Step = "texgen", Name = "TexGen" }, "My Profile");
+		Check(unknown.Any(l => l.Contains("no run of this setup on record built it", StringComparison.Ordinal)) && unknown.Any(l => l.StartsWith("What changed in your mods since then is not known", StringComparison.Ordinal)), "what is not known is said as not known");
+		Check(unknown.Any(l => l.StartsWith("Built on top of it in this run: DynDOLOD - it reads this old output", StringComparison.Ordinal)), "and the tool that builds on it");
+
+		using var f = new FakeMo2();
+		var setup = f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("pgpatcher", new JsonObject { ["output_mod"] = "Output B" }),
+			("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		((JsonArray)setup.Root["steps"]!)[1]![OldOutput.Key] = true;
+		setup.Save();
+		var mo2 = Mo2Instance.Load(f.Exe, f.Instance);
+		var ran = new LastRuns.Ran(made, "", "PGPatcher", StepState.Done, made, made.AddMinutes(9), "", "Output B");
+		var preview = RunPreview.Build(setup, mo2, setup.EnabledSteps, [new LastRuns.Section("pgpatcher", ran, ran, [("Some Texture Mod", "added")], "Output B")]);
+		var only = preview.UsesOld.Single();
+		Check(only is { Step: "pgpatcher", Mod: "Output B", There: true, On: true, ByRun: true, ChangedSince.Count: 1 } && only.Made == made.AddMinutes(9), "the step as it stands, dated by the run that made its output");
+		Equal("Landscape Fixer", string.Join(",", only.BuiltAgainBefore), "built again before it in this run");
+		Equal("TexGen", string.Join(",", only.BuiltOnIt), "built on it in this run");
+		var lines = preview.Lines(_ => null);
+		Check(lines.Any(l => l.StartsWith("NOT built again - the old output is used", StringComparison.Ordinal)) && lines.Any(l => l == "  - PGPatcher: \"Output B\"") &&
+		      lines.Any(l => l.Contains("1 change in the profile Test since then (1 added), e.g. Some Texture Mod added - it is not in it", StringComparison.Ordinal)) &&
+		      lines.Any(l => l.Contains("In the game: A texture or mesh mod added or updated since is not patched", StringComparison.Ordinal)), "START's preview carries the warning: " + string.Join(" | ", lines));
+		Check(lines.Count(l => l.Contains("remakes \"", StringComparison.Ordinal)) == 1 && lines.All(l => !l.Contains("PGPatcher - remakes", StringComparison.Ordinal)), "and never lists the step among the tools that run");
+		Check(preview.OffForTheRun.Any(o => o.Mod == "Output B" && o.Why.Contains("the old output of PGPatcher, used again: back on at that step's place", StringComparison.Ordinal)), "the old output is among what goes off for the run, with why");
+		var json = JsonNode.Parse(Reports.Text(Reports.Preview(setup, preview, _ => null)))!;
+		Check(json["usesOldOutput"]![0]!["key"]!.ToString() == "pgpatcher" && json["usesOldOutput"]![0]!["usable"]!.GetValue<bool>() && json["usesOldOutput"]![0]!["changesSince"]!.GetValue<int>() == 1, "the command line's report names it too");
+		// without a run on record its files date it, and what changed since is not known
+		var plain = OldOutput.LookAt(setup, mo2, ProfileOf(f).States(), setup.EnabledSteps).Single();
+		Check(plain is { ByRun: false, ChangedSince: null, Made: not null }, "no run on record: dated by its files");
+		Equal(1, OldOutput.Places(setup, setup.EnabledSteps).Single().At, "its place: before the first step of the run that stands after it");
+		Equal(0, OldOutput.Places(setup, setup.EnabledSteps.Where(x => x.Key == "texgen").ToList()).Single().At, "in a run of only a later step: before that step");
+		Equal(1, OldOutput.Places(setup, setup.EnabledSteps.Where(x => x.Key == "landscapefixer").ToList()).Single().At, "in a run of only an earlier step: after it");
+	}
+
 	// his checklist 454: a finished run's old outputs are packed, its folder gone; undoing the run puts each output and the lists back,
 	// sets the new outputs aside (never erased), takes out an output the run made new, keeps what the player changed; it can be done once,
 	// only to the last run on that profile and those outputs; a switched-off pack keeps the folder

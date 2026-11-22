@@ -30,6 +30,9 @@ public static class Runner
 			if (a_setup.LeftOutForNewGame(k) && a_setup.Steps.Any(s => s.Key == k && s.On)) {
 				throw new ArgumentException($"{StepCatalog.Name(k)} is left out: this setup is set to a new game (untick \"New game\" to run it)");
 			}
+			if (a_setup.KeptSteps.Any(s => s.Key == k)) {
+				throw new ArgumentException($"{StepCatalog.Name(k)} is set to use its old output in this setup, so it does not run (switch \"Use old output\" off for it to run it)");
+			}
 			if (order.All(s => s.Key != k)) {
 				throw new ArgumentException($"\"{k}\" is not a step of this setup - its steps: {string.Join(", ", order.Select(s => s.Key))}");
 			}
@@ -376,6 +379,13 @@ public static class Runner
 			foreach (var om in outputs) {
 				profile.EnsureMod(om, log);
 			}
+			// an old output that is used must have its line in the mod list to be switched (its folder is there: the check saw it)
+			var usedOld = OldOutput.Places(setup, todo);
+			foreach (var (k, _) in usedOld) {
+				if (new StepSettings(k.Settings).OutputMod is { } old && Directory.Exists(mo2.ModDir(old)) && !listed.ContainsKey(old)) {
+					profile.EnsureMod(old, log);
+				}
+			}
 			journal.Added = [.. profile.Added];
 			snap0 = profile.Snapshot();
 			profile.OursFile = Path.Combine(journal.Folder, Profile.WatchFileName);
@@ -387,7 +397,18 @@ public static class Runner
 			var lead = keys.TakeWhile(k => k == "shaders").ToList();
 			var playsave = keys.Contains("playsave");
 			var outputsOff = false;
-			foreach (var s in todo) {
+			// Each old output that is used comes back on at its own step's place, once the outputs have gone off: before the
+			// first step of this run that stands after it (a_before), the rest after the last tool. Never while the outputs
+			// are still on - it would only be switched off again a moment later, for good
+			void UseOldDue(int a_before)
+			{
+				foreach (var (k, _) in usedOld.Where(u => u.At <= a_before).ToList()) {
+					usedOld.RemoveAll(u => ReferenceEquals(u.Step, k));
+					UseOldOutput(ctx, k, todo);
+				}
+			}
+			for (var n = 0; n < todo.Count; ++n) {
+				var s = todo[n];
 				if (s.Key == "playsave") {
 					continue;
 				}
@@ -398,6 +419,9 @@ public static class Runner
 					}
 					OutputsOff(ctx);
 					outputsOff = true;
+				}
+				if (outputsOff) {
+					UseOldDue(n);
 				}
 				if (!RunStep(ctx, s)) {
 					return Finish(ctx, snap0, commands.Stopped ? RunState.Stopped : RunState.Failed);
@@ -411,6 +435,9 @@ public static class Runner
 					}
 					return Finish(ctx, snap0, RunState.Stopped, $"stopped after {StepCatalog.Name(s.Key)}, as asked - carry on from {next.Name}");
 				}
+			}
+			if (outputsOff) {
+				UseOldDue(todo.Count);
 			}
 			var outcome = Finish(ctx, snap0, RunState.Finished);
 			if (outcome.State != RunState.Finished) {
@@ -667,6 +694,39 @@ public static class Runner
 		}
 	}
 
+	// A step the setup does not run because its old output is used, at that step's place in the order: the old output comes
+	// back on - what a fresh one would do there - with every line of what that means in the run's log and one in its notes
+	static void UseOldOutput(RunContext a_ctx, Setup.StepEntry a_s, List<Setup.StepEntry> a_todo)
+	{
+		var name = StepCatalog.Name(a_s.Key);
+		var mod = new StepSettings(a_s.Settings).OutputMod!;
+		a_ctx.Cancel.ThrowIfCancellationRequested();
+		a_ctx.Log.Say("");
+		a_ctx.Log.Say($"=== {name}: not run - its old output \"{mod}\" is used, as this setup says ===");
+		a_ctx.Log.Simple($"{name} is not run: its old output \"{mod}\" is used, as this setup says");
+		var st = a_ctx.Profile.States();
+		foreach (var l in OldOutput.LookAt(a_ctx.Setup, a_ctx.Mo2, st, a_todo, null, [a_s])) {
+			// (It is off at this moment only because the run switched it off a while ago, and other outputs are off with it:
+			// neither is news for the log, and its masters were judged by the check, with the profile as the player has it)
+			foreach (var line in OldOutput.Warning(l with { On = true, MissingMaster = null }, a_ctx.Setup.Profile)) {
+				a_ctx.Log.Warn(line);
+			}
+		}
+		// on record before it is switched: a Stop or a crash in the seconds Mod Organizer takes to close still finds it there,
+		// and the put-back switches it on
+		if (!a_ctx.Journal.UsedOld.Any(u => u.Mod.Equals(mod, StringComparison.OrdinalIgnoreCase))) {
+			a_ctx.Journal.UsedOld.Add(new OldUse { Step = a_s.Key, Name = name, Mod = mod });
+			a_ctx.Journal.Notes.Add($"{name} was not run: its old output \"{mod}\" is used, as this setup says. What changed in your mods since it was made is not in it.");
+		}
+		a_ctx.Journal.Save();
+		if (st.TryGetValue(mod, out var f) && f != '+') {
+			// the game finds its files again: a list of the game's files made while it was off is old
+			++a_ctx.Journal.FilesChanged;
+		}
+		a_ctx.SetAfter(mod);
+		ApplyAfter(a_ctx, a_ctx.Cancel);
+	}
+
 	// the ticked mods a run switches off before its first tool, each with why (the run itself and its preview use this one list)
 	public static List<(string Mod, string Why)> OutputsToTurnOff(Setup a_setup, IReadOnlyDictionary<string, char> a_states)
 	{
@@ -687,6 +747,10 @@ public static class Runner
 			foreach (var m in s.List("replaces")) {
 				Add(m, "replaced by " + name);
 			}
+		}
+		// an old output that is used goes off with the rest - no tool before its step's place reads it - and comes back on there
+		foreach (var k in a_setup.KeptSteps) {
+			Add(new StepSettings(k.Settings).OutputMod!, $"the old output of {StepCatalog.Name(k.Key)}, used again: back on at that step's place in the order");
 		}
 		foreach (var m in a_setup.LodOutputs) {
 			Add(m, "a LOD output of this setup");
@@ -1130,7 +1194,7 @@ public static class Runner
 		// what the player changed in Mod Organizer while the run went on (a mod ticked, unticked or installed) is kept, never
 		// undone by the put-back - except on the mods this run owns (its outputs and the mods it replaces), which it decides
 		var own = a_ctx.Journal.Added.Concat(a_ctx.Journal.Built).Concat(a_ctx.Journal.Retire).Concat(a_ctx.Journal.ParkedMods)
-			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+			.Concat(a_ctx.Journal.UsedOld.Select(u => u.Mod)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 		var theirs = a_ctx.Profile.ChangedByOthers().Where(p => !own.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase);
 		if (a_snap != null && a_snap.Count > 0) {
 			a_ctx.Log.Say("the profile as it was before the run, with this run's finished outputs on:");
@@ -1189,6 +1253,8 @@ public static class Runner
 		// built it once
 		var stillOut = a_ctx.Journal.Parked.Where(p => !p.Replaced && !p.PutBack && !p.IsFolder).Select(p => p.Mod).ToHashSet(StringComparer.OrdinalIgnoreCase);
 		a_ctx.PendingEnable.AddRange(a_ctx.Journal.Built.Where(m => st.ContainsKey(m) && !stillOut.Contains(m)));
+		// an old output the run had switched back on at its step's place is the player's choice for this setup: on, like what was built
+		a_ctx.PendingEnable.AddRange(a_ctx.Journal.UsedOld.Select(u => u.Mod).Where(st.ContainsKey));
 		// a Stop is often why this put-back runs: it never ends the wait for Mod Organizer here
 		ApplyAfter(a_ctx, CancellationToken.None);
 	}

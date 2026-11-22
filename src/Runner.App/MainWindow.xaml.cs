@@ -318,7 +318,67 @@ public partial class MainWindow : Window
 			_vm.Say($"{a_row.Name} is left out for a new game - untick \"New game\" to run it.", "bad");
 			return;
 		}
+		if (a_row.UsesOld) {
+			_vm.Say($"{a_row.Name} uses its old output in this setup, so it does not run - press \"Build it again\" under the steps first.", "bad");
+			return;
+		}
 		_ = _vm.StartWith(a_how == "only" ? a_row.Key : null, a_how == "from" ? a_row.Key : null, a_how == "until" ? a_row.Key : null);
+	}
+
+	// His word of 2026-11-21: a step may use the output its tool made before - behind a box that says exactly what that means
+	// for this tool, now. Pressed for a step that is set so already, it is built again from the next run on, with no box
+	bool _oldAsked;
+
+	async void UseOld_Click(object a_s, RoutedEventArgs a_e)
+	{
+		if (_vm.SelectedStep is not { } row) {
+			_vm.Say("Select a step in the list first.", "bad");
+			return;
+		}
+		if (_vm.IsRunning || _oldAsked) {
+			return;
+		}
+		if (row.UsesOld) {
+			_vm.SetUseOld(row, false);
+			return;
+		}
+		if (!row.On || row.LeftOut) {
+			_vm.Say(row.LeftOut ? $"{row.Name} is left out for a new game, so there is nothing of it to use." : $"{row.Name} is switched off in this setup - tick it first.", "bad");
+			return;
+		}
+		_oldAsked = true;
+		try {
+			var (look, whyNot) = await _vm.OldOutputOf(row);
+			if (look == null) {
+				Ask.Tell(this, "No old output to use", whyNot ?? "", "OK");
+			} else if (!look.Usable) {
+				Ask.Tell(this, $"{row.Name}'s old output cannot be used", string.Join("\n\n", OldOutput.Warning(look, _vm.Setup?.Profile ?? "")), "OK");
+			} else if (Ask.Show(this, $"Use {row.Name}'s old output?", _vm.OldOutputText(look), "Use the old output", "Build it again")) {
+				_vm.SetUseOld(row, true);
+			}
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException) {
+			_vm.Say("The old output could not be looked at: " + e.Message, "bad");
+		} finally {
+			_oldAsked = false;
+		}
+	}
+
+	// the off-screen pictures: that box for a made-up DynDOLOD output with changes since, and tools built again before it
+	public Window DemoOldOutputBox()
+	{
+		var look = new OldOutput.Look("dyndolod", "DynDOLOD", "DynDOLOD Output", true, true, new DateTime(2026, 10, 27, 21, 52, 0, DateTimeKind.Local), true,
+			[("Blubbos Trees", "added"), ("Skyland AIO", "ticked"), ("Old Town Overhaul", "removed")], ["xLODGen", "TexGen"], [], null);
+		return Ask.Make(this, "Use DynDOLOD's old output?", _vm.OldOutputText(look), "Use the old output", "Build it again", _ => { });
+	}
+
+	// the off-screen pictures: a step of the made-up setup shown as using its old output, selected so the button reads for it
+	public void DemoUsesOld(string a_key, bool a_on)
+	{
+		if (_vm.Steps.FirstOrDefault(s => s.Key == a_key) is { } row) {
+			row.UsesOld = a_on;
+			_vm.SelectedStep = a_on ? row : null;
+			_vm.DemoRefreshOld();
+		}
 	}
 
 	void Up_Click(object a_s, RoutedEventArgs a_e) => Move(RowOf(a_s), -1);
