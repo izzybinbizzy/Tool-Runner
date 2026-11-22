@@ -782,25 +782,45 @@ public static class SettingsPanel
 						$"Its settings were learned {learned.At.ToLocalTime().ToString("MMM d HH:mm", InvariantCulture)} ({learned.Files.Count} file(s)) - every run uses them." };
 				var learn = new Button { Content = "Learn its settings (opens its own window)", Style = (Style)a_w.FindResource("Ghost"),
 					HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 12) };
+				// while the tool is being opened (or is open) the button stops the wait instead (his report of 2026-11-22: a wait on
+				// Mod Organizer under a running game went on with nothing said and nothing to stop it)
+				ToolOpen? opening = null;
+				var learnText = learn.Content;
 				learn.Click += async (_, _) => {
+					if (opening is { } o) {
+						if (!o.Stopping && (!o.Opened || Ask.Show(a_w, $"Stop waiting for {name}?", $"{name} is open. Its settings are kept once you save and close it there.\n\n" +
+							    $"If you stop waiting, {name} stays open, but nothing it saves is kept with this setup.", "Stop waiting", "Keep waiting"))) {
+							o.Stop();
+							learn.IsEnabled = false;
+						}
+						return;
+					}
 					if (!Ask.Show(a_w, "Learn its settings", $"{name} opens through Mod Organizer (Mod Organizer is closed first if it is open). Set it up the way every run " +
 					        "should use it, save, and close it - its settings are then kept with this setup. To change them later, do this again.", "Open it", "Not now")) {
 						return;
 					}
-					learn.IsEnabled = false;
-					status.Text = $"{name} is open - set it up, save, and close it ...";
-					using var hand = a_w.Working($"{name} is open to learn its settings");
-					// the mod its window was started from, when that could not be switched off again
-					string? stillOn = null;
-					try {
-						var l = await Task.Run(() => ToolSettings.Learn(setupNow, stepKey, RunLog.Null, CancellationToken.None, m => stillOn = m));
-						status.Text = $"Learned: {l.Files.Count} settings file(s) ({string.Join(", ", l.Files.Select(f => Path.GetFileName(f.Live)))}) - every run uses them.";
-					} catch (Exception e) {
-						status.Text = "Not learned: " + e.Message;
-					} finally {
-						learn.IsEnabled = true;
+					using var now = new ToolOpen();
+					opening = now;
+					learn.Content = "Stop waiting";
+					status.Text = $"opening {name} ...";
+					ToolOpen.Result result;
+					using (a_w.Working($"{name} is open to learn its settings")) {
+						result = await now.Go(setupNow, stepKey,
+							why => Ask.Show(a_w, $"{name} cannot open yet", $"{ToolsDialog.Capital(why)}.\n\n{name} opens through Mod Organizer, and Mod Organizer is closed first - " +
+							                     $"never while that is open. Close it and try again, or wait here: {name} opens by itself once it has ended, and you can stop " +
+							                     "waiting at any time.", "Wait for it", "Not now"),
+							line => a_w.Dispatcher.BeginInvoke(() => {
+								if (opening == now) {
+									status.Text = now.Opened ? $"{name} is open - set it up, save, and close it ..." : line;
+								}
+							}));
 					}
-					status.Text += ToolsDialog.StillOn(stillOn);
+					opening = null;
+					learn.Content = learnText;
+					learn.IsEnabled = true;
+					status.Text = (result.Learned is { } l
+						? $"Learned: {l.Files.Count} settings file(s) ({string.Join(", ", l.Files.Select(f => Path.GetFileName(f.Live)))}) - every run uses them."
+						: result.How == ToolOpen.Ending.Failed ? "Not learned: " + result.Why : "Not learned: " + ToolsDialog.Outcome(name, result)) + ToolsDialog.StillOn(now.StillOn);
 				};
 				stepHost.Children.Add(status);
 				stepHost.Children.Add(learn);

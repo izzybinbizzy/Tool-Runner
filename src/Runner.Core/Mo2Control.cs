@@ -553,6 +553,37 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		return found;
 	}
 
+	// Why Mod Organizer may not be closed right now (null: nothing holds it), looked at once: a download, the game, Faster
+	// Archives' repack, a program the player started under it. A close waits on any of these; a box that opens a tool through
+	// Mod Organizer asks this first, so the player is told what holds it instead of a window that waits without a word.
+	// A list of processes Windows would not give is no answer: neither "no game runs" nor "no repack does" nor "nothing of yours
+	// runs under Mod Organizer" was learned, and Mod Organizer ends what runs under it when it closes.
+	public string? WhyNotClosable()
+	{
+		var dl = DownloadsInProgress();
+		var game = GameRunning();
+		var blind = GameProbe == GameLook && Procs.LookFailed;
+		List<(int Pid, string Image)> theirs;
+		if (ForeignProbe != null) {
+			theirs = ForeignProbe();
+		} else {
+			theirs = ForeignChildren(true);
+			blind |= ForeignBlind;
+		}
+		var repack = (RepackProbe ?? Repackers)();
+		blind |= repack == null;
+		return WhyBusy(dl, game, theirs.Select(t => t.Image).ToList(), repack, blind);
+	}
+
+	// the words for what holds Mod Organizer open (null: nothing does)
+	public static string? WhyBusy(IReadOnlyList<string> a_downloads, IReadOnlyList<string> a_game, IReadOnlyList<string> a_theirs, IReadOnlyList<int>? a_repack, bool a_blind) =>
+		a_downloads.Count > 0 ? "Mod Organizer is downloading (" + string.Join(", ", a_downloads.Take(3)) + ")" :
+		a_game.Count > 0 ? "the game is running (" + string.Join(", ", a_game) + ")" :
+		a_repack is { Count: > 0 } ? "Faster Archives' own program is still open (it repacks the game's archives, or waits for a choice in its window)" :
+		a_theirs.Count > 0 ? "a program you started runs under Mod Organizer (" + string.Join(", ", a_theirs.Distinct()) + ")" :
+		a_blind || a_repack == null ? "Windows would not list the running programs, so a game, a repack or a program of yours may run under Mod Organizer" :
+		null;
+
 	public void Close(TimeSpan? a_timeout = null, CancellationToken a_ct = default)
 	{
 		if (!IsRunning()) {
@@ -579,29 +610,9 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		var told = false;
 		while (true) {
 			a_ct.ThrowIfCancellationRequested();
-			var dl = DownloadsInProgress();
-			var game = GameRunning();
-			// A list of processes Windows would not give is no answer: neither "no game runs" nor "no repack does" nor "nothing of
-			// yours runs under Mod Organizer" was learned, and Mod Organizer ends what runs under it when it closes. Each look
-			// is judged right after it; the close waits and looks again.
-			var blind = GameProbe == GameLook && Procs.LookFailed;
-			List<(int Pid, string Image)> theirs;
-			if (ForeignProbe != null) {
-				theirs = ForeignProbe();
-			} else {
-				theirs = ForeignChildren(true);
-				blind |= ForeignBlind;
-			}
-			var repack = (RepackProbe ?? Repackers)();
-			blind |= repack == null;
-			if (dl.Count == 0 && game.Count == 0 && theirs.Count == 0 && repack is { Count: 0 } && !blind) {
+			if (WhyNotClosable() is not { } why) {
 				break;
 			}
-			var why = dl.Count > 0 ? "Mod Organizer is downloading (" + string.Join(", ", dl.Take(3)) + ")" :
-				game.Count > 0 ? "the game is running (" + string.Join(", ", game) + ")" :
-				repack is { Count: > 0 } ? "Faster Archives' own program is still open (it repacks the game's archives, or waits for a choice in its window)" :
-				theirs.Count > 0 ? "a program you started runs under Mod Organizer (" + string.Join(", ", theirs.Select(t => t.Image).Distinct()) + ")" :
-				"Windows would not list the running programs, so a game, a repack or a program of yours may run under Mod Organizer";
 			if (waited.Elapsed > BusyWait) {
 				throw new Mo2BusyException($"{why} for {BusyWait.TotalMinutes:0} minutes - Mod Organizer is never closed under it");
 			}
