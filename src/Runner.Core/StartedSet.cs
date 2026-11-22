@@ -37,6 +37,11 @@ public sealed class StartedSet : IEnumerable<int>
 	// the first look still read every child under it as the run's own. Taken before _gate, never inside it.
 	readonly Lock _sweeping = new();
 
+	// The offline tests only: told when a look, or the giving up of every hold, has come to the point where it waits for
+	// its turn (the next thing it does is take _sweeping). A test that must show that one waits for the other tells by this
+	// that the other has reached the wait - and has not merely not started yet
+	public Action? AboutToWaitForItsTurn { get; set; }
+
 	// (the offline tests hand in start times of their own - and then a hold of their own, or none)
 	public StartedSet(Func<int, DateTime?>? a_startOf = null, Func<int, DateTime, IDisposable?>? a_pin = null)
 	{
@@ -79,6 +84,7 @@ public sealed class StartedSet : IEnumerable<int>
 	// (the watch's last beat) is waited for: its holds are not given up under it.
 	public void Release()
 	{
+		AboutToWaitForItsTurn?.Invoke();
 		lock (_sweeping) {
 			List<IDisposable> all;
 			lock (_gate) {
@@ -188,6 +194,7 @@ public sealed class StartedSet : IEnumerable<int>
 	{
 		// from the moment it reads which numbers are held to the moment it gives a hold up itself, no other look runs and
 		// no hold is given up (_sweeping)
+		AboutToWaitForItsTurn?.Invoke();
 		lock (_sweeping) {
 			SweepAlone(a_list, a_clock);
 		}

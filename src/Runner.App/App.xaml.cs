@@ -139,6 +139,12 @@ public partial class App : Application
 	// in place, since a task left behind would end with the process before its write
 	protected override void OnExit(ExitEventArgs a_e)
 	{
+		// (a setup still being written runs on a worker and needs nothing of this thread: waited for, never left to end with
+		// the process; it says itself when it could not write)
+		try {
+			MainViewModel.PendingSetupSave.Wait(TimeSpan.FromSeconds(30));
+		} catch (AggregateException) {
+		}
 		if (UiState.Unsaved) {
 			UiState.Save();
 		}

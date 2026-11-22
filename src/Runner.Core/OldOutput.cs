@@ -184,7 +184,6 @@ public static class OldOutput
 		readonly IReadOnlyList<Setup.StepEntry> _todo;
 		readonly List<(Setup.StepEntry Step, int At)> _places;
 		readonly List<Setup.StepEntry> _kept;
-		readonly List<string> _order;
 		readonly HashSet<string> _replaced;
 		readonly Dictionary<string, List<string>> _inMod = new(StringComparer.OrdinalIgnoreCase);
 		List<string>? _data;
@@ -200,13 +199,14 @@ public static class OldOutput
 			_todo = a_todo;
 			_places = Places(a_setup, a_todo);
 			_kept = a_setup.KeptSteps;
-			_order = a_setup.Steps.Select(s => s.Key).ToList();
 			_replaced = a_todo.SelectMany(s => new StepSettings(s.Settings).List("replaces")).ToHashSet(StringComparer.OrdinalIgnoreCase);
 		}
 
 		List<string> InMod(string a_mod) => _inMod.TryGetValue(a_mod, out var l) ? l : _inMod[a_mod] = Plugins.InMod(_mo2.ModDir(a_mod));
 
-		List<string> Data => _data ??= Plugins.InMod(Path.Combine(_mo2.GameDir, "Data"));
+		// the game's own Data folder, and Mod Organizer's overwrite folder: what lies there is in the game's Data for every
+		// tool and for the game, whatever is ticked (the check says so of the files it holds)
+		List<string> Data => _data ??= [.. Plugins.InMod(Path.Combine(_mo2.GameDir, "Data")), .. Plugins.InMod(_mo2.OverwriteDir)];
 
 		IEnumerable<string> Ticked => _states.Where(s => s.Value == '+').Select(s => s.Key);
 
@@ -289,13 +289,14 @@ public static class OldOutput
 			if (!_todo.Skip(at).Any(s => s.Key != "playsave")) {
 				return null;
 			}
-			var mine = _order.IndexOf(a_kept);
 			var there = new HashSet<string>(Stay(), StringComparer.OrdinalIgnoreCase);
 			foreach (var s in _todo.Take(at)) {
 				there.UnionWith(Built(s));
 			}
-			// (an old output that comes back on no later than this one is on by then)
-			foreach (var k in _kept.Where(k => _order.IndexOf(k.Key) <= mine)) {
+			// Every old output that comes back on before the same tool is on by the time that tool runs - the ones listed
+			// after this one too: no tool works between them, and the run switches them on together, each one that another
+			// needs first (InMasterOrder)
+			foreach (var (k, _) in _places.Where(p => p.At <= at)) {
 				if (Output(k) is { } om) {
 					there.UnionWith(InMod(om));
 				}
@@ -306,7 +307,7 @@ public static class OldOutput
 			if (_todo.Skip(at).FirstOrDefault(s => Holds(Built(s), away)) is { } later) {
 				return $"{away}: it is built again only later in this run, by {StepCatalog.Name(later.Key)}";
 			}
-			if (_kept.FirstOrDefault(k => _order.IndexOf(k.Key) > mine && Output(k) is { } om && Holds(InMod(om), away)) is { } after) {
+			if (_places.Where(p => p.At > at && Output(p.Step) is { } om && Holds(InMod(om), away)).Select(p => p.Step).FirstOrDefault() is { } after) {
 				return $"{away}: it is in the old output of {StepCatalog.Name(after.Key)}, which comes back on only later in the order";
 			}
 			var off = Off().FirstOrDefault(o => Holds(InMod(o.Key), away));
@@ -317,10 +318,45 @@ public static class OldOutput
 	// At an old output's place in a run, with the run's own switches made (a_states: the profile as it stands at this
 	// moment): a plugin of it and a master of that plugin that is not switched on now, in words - the tool that runs next
 	// would find the plugin with a master missing. Null: every master is on
-	public static string? MasterOffNow(Mo2Instance a_mo2, IReadOnlyDictionary<string, char> a_states, string a_mod)
+	// a_with: the other old outputs that come on at the same place (they are on before the next tool runs)
+	public static string? MasterOffNow(Mo2Instance a_mo2, IReadOnlyDictionary<string, char> a_states, string a_mod, IEnumerable<string>? a_with = null)
+	{
+		HashSet<string>? on = null;
+		foreach (var (p, masters) in MastersIn(a_mo2, a_mod)) {
+			if (on == null) {
+				on = new HashSet<string>(Plugins.InMod(Path.Combine(a_mo2.GameDir, "Data")), StringComparer.OrdinalIgnoreCase);
+				on.UnionWith(Plugins.InMod(a_mo2.OverwriteDir));
+				foreach (var m in a_states.Where(s => s.Value == '+').Select(s => s.Key).Concat(a_with ?? []).Append(a_mod)) {
+					on.UnionWith(Plugins.InMod(a_mo2.ModDir(m)));
+				}
+			}
+			if (masters.FirstOrDefault(m => !on.Contains(m)) is { } away) {
+				return $"{p} needs {away}, which is not switched on at this point of the run";
+			}
+		}
+		return null;
+	}
+
+	// In a run, before an old output is switched on: a plugin of it and a master the game will not find once the run has
+	// ended and its profile is back, in words. a_before: the mod states the run found as it began, after the setup's own
+	// commands before a run - what its put-back restores (the check before the run looked earlier, and such a command may
+	// have switched the master's mod off since). Null: every master is there by then
+	public static string? MasterGoneAfterRun(Setup a_setup, Mo2Instance a_mo2, IReadOnlyDictionary<string, char> a_before, IReadOnlyList<Setup.StepEntry> a_todo, string a_mod)
+	{
+		Planned? plan = null;
+		foreach (var (p, masters) in MastersIn(a_mo2, a_mod)) {
+			plan ??= new Planned(a_setup, a_mo2, a_before, a_todo);
+			if (plan.GoneAfter(masters) is { } gone) {
+				return $"{p} needs {gone}";
+			}
+		}
+		return null;
+	}
+
+	// each plugin of a mod that names masters, with them (one that cannot be read is passed over, as the look passes it)
+	static IEnumerable<(string Plugin, List<string> Masters)> MastersIn(Mo2Instance a_mo2, string a_mod)
 	{
 		var dir = a_mo2.ModDir(a_mod);
-		HashSet<string>? on = null;
 		foreach (var p in Plugins.InMod(dir)) {
 			List<string> masters;
 			try {
@@ -328,21 +364,32 @@ public static class OldOutput
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 				continue;
 			}
-			if (masters.Count == 0) {
-				continue;
-			}
-			if (on == null) {
-				on = new HashSet<string>(Plugins.InMod(Path.Combine(a_mo2.GameDir, "Data")), StringComparer.OrdinalIgnoreCase);
-				foreach (var m in a_states.Where(s => s.Value == '+').Select(s => s.Key)) {
-					on.UnionWith(Plugins.InMod(a_mo2.ModDir(m)));
-				}
-				on.UnionWith(Plugins.InMod(dir));
-			}
-			if (masters.FirstOrDefault(m => !on.Contains(m)) is { } away) {
-				return $"{p} needs {away}, which is not switched on at this point of the run";
+			if (masters.Count > 0) {
+				yield return (p, masters);
 			}
 		}
-		return null;
+	}
+
+	// The old outputs that come on at one place of a run, each one that another of them needs before that other: a plugin
+	// the order files do not hold yet gets its place as its mod is switched on, and a master stands before what needs it.
+	// Two that need each other, and the ones that need none of the others, keep the order they were given in
+	public static List<Setup.StepEntry> InMasterOrder(Mo2Instance a_mo2, IReadOnlyList<Setup.StepEntry> a_due)
+	{
+		if (a_due.Count < 2) {
+			return [.. a_due];
+		}
+		var mods = a_due.Select(s => new StepSettings(s.Settings).OutputMod ?? "").ToList();
+		var has = mods.Select(m => (m == "" ? [] : Plugins.InMod(a_mo2.ModDir(m))).ToHashSet(StringComparer.OrdinalIgnoreCase)).ToList();
+		var needs = mods.Select(m => (m == "" ? [] : MastersIn(a_mo2, m).SelectMany(x => x.Masters)).ToHashSet(StringComparer.OrdinalIgnoreCase)).ToList();
+		var left = Enumerable.Range(0, a_due.Count).ToList();
+		var order = new List<Setup.StepEntry>();
+		while (left.Count > 0) {
+			var free = left.Where(i => !left.Any(o => o != i && needs[i].Overlaps(has[o]))).ToList();
+			var next = free.Count > 0 ? free[0] : left[0];
+			order.Add(a_due[next]);
+			left.Remove(next);
+		}
+		return order;
 	}
 
 	static string When(DateTime a_t) => a_t.ToString("ddd MMM d HH:mm", InvariantCulture);

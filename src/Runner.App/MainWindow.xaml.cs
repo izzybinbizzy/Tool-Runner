@@ -1178,10 +1178,17 @@ public partial class MainWindow : Window
 	bool _keeping;
 	bool _kept;
 
-	// the window is out of sight already: what it remembers is written away from its thread, then it closes for good
+	// The window is out of sight already: a setup that is still being written is waited for (a change the window took a
+	// moment ago - a tick, a place, use old output - is in its file before the program ends), what the window remembers is
+	// written away from its thread, then it closes for good
 	async Task KeepThenClose()
 	{
 		try {
+			try {
+				await MainViewModel.PendingSetupSave;
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) {
+				// (the write says by itself why it failed; nothing of it holds the window open)
+			}
 			await Task.Run(UiState.Save);
 		} finally {
 			_keeping = false;
@@ -1237,10 +1244,11 @@ public partial class MainWindow : Window
 			// its panel windows now, so that their sizes are kept before the write below (closed only as this window goes,
 			// they were kept in memory alone, with nothing left to write them in time)
 			ClosePanels();
-			if (UiState.Unsaved) {
+			if (UiState.Unsaved || !MainViewModel.PendingSetupSave.IsCompleted) {
 				// What the window remembers goes into its file before the program ends, and never on this thread: the window
 				// is out of sight at once and closes when the write is done (on a slow disk it stood there frozen, and the
-				// write held this thread). An end that cannot be put off - Windows logging off - is covered by App.OnExit
+				// write held this thread) - and so does a setup that is still on its way into its file. An end that cannot
+				// be put off - Windows logging off - is covered by App.OnExit
 				a_e.Cancel = true;
 				_keeping = true;
 				Hide();

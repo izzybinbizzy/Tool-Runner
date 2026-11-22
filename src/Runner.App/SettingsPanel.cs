@@ -841,13 +841,26 @@ public static class SettingsPanel
 			foreach (var k in work.Select(x => x.Key).ToList()) {
 				a_vm.Setup.Root[k] = work[k]?.DeepClone();
 			}
-			// (written away from the window's thread: the button waits for it, so a second press cannot start a second save)
+			// Written away from the window's thread. Until it is done the button waits (a second press cannot start a second
+			// save) and nothing in the settings can be changed: a field changed after its text was taken would be gone when
+			// the settings are drawn again below - unsaved, and never asked about. After a save that failed everything is
+			// free again, with what was typed, for another try. Undo waits too: it draws the settings again from the setup
+			// in memory, which holds what is being saved, not what is in the file. (A button that is switched off loses the
+			// keyboard: Save gets it back, so a second try needs no mouse.)
+			var byKeyboard = save.IsKeyboardFocused;
 			save.IsEnabled = false;
+			undo.IsEnabled = false;
+			host.IsEnabled = false;
 			bool saved;
 			try {
 				saved = await a_vm.SaveSetup();
 			} finally {
 				save.IsEnabled = true;
+				undo.IsEnabled = true;
+				host.IsEnabled = true;
+				if (byKeyboard) {
+					save.Focus();
+				}
 			}
 			// another setup was picked while this one was being written: its file holds what was saved (or not), and the
 			// setup shown now is neither read again nor are these settings drawn again over it

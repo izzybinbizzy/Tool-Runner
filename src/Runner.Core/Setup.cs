@@ -279,10 +279,23 @@ public sealed class Setup
 			Directory.CreateDirectory(a_copies);
 			if (System.IO.File.Exists(a_file)) {
 				var name = Path.GetFileNameWithoutExtension(a_file);
-				System.IO.File.Copy(a_file, Path.Combine(a_copies, name + " " + DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss", InvariantCulture) + ".json"), true);
-				var own = new System.Text.RegularExpressions.Regex("^" + System.Text.RegularExpressions.Regex.Escape(name) + @" \d{4}-\d\d-\d\d \d\d-\d\d-\d\d\.json$");
-				foreach (var old in new DirectoryInfo(a_copies).GetFiles("*.json").Where(f => own.IsMatch(f.Name)).OrderByDescending(f => f.Name).Skip(CopiesKept)) {
-					old.Delete();
+				var stamp = DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss", InvariantCulture);
+				// A copy is never written over: two saves within one second each keep the file as it stood before them (the
+				// later ones carry a number after the time - written over, the first save's copy was lost to the second's)
+				for (var n = 1; ; ++n) {
+					var copy = Path.Combine(a_copies, $"{name} {stamp}{(n == 1 ? "" : " " + n.ToString(InvariantCulture))}.json");
+					if (!System.IO.File.Exists(copy)) {
+						System.IO.File.Copy(a_file, copy, false);
+						break;
+					}
+				}
+				// this setup's own copies, the newest first: by their time, then by the number of those made in one second
+				var own = new System.Text.RegularExpressions.Regex("^" + System.Text.RegularExpressions.Regex.Escape(name) + @" (\d{4}-\d\d-\d\d \d\d-\d\d-\d\d)(?: (\d{1,9}))?\.json$");
+				var copies = new DirectoryInfo(a_copies).GetFiles("*.json").Select(f => (File: f, Is: own.Match(f.Name))).Where(c => c.Is.Success)
+					.OrderByDescending(c => c.Is.Groups[1].Value, StringComparer.Ordinal)
+					.ThenByDescending(c => c.Is.Groups[2].Success ? int.Parse(c.Is.Groups[2].Value, InvariantCulture) : 1);
+				foreach (var old in copies.Skip(CopiesKept)) {
+					old.File.Delete();
 				}
 			}
 			Files.WriteAtomic(a_file, a_text);

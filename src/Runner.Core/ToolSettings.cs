@@ -334,7 +334,9 @@ public static partial class ToolSettings
 						control.Close(null, CancellationToken.None);
 						profile.SetMods([], [toolMod], a_log);
 						Files.Delete(SwitchRecord(a_setup));
-					} catch (Exception e) when (e is Mo2BusyException or IOException or UnauthorizedAccessException or InvalidOperationException or KeyNotFoundException) {
+					} catch (Exception e) when (e is Mo2BusyException or StepFailedException or IOException or UnauthorizedAccessException or InvalidOperationException or KeyNotFoundException) {
+						// (StepFailedException: Mod Organizer would not close - a box of its own nobody answered. Left to
+						// fly, it hid that the mod is still on, and the settings the tool had just saved were not kept)
 						a_log.Warn($"the mod \"{toolMod}\" could not be switched off again ({e.Message}) - untick it in Mod Organizer");
 						a_stillOn?.Invoke(toolMod);
 					}

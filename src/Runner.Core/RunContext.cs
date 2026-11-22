@@ -104,8 +104,26 @@ public sealed class RunContext
 	// the step in hand starts the game with a mod set to list the game's files anew (Crdw.Apply): when it finishes, that list is current
 	public bool FreshList { get; set; }
 
-	// the step in hand put its mods back as they were after such a list was made (Toggle): the list is older than that again
+	// the step in hand put its mods back as they were after such a list was made (Toggle), or the player switched a mod
+	// while it ran: the list is older than that again
 	public bool SwitchedBack { get; set; }
+
+	// The player's own switches in Mod Organizer that the run has counted as a change to the game's files so far (mod ->
+	// how they left it). True when a_theirs - their switches as a step finds them - is not what was counted: one is new,
+	// stands otherwise, or was taken back. The same switch, met again at every later step, is counted once.
+	readonly Dictionary<string, char> _theirsCounted = new(StringComparer.OrdinalIgnoreCase);
+
+	public bool CountTheirs(IReadOnlyDictionary<string, char> a_theirs)
+	{
+		if (a_theirs.Count == _theirsCounted.Count && a_theirs.All(p => _theirsCounted.TryGetValue(p.Key, out var was) && was == p.Value)) {
+			return false;
+		}
+		_theirsCounted.Clear();
+		foreach (var (mod, state) in a_theirs) {
+			_theirsCounted[mod] = state;
+		}
+		return true;
+	}
 
 	public void SetAfter(params string[] a_mods) => PendingEnable.AddRange(a_mods);
 
@@ -297,11 +315,17 @@ public sealed class Toggle : IDisposable
 			_ctx.Log.Detail($"kept what you changed in Mod Organizer during {_label}: " + string.Join(", ", theirs.Select(p => (p.Value == '+' ? "on " : "off ") + p.Key)));
 			Runner.ReapplyTheirs(_ctx, theirs, marks);
 			_ctx.Profile.OursBack(expected);
-			// What the player switched stands other than before the step: the game now finds other files than its list names,
-			// whatever was counted or taken back above for the step's own switches (a change of theirs back to how a mod
-			// stood before the step is none)
-			var before = Profile.StatesOf(_snap);
-			if (theirs.Any(p => !before.TryGetValue(p.Key, out var was) || was != p.Value)) {
+		}
+		// What the player switched in Mod Organizer changes the files the game finds, whatever was counted or taken back
+		// above for the step's own switches. Each such switch counts once, when it is first met here: by what the run has
+		// counted so far - never by this step's own snapshot, which already holds a switch made before the step began.
+		if (_ctx.CountTheirs(theirs)) {
+			if (_ctx.FreshList) {
+				// The game made its list during this step, and when the player switched cannot be told from here: counted
+				// when the step ends, after the finished step has called that list current (Crdw.StepEnded) - counted
+				// now, it was wiped by that very reset
+				_ctx.SwitchedBack = true;
+			} else {
 				++_ctx.Journal.FilesChanged;
 			}
 		}

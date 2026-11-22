@@ -490,9 +490,7 @@ public sealed partial class MainViewModel : Observable
 	// why the setup shown is not changed at this moment, in words (null: it may be) - a run uses it, or the change before
 	// this one is still on its way into the setup's file
 	string? NotNow(string a_done) =>
-		IsRunning || SetupInUse ? $"Not {a_done}: a run is using this setup right now."
-		: Saving ? $"Not {a_done} yet: the change before this one is still being saved - try again in a moment."
-		: null;
+		IsRunning || SetupInUse ? $"Not {a_done}: a run is using this setup right now." : NotYetSaved(a_done);
 
 	// each row's standing in the setup beyond its tick: left out for a new game, or not run because its old output is used
 	void MarkLeftOut()
@@ -935,10 +933,15 @@ public sealed partial class MainViewModel : Observable
 	string? CannotStart() =>
 		SelectedSetup == null || Setup == null ? "Make or pick a setup first." : CannotStartAny();
 
-	// what stops any start, a single run or a queue
-	static string? CannotStartAny() =>
+	// what stops any start, a single run or a queue. A change to a setup that is still on its way into its file stops one
+	// too: the run reads the file, and started in that moment it ran with the steps as they stood before the change
+	string? CannotStartAny() =>
 		Engine.Active() != null || QueueRun.Read(AppPaths.Data) != null ? "A run is going already." :
-		Engine.Interrupted() != null ? "The last run did not finish - put your profile back first (the button at the top)." : null;
+		Engine.Interrupted() != null ? "The last run did not finish - put your profile back first (the button at the top)." :
+		NotYetSaved("started");
+
+	string? NotYetSaved(string a_done) =>
+		Saving ? $"Not {a_done} yet: the change before this one is still being saved - try again in a moment." : null;
 
 	// the profile's mod list and plugin list as they are on disk (unreadable = a stamp of its own, so it never matches)
 	static string ProfileStamp(string a_dir)
@@ -957,7 +960,8 @@ public sealed partial class MainViewModel : Observable
 		if (_previewing) {
 			return;
 		}
-		if ((a_dryOnly ? (SelectedSetup == null || Setup == null ? "Make or pick a setup first." : null) : CannotStart()) is { } why) {
+		// (a dry run reads the setup's file as well: one made while a change is on its way into that file left the change out)
+		if ((a_dryOnly ? (SelectedSetup == null || Setup == null ? "Make or pick a setup first." : NotYetSaved("looked at")) : CannotStart()) is { } why) {
 			Say(why, "bad");
 			return;
 		}
@@ -1490,6 +1494,10 @@ public sealed partial class MainViewModel : Observable
 	// a change to the setup shown is on its way into its file (the next change waits for it: NotNow)
 	public bool Saving { get; private set; }
 
+	// The write of a setup that is under way (finished when none is). A window that closes waits for it, and so does the
+	// program's end: a change the window took is in the file before the program is gone
+	public static Task PendingSetupSave { get; private set; } = Task.CompletedTask;
+
 	// The setup shown, written to its file - away from the window's own thread, where the copy into "Setup backups", the
 	// tidying of older copies and the write itself held up every click on a slow disk. Its text is made here (memory
 	// only); one save at a time, and while one is on its way the setup is not changed again, so what is shown and what is
@@ -1514,11 +1522,23 @@ public sealed partial class MainViewModel : Observable
 		Saving = true;
 		string? why;
 		try {
-			why = await Task.Run(() => Setup.WriteKeepingACopy(file, text, copies));
+			var write = Task.Run(() => Setup.WriteKeepingACopy(file, text, copies));
+			PendingSetupSave = write;
+			why = await write;
 		} finally {
 			Saving = false;
 		}
 		Say(why == null ? "Saved." : "Not saved: " + why, why == null ? "good" : "bad");
+		if (why != null) {
+			// The caller takes the change back out of the setup shown. A check that began while the change stood in memory
+			// read a setup that is now neither shown nor saved: its findings are not this setup's either
+			++_setupEdits;
+		} else if (!ReferenceEquals(Setup, setup) && StillShown(file, Setup?.File)) {
+			// This setup was picked away and picked again while it was being written: what is shown was read from the file as
+			// it stood before the write. Read again, with what was saved - shown stale, the next change would have written
+			// the old values back over this one
+			LoadSteps();
+		}
 		return why == null;
 	}
 

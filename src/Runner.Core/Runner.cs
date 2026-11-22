@@ -398,9 +398,13 @@ public static class Runner
 			// are still on - it would only be switched off again a moment later, for good
 			void UseOldDue(int a_before)
 			{
-				foreach (var (k, _) in usedOld.Where(u => u.At <= a_before).ToList()) {
-					usedOld.RemoveAll(u => ReferenceEquals(u.Step, k));
-					UseOldOutput(ctx, k, todo, a_before);
+				// the ones due at this place come on together, each one that another of them needs first: no tool works
+				// between them, so a master that the next one brings is there before the next tool reads the plugin that needs it
+				var due = OldOutput.InMasterOrder(mo2, usedOld.Where(u => u.At <= a_before).Select(u => u.Step).ToList());
+				usedOld.RemoveAll(u => u.At <= a_before);
+				var before = Profile.StatesOf(snap0);
+				foreach (var k in due) {
+					UseOldOutput(ctx, k, todo, a_before, due, before);
 				}
 			}
 			for (var n = 0; n < todo.Count; ++n) {
@@ -697,8 +701,10 @@ public static class Runner
 
 	// A step the setup does not run because its old output is used, at that step's place in the order (a_at: before that
 	// step of a_todo): the old output comes back on - what a fresh one would do there - with every line of what that means
-	// in the run's log and one in its notes
-	static void UseOldOutput(RunContext a_ctx, Setup.StepEntry a_s, List<Setup.StepEntry> a_todo, int a_at)
+	// in the run's log and one in its notes. a_due: every old output that comes on at this place, this one among them.
+	// a_before: the mod states the run found as it began - what its put-back restores
+	static void UseOldOutput(RunContext a_ctx, Setup.StepEntry a_s, List<Setup.StepEntry> a_todo, int a_at, IReadOnlyList<Setup.StepEntry> a_due,
+		IReadOnlyDictionary<string, char> a_before)
 	{
 		var name = StepCatalog.Name(a_s.Key);
 		var mod = new StepSettings(a_s.Settings).OutputMod!;
@@ -715,8 +721,16 @@ public static class Runner
 			if (!l.There) {
 				throw new StepFailedException($"{name}: it is set to use its old output, and there is none to use any more - \"{mod}\" is missing or holds nothing now (it was there when the run was checked)");
 			}
-			if (a_todo.Skip(a_at).Any(s => s.Key != "playsave") && OldOutput.MasterOffNow(a_ctx.Mo2, st, mod) is { } needs) {
+			// (the others due at this place are on before the next tool runs: their plugins count)
+			var others = a_due.Select(d => new StepSettings(d.Settings).OutputMod).OfType<string>();
+			if (a_todo.Skip(a_at).Any(s => s.Key != "playsave") && OldOutput.MasterOffNow(a_ctx.Mo2, st, mod, others) is { } needs) {
 				throw new StepFailedException($"{name}: its old output cannot be used in this run: {needs} - the tools after it would find that plugin with a master missing");
+			}
+			// ... and against the profile the run's end leaves: a master in a mod that a command of the setup switched off
+			// after the check (or that a tool of the run replaces) is not there for the game, whether or not a tool still
+			// runs - the old output would stay on with its master off, also for the save to play's game start
+			if (OldOutput.MasterGoneAfterRun(a_ctx.Setup, a_ctx.Mo2, a_before, a_todo, mod) is { } gone) {
+				throw new StepFailedException($"{name}: its old output cannot be used: {gone} - the game would not start with it");
 			}
 			// (it is off at this moment only because the run switched it off a while ago: no news for the log)
 			foreach (var line in OldOutput.Warning(l with { On = true }, a_ctx.Setup.Profile)) {
@@ -726,7 +740,8 @@ public static class Runner
 		// On record before anything is switched for it, as what the run is about to do (not Done yet): a Stop or a crash in
 		// the seconds Mod Organizer takes to close finds it there, and the put-back then leaves the old output as the
 		// profile had it before the run - never switched on by a record of something that did not happen
-		var use = a_ctx.Journal.UsedOld.FirstOrDefault(u => u.Mod.Equals(mod, StringComparison.OrdinalIgnoreCase));
+		// (by its step: two steps that share an output mod are two uses, and the run's summary names both)
+		var use = a_ctx.Journal.UsedOld.FirstOrDefault(u => u.Step == a_s.Key);
 		if (use == null) {
 			use = new OldUse { Step = a_s.Key, Name = name, Mod = mod, Listed = !st.ContainsKey(mod) };
 			a_ctx.Journal.UsedOld.Add(use);
@@ -1020,9 +1035,14 @@ public static class Runner
 	// just asked for and must still tick what was built
 	static void ApplyAfter(RunContext a_ctx, CancellationToken a_ct)
 	{
-		var st = a_ctx.Profile.States();
-		var en = a_ctx.PendingEnable.Distinct().Where(m => st.TryGetValue(m, out var f) && f != '+').ToList();
+		// What was asked is taken off the list before anything can fail (the read of the mod list just below can): a name
+		// left on it was switched on by the put-back's own pass, past its checks - an output whose files were still in the
+		// backup, or an old output whose use was never carried out. What a step built is on record as built by now, and the
+		// put-back asks for it again from that record
+		var asked = a_ctx.PendingEnable.Distinct().ToList();
 		a_ctx.PendingEnable.Clear();
+		var st = a_ctx.Profile.States();
+		var en = asked.Where(m => st.TryGetValue(m, out var f) && f != '+').ToList();
 		if (en.Count > 0 || a_ctx.Setup.Placement.Count > 0) {
 			a_ctx.Control.Close(null, a_ct);
 		}
@@ -1283,6 +1303,9 @@ public static class Runner
 		// a mod whose old output is not back in it is not switched on again a line later because an earlier step of this run had
 		// built it once
 		var stillOut = a_ctx.Journal.Parked.Where(p => !p.Replaced && !p.PutBack && !p.IsFolder).Select(p => p.Mod).ToHashSet(StringComparer.OrdinalIgnoreCase);
+		// only what passes the checks here is switched on by the put-back: whatever a step had asked for and never got is
+		// either on record as built (asked for again below) or was never the run's to switch on
+		a_ctx.PendingEnable.Clear();
 		a_ctx.PendingEnable.AddRange(a_ctx.Journal.Built.Where(m => st.ContainsKey(m) && !stillOut.Contains(m)));
 		// An old output the run had switched back on at its step's place is the player's choice for this setup: on, like what
 		// was built. Not one the run was only about to switch on (a Stop while Mod Organizer closed for it): that one stays
@@ -1290,6 +1313,16 @@ public static class Runner
 		// not bring back (two steps can share an output mod): a mod never goes on holding nothing - a later put-back
 		// switches it on once its files are back
 		a_ctx.PendingEnable.AddRange(a_ctx.Journal.UsedOld.Where(u => u.Done).Select(u => u.Mod).Where(m => st.ContainsKey(m) && !stillOut.Contains(m)));
+		// An old output whose line the run itself put into the mod list was in no order file before the run: the plugin
+		// lists that just went back hold none of its plugins, and its line came back switched on - so the pass below,
+		// which ticks the plugins of what it switches on, passes it by. Its plugins get their ticks and their places here,
+		// as they got them when it was switched on at its step's place (left to Mod Organizer's next start, they were
+		// listed wherever it put them)
+		var listedByRun = a_ctx.Journal.UsedOld.Where(u => u.Done && u.Listed).Select(u => u.Mod).Distinct(StringComparer.OrdinalIgnoreCase)
+			.Where(m => st.TryGetValue(m, out var f) && f == '+' && !stillOut.Contains(m)).ToList();
+		if (listedByRun.Count > 0) {
+			a_ctx.Profile.ActivatePlugins(listedByRun, a_ctx.Setup.PlaceAfter);
+		}
 		// a Stop is often why this put-back runs: it never ends the wait for Mod Organizer here
 		ApplyAfter(a_ctx, CancellationToken.None);
 	}
