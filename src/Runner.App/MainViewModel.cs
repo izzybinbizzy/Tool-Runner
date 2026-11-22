@@ -144,7 +144,7 @@ public sealed partial class MainViewModel : Observable
 	// the title bar and the taskbar button say what runs (read out on Alt+Tab, seen with the window behind the game)
 	public string WindowTitle => !IsRunning ? Brand.Name :
 		Waiting != "" ? $"{WaitingTitle} - {Brand.Name}" :
-		$"{NowTitle}{(ProgressKnown ? $" {Progress * 100:0}%" : "")} - {Brand.Name}";
+		$"{NowTitle}{(ProgressKnown ? $" {Progress * 100:0}%" : "")}{(FinishAt == "" ? "" : ", " + FinishAt)} - {Brand.Name}";
 
 	// What the run waits on the player for is either a guided part in the game (they do it, then press Done) or something
 	// only they can end outside it - their own Mod Organizer left open - which the run notices by itself: no Done to press
@@ -170,6 +170,12 @@ public sealed partial class MainViewModel : Observable
 	public System.Windows.Shell.TaskbarItemProgressState TaskbarState { get; set => Set(ref field, value); }
 	public string Clock { get; set => Set(ref field, value); } = "";
 	public string Left { get; set => Set(ref field, value); } = "";
+	// when the run should be done, by the steps' usual times ("done about 21:40"; "" when not known): beside the clock, in the
+	// title the taskbar button shows, and in the notification-area icon's tip
+	public string FinishAt { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(WindowTitle)); } } = "";
+
+	// the clock time in the player's own way of writing it (24 hours or AM / PM)
+	public static string DoneAbout(DateTime a_at) => "done about " + a_at.ToString("t", System.Globalization.CultureInfo.CurrentCulture);
 	public string Verdict { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(VerdictLine)); } } = "";
 	public string VerdictKind { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(VerdictLine)); } } = "";
 	public string Waiting { get; set { if (Set(ref field, value)) { OnPropertyChanged(nameof(ShowProgress)); OnPropertyChanged(nameof(ProgressBusy)); OnPropertyChanged(nameof(WindowTitle)); } } } = "";
@@ -766,6 +772,7 @@ public sealed partial class MainViewModel : Observable
 			.Select(s => _usual.TryGetValue(s.Key, out var t) ? (s.State == StepState.Running && s.Started != null ? Max(TimeSpan.Zero, t - (DateTime.Now - s.Started.Value)) : t) : TimeSpan.Zero)
 			.Aggregate(TimeSpan.Zero, (a, b) => a + b);
 		Left = IsRunning && leftT > TimeSpan.Zero ? "about " + Long(leftT) + " left" : "";
+		FinishAt = IsRunning && leftT > TimeSpan.Zero ? DoneAbout(DateTime.Now + leftT) : "";
 		StepOf = IsRunning && cur != null ? $"step {_run.Steps.IndexOf(cur) + 1} of {steps}" : "";
 		// a run that ended is summed up once (its record is the same object until its file changes)
 		if (IsRunning || _run.Live) {
@@ -1627,6 +1634,7 @@ public sealed partial class MainViewModel : Observable
 		Progress = current == "xlodgen" ? Math.Min(0.97, now / 17.5) : Math.Min(0.95, now / 1.5);
 		Clock = Long(TimeSpan.FromMinutes(spent));
 		Left = $"about {Long(TimeSpan.FromMinutes(left))} left";
+		FinishAt = DoneAbout(new DateTime(2026, 10, 27, 20, 0, 0, DateTimeKind.Local).AddMinutes(spent + left));
 		Verdict = "";
 		Mo2Open = a_waiting || current == "xlodgen";
 		GameRunning = a_waiting;
@@ -1683,7 +1691,7 @@ public sealed partial class MainViewModel : Observable
 		Waiting = "";
 		StepOf = "";
 		Clock = Long(at - start);
-		Left = "";
+		Left = FinishAt = "";
 		Verdict = j.Verdict;
 		VerdictKind = a_failed ? "bad" : "good";
 		RetryFrom = a_failed ? "dyndolod" : "";
@@ -1720,7 +1728,7 @@ public sealed partial class MainViewModel : Observable
 		Estimate();
 		ShowReady();
 		Waiting = "";
-		Clock = Left = Verdict = "";
+		Clock = Left = FinishAt = Verdict = "";
 		Progress = 0;
 		Mo2Open = false;
 		GameRunning = false;

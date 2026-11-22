@@ -1004,6 +1004,60 @@ public static class Program
 		}
 	}
 
+	// The plan's owed test (7 A3): StartAndLoad's own loop around Faster Archives' offer. The game closes a few seconds into its
+	// start for the offer (its program runs, the game does not): never taken for a crash - the run waits for that window, then
+	// starts the game again. A stand-in starts the "game" (ping under the offer program's name, this test standing in for the
+	// game); DevBench never answers here (a port nothing listens on), and the second start stops the step
+	static void T_AGameClosedForTheRepackOfferIsStartedAgain()
+	{
+		using var f = new FakeMo2();
+		f.WriteSetup(("shaders", []));
+		var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+		probe.Start();
+		var dead = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port;
+		probe.Stop();
+		using var cts = new CancellationTokenSource();
+		var ctx = StepContext(f, "shaders", new DevBench($"http://127.0.0.1:{dead}/api/tool/"), cts.Token);
+		using var log = ctx.Log;
+		var tool = Path.Combine(f.Root, FasterArchives.ToolImage);
+		File.Copy(Path.Combine(Environment.SystemDirectory, "PING.EXE"), tool);
+		var lines = new List<string>();
+		ctx.Log.Line += (t, _) => {
+			lock (lines) {
+				lines.Add(t);
+			}
+		};
+		var launches = 0;
+		Process? offer = null;
+		var offerGoneAtSecond = false;
+		InGame.LaunchStandIn = (c, _) => {
+			if (++launches == 1) {
+				// its program outlives the start loop's first looks for an offer (each ask of a DevBench that is not there can
+				// take a few seconds to be refused), then closes by itself
+				c.Control.Started.Add(Environment.ProcessId);
+				offer = Process.Start(new ProcessStartInfo(tool, "-n 20 127.0.0.1") { UseShellExecute = false, CreateNoWindow = true });
+			} else {
+				offerGoneAtSecond = offer?.HasExited == true;
+				cts.Cancel();
+			}
+		};
+		try {
+			Throws<OperationCanceledException>(() => InGame.StartAndLoad(ctx, "shaders", new StepSettings([]), "Some Save"), "(the second start stops the step)");
+		} finally {
+			InGame.LaunchStandIn = null;
+			try {
+				offer?.Kill();
+			} catch (InvalidOperationException) {
+			}
+			offer?.Dispose();
+		}
+		Equal(2, launches, "the game was started again after the offer");
+		Check(offerGoneAtSecond, "only once the offer's window had closed");
+		lock (lines) {
+			Check(lines.All(l => !l.Contains("while it was starting", StringComparison.Ordinal)), "and the close was never taken for a crash: " + string.Join(" | ", lines.TakeLast(5)));
+		}
+	}
+
 	// CodeRabbit's first round on 1.0 (pull request 32): the points a test can hold
 	static void T_TheReviewOfOnePointZero()
 	{
@@ -2743,6 +2797,96 @@ public static class Program
 			var at = lines.IndexOf("BaseMod.esp");
 			Check(at >= 0 && lines.IndexOf("PairBase.esp") == at + 1 && lines.IndexOf("PairPatch.esp") == at + 2, $"{file}: right after the anchor, the master first: " + string.Join(" | ", lines));
 		}
+	}
+
+	// His checklist 635: a setup copied keeps the first as it was and takes the settings its tools learned along; renamed, its run
+	// records and learned settings go with it (History, the last runs and Undo find a setup by its file); a name that cannot be a
+	// file, or is taken, is refused in words; a run that did not finish refuses a rename and nothing moves
+	static void T_ASetupIsCopiedAndRenamedWithWhatIsItsOwn()
+	{
+		using var f = new FakeMo2();
+		f.WriteSetup(("texgen", new JsonObject { ["output_mod"] = "Output A" }));
+		var setups = Path.GetDirectoryName(f.SetupFile)!;
+		var learned = Path.Combine(setups, "learned settings", "Test", "texgen");
+		Directory.CreateDirectory(learned);
+		File.WriteAllText(Path.Combine(learned, "learned.json"), "{}");
+		var before = File.ReadAllBytes(f.SetupFile);
+		Equal<string?>(null, SetupFiles.BadName(setups, "My Copy"), "a plain name is good");
+		Check(SetupFiles.BadName(setups, "a/b") != null && SetupFiles.BadName(setups, " ") != null && SetupFiles.BadName(setups, "CON") != null && SetupFiles.BadName(setups, "x.") != null,
+			"a name that cannot be a file is refused");
+		Check(SetupFiles.BadName(setups, "test")?.Contains("is there already", StringComparison.Ordinal) == true, "a name taken (in other letters too) is refused");
+		Equal<string?>(null, SetupFiles.BadName(setups, "TEST", f.SetupFile), "its own name in other letters is no clash for a rename");
+		Check(SetupFiles.BadName(setups, "output sizes") != null, "the program's own files are no names");
+		Equal("Test (copy)", SetupFiles.FreeCopyName(f.SetupFile), "a copy's first name");
+		// (the setup carries its own name, "Test", after its file: the copy carries its new name, the rest as it is)
+		string Without(string a_file, out string? a_name)
+		{
+			var o = (JsonObject)JsonNode.Parse(File.ReadAllText(a_file))!;
+			a_name = o["name"]?.GetValue<string>();
+			o.Remove("name");
+			return o.ToJsonString();
+		}
+		var asItWas = Without(f.SetupFile, out _);
+		var copy = SetupFiles.Duplicate(f.SetupFile, "Test (copy)");
+		Check(Without(copy, out var copyName) == asItWas && copyName == "Test (copy)", "the copy holds the setup as it is, under its new name: " + copyName);
+		Check(File.ReadAllBytes(f.SetupFile).SequenceEqual(before), "and the first is untouched");
+		Check(File.Exists(Path.Combine(setups, "learned settings", "Test (copy)", "texgen", "learned.json")) && File.Exists(Path.Combine(learned, "learned.json")),
+			"the learned settings are copied, the first keeps its own");
+		Equal("Test (copy 2)", SetupFiles.FreeCopyName(f.SetupFile), "a second copy takes the next name");
+		Throws<ArgumentException>(() => SetupFiles.Duplicate(f.SetupFile, "Test (copy)"), "a copy never writes over a setup that is there");
+		// a setup that carries a name of its own after its file keeps doing so
+		var named = Path.Combine(setups, "Named.json");
+		File.WriteAllText(named, "{ \"name\": \"Named\" }");
+		Equal("Named 2", JsonNode.Parse(File.ReadAllText(SetupFiles.Duplicate(named, "Named 2")))!["name"]!.GetValue<string>(), "a name inside it follows the new name");
+		// renamed: its run record follows, another setup's does not
+		var runs = Runner.RunsDir(f.Data);
+		var mine = Path.Combine(runs, "2026-01-01 00-00-00 Test");
+		var others = Path.Combine(runs, "2026-01-02 00-00-00 Test (copy)");
+		Directory.CreateDirectory(mine);
+		Directory.CreateDirectory(others);
+		new Journal { Folder = mine, SetupFile = f.SetupFile, State = RunState.Finished }.Save();
+		new Journal { Folder = others, SetupFile = copy, State = RunState.Finished }.Save();
+		var done = SetupFiles.Rename(f.SetupFile, "Main Run", runs);
+		Check(!File.Exists(f.SetupFile) && File.Exists(done.File) && Without(done.File, out var renamedName) == asItWas && renamedName == "Main Run",
+			"the file has its new name and the same setup, its name inside following");
+		Equal(1, done.Records, "one run record named it");
+		Check(Files.SamePath(Journal.Load(mine).SetupFile, done.File) && Files.SamePath(Journal.Load(others).SetupFile, copy), "its own run record names the new file, another setup's is untouched");
+		Check(Directory.Exists(Path.Combine(setups, "learned settings", "Main Run", "texgen")) && !Directory.Exists(Path.Combine(setups, "learned settings", "Test")), "its learned settings went with it");
+		// the same name in other letters only
+		var cased = SetupFiles.Rename(done.File, "MAIN RUN", runs);
+		Check(Directory.GetFiles(setups, "*.json").Any(x => Path.GetFileName(x) == "MAIN RUN.json"), "a rename to other letters only takes");
+		Check(Directory.GetDirectories(Path.Combine(setups, "learned settings")).Any(d => Path.GetFileName(d) == "MAIN RUN"), "and its learned settings folder too");
+		// a run that did not finish refuses it
+		new Journal { Folder = mine, SetupFile = cased.File, State = RunState.Running }.Save();
+		Throws<InvalidOperationException>(() => SetupFiles.Rename(cased.File, "Later", runs), "a run that did not finish refuses a rename");
+		Check(File.Exists(cased.File) && !File.Exists(Path.Combine(setups, "Later.json")), "and nothing was renamed");
+	}
+
+	// His checklist 635: the log window's search goes on from where it stands and from the top again; "first problem" is the first
+	// line the run marked as a failure, else the first it marked as a warning
+	static void T_TheLogWindowFindsTheNextAndTheFirstProblem()
+	{
+		var log = "21:00:01  Tool Runner - Test\n21:00:02  ! a warning first\n21:00:03    a detail\n21:00:04  !!! the step failed\n21:00:05  done\n";
+		Equal(log.IndexOf("21:00:04", StringComparison.Ordinal), ToolRunner.App.LogSearch.FirstProblem(log), "a failure line wins over an earlier warning");
+		Equal(log.IndexOf("21:00:02", StringComparison.Ordinal), ToolRunner.App.LogSearch.FirstProblem(log.Replace("!!! the step failed", "the step went on", StringComparison.Ordinal)), "with no failure, the first warning");
+		Equal(-1, ToolRunner.App.LogSearch.FirstProblem("21:00:01  all well\n21:00:02    a detail\n"), "a log with neither has none");
+		var at = ToolRunner.App.LogSearch.Next(log, "STEP", 0);
+		Equal(log.IndexOf("step", StringComparison.Ordinal), at, "case does not matter");
+		Equal(at, ToolRunner.App.LogSearch.Next(log, "step", at + 1), "past the last match, from the top again");
+		Equal(-1, ToolRunner.App.LogSearch.Next(log, "nowhere", 0), "not there");
+		Equal(-1, ToolRunner.App.LogSearch.Next(log, "", 0), "nothing typed finds nothing");
+	}
+
+	// His checklist 635: the command box keeps what holds every word typed, what starts with it first
+	static void T_TheCommandBoxMatchesTheWordsTyped()
+	{
+		string[] items = ["Start", "Settings", "Settings of TexGen", "Run only TexGen", "Dry run"];
+		Equal("Settings,Settings of TexGen", string.Join(",", ToolRunner.App.CommandBox.Match(items, x => x, "sett")), "the start of a word");
+		Equal("Settings of TexGen,Run only TexGen", string.Join(",", ToolRunner.App.CommandBox.Match(items, x => x, "tex")), "inside a label, in the order given");
+		Equal("Run only TexGen,Dry run", string.Join(",", ToolRunner.App.CommandBox.Match(items, x => x, "run")), "what starts with it first");
+		Equal("Run only TexGen", string.Join(",", ToolRunner.App.CommandBox.Match(items, x => x, "tex run")), "every word must be there");
+		Equal(items.Length, ToolRunner.App.CommandBox.Match(items, x => x, "  ").Count, "nothing typed: everything");
+		Check(ToolRunner.App.MainViewModel.DoneAbout(new DateTime(2026, 1, 1, 21, 40, 0, DateTimeKind.Local)).StartsWith("done about ", StringComparison.Ordinal), "the finish time's words");
 	}
 
 	// A mod list that begins with a UTF-8 mark keeps it: a line written into it and taken out again leaves the file byte for

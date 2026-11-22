@@ -723,6 +723,8 @@ public static class SettingsPanel
 		stack = stepPage;
 		var pick = new ComboBox { ItemsSource = steps.Select(s => StepCatalog.Name(Setup.Str(s, "step") ?? "")).ToList(), Margin = new Thickness(0, 0, 0, 8) };
 		System.Windows.Automation.AutomationProperties.SetName(pick, "Step to edit");
+		s_pick = pick;
+		s_steps = steps;
 		var stepHost = new StackPanel();
 		var stepApply = new List<Func<string?>>();
 		pick.SelectionChanged += (_, _) => {
@@ -966,6 +968,40 @@ public static class SettingsPanel
 		s_find = null;
 		s_cats = null;
 		s_errors = null;
+		s_pick = null;
+		s_steps = null;
+	}
+
+	// the drawing's step picker on the Steps page and the steps it lists
+	static ComboBox? s_pick;
+	static List<JsonObject>? s_steps;
+
+	// The Steps page with a_key's settings open (a step double-clicked in the main window, his checklist 635). False when this
+	// drawing has no such step, or the step open now has a value that does not read (it stays, to be fixed first)
+	public static bool ShowStep(string a_key)
+	{
+		if (s_cats is not { } cats || s_pick is not { } pick || s_steps is not { } steps) {
+			return false;
+		}
+		var i = steps.FindIndex(s => Setup.Str(s, "step") == a_key);
+		if (i < 0) {
+			return false;
+		}
+		if (cats.Items.IndexOf("Steps") is var page and >= 0) {
+			cats.SelectedIndex = page;
+		}
+		pick.SelectedIndex = i;
+		return pick.SelectedIndex == i;
+	}
+
+	// the search box with a_q in it (the command box's "find a setting")
+	public static void Find(string a_q)
+	{
+		if (s_find is { } f) {
+			f.Text = a_q;
+			f.Focus();
+			f.CaretIndex = f.Text.Length;
+		}
 	}
 
 	// the off-screen pictures only: the open settings turned to page a_page; its name, or null when there is no such page
