@@ -1189,7 +1189,7 @@ public partial class MainWindow : Window
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) {
 				// (the write says by itself why it failed; nothing of it holds the window open)
 			}
-			await Task.Run(UiState.Save);
+			await Task.Run(UiState.SaveAtClose);
 		} finally {
 			_keeping = false;
 			_kept = true;

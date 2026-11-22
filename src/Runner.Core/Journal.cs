@@ -127,6 +127,10 @@ public sealed class Journal
 	public bool OrderChanged { get; set; }
 	public List<string> Retire { get; set; } = [];
 	public List<string> Added { get; set; } = [];
+	// Output mods that stood in the mods folder with no line in the mod list: the run gave each one its line before its
+	// first step. One it then neither built nor switched on as an old output loses that line again when the profile is put
+	// back - the list as it was before the run. Its folder is the player's and is never touched for it
+	public List<string> Listed { get; set; } = [];
 	public List<ParkRecord> Parked { get; set; } = [];
 	[JsonIgnore]
 	public IEnumerable<string> ParkedMods => Parked.Where(p => !p.IsFolder).Select(p => p.Mod);

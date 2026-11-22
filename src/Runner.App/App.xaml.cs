@@ -145,7 +145,9 @@ public partial class App : Application
 			MainViewModel.PendingSetupSave.Wait(TimeSpan.FromSeconds(30));
 		} catch (AggregateException) {
 		}
-		if (UiState.Unsaved) {
+		// (a window that closed the usual way has written on a worker, and tried once more there: nothing is written here
+		// then, on the window's thread - this write is for an end that passed the closing window by)
+		if (!UiState.WrittenAtClose && UiState.Unsaved) {
 			UiState.Save();
 		}
 		base.OnExit(a_e);

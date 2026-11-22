@@ -232,6 +232,24 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 		return true;
 	}
 
+	// A mod's line taken out of the mod list again: the line a run had given a mod that had none (ListMod), when the run then
+	// left that mod as it was. Its folder is not touched. False: the list does not name it.
+	public bool UnlistMod(string a_mod, RunLog? a_log = null)
+	{
+		if (!States().ContainsKey(a_mod)) {
+			return false;
+		}
+		MustBeClosed("the mod list");
+		var (lines, nl) = ReadLines(ModList);
+		lines.RemoveAll(l => l.Length > 1 && l[0] is '+' or '-' or '*' && l[1..].Equals(a_mod, StringComparison.OrdinalIgnoreCase));
+		Files.WriteAtomic(ModList, string.Join(nl, lines));
+		Added.Remove(a_mod);
+		_ours?.Remove(a_mod);
+		SaveOurs();
+		a_log?.Detail($"{a_mod}: it had no line in the mod list before this run, and the run neither built nor used it - the line is taken out again (its folder is as it was)");
+		return true;
+	}
+
 	// an output mod this tool made that holds nothing but its meta.ini (a step that failed, was stopped or wrote nothing): its
 	// mod-list line goes and the folder moves into a_parkIn (never erased) - so no empty outputs sit in Mod Organizer
 	public static bool IsEmptyOutput(string a_dir) =>

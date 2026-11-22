@@ -648,8 +648,8 @@ public static class SettingsPanel
 		work["checkUpdates"] ??= true;
 		Field(stack, apply, "Check (F5) also looks for updates", work, "checkUpdates", JsonValueKind.True);
 		var updNote = new TextBlock { Text = "Asks each tool's own page (Nexus, GitHub) for its newest version - only when you press this.",
-			Style = (Style)a_w.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
-		var updRows = new StackPanel();
+			Style = (Style)a_w.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 8) };
+		var updRows = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
 		var updCheck = new Button { Content = "Check its tools for updates", Style = (Style)a_w.FindResource("Ghost"), HorizontalAlignment = HorizontalAlignment.Left };
 		updCheck.Click += async (_, _) => {
 			updCheck.IsEnabled = false;
@@ -702,11 +702,13 @@ public static class SettingsPanel
 				testTools.IsEnabled = true;
 			}
 		};
+		// the look for updates first, its note right under its own button (the note turns into that look's answer) - standing
+		// above the button it read as words about "Test my tools", the button over it
+		stack.Children.Add(updCheck);
+		stack.Children.Add(updNote);
+		stack.Children.Add(updRows);
 		stack.Children.Add(testTools);
 		stack.Children.Add(testRows);
-		stack.Children.Add(updNote);
-		stack.Children.Add(updCheck);
-		stack.Children.Add(updRows);
 
 		stack = stepPage;
 		var pick = new ComboBox { ItemsSource = steps.Select(s => StepCatalog.Name(Setup.Str(s, "step") ?? "")).ToList(), Margin = new Thickness(0, 0, 0, 8) };

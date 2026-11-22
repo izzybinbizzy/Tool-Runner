@@ -375,6 +375,8 @@ public static class Runner
 			var outputs = todo.Select(s => new StepSettings(s.Settings).OutputMod).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 			var listed = profile.States();
 			journal.Added = outputs.Where(m => !listed.ContainsKey(m)).ToList();
+			// (the ones that are there as folders already and only lack their line: the player's, with whatever they hold)
+			journal.Listed = journal.Added.Where(m => Directory.Exists(mo2.ModDir(m))).ToList();
 			journal.Save();
 			foreach (var om in outputs) {
 				profile.EnsureMod(om, log);
@@ -548,7 +550,9 @@ public static class Runner
 			var state = commands.Stopped ? RunState.Stopped : RunState.Failed;
 			journal.State = state;
 			journal.Verdict = "stopped before anything was changed: " + (commands.Stopped ? "Stop was pressed" : Plain(e));
-			// an output mod made a moment ago is still empty: out of the mod list again (Mod Organizer is closed by now)
+			// an output mod made a moment ago is still empty: out of the mod list again (Mod Organizer is closed by now) - and
+			// one that was there already, and only got its line, loses that line again
+			UnlistWhatTheRunOnlyListed(profile, journal, log);
 			var left = new List<string>();
 			foreach (var a in journal.Added.ToList()) {
 				try {
@@ -1285,6 +1289,7 @@ public static class Runner
 				a_ctx.Log.Warn($"{a}: is empty but could not be taken out ({e.Message})");
 			}
 		}
+		UnlistWhatTheRunOnlyListed(a_ctx.Profile, a_ctx.Journal, a_ctx.Log);
 		// the order files are back: a record the disk refuses right now must not be what stops the outputs being ticked
 		if (!a_ctx.Journal.TrySave()) {
 			a_ctx.Log.Warn("the run's record could not be written just now (is the disk full?) - the put-back goes on");
@@ -1325,6 +1330,29 @@ public static class Runner
 		}
 		// a Stop is often why this put-back runs: it never ends the wait for Mod Organizer here
 		ApplyAfter(a_ctx, CancellationToken.None);
+	}
+
+	// A mod that stood in the mods folder with no line in the mod list got one from the run before its first step (EnsureMod,
+	// for a step's output - the order files of "before the run" were read after that, so they hold the line). Where the run
+	// then left that mod as it was - not built by it, not switched on as an old output - the line goes again: the mod list
+	// is as it was before the run, byte for byte. The folder is the player's and stays as it is. Not while what the mod
+	// held is still in the run's backup (a later put-back brings that back first, and takes the line out then).
+	// a_undone: the run was undone - nothing it built or used stands any more
+	static void UnlistWhatTheRunOnlyListed(Profile a_profile, Journal a_j, RunLog a_log, bool a_undone = false)
+	{
+		foreach (var m in a_j.Listed) {
+			if (!a_undone && (a_j.Built.Contains(m, StringComparer.OrdinalIgnoreCase) || a_j.UsedOld.Any(u => u.Done && u.Mod.Equals(m, StringComparison.OrdinalIgnoreCase)))) {
+				continue;
+			}
+			if (a_j.Parked.Any(p => !p.IsFolder && p.Mod.Equals(m, StringComparison.OrdinalIgnoreCase) && !p.PutBack && (a_undone || !p.Replaced))) {
+				continue;
+			}
+			try {
+				a_profile.UnlistMod(m, a_log);
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) {
+				a_log.Warn($"{m}: the line this run gave it in the mod list could not be taken out again ({e.Message})");
+			}
+		}
 	}
 
 	// an interrupted run (a crash, Stop now, a power cut): every unfinished output back, the profile as before + the finished
@@ -1533,6 +1561,7 @@ public static class Runner
 			foreach (var a in a_j.Added.ToList()) {
 				ctx.Profile.TakeOutEmptyOutput(a, a_j.BackupDir, log);
 			}
+			UnlistWhatTheRunOnlyListed(ctx.Profile, a_j, log, true);
 		} catch (Exception e) {
 			log.Error("undo failed: " + Plain(e));
 			var left = a_j.Undoing ? "it stopped half way, and nothing new starts until it is undone again: what moved is on record, its files are in the run's backup" : "nothing was changed";

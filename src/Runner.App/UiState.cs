@@ -14,6 +14,8 @@ public static class UiState
 	static JsonObject? s_state;
 	// something is kept that the file does not hold yet / a write of it is on its way / a write is under way this moment
 	static bool s_unsaved, s_queued, s_writing;
+	// the closing window has made its last write, and its one more try (SaveAtClose)
+	static bool s_closed;
 	// a width and a height kept together are one write
 	static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(150);
 
@@ -28,6 +30,7 @@ public static class UiState
 				field = value;
 				s_state = null;
 				s_unsaved = false;
+				s_closed = false;
 			}
 		}
 	}
@@ -122,6 +125,30 @@ public static class UiState
 				lock (Gate) {
 					s_writing = false;
 				}
+			}
+		}
+	}
+
+	// The closing window's last write, made on a worker and waited for: what is kept goes into the file, and once more when
+	// that write failed. From then on the program's end leaves the file alone (WrittenAtClose): its own write is made on the
+	// window's thread, and a disk that refused twice a moment ago is not asked a third time there, by a program that would
+	// stand frozen for the answer. An end that passes the closing window by (Windows logging off) still writes at the end.
+	public static void SaveAtClose()
+	{
+		Save();
+		if (Unsaved) {
+			Save();
+		}
+		lock (Gate) {
+			s_closed = true;
+		}
+	}
+
+	public static bool WrittenAtClose
+	{
+		get {
+			lock (Gate) {
+				return s_closed;
 			}
 		}
 	}

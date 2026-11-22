@@ -2081,6 +2081,61 @@ public static class Program
 		Check(ProfileOf(f).ActivePlugins().Contains("OldPatch.esp", StringComparer.OrdinalIgnoreCase), "with its plugin ticked (the plugin lists of before the run did not hold it)");
 		Check(!j.Added.Contains("Old Patch") && File.Exists(Path.Combine(f.Mods, "Old Patch", "OldPatch.esp")), "it is not counted among the mods the run made: its folder is the player's, untouched");
 
+		// A mod that is there as a folder with no line in the mod list, which a step of the run builds into - here it is also
+		// the old output another step uses. The run gives it its line before its first step: it is one of the run's
+		// outputs. A run that ends before anything was built into that mod or used of it takes the line out again - after a
+		// step that failed, and after a crash once the profile is put back - so the mod list is as it was. The folder is
+		// the player's: as it was
+		using var k = new FakeMo2();
+		k.Mod("Shared", ("Shared.esp", false, []));
+		var how = "fail";
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
+			if (how == "crash") {
+				// (what the run had on record by then: the mod it gave a line)
+				ctx.Journal.Added.Add("Shared");
+				ctx.Journal.Listed.Add("Shared");
+				ctx.Journal.Pid = 999999;
+				ctx.Journal.Save();
+				throw new CrashForTest();
+			}
+			if (how == "fail") {
+				throw new StepFailedException("the tool gave up");
+			}
+			WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp");
+		}));
+		StepRegistry.Replace(new FakeStep("texgen", (ctx, s) => WriteOutput(ctx, "texgen", "Shared", "Shared.esp")));
+		var both = k.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("synthesis", new JsonObject { ["output_mod"] = "Shared" }),
+			("texgen", new JsonObject { ["output_mod"] = "Shared" }));
+		((JsonArray)both.Root["steps"]!)[1]![OldOutput.Key] = true;
+		both.Save();
+		var sharedBefore = k.Text("modlist.txt");
+		var sharedBytes = File.ReadAllBytes(Path.Combine(k.Mods, "Shared", "Shared.esp"));
+		r = Runner.Run(new RunRequest(k.SetupFile, k.Data));
+		Equal(RunState.Failed, r.State, r.Verdict);
+		Equal("Shared", string.Join(",", Journal.Load(r.Folder!).Listed), "(on record: the run gave that mod its line)");
+		Equal(sharedBefore, k.Text("modlist.txt"), "a run that failed before it built into that mod or used it leaves the mod list byte for byte as it was");
+		Check(File.ReadAllBytes(Path.Combine(k.Mods, "Shared", "Shared.esp")).SequenceEqual(sharedBytes), "and what the mod holds as it was");
+		// cut off by a crash in its first step: the line the run wrote, and the order files it read after writing it
+		how = "crash";
+		ProfileOf(k).EnsureMod("Shared");
+		try {
+			RunUntilCrash(k);
+		} catch (CrashForTest) {
+		}
+		Check(ProfileOf(k).States().ContainsKey("Shared"), "(after the crash the line the run wrote is still in the mod list)");
+		Equal(RunState.Restored, Runner.Restore(Journal.Interrupted(Runner.RunsDir(k.Data))!).State, "the profile put back after the crash");
+		Equal(sharedBefore, k.Text("modlist.txt"), "the put-back after a crash takes that line out again too");
+		// the run that goes through uses the old output at its place and then builds into the mod: it keeps its line, on
+		how = "";
+		r = Runner.Run(new RunRequest(k.SetupFile, k.Data));
+		Equal(RunState.Finished, r.State, r.Verdict);
+		Check(ProfileOf(k).IsOn("Shared") && File.Exists(Path.Combine(k.Mods, "Shared", "new.txt")), "built into by the run, the mod keeps its line and is switched on");
+		// ... and undone, that run leaves the list as it was before it, and the mod with what it held
+		var undone = Runner.Undo(Journal.Load(r.Folder!));
+		Equal(RunState.Restored, undone.State, undone.Verdict);
+		Check(!ProfileOf(k).States().ContainsKey("Shared"), "undone, the mod has no line again");
+		Check(File.ReadAllBytes(Path.Combine(k.Mods, "Shared", "Shared.esp")).SequenceEqual(sharedBytes) && !File.Exists(Path.Combine(k.Mods, "Shared", "new.txt")), "and holds what it held before the run");
+
 		// gone by the time its place comes (a tool, or a command of the setup, moved it away after the check): the run stops
 		// there, and the tool after it never runs on an output that is not there
 		using var g = new FakeMo2();
@@ -2112,9 +2167,10 @@ public static class Program
 			ctx.Profile.SetMods([], ["Needs B", "Output B"]);
 			var snap = ctx.Profile.Snapshot();
 			ctx.Journal.UsedOld.Add(new OldUse { Step = "synthesis", Name = "Synthesis", Mod = "Output B" });
-			// (and a mod some step had asked to be switched on and never got - the ask was still standing when the run was
-			// cut off: no record calls it built or used, so the put-back does not switch it on either)
-			ctx.SetAfter("Needs B");
+			// (The ask to switch that old output on was still standing when the run was cut off - the read of the mod list that
+			// follows it had failed, say - and so was one for a mod some step had asked for and never got. No record calls
+			// either built or used, so the put-back switches neither on: it goes by its records, never by a standing ask)
+			ctx.SetAfter("Output B", "Needs B");
 			Runner.PutBack(ctx, snap);
 			Check(!ProfileOf(h).IsOn("Output B"), "a use that was never carried out leaves the old output as the profile had it before the run");
 			Check(!ProfileOf(h).IsOn("Needs B"), "and what was only asked for, on no record as built or used, is not switched on by the put-back");
@@ -6706,6 +6762,22 @@ public static class Program
 			Directory.Delete(kept, true);
 			ToolRunner.App.UiState.Save();
 			Check(!ToolRunner.App.UiState.Unsaved && JsonNode.Parse(File.ReadAllText(kept))!["test.width"]!.GetValue<double>() == 900, "and the next write puts it in the file");
+			// The closing window's last write is made on a worker: tried, and tried once more when the disk refused. After it
+			// the program's end leaves the file alone - its own write would be made on the window's thread (CodeRabbit on
+			// pull request #35)
+			Check(!ToolRunner.App.UiState.WrittenAtClose, "(no window has made its last write yet)");
+			File.Delete(kept);
+			Directory.CreateDirectory(kept);
+			ToolRunner.App.UiState.Set("test.width", 1000);
+			ToolRunner.App.UiState.SaveAtClose();
+			Check(ToolRunner.App.UiState.Unsaved && ToolRunner.App.UiState.WrittenAtClose, "a last write the disk refused twice leaves it unsaved, and the program's end is told that the window has done its part");
+			Directory.Delete(kept, true);
+			ToolRunner.App.UiState.FileForTests = kept;
+			Check(!ToolRunner.App.UiState.WrittenAtClose, "(a new start begins without it)");
+			ToolRunner.App.UiState.Set("test.width", 1100);
+			ToolRunner.App.UiState.SaveAtClose();
+			Check(!ToolRunner.App.UiState.Unsaved && ToolRunner.App.UiState.WrittenAtClose && JsonNode.Parse(File.ReadAllText(kept))!["test.width"]!.GetValue<double>() == 1100,
+				"a last write that goes through is in the file");
 		} finally {
 			ToolRunner.App.UiState.FileForTests = null;
 		}
