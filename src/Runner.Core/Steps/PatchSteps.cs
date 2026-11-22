@@ -33,7 +33,8 @@ public abstract class LauncherStep : IStep
 
 	// the fields that decide what the tool reads and where it writes: one renamed in its settings file would leave this
 	// program's value unread, and the tool would build from whatever profile and into whatever folder it was last pointed at
-	static readonly string[] Pointing = ["Mo2InstancePath", "Mo2ProfileName", "OutputLocation"];
+	// (the game's folder too: renamed, the tool would read its own new key and build for a game folder it was given before)
+	static readonly string[] Pointing = ["Mo2InstancePath", "Mo2ProfileName", "GameLocation", "OutputLocation"];
 
 	// the first of those fields a settings file the tool already wrote does not hold (null: all there, or no file yet - a new
 	// one gets them all)

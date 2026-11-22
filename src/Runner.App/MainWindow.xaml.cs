@@ -738,10 +738,21 @@ public partial class MainWindow : Window
 				e.Handled = true;
 			}
 		};
-		problem.Click += (_, _) => {
+		void ShowFirstProblem()
+		{
 			var at = LogSearch.FirstProblem(box.Text);
 			var end = at < 0 ? -1 : box.Text.IndexOf('\n', at);
 			Reveal(at, at < 0 ? 0 : (end < 0 ? box.Text.Length : end) - at, "No line of this log is marked as a problem.");
+		}
+		problem.Click += (_, _) => {
+			// the simple log marks no line (only the detailed one says "!" and "!!!"): the detailed log is shown first, and the
+			// search runs once its text is in (CodeRabbit on pull request #38)
+			if (!_vm.DetailedLog) {
+				_vm.DetailedLog = true;
+				Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, ShowFirstProblem);
+				return;
+			}
+			ShowFirstProblem();
 		};
 		var findBar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
 		foreach (var c in new UIElement[] { find, next, problem, found }) {

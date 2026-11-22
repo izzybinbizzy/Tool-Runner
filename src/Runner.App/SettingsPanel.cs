@@ -987,6 +987,11 @@ public static class SettingsPanel
 		if (i < 0) {
 			return false;
 		}
+		// a search left in the box would keep hiding the step's fields: the category's own change clears it, but Steps may be
+		// the page already (CodeRabbit on pull request #38)
+		if (s_find is { } f && f.Text != "") {
+			f.Text = "";
+		}
 		if (cats.Items.IndexOf("Steps") is var page and >= 0) {
 			cats.SelectedIndex = page;
 		}

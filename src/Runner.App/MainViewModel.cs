@@ -326,6 +326,22 @@ public sealed partial class MainViewModel : Observable
 	readonly LogTail _logTail = new();
 	Dictionary<string, TimeSpan> _usual = [];
 
+	// the usual step times of the setup a run is running (read once per setup: the picked setup's own when it is that one)
+	string? _runUsualFor;
+	Dictionary<string, TimeSpan> _runUsual = [];
+
+	Dictionary<string, TimeSpan> RunUsual(string a_setupFile)
+	{
+		if (SelectedSetup is { } picked && string.Equals(picked.File, a_setupFile, StringComparison.OrdinalIgnoreCase)) {
+			return _usual;
+		}
+		if (!string.Equals(_runUsualFor, a_setupFile, StringComparison.OrdinalIgnoreCase)) {
+			_runUsualFor = a_setupFile;
+			_runUsual = Engine.UsualTimes(a_setupFile);
+		}
+		return _runUsual;
+	}
+
 	public MainViewModel()
 	{
 		_work.Changed += ShowClose;
@@ -768,11 +784,16 @@ public sealed partial class MainViewModel : Observable
 		};
 		var elapsed = (_run.Ended ?? DateTime.Now) - _run.Started;
 		Clock = Long(elapsed);
-		var leftT = _run.Steps.Where(s => s.State is StepState.Pending or StepState.Running)
-			.Select(s => _usual.TryGetValue(s.Key, out var t) ? (s.State == StepState.Running && s.Started != null ? Max(TimeSpan.Zero, t - (DateTime.Now - s.Started.Value)) : t) : TimeSpan.Zero)
+		// the running setup's own usual times, whichever setup is picked in the list (CodeRabbit on pull request #38)
+		var usual = RunUsual(_run.SetupFile);
+		var ahead = _run.Steps.Where(s => s.State is StepState.Pending or StepState.Running).ToList();
+		var leftT = ahead.Select(s => usual.TryGetValue(s.Key, out var t) ? (s.State == StepState.Running && s.Started != null ? Max(TimeSpan.Zero, t - (DateTime.Now - s.Started.Value)) : t) : TimeSpan.Zero)
 			.Aggregate(TimeSpan.Zero, (a, b) => a + b);
-		Left = IsRunning && leftT > TimeSpan.Zero ? "about " + Long(leftT) + " left" : "";
-		FinishAt = IsRunning && leftT > TimeSpan.Zero ? DoneAbout(DateTime.Now + leftT) : "";
+		// a step still to come that never ran before has no usual time: what is left is then at least that much, and no
+		// finish time is promised
+		var partial = ahead.Any(s => !usual.ContainsKey(s.Key));
+		Left = IsRunning && leftT > TimeSpan.Zero ? (partial ? "at least " : "about ") + Long(leftT) + " left" : "";
+		FinishAt = IsRunning && leftT > TimeSpan.Zero && !partial ? DoneAbout(DateTime.Now + leftT) : "";
 		StepOf = IsRunning && cur != null ? $"step {_run.Steps.IndexOf(cur) + 1} of {steps}" : "";
 		// a run that ended is summed up once (its record is the same object until its file changes)
 		if (IsRunning || _run.Live) {
@@ -959,6 +980,7 @@ public sealed partial class MainViewModel : Observable
 		NotYetSaved("started");
 
 	string? NotYetSaved(string a_done) =>
+		Renaming ? $"Not {a_done} yet: the setup is being renamed - try again in a moment." :
 		Saving ? $"Not {a_done} yet: the change before this one is still being saved - try again in a moment." : null;
 
 	// the profile's mod list and plugin list as they are on disk (unreadable = a stamp of its own, so it never matches)
@@ -1409,9 +1431,9 @@ public sealed partial class MainViewModel : Observable
 		if (Setup is not { } setup || setup.Root["steps"] is not JsonArray arr) {
 			return;
 		}
-		if (SetupInUse || Saving) {
+		if (SetupInUse || Saving || Renaming) {
 			a_row.On = !a_on;
-			Say(SetupInUse ? "Not changed: a run is using this setup right now." : "Not changed yet: the change before this one is still being saved - try again in a moment.", "bad");
+			Say(SetupInUse ? "Not changed: a run is using this setup right now." : NotYetSaved("changed")!, "bad");
 			return;
 		}
 		var mine = arr.OfType<JsonObject>().Where(o => Setup.Str(o, "step") == a_row.Key).ToList();
@@ -1468,8 +1490,8 @@ public sealed partial class MainViewModel : Observable
 		if (Setup is not { } setup || setup.Root["steps"] is not JsonArray arr) {
 			return;
 		}
-		if (SetupInUse || Saving) {
-			Say(SetupInUse ? "Not moved: a run is using this setup right now." : "Not moved yet: the change before this one is still being saved - try again in a moment.", "bad");
+		if (SetupInUse || Saving || Renaming) {
+			Say(SetupInUse ? "Not moved: a run is using this setup right now." : NotYetSaved("moved")!, "bad");
 			return;
 		}
 		var i = Steps.IndexOf(a_row);
@@ -1522,6 +1544,10 @@ public sealed partial class MainViewModel : Observable
 	// a change to the setup shown is on its way into its file (the next change waits for it: NotNow)
 	public bool Saving { get; private set; }
 
+	// the setup shown is being renamed: its file moves, and no change or save may land in the old one meanwhile (CodeRabbit on
+	// pull request #38) - held from before the last save is waited for until the renamed setup is shown
+	public bool Renaming { get; set; }
+
 	// The write of a setup that is under way (finished when none is). A window that closes waits for it, and so does the
 	// program's end: a change the window took is in the file before the program is gone
 	public static Task PendingSetupSave { get; private set; } = Task.CompletedTask;
@@ -1535,8 +1561,8 @@ public sealed partial class MainViewModel : Observable
 		if (Setup is not { } setup) {
 			return false;
 		}
-		if (Saving) {
-			Say("Not saved yet: the change before this one is still being saved - try again in a moment.", "bad");
+		if (NotYetSaved("saved") is { } notNow) {
+			Say(notNow, "bad");
 			return false;
 		}
 		if (Engine.Active() is { } j && string.Equals(j.SetupFile, setup.File, StringComparison.OrdinalIgnoreCase)) {

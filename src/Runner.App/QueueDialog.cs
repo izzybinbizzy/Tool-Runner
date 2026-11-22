@@ -89,6 +89,11 @@ public static class QueueDialog
 				if (rows.FirstOrDefault(r => ReferenceEquals(r.Item, d)) is { } hit) {
 					return hit;
 				}
+				// the padding round a row is its container's, not the row's own (CodeRabbit on pull request #38): a drop there is
+				// that row's too
+				if (d is ListBoxItem container && rows.FirstOrDefault(r => ReferenceEquals(r.Item, container.Content)) is { } around) {
+					return around;
+				}
 			}
 			return null;
 		}

@@ -82,9 +82,12 @@ public partial class MainWindow
 	}
 
 	// ---------------------------------------------------------------- a setup copied or renamed
-	void DuplicateSetup_Click(object a_s, RoutedEventArgs a_e)
+	bool _copying;
+
+	// the copy is made on a worker (a slow disk never holds the window), one at a time
+	async void DuplicateSetup_Click(object a_s, RoutedEventArgs a_e)
 	{
-		if (_vm.IsRunning || _vm.SelectedSetup is not { } item) {
+		if (_copying || _vm.IsRunning || _vm.SelectedSetup is not { } item) {
 			return;
 		}
 		var name = Ask.Input(this, "Copy this setup", $"A new setup with the steps and settings of \"{item.Name}\", and the settings its tools learned. Nothing of \"{item.Name}\" changes. The copy's name:",
@@ -92,12 +95,16 @@ public partial class MainWindow
 		if (name == null) {
 			return;
 		}
+		_copying = true;
 		try {
-			var made = SetupFiles.Duplicate(item.File, name);
+			var from = item.File;
+			var made = await Task.Run(() => SetupFiles.Duplicate(from, name)).ConfigureAwait(true);
 			_vm.LoadSetups(made);
 			_vm.Say($"\"{name.Trim()}\" made: a copy of \"{item.Name}\". It has no runs of its own yet.", "good");
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or InvalidDataException or System.Text.Json.JsonException) {
 			_vm.Say("The copy could not be made: " + e.Message, "bad");
+		} finally {
+			_copying = false;
 		}
 	}
 
@@ -126,9 +133,15 @@ public partial class MainWindow
 			return;
 		}
 		_renaming = true;
+		// from here no change or save of the setup starts (Renaming), until the renamed one is shown
+		_vm.Renaming = true;
 		try {
-			// a change to the setup that is still on its way into the old file lands there first
-			await MainViewModel.PendingSetupSave.ConfigureAwait(true);
+			// a change to the setup that is still on its way into the old file lands there first - every one, also one that
+			// began while this waited
+			while (!MainViewModel.PendingSetupSave.IsCompleted || _vm.Saving) {
+				await MainViewModel.PendingSetupSave.ConfigureAwait(true);
+				await Task.Yield();
+			}
 			var done = await Task.Run(() => SetupFiles.Rename(item.File, name, AppPaths.Runs)).ConfigureAwait(true);
 			var was = MainViewModel.ToolsOfferedKey(item.File);
 			if (UiState.Flag(was)) {
@@ -142,6 +155,7 @@ public partial class MainWindow
 			_vm.LoadSetups(File.Exists(item.File) ? item.File : null);
 			_vm.Say("The setup was not renamed: " + e.Message, "bad");
 		} finally {
+			_vm.Renaming = false;
 			_renaming = false;
 		}
 	}

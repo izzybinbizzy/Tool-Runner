@@ -63,19 +63,29 @@ public static class SetupFiles
 		}
 		var to = Path.Combine(dir, a_name.Trim() + ".json");
 		var learned = LearnedDir(a_file);
-		// learned settings left under that name by a setup that is gone are not mixed into the copy's
-		if (Directory.Exists(learned) && Directory.Exists(LearnedDir(to))) {
-			throw new ArgumentException($"learned tool settings for \"{a_name.Trim()}\" are there already ({LearnedDir(to)}) - pick another name");
+		var learnedTo = LearnedDir(to);
+		// learned settings left under that name by a setup that is gone would be the copy's (they are found by the setup's file
+		// name alone), whether or not the first setup has learned any (CodeRabbit on pull request #38)
+		if (Directory.Exists(learnedTo)) {
+			throw new ArgumentException($"learned tool settings for \"{a_name.Trim()}\" are there already ({learnedTo}) - pick another name");
 		}
 		File.Copy(a_file, to, false);
 		try {
 			NameInside(to, a_file, a_name.Trim());
 			if (Directory.Exists(learned)) {
-				CopyTree(learned, LearnedDir(to));
+				CopyTree(learned, learnedTo);
 			}
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) {
-			// a copy that did not come out whole is not left as a setup of its own
+			// a copy that did not come out whole is not left as a setup of its own - nor the part of its learned settings already
+			// copied (that folder was not there before this copy: refused above)
 			Files.TryDelete(to);
+			try {
+				if (Directory.Exists(learnedTo)) {
+					Directory.Delete(learnedTo, true);
+				}
+			} catch (Exception e2) when (e2 is IOException or UnauthorizedAccessException) {
+				throw new IOException($"{e.Message} - and the part of its learned settings already copied could not be removed ({learnedTo}): delete that folder, then copy again", e);
+			}
 			throw;
 		}
 		return to;
@@ -84,7 +94,8 @@ public static class SetupFiles
 	// A setup file that carries a name of its own ("name") and called itself after its file keeps doing so under the new name
 	static void NameInside(string a_file, string a_was, string a_name)
 	{
-		if (JsonNode.Parse(Files.ReadShared(a_file)) is not JsonObject root || root["name"]?.GetValue<string>() is not { } inside ||
+		// (a "name" that is no text is left as it is: it was never the file's name)
+		if (JsonNode.Parse(Files.ReadShared(a_file)) is not JsonObject root || root["name"] is not JsonValue v || !v.TryGetValue<string>(out var inside) ||
 		    !string.Equals(inside, Path.GetFileNameWithoutExtension(a_was), StringComparison.OrdinalIgnoreCase)) {
 			return;
 		}
@@ -125,7 +136,9 @@ public static class SetupFiles
 				try {
 					runs.Add(Journal.Load(d));
 				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidDataException) {
-					// a record that does not read names no setup the window could show
+					// A record that does not read may be an unfinished run's, whose put-back reads the setup by the file it names:
+					// nothing moves until it reads (CodeRabbit on pull request #38)
+					throw new InvalidOperationException($"the run record in \"{d}\" could not be read ({e.Message}), so it is not known whether that run still needs this setup - close what holds it, then rename again", e);
 				}
 			}
 		}
@@ -139,7 +152,10 @@ public static class SetupFiles
 			throw new InvalidOperationException($"a folder of learned tool settings for \"{a_name.Trim()}\" is there already ({learnedTo})");
 		}
 		File.Move(a_file, to);
-		// its learned settings go with it, or the file goes back to its old name: the two never part
+		// its learned settings go with it and its own name inside follows, or the file and the folder go back to their old names:
+		// the setup never stands half renamed (CodeRabbit on pull request #38: a name inside that did not write left both moved)
+		var origin = LearnedDir(a_file);
+		var folderMoved = false;
 		try {
 			if (Directory.Exists(learned) && !string.Equals(learned, learnedTo, StringComparison.Ordinal)) {
 				// the same name in other letters: Windows moves a folder onto itself only by way of another name
@@ -149,17 +165,19 @@ public static class SetupFiles
 					learned = between;
 				}
 				Directory.Move(learned, learnedTo);
+				folderMoved = true;
 			}
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			NameInside(to, a_file, a_name.Trim());
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException) {
 			// (a folder half way through a change of letters goes back to its old name too)
-			var origin = LearnedDir(a_file);
-			if (!string.Equals(learned, origin, StringComparison.Ordinal) && Directory.Exists(learned) && !Directory.Exists(origin)) {
+			if (folderMoved && Directory.Exists(learnedTo) && !Directory.Exists(origin)) {
+				Directory.Move(learnedTo, origin);
+			} else if (!string.Equals(learned, origin, StringComparison.Ordinal) && Directory.Exists(learned) && !Directory.Exists(origin)) {
 				Directory.Move(learned, origin);
 			}
 			File.Move(to, a_file);
-			throw new IOException($"its learned tool settings could not be moved ({e.Message}) - the setup keeps its old name", e);
+			throw new IOException($"it could not be renamed whole ({e.Message}) - the setup keeps its old name", e);
 		}
-		NameInside(to, a_file, a_name.Trim());
 		var moved = 0;
 		var notRepointed = new List<string>();
 		foreach (var j in runs.Where(j => Files.SamePath(j.SetupFile, a_file))) {

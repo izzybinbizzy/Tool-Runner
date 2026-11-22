@@ -2866,6 +2866,36 @@ public static class Program
 		Directory.CreateDirectory(Path.Combine(setups, "learned settings", "Leftover", "texgen"));
 		Throws<ArgumentException>(() => SetupFiles.Duplicate(cased.File, "Leftover"), "a copy onto leftover learned settings is refused");
 		Check(!File.Exists(Path.Combine(setups, "Leftover.json")), "and no copy is left");
+		// CodeRabbit on pull request #38: leftover learned settings refuse a copy also of a setup that has learned none
+		Directory.CreateDirectory(Path.Combine(setups, "learned settings", "Named 3", "texgen"));
+		Throws<ArgumentException>(() => SetupFiles.Duplicate(named, "Named 3"), "a copy of a setup without learned settings onto leftover ones is refused");
+		Check(!File.Exists(Path.Combine(setups, "Named 3.json")), "and no copy is left");
+		// a copy whose learned settings stop half way leaves neither the setup nor the part already copied
+		var half = Path.Combine(setups, "Half.json");
+		File.WriteAllText(half, "{ \"name\": \"Half\" }");
+		var halfLearned = Path.Combine(setups, "learned settings", "Half", "texgen");
+		Directory.CreateDirectory(halfLearned);
+		File.WriteAllText(Path.Combine(halfLearned, "a.ini"), "a=1");
+		File.WriteAllText(Path.Combine(halfLearned, "b.ini"), "b=1");
+		using (new FileStream(Path.Combine(halfLearned, "b.ini"), FileMode.Open, FileAccess.Read, FileShare.None)) {
+			Throws<IOException>(() => SetupFiles.Duplicate(half, "Half 2"), "a copy whose learned settings cannot all be read");
+		}
+		Check(!File.Exists(Path.Combine(setups, "Half 2.json")) && !Directory.Exists(Path.Combine(setups, "learned settings", "Half 2")), "leaves no setup and no part of its learned settings");
+		Check(SetupFiles.Duplicate(half, "Half 2") is { } again && File.Exists(again), "so the same copy can be made again");
+		// a rename whose name inside cannot be written: the file and its learned settings are back under the old name
+		var broken = Path.Combine(setups, "Broken.json");
+		File.WriteAllText(broken, "{ \"name\": \"Broken\", ");
+		Directory.CreateDirectory(Path.Combine(setups, "learned settings", "Broken", "texgen"));
+		Throws<IOException>(() => SetupFiles.Rename(broken, "Mended", runs), "a setup whose file does not read is not renamed half way");
+		Check(File.Exists(broken) && !File.Exists(Path.Combine(setups, "Mended.json")) && Directory.Exists(Path.Combine(setups, "learned settings", "Broken", "texgen")) &&
+			!Directory.Exists(Path.Combine(setups, "learned settings", "Mended")), "the file and its learned settings keep the old name");
+		// a run record that does not read may be an unfinished run's: nothing is renamed until it reads
+		var unread = Path.Combine(runs, "2026-01-03 00-00-00 Test");
+		Directory.CreateDirectory(unread);
+		File.WriteAllText(Path.Combine(unread, "journal.json"), "{ not a record");
+		Throws<InvalidOperationException>(() => SetupFiles.Rename(cased.File, "Later", runs), "a run record that does not read refuses a rename");
+		Check(File.Exists(cased.File) && !File.Exists(Path.Combine(setups, "Later.json")), "and nothing was renamed");
+		Directory.Delete(unread, true);
 		// a run that did not finish refuses it
 		new Journal { Folder = mine, SetupFile = cased.File, State = RunState.Running }.Save();
 		Throws<InvalidOperationException>(() => SetupFiles.Rename(cased.File, "Later", runs), "a run that did not finish refuses a rename");
@@ -6503,9 +6533,11 @@ public static class Program
 		// Its author's word (Landscape Fixer, 2026-11-22): its settings file is no stable contract. A file it wrote that no longer
 		// holds a field this program points it with (renamed in a newer version) is not written over: the step stops, names
 		// the field, and says the fault is Tool Runner's to report - never the tool author's
-		Equal<string?>(null, LauncherStep.MissingField("{ \"Mo2InstancePath\": \"C:\\\\M\", \"Mo2ProfileName\": \"A\", \"OutputLocation\": \"C:\\\\O\" }"), "all three fields there");
+		Equal<string?>(null, LauncherStep.MissingField("{ \"Mo2InstancePath\": \"C:\\\\M\", \"Mo2ProfileName\": \"A\", \"GameLocation\": \"C:\\\\G\", \"OutputLocation\": \"C:\\\\O\" }"), "all four fields there");
 		Equal<string?>(null, LauncherStep.MissingField(null), "no file yet: a new one gets them all");
-		Equal("OutputLocation", LauncherStep.MissingField("{ \"Mo2InstancePath\": \"C:\\\\M\", \"Mo2ProfileName\": \"A\", \"OutputFolder\": \"C:\\\\O\" }"), "a renamed field is found");
+		Equal("OutputLocation", LauncherStep.MissingField("{ \"Mo2InstancePath\": \"C:\\\\M\", \"Mo2ProfileName\": \"A\", \"GameLocation\": \"C:\\\\G\", \"OutputFolder\": \"C:\\\\O\" }"), "a renamed field is found");
+		// the game's folder is one of them (CodeRabbit on pull request #38)
+		Equal("GameLocation", LauncherStep.MissingField("{ \"Mo2InstancePath\": \"C:\\\\M\", \"Mo2ProfileName\": \"A\", \"GameDirectory\": \"C:\\\\G\", \"OutputLocation\": \"C:\\\\O\" }"), "the game's folder under another name is found too");
 		Check(LauncherStep.OursToFix("Landscape Fixer").Contains("Tool Runner's GitHub page, never on Landscape Fixer's own page", StringComparison.Ordinal), "and the report goes to Tool Runner");
 	}
 
