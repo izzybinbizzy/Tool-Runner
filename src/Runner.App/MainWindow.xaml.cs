@@ -22,6 +22,7 @@ public partial class MainWindow : Window
 	RunsWatch? _watch;
 	int _woken;
 	bool _demo;
+	bool _wasMaximized;
 	Tray? _tray;
 	// History (the MO2 Changelog is its second view), Settings and Themes: each in a window of its own while it is open
 	readonly Dictionary<string, PanelWindow> _panels = [];
@@ -70,6 +71,12 @@ public partial class MainWindow : Window
 		// nothing moves in a window nobody sees (minimized, or put away while a run goes)
 		void SeenOrNot() => _vm.WindowAway = WindowState == WindowState.Minimized || !IsVisible;
 		StateChanged += (_, _) => SeenOrNot();
+		// how it stood before it was minimized: closed from the taskbar while minimized, it comes back maximized if it was
+		StateChanged += (_, _) => {
+			if (WindowState != WindowState.Minimized) {
+				_wasMaximized = WindowState == WindowState.Maximized;
+			}
+		};
 		// Windows' own "show animations" switch, changed while the window is up: the moving bar follows at once
 		void MotionChanged(object? a_sender, System.ComponentModel.PropertyChangedEventArgs a_e)
 		{
@@ -220,6 +227,7 @@ public partial class MainWindow : Window
 		}
 		if (UiState.Flag("main.maximized")) {
 			WindowState = WindowState.Maximized;
+			_wasMaximized = true;
 		}
 	}
 
@@ -228,10 +236,12 @@ public partial class MainWindow : Window
 		if (App.Headless) {
 			return;
 		}
-		UiState.Set("main.maximized", WindowState == WindowState.Maximized);
-		if (WindowState == WindowState.Normal) {
-			UiState.Set("main.width", ActualWidth);
-			UiState.Set("main.height", ActualHeight);
+		UiState.Set("main.maximized", WindowState == WindowState.Maximized || (WindowState == WindowState.Minimized && _wasMaximized));
+		// maximized or minimized, the size it comes back to is the one Windows keeps for its normal state
+		var normal = WindowState == WindowState.Normal ? new Size(ActualWidth, ActualHeight) : RestoreBounds.Size;
+		if (normal.Width > 0 && normal.Height > 0 && !double.IsInfinity(normal.Width) && !double.IsInfinity(normal.Height)) {
+			UiState.Set("main.width", normal.Width);
+			UiState.Set("main.height", normal.Height);
 		}
 	}
 

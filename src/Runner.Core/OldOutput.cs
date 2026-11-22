@@ -326,10 +326,12 @@ public static class OldOutput
 	// The same as its two parts: a plugin of the mod, and the master of it that the game does not load. A master is loaded when
 	// it is in the game's own Data folder (the game's own plugins load with no line in the plugin list), or when a switched-on
 	// mod or Mod Organizer's overwrite folder holds it AND it is ticked in the plugin list (a_active) - a mod switched on with
-	// that plugin unticked loads no master - or when the switch at hand ticks it: the mod itself and a_with, whose plugins are
-	// ticked together with it. Null: every master is loaded
+	// that plugin unticked loads no master - or when the switch at hand ticks it: a_with, whose plugins are ticked together with
+	// it, and the mod itself when a_ticksItself. At an old output's place the switch ticks every plugin of the mod; a put-back
+	// that finds the mod switched on already lays its ticks back as they were and ticks none of them, so there a master in the
+	// same mod counts only while its plugin is ticked. Null: every master is loaded
 	public static (string Plugin, string Master)? MasterNotOn(Mo2Instance a_mo2, IReadOnlyDictionary<string, char> a_states, IReadOnlyCollection<string> a_active, string a_mod,
-		IEnumerable<string>? a_with = null)
+		IEnumerable<string>? a_with = null, bool a_ticksItself = true)
 	{
 		HashSet<string>? on = null;
 		foreach (var (p, masters) in MastersIn(a_mo2, a_mod)) {
@@ -340,7 +342,7 @@ public static class OldOutput
 				foreach (var m in a_states.Where(s => s.Value == '+').Select(s => s.Key)) {
 					on.UnionWith(Plugins.InMod(a_mo2.ModDir(m)).Where(ticked.Contains));
 				}
-				foreach (var m in (a_with ?? []).Append(a_mod)) {
+				foreach (var m in a_ticksItself ? (a_with ?? []).Append(a_mod) : a_with ?? []) {
 					on.UnionWith(Plugins.InMod(a_mo2.ModDir(m)));
 				}
 			}

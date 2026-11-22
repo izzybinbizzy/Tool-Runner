@@ -1427,7 +1427,8 @@ public static class Runner
 			again = false;
 			foreach (var m in used.ToList()) {
 				var ticks = built.Concat(used).Where(o => !final.TryGetValue(o, out var f) || f != '+' || listedByRun.Contains(o)).ToList();
-				if (OldOutput.MasterNotOn(a_ctx.Mo2, final, active, m, ticks) is not { } miss) {
+				// (a mod that came back switched on keeps its ticks as they were: a master of its own counts only while ticked)
+				if (OldOutput.MasterNotOn(a_ctx.Mo2, final, active, m, ticks, ticks.Contains(m, byName)) is not { } miss) {
 					continue;
 				}
 				used.Remove(m);

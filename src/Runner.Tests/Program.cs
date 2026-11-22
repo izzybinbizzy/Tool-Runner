@@ -2249,6 +2249,38 @@ public static class Program
 			prc.Log.Dispose();
 		}
 
+		// An old output that was switched on before the run gets its ticks back as they were, and the put-back ticks none of its
+		// plugins: a master in that same mod counts only while its plugin is ticked. Unticked, the patch would be on with its
+		// master off - the old output is left off and said. Ticked, it stays on (CodeRabbit on pull request #35)
+		foreach (var masterTicked in new[] { false, true }) {
+			using var ps = new FakeMo2();
+			ps.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+			ps.Mod("Same Mod", ("SameBase.esp", false, []), ("SamePatch.esp", false, ["SameBase.esp"]));
+			var psList = Path.Combine(ps.ProfileDir, "modlist.txt");
+			File.WriteAllText(psList, File.ReadAllText(psList).Replace("+Base Mod", "+Same Mod\r\n+Base Mod", StringComparison.Ordinal));
+			File.AppendAllText(Path.Combine(ps.ProfileDir, "plugins.txt"), (masterTicked ? "*" : "") + "SameBase.esp\r\n*SamePatch.esp\r\n");
+			File.AppendAllText(Path.Combine(ps.ProfileDir, "loadorder.txt"), "SameBase.esp\r\nSamePatch.esp\r\n");
+			var psc = StepContext(ps, "landscapefixer");
+			try {
+				var psSnap = psc.Profile.Snapshot();
+				psc.Journal.UsedOld.Add(new OldUse { Step = "synthesis", Name = "Synthesis", Mod = "Same Mod", Done = true });
+				Runner.PutBack(psc, psSnap);
+				var psActive = ProfileOf(ps).ActivePlugins();
+				if (masterTicked) {
+					Check(ProfileOf(ps).IsOn("Same Mod") && psActive.Contains("SamePatch.esp", StringComparer.OrdinalIgnoreCase) && psActive.Contains("SameBase.esp", StringComparer.OrdinalIgnoreCase),
+						"its master ticked in the same mod: the old output stays on, both plugins ticked: " + string.Join(" | ", psActive));
+					Check(psc.Journal.Notes.All(n => !n.Contains("\"Same Mod\" is left switched off", StringComparison.Ordinal)), "and no note says otherwise");
+				} else {
+					Check(!ProfileOf(ps).IsOn("Same Mod") && !psActive.Contains("SamePatch.esp", StringComparer.OrdinalIgnoreCase),
+						"its master unticked in the same mod: the old output is left off, its patch not ticked: " + string.Join(" | ", psActive));
+					Check(psc.Journal.Notes.Any(n => n.Contains("\"Same Mod\" is left switched off", StringComparison.Ordinal) && n.Contains("SameBase.esp", StringComparison.Ordinal)),
+						"and the run's notes say why: " + string.Join(" | ", psc.Journal.Notes));
+				}
+			} finally {
+				psc.Log.Dispose();
+			}
+		}
+
 		// a copy of a master in Mod Organizer's overwrite folder keeps it there when its mod goes off: what needs it stays on
 		var deps = Mo2Instance.Load(f.Exe, f.Instance);
 		Check(Profile.DependentsOf(deps, ProfileOf(f).States(), ["Output B"]).ContainsKey("Needs B"), "(a mod that needs a plugin of a mod going off goes off with it)");
@@ -2591,16 +2623,32 @@ public static class Program
 		try {
 			var j = new Journal { Folder = dir, UsedOld = [new OldUse { Step = "wryebash", Mod = "Bashed" }, new OldUse { Step = "synthesis", Mod = "Patch On Bashed" }] };
 			j.Save();
-			Task? other = null;
-			var waited = false;
+			// A thread of its own (a pool task may not have started yet) that says when it is about to save; the change goes on
+			// only once Windows has put that thread to sleep on the record's lock - so the save it races is really under way
+			Thread? other = null;
+			bool reached = false, blocked = false, stillWaiting = false;
+			using var started = new ManualResetEventSlim();
 			j.SaveWith(() => {
 				j.UsedOld[0].Done = true;
-				other = Task.Run(j.Save);
-				waited = !other.Wait(TimeSpan.FromMilliseconds(300));
+				other = new Thread(() => {
+					started.Set();
+					j.Save();
+				}) { IsBackground = true };
+				other.Start();
+				reached = started.Wait(TimeSpan.FromSeconds(10));
+				for (var until = Environment.TickCount64 + 10_000; reached && !blocked && other.IsAlive && Environment.TickCount64 < until;) {
+					blocked = (other.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0;
+					if (!blocked) {
+						Thread.Sleep(5);
+					}
+				}
+				Thread.Sleep(100);
+				stillWaiting = other.IsAlive;
 				j.UsedOld[1].Done = true;
 			});
-			Check(waited, "a save on another thread waits while the change is made");
-			Check(other != null && other.Wait(TimeSpan.FromSeconds(10)), "and goes on once it is done");
+			Check(reached, "the other thread reached its save");
+			Check(blocked && stillWaiting, "a save on another thread waits while the change is made");
+			Check(other != null && other.Join(TimeSpan.FromSeconds(10)), "and goes on once it is done");
 			Check(Journal.Load(dir).UsedOld.All(u => u.Done), "what is on disk holds the whole change, never half of it");
 		} finally {
 			try {
