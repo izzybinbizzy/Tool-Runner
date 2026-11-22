@@ -26,9 +26,32 @@ public abstract class LauncherStep : IStep
 		return json.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
 	}
 
+	// The tool's window and its settings file are its author's and may change in any version, with no word to this program: a
+	// failure that comes from reading them is this program's to fix, and says so - its author is never sent the report
+	public static string OursToFix(string a_name) =>
+		$" This is Tool Runner's to fix, not {a_name}'s: a newer {a_name} may have changed its window or its settings file. Report it on Tool Runner's GitHub page, never on {a_name}'s own page.";
+
+	// the fields that decide what the tool reads and where it writes: one renamed in its settings file would leave this
+	// program's value unread, and the tool would build from whatever profile and into whatever folder it was last pointed at
+	static readonly string[] Pointing = ["Mo2InstancePath", "Mo2ProfileName", "OutputLocation"];
+
+	// the first of those fields a settings file the tool already wrote does not hold (null: all there, or no file yet - a new
+	// one gets them all)
+	public static string? MissingField(string? a_settings)
+	{
+		if (a_settings is not { Length: > 0 } || JsonNode.Parse(a_settings) is not JsonObject held || held.Count == 0) {
+			return null;
+		}
+		return Pointing.FirstOrDefault(k => !held.ContainsKey(k));
+	}
+
 	void PointAtThisRun(RunContext a_ctx, string a_output)
 	{
 		var file = SettingsFile(a_ctx);
+		var name = StepCatalog.Name(Key);
+		if (MissingField(File.Exists(file) ? File.ReadAllText(file) : null) is { } gone) {
+			throw new StepFailedException($"{name}'s settings file no longer holds \"{gone}\", which Tool Runner sets to point it at this profile and this output - nothing was changed and {name} was not started." + OursToFix(name));
+		}
 		// the instance is the folder that holds ModOrganizer.ini (its base folder can point elsewhere - a mods folder moved off it)
 		var text = PointedAt(File.Exists(file) ? File.ReadAllText(file) : null, Path.GetDirectoryName(a_ctx.Mo2.IniPath)!, a_ctx.Profile.Name, a_ctx.Mo2.GameDir, a_output);
 		StepKit.KeepFile(a_ctx, file);
@@ -114,14 +137,16 @@ public abstract class LauncherStep : IStep
 		using (new Toggle(a_ctx, [mod, .. a_s.List("enable_during"), .. StepKit.ToolMods(a_ctx, a_s)], a_s.List("disable_during"), name, a_ctx.Cancel)) {
 			try {
 				using var proc = a_ctx.Control.RunExecutable(a_s.Req("executable"), image, a_s.Str("args"), a_ctx.Cancel);
-				var w = StepKit.WaitWindow(a_ctx, image, t => Regex.IsMatch(t, TitleRx), TimeSpan.FromMinutes(3), name + "'s window");
+				// (its window is known by its title: one renamed in a newer version is this program's to follow)
+				var w = Uia.WaitWindow(StepKit.PidsOf(image), t => Regex.IsMatch(t, TitleRx), TimeSpan.FromMinutes(3), a_ctx.Cancel) ??
+					throw new StepFailedException($"{name}'s window did not appear within 3 minutes." + OursToFix(name));
 				// its button, once its window has finished laying itself out (usable, on screen)
 				System.Windows.Automation.AutomationElement? go = null;
 				for (var sw = System.Diagnostics.Stopwatch.StartNew(); go == null; Thread.Sleep(1000)) {
 					a_ctx.Cancel.ThrowIfCancellationRequested();
 					go = Uia.Button(w, names) is { } b && Uia.Usable(b) ? b : null;
 					if (go == null && (Exited(proc) || sw.Elapsed > TimeSpan.FromMinutes(1))) {
-						throw new StepFailedException($"{name} shows no usable {StartNames[0]} button. Its window shows: {WindowSays(w)}");
+						throw new StepFailedException($"{name} shows no usable {StartNames[0]} button. Its window shows: {WindowSays(w)}." + OursToFix(name));
 					}
 				}
 				Uia.Press(go);
@@ -138,7 +163,7 @@ public abstract class LauncherStep : IStep
 						throw new StepFailedException($"{name} closed when {Uia.Name(go)} was pressed");
 					}
 					if (sw.Elapsed > TimeSpan.FromSeconds(30)) {
-						throw new StepFailedException($"{name} did not start working when {Uia.Name(go)} was pressed. Its window shows: {WindowSays(w)}");
+						throw new StepFailedException($"{name} did not start working when {Uia.Name(go)} was pressed. Its window shows: {WindowSays(w)}." + OursToFix(name));
 					}
 				}
 				a_ctx.Activity(Key, name + " is patching");

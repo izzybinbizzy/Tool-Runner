@@ -6490,6 +6490,13 @@ public static class Program
 		Equal(@"C:\M\mods\Out", (string?)at["OutputLocation"], "this run's output");
 		Equal("system", (string?)at["UiTheme"], "the player's other settings stay");
 		Equal("Test", (string?)System.Text.Json.Nodes.JsonNode.Parse(ToolRunner.Steps.LauncherStep.PointedAt(null, @"C:\M", "Test", @"C:\G", @"C:\O"))!["Mo2ProfileName"], "a tool never run before");
+		// Its author's word (Landscape Fixer, 2026-11-22): its settings file is no stable contract. A file it wrote that no longer
+		// holds a field this program points it with (renamed in a newer version) is not written over: the step stops, names
+		// the field, and says the fault is Tool Runner's to report - never the tool author's
+		Equal<string?>(null, LauncherStep.MissingField("{ \"Mo2InstancePath\": \"C:\\\\M\", \"Mo2ProfileName\": \"A\", \"OutputLocation\": \"C:\\\\O\" }"), "all three fields there");
+		Equal<string?>(null, LauncherStep.MissingField(null), "no file yet: a new one gets them all");
+		Equal("OutputLocation", LauncherStep.MissingField("{ \"Mo2InstancePath\": \"C:\\\\M\", \"Mo2ProfileName\": \"A\", \"OutputFolder\": \"C:\\\\O\" }"), "a renamed field is found");
+		Check(LauncherStep.OursToFix("Landscape Fixer").Contains("Tool Runner's GitHub page, never on Landscape Fixer's own page", StringComparison.Ordinal), "and the report goes to Tool Runner");
 	}
 
 	static void T_SynthesisUsesTheGameModOrganizerRuns()
