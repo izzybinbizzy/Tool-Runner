@@ -1027,7 +1027,10 @@ public static partial class InGame
 			const string Again = "the game compiled shaders at this start although this run's shader step had made the cache ready - " +
 				"this start needed shaders that step did not build (a mod switched for this step that changes shaders, or a shader mod that does not keep its cache)";
 			a_ctx.Log.Warn(Again);
-			a_ctx.Note("shaders: " + Again);
+			// once in the run's notes, however many of its game starts it happens at (the log has each)
+			if (!a_ctx.Journal.Notes.Contains("shaders: " + Again)) {
+				a_ctx.Note("shaders: " + Again);
+			}
 		}
 		a_ctx.Activity(a_step, $"loading \"{a_save}\"");
 		a_ctx.Log.Detail($"loading \"{a_save}\"");

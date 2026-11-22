@@ -530,6 +530,12 @@ public sealed partial class MainViewModel : Observable
 		if (Setup?.Root["steps"] is not JsonArray arr) {
 			return;
 		}
+		// the row of a setup that is no longer the one shown (another was picked while its box was worked out): a step of
+		// the same name in the setup shown now is never switched in its place
+		if (!Steps.Contains(a_row)) {
+			Say("Not changed: another setup was picked meanwhile - select the step again.", "warn");
+			return;
+		}
 		if (IsRunning || SetupInUse) {
 			Say("Not changed: a run is using this setup right now.", "bad");
 			return;

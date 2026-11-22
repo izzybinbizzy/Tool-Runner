@@ -349,7 +349,10 @@ public partial class MainWindow : Window
 		_oldAsked = true;
 		try {
 			var (look, whyNot) = await _vm.OldOutputOf(row);
-			if (look == null) {
+			// (the look ran away from the window's thread: the setup it was made for may no longer be the one shown)
+			if (!_vm.Steps.Contains(row)) {
+				_vm.Say("Another setup was picked meanwhile - select the step again.", "warn");
+			} else if (look == null) {
 				Ask.Tell(this, "No old output to use", whyNot ?? "", "OK");
 			} else if (!look.Usable) {
 				Ask.Tell(this, $"{row.Name}'s old output cannot be used", string.Join("\n\n", OldOutput.Warning(look, _vm.Setup?.Profile ?? "")), "OK");
