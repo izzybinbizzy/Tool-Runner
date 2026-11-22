@@ -113,7 +113,7 @@ public partial class MainWindow : Window
 			if (!App.Headless) {
 				// what an install of a new version set aside is removed now, and what that version brings is said once
 				_ = Task.Run(() => ProgramUpdate.CleanUp(AppPaths.Data));
-				SayWhatIsNew();
+				await SayWhatIsNew();
 				await _vm.LookForNewVersion(AppVersion);
 			}
 		};
@@ -1152,22 +1152,25 @@ public partial class MainWindow : Window
 	// ---------------------------------------------------------------- a new version of the program itself
 	// The first start of another version than the last one started here: its own lines of the changelog, and every setup key it
 	// reads differently, in one box - once. A first start ever shows nothing (there is no version before to compare with).
-	void SayWhatIsNew()
+	async Task SayWhatIsNew()
 	{
 		var before = UiState.Text("version.seen");
 		if (before == AppVersion) {
 			return;
 		}
-		UiState.Set("version.seen", AppVersion);
 		if (before == "") {
+			UiState.Set("version.seen", AppVersion);
 			return;
 		}
-		List<string> lines;
-		try {
-			lines = ProgramUpdate.WhatsNew(File.ReadAllText(Path.Combine(Path.GetDirectoryName(AppPaths.Exe) ?? "", "CHANGELOG.txt")), before, AppVersion);
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+		// read off the window's thread (the program's folder may be slow to answer); a changelog that does not read leaves the
+		// version unmarked, so its notice is tried again at the next start instead of lost
+		var changelog = Path.Combine(Path.GetDirectoryName(AppPaths.Exe) ?? "", "CHANGELOG.txt");
+		var now = AppVersion;
+		var lines = await Task.Run(() => ProgramUpdate.ReadWhatsNew(changelog, before, now));
+		if (lines == null || UiState.Text("version.seen") != before) {
 			return;
 		}
+		UiState.Set("version.seen", AppVersion);
 		if (lines.Count > 0) {
 			Ask.Tell(this, $"New in {Brand.Name} {AppVersion}", $"You had version {before} before.\n\n" + string.Join("\n", lines), "Close");
 		}
@@ -1220,8 +1223,12 @@ public partial class MainWindow : Window
 			}
 			CloseSettingsUnasked();
 			string exe;
-			// the window stays until the new files are in place (WorkInHand): closed half way, the program would stand half replaced
-			using (Working($"{Brand.Name} {release.Version} is being installed")) {
+			// The window stays until the new files are in place AND the restart is decided (WorkInHand): closed half way, the program
+			// would stand half replaced, and a close asked for meanwhile must not cut off the start of the new version. A close
+			// asked for while it went happens when the hand is let go - at once on a failure, after the decision on a success
+			var hand = Working($"{Brand.Name} {release.Version} is being installed");
+			var restarted = false;
+			try {
 				try {
 					var progress = new Progress<long>(n => _vm.Say($"Downloading {Brand.Name} {release.Version}: {n / 1024.0 / 1024:0.0} MB ...", ""));
 					var zip = await Task.Run(() => ProgramUpdate.Download(release, AppPaths.Data, progress, CancellationToken.None));
@@ -1231,37 +1238,53 @@ public partial class MainWindow : Window
 					_vm.Say($"Not installed: {e.Message}. Nothing of this version was changed - its download page has the new one.", "bad");
 					return;
 				}
-			}
-			// (settings opened and changed again while the download ran: asked once more - on "keep editing" this window
-			// stays, and the new version starts when the player starts it)
-			if (!LeaveSettings()) {
-				_vm.Say($"{Brand.Name} {release.Version} is installed - close this window when you are done here and start it again.", "warn");
-				return;
-			}
-			// What this window remembers goes into its file NOW, before the new version starts. Both programs read and write
-			// that one file: started first, the new one wrote "the version last seen", and this window's own write as it
-			// closed put the old value back over it - what is new was then shown a second time. With everything written
-			// here (waited for), its close a moment later finds nothing left to write
-			var logWasOut = _logWindow != null;
-			_closingAll = true;
-			KeepSize();
-			ClosePanels();
-			await Task.Run(UiState.Save);
-			try {
-				System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe) { UseShellExecute = true })?.Dispose();
-			} catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) {
-				// this window stays after all: the log, when it was in a window of its own, is shown here again
-				_closingAll = false;
-				if (logWasOut) {
-					ShowLogHere(_logWasHere);
+				restarted = await RestartInto(exe, release.Version);
+			} finally {
+				if (restarted) {
+					// this window closes itself now; a close asked for meanwhile is that same close
+					_closeWhenFree = false;
 				}
-				_vm.Say($"{Brand.Name} {release.Version} is installed, but it did not start by itself ({e.Message}) - close this window and start it again.", "warn");
-				return;
+				hand.Dispose();
 			}
-			Close();
+			if (restarted) {
+				Close();
+			}
 		} finally {
 			_installing = false;
 		}
+	}
+
+	// after an install: settings asked about once more, what this window remembers written, and the new version started -
+	// true when it started and this window is to close
+	async Task<bool> RestartInto(string a_exe, string a_version)
+	{
+		// (settings opened and changed again while the download ran: asked once more - on "keep editing" this window
+		// stays, and the new version starts when the player starts it)
+		if (!LeaveSettings()) {
+			_vm.Say($"{Brand.Name} {a_version} is installed - close this window when you are done here and start it again.", "warn");
+			return false;
+		}
+		// What this window remembers goes into its file NOW, before the new version starts. Both programs read and write
+		// that one file: started first, the new one wrote "the version last seen", and this window's own write as it
+		// closed put the old value back over it - what is new was then shown a second time. With everything written
+		// here (waited for), its close a moment later finds nothing left to write
+		var logWasOut = _logWindow != null;
+		_closingAll = true;
+		KeepSize();
+		ClosePanels();
+		await Task.Run(UiState.Save);
+		try {
+			System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(a_exe) { UseShellExecute = true })?.Dispose();
+		} catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) {
+			// this window stays after all: the log, when it was in a window of its own, is shown here again
+			_closingAll = false;
+			if (logWasOut) {
+				ShowLogHere(_logWasHere);
+			}
+			_vm.Say($"{Brand.Name} {a_version} is installed, but it did not start by itself ({e.Message}) - close this window and start it again.", "warn");
+			return false;
+		}
+		return true;
 	}
 
 	// ---------------------------------------------------------------- a new setup

@@ -120,7 +120,33 @@ public static class ProgramUpdate
 	static string Record(string a_dataDir) => Path.Combine(UpdatesDir(a_dataDir), "installed.json");
 
 	// the same version, however each is written ("v1.1", "1.1.0.0")
-	public static bool SameVersion(string a_a, string a_b) => a_a.Trim() != "" && a_b.Trim() != "" && !ToolUpdates.IsNewer(a_a, a_b) && !ToolUpdates.IsNewer(a_b, a_a);
+	// - and never for a value with no version number in it ("unknown", "")
+	public static bool SameVersion(string a_a, string a_b) =>
+		ToolUpdates.HasVersion(a_a) && ToolUpdates.HasVersion(a_b) && !ToolUpdates.IsNewer(a_a, a_b) && !ToolUpdates.IsNewer(a_b, a_a);
+
+	// GitHub renames an uploaded file whose name holds anything but letters, digits and a few marks ("Tool Runner 1.1.zip" is
+	// listed as "Tool.Runner.1.1.zip"), and its list of a release's files gives the renamed name: two names match when they
+	// are the same once every run of other characters counts as one dot
+	public static bool SameAssetName(string? a_listed, string a_ours) =>
+		a_listed != null && AssetKey(a_listed).Equals(AssetKey(a_ours), StringComparison.OrdinalIgnoreCase);
+
+	static string AssetKey(string a_name)
+	{
+		var b = new System.Text.StringBuilder(a_name.Length);
+		foreach (var c in a_name) {
+			var keep = char.IsAsciiLetterOrDigit(c) || c is '-' or '_';
+			if (keep) {
+				b.Append(c);
+			} else if (b.Length > 0 && b[^1] != '.') {
+				b.Append('.');
+			}
+		}
+		return b.ToString().TrimEnd('.');
+	}
+
+	// the first name the zip holds twice (as Windows sees names: case does not count), or null
+	static string? Twice(ZipArchive a_zip) =>
+		a_zip.Entries.GroupBy(e => e.Name, StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1)?.Key;
 
 	// the newest release and its download - from the program's own repository, or not at all
 	public static async Task<Release> Latest(CancellationToken a_ct)
@@ -128,17 +154,21 @@ public static class ProgramUpdate
 		var o = await (ReleaseProbe?.Invoke(a_ct) ?? ToolUpdates.GitHubRelease(GitHubRepo, a_ct)).ConfigureAwait(false);
 		var version = o?["tag_name"]?.ToString() is { Length: > 0 } tag ? tag : throw new InvalidOperationException("GitHub gave no release");
 		var want = $"{Brand.Name} {version.TrimStart('v', 'V')}.zip";
-		var asset = (o!["assets"] as JsonArray ?? []).OfType<JsonObject>()
-			.FirstOrDefault(a => string.Equals(a["name"]?.ToString(), want, StringComparison.OrdinalIgnoreCase));
+		var asset = (o!["assets"] as JsonArray ?? []).OfType<JsonObject>().FirstOrDefault(a => SameAssetName(a["name"]?.ToString(), want));
 		if (asset?["browser_download_url"]?.ToString() is not { } url) {
 			throw new InvalidOperationException($"the release {version} has no download named \"{want}\" - take it from its page");
+		}
+		// kept under the name GitHub gives it
+		var listed = asset["name"]!.ToString();
+		if (!Setup.PlainName(listed)) {
+			throw new InvalidOperationException($"the release's download is named \"{listed}\", which is no plain file name - take it from its page");
 		}
 		if (!url.StartsWith($"https://github.com/{GitHubRepo}/releases/download/", StringComparison.Ordinal)) {
 			throw new InvalidOperationException("the release's download does not come from the program's own repository - not taken");
 		}
 		var size = asset["size"] is JsonValue sv && sv.TryGetValue<long>(out var n) ? n : 0;
 		var digest = asset["digest"]?.ToString();
-		return new Release(version, want, url, size, digest != null && digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase) ? digest[7..].Trim() : null);
+		return new Release(version, listed, url, size, digest != null && digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase) ? digest[7..].Trim() : null);
 	}
 
 	// The download fetched into the data folder's Updates and checked; returns the zip. Nothing is left behind when it fails.
@@ -157,7 +187,7 @@ public static class ProgramUpdate
 				if (AssetProbe != null) {
 					var from = await AssetProbe(a_r, a_ct).ConfigureAwait(false);
 					await using (from.ConfigureAwait(false)) {
-						await ToolUpdates.Copy(from, to, MaxDownload, a_progress, a_ct).ConfigureAwait(false);
+						await ToolUpdates.CopyWatched(from, to, MaxDownload, a_progress, a_ct).ConfigureAwait(false);
 					}
 				} else {
 					await ToolUpdates.Fetch(a_r.Url, to, MaxDownload, a_progress, a_ct).ConfigureAwait(false);
@@ -200,6 +230,10 @@ public static class ProgramUpdate
 			// its files stand in the zip's root under plain names: nothing of it can land outside the program's own folder
 			if (zip.Entries.FirstOrDefault(e => e.FullName != e.Name || !Setup.PlainName(e.Name)) is { } odd) {
 				return $"the download holds \"{odd.FullName}\", which is no plain file of the program - not installed";
+			}
+			// two entries for one file: the second would be written over the first and over the first's set-aside copy
+			if (Twice(zip) is { } twice) {
+				return $"the download holds {twice} twice - not installed";
 			}
 			if (zip.Entries.FirstOrDefault(e => e.Name.Equals(ProgramFile, StringComparison.OrdinalIgnoreCase)) is not { } exe) {
 				return $"the download holds no {ProgramFile} - not installed";
@@ -248,6 +282,9 @@ public static class ProgramUpdate
 		var swapped = new List<(string File, string? Old)>();
 		try {
 			using (var zip = System.IO.Compression.ZipFile.OpenRead(a_zip)) {
+				if (Twice(zip) is { } twice) {
+					throw new InvalidOperationException($"the download holds {twice} twice - not installed");
+				}
 				foreach (var e in zip.Entries) {
 					if (e.FullName != e.Name || !Setup.PlainName(e.Name)) {
 						throw new InvalidOperationException($"the download holds \"{e.FullName}\", which is no plain file of the program - not installed");
@@ -367,5 +404,16 @@ public static class ProgramUpdate
 			lines.AddRange(keys.Select(k => "- " + k));
 		}
 		return lines;
+	}
+
+	// the same off the changelog file beside the program; null when it cannot be read (then the version is not marked as seen,
+	// and the next start tries again)
+	public static List<string>? ReadWhatsNew(string a_changelog, string a_before, string a_now)
+	{
+		try {
+			return WhatsNew(Files.ReadSharedText(a_changelog), a_before, a_now);
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			return null;
+		}
 	}
 }

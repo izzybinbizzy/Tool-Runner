@@ -86,6 +86,17 @@ public static class Program
 		throw new InvalidOperationException(a_what + ": did not throw " + typeof(TE).Name);
 	}
 
+	// the same, handing back what was thrown (to read its message)
+	static TE Thrown<TE>(Action a_act, string a_what) where TE : Exception
+	{
+		try {
+			a_act();
+		} catch (TE e) {
+			return e;
+		}
+		throw new InvalidOperationException(a_what + ": did not throw " + typeof(TE).Name);
+	}
+
 	// ------------------------------------------------------------------ a fake Mod Organizer on disk
 	sealed class FakeMo2 : IDisposable
 	{
@@ -7024,7 +7035,8 @@ public static class Program
 			["tag_name"] = "v1.1",
 			["assets"] = new JsonArray(
 				new JsonObject { ["name"] = "Source code.zip", ["browser_download_url"] = $"https://github.com/{ProgramUpdate.GitHubRepo}/archive/v1.1.zip", ["size"] = 5 },
-				new JsonObject { ["name"] = a_name ?? $"{Brand.Name} 1.1.zip", ["browser_download_url"] = a_url ?? $"https://github.com/{ProgramUpdate.GitHubRepo}/releases/download/v1.1/Tool.Runner.1.1.zip",
+				// GitHub lists an uploaded "Tool Runner 1.1.zip" under the name it gives it, its space made a dot
+				new JsonObject { ["name"] = a_name ?? $"{Brand.Name.Replace(' ', '.')}.1.1.zip", ["browser_download_url"] = a_url ?? $"https://github.com/{ProgramUpdate.GitHubRepo}/releases/download/v1.1/Tool.Runner.1.1.zip",
 					["size"] = new FileInfo(a_zip).Length, ["digest"] = "sha256:" + (a_sha ?? Sha(a_zip)) }),
 		};
 		var serve = good;
@@ -7057,12 +7069,31 @@ public static class Program
 			serve = Path.Combine(web, "nozip.zip");
 			File.WriteAllText(serve, "this is no zip");
 			Throws<InvalidOperationException>(() => Download(Latest(Answer(serve))), "a download that is no zip");
+			// one file twice (as Windows sees names): the second copy would land on the first and on its set-aside copy
+			var twice = MakeZip("twice.zip", (exeName, "the program, version 1.1"), (exeName.ToUpperInvariant(), "the program, version 1.1"));
+			serve = twice;
+			Throws<InvalidOperationException>(() => Download(Latest(Answer(serve))), "a zip holding one file twice");
+			// a download that stops coming is ended, never waited on for good
+			var quietWas = ToolUpdates.FetchQuiet;
+			ToolUpdates.FetchQuiet = TimeSpan.FromMilliseconds(300);
+			ProgramUpdate.AssetProbe = (_, _) => Task.FromResult<Stream>(new SilentStream(7));
+			try {
+				var clock = System.Diagnostics.Stopwatch.StartNew();
+				Throws<System.Net.Http.HttpRequestException>(() => Download(Latest(Answer(good))), "a download that sends a little and then nothing");
+				Check(clock.Elapsed < TimeSpan.FromSeconds(10), $"ended after the quiet stretch, not later ({clock.Elapsed.TotalSeconds:0.0} s)");
+			} finally {
+				ToolUpdates.FetchQuiet = quietWas;
+				ProgramUpdate.AssetProbe = (_, _) => Task.FromResult<Stream>(File.OpenRead(serve));
+			}
 			Check(NothingLeft(), "none of the refused downloads is kept");
+			// the name as it was uploaded is still the program's own download
+			Equal($"{Brand.Name} 1.1.zip", Latest(Answer(good, a_name: $"{Brand.Name} 1.1.zip")).Asset, "a download listed under its name with spaces");
 
 			// the real thing
 			serve = good;
 			var release = Latest(Answer(good));
 			Equal("v1.1", release.Version, "the release's version");
+			Equal($"{Brand.Name.Replace(' ', '.')}.1.1.zip", release.Asset, "the download found under the name GitHub lists, and kept under it");
 			var zip = Download(release);
 			Check(File.Exists(zip) && Path.GetDirectoryName(zip) == ProgramUpdate.UpdatesDir(data) && !File.Exists(zip + ".part"), "the checked download is in the data folder's Updates, whole");
 			File.WriteAllText(Path.Combine(program, exeName), "the program, version 1.0");
@@ -7096,6 +7127,10 @@ public static class Program
 			}
 			Equal("the program, version 1.0", File.ReadAllText(Path.Combine(program, exeName)), "and nothing was touched");
 
+			// a zip holding one file twice is refused before anything is written
+			Throws<InvalidOperationException>(() => ProgramUpdate.Install(twice, program, data), "an install of a zip holding one file twice");
+			Equal("README.txt," + exeName, string.Join(",", Directory.GetFiles(program).Select(Path.GetFileName).OrderBy(n => n, StringComparer.Ordinal)), "and nothing was written or set aside");
+
 			var started = ProgramUpdate.Install(zip, program, data);
 			Equal(Path.Combine(program, exeName), started, "the program to start again");
 			Equal("the program, version 1.1", File.ReadAllText(started), "the new program is in place");
@@ -7121,6 +7156,15 @@ public static class Program
 			var fromBefore = ProgramUpdate.WhatsNew(log, "0.9", "1.1");
 			Check(fromBefore.Any(l => l.Contains("directoryCache", StringComparison.Ordinal)) && fromBefore[0] == "- A new thing.", "coming from before 1.0, the setup key 1.0 reads differently is named too");
 			Check(ProgramUpdate.SameVersion("v1.1", "1.1.0.0") && !ProgramUpdate.SameVersion("1.1", "1.2") && !ProgramUpdate.SameVersion("", "1.1"), "a version is the same however it is written");
+			Check(!ProgramUpdate.SameVersion("unknown", "v1.1") && !ProgramUpdate.SameVersion("v1.1", "unknown"), "and a value with no version in it is never the same as one");
+			serve = MakeZip("unknown.zip", (exeName, "the program, no version"));
+			ProgramUpdate.VersionOf = f => File.ReadAllText(f).Contains("version 1.1", StringComparison.Ordinal) ? "1.1.0.0" : "unknown";
+			Throws<InvalidOperationException>(() => Download(Latest(Answer(serve))), "a program that says no version at all");
+			// the changelog read off its file: one that does not read gives nothing (the version is then not marked as seen)
+			var changelog = Path.Combine(top, "CHANGELOG.txt");
+			Check(ProgramUpdate.ReadWhatsNew(changelog, "1.0", "1.1") == null, "a changelog that is not there");
+			File.WriteAllText(changelog, log);
+			Equal("- A new thing.|  It goes on here.", string.Join("|", ProgramUpdate.ReadWhatsNew(changelog, "1.0", "1.1") ?? []), "a changelog read off its file");
 		} finally {
 			ProgramUpdate.ReleaseProbe = null;
 			ProgramUpdate.AssetProbe = null;
@@ -7129,6 +7173,96 @@ public static class Program
 				Directory.Delete(top, true);
 			} catch (IOException) {
 			}
+		}
+	}
+
+	// a download that gives a_first bytes and then nothing more, until it is cancelled
+	sealed class SilentStream(int a_first) : Stream
+	{
+		int _left = a_first;
+
+		public override async ValueTask<int> ReadAsync(Memory<byte> a_buffer, CancellationToken a_ct = default)
+		{
+			if (_left > 0) {
+				var n = Math.Min(_left, a_buffer.Length);
+				a_buffer.Span[..n].Fill((byte)'x');
+				_left -= n;
+				return n;
+			}
+			await Task.Delay(Timeout.Infinite, a_ct).ConfigureAwait(false);
+			return 0;
+		}
+
+		public override bool CanRead => true;
+		public override bool CanSeek => false;
+		public override bool CanWrite => false;
+		public override long Length => throw new NotSupportedException();
+		public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+		public override void Flush() { }
+		public override int Read(byte[] a_buffer, int a_offset, int a_count) => throw new NotSupportedException();
+		public override long Seek(long a_offset, SeekOrigin a_origin) => throw new NotSupportedException();
+		public override void SetLength(long a_value) => throw new NotSupportedException();
+		public override void Write(byte[] a_buffer, int a_offset, int a_count) => throw new NotSupportedException();
+	}
+
+	// CodeRabbit on pull request #37: the client's own timeout covers only an answer's headers. A server on this PC that sends its
+	// headers and then nothing is ended after the quiet stretch, and one that keeps sending a byte now and then by the deadline
+	static void T_ADownloadThatStopsComingIsEnded()
+	{
+		var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+		listener.Start();
+		var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+		using var stop = new CancellationTokenSource();
+		// each connection: the request read, headers promising more than is sent, then a byte every a_every ms (or nothing)
+		async Task Serve(int a_every)
+		{
+			using var client = await listener.AcceptTcpClientAsync(stop.Token);
+			var s = client.GetStream();
+			var buf = new byte[4096];
+			// the request's first piece is enough: the answer goes out whatever it asked
+			if (await s.ReadAsync(buf, stop.Token) == 0) {
+				return;
+			}
+			await s.WriteAsync("HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\nabc"u8.ToArray(), stop.Token);
+			try {
+				while (!stop.IsCancellationRequested) {
+					await Task.Delay(a_every <= 0 ? Timeout.Infinite : a_every, stop.Token);
+					await s.WriteAsync("x"u8.ToArray(), stop.Token);
+				}
+			} catch (Exception e) when (e is OperationCanceledException or IOException) {
+			}
+		}
+		var quietWas = ToolUpdates.FetchQuiet;
+		var deadlineWas = ToolUpdates.FetchDeadline;
+		try {
+			var url = $"http://127.0.0.1:{port}/Tool.Runner.1.1.zip";
+			ToolUpdates.FetchQuiet = TimeSpan.FromMilliseconds(400);
+			_ = Serve(0);
+			var clock = System.Diagnostics.Stopwatch.StartNew();
+			using (var to = new MemoryStream()) {
+				var e = Thrown<System.Net.Http.HttpRequestException>(() => ToolUpdates.Fetch(url, to, 1 << 20, null, CancellationToken.None).GetAwaiter().GetResult(), "headers, then nothing");
+				Check(e.Message.Contains("nothing came", StringComparison.Ordinal) && clock.Elapsed < TimeSpan.FromSeconds(10), $"ended as stopped, after the quiet stretch ({clock.Elapsed.TotalSeconds:0.0} s: {e.Message})");
+			}
+			ToolUpdates.FetchQuiet = TimeSpan.FromSeconds(5);
+			ToolUpdates.FetchDeadline = TimeSpan.FromMilliseconds(1500);
+			_ = Serve(100);
+			clock.Restart();
+			using (var to = new MemoryStream()) {
+				var e = Thrown<System.Net.Http.HttpRequestException>(() => ToolUpdates.Fetch(url, to, 1 << 20, null, CancellationToken.None).GetAwaiter().GetResult(), "a byte now and then, past the deadline");
+				Check(e.Message.Contains("did not finish", StringComparison.Ordinal) && clock.Elapsed < TimeSpan.FromSeconds(10) && to.Length > 3, $"ended by the deadline, with what had come so far ({clock.Elapsed.TotalSeconds:0.0} s, {to.Length} bytes: {e.Message})");
+			}
+			// the caller's own cancel stays a cancel
+			using (var mine = new CancellationTokenSource(300))
+			using (var to = new MemoryStream()) {
+				ToolUpdates.FetchDeadline = TimeSpan.FromMinutes(1);
+				_ = Serve(0);
+				Throws<OperationCanceledException>(() => ToolUpdates.Fetch(url, to, 1 << 20, null, mine.Token).GetAwaiter().GetResult(), "the caller's own cancel");
+			}
+		} finally {
+			ToolUpdates.FetchQuiet = quietWas;
+			ToolUpdates.FetchDeadline = deadlineWas;
+			stop.Cancel();
+			listener.Stop();
 		}
 	}
 
