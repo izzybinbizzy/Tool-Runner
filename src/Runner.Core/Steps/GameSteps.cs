@@ -344,12 +344,17 @@ public sealed class ShaderStep : IStep
 			}
 			string boot;
 			try {
-				boot = JsonNode.Parse(Files.ReadShared(a_file), null, new System.Text.Json.JsonDocumentOptions { CommentHandling = System.Text.Json.JsonCommentHandling.Skip, AllowTrailingCommas = true })
+				// (a file saved with a byte order mark reads all the same)
+				var text = Files.ReadShared(a_file).AsSpan();
+				if (text.StartsWith<byte>([0xEF, 0xBB, 0xBF])) {
+					text = text[3..];
+				}
+				boot = JsonNode.Parse(text, null, new System.Text.Json.JsonDocumentOptions { CommentHandling = System.Text.Json.JsonCommentHandling.Skip, AllowTrailingCommas = true })
 					is JsonObject o && o[BootKey] is JsonObject off
 					? string.Join("|", off.Select(kv => kv.Key + "=" + (kv.Value?.ToJsonString() ?? "null")).Order(StringComparer.Ordinal))
 					: "";
-			} catch (System.Text.Json.JsonException) {
-				// a file that does not read as settings counts whole, as before
+			} catch (Exception e) when (e is System.Text.Json.JsonException or ArgumentException) {
+				// a file that does not read as settings (no JSON, or a name twice in one object) counts whole, as before
 				Add(a_file);
 				return;
 			}

@@ -1560,6 +1560,11 @@ public static class Program
 		Check((ShaderStep.WhyStale(mo2, c, p) ?? "").Contains("holds 0 shader(s)", StringComparison.Ordinal), "a cache that lost its shaders says so: " + ShaderStep.WhyStale(mo2, c, p));
 		File.Delete(stamp);
 		Check((ShaderStep.WhyStale(mo2, c, p) ?? "").Contains("no record", StringComparison.Ordinal), "no stamp: built, and the reason is said");
+		// a file saved with a byte order mark is the same settings
+		File.WriteAllText(settings, """{ "Disable at Boot": { "Skylighting": true } }""", new UTF8Encoding(false));
+		var plain = ShaderStep.Fingerprint(mo2, c, p);
+		File.WriteAllText(settings, """{ "Menu": 1, "Disable at Boot": { "Skylighting": true } }""", new UTF8Encoding(true));
+		Equal(plain, ShaderStep.Fingerprint(mo2, c, p), "a byte order mark in front of the settings changes nothing");
 		// a settings file that does not read counts whole
 		File.WriteAllText(settings, "not settings at all");
 		var unread = ShaderStep.Fingerprint(mo2, c, p);
