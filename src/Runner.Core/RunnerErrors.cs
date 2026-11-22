@@ -122,7 +122,7 @@ public static class RunnerErrors
 			"When the message says \"in this run\", leaving the tools after that step out of the run works too."),
 		E("TR-322", "could not be switched on: its line is no longer in the mod list|could not be switched on: their lines are no longer in the mod list",
 			"An old output was to be switched on at its step's place, and its line was gone from the profile's mod list by then (taken out while the run went on).",
-			"Press F5 in Mod Organizer so it lists that mod again (or put the mod back in its mods folder), then run again from that step."),
+			"Press F5 in Mod Organizer so it lists that mod again (or put the mod back in its mods folder), then start the run again the way you started it - the step stays set to use its old output."),
 		E("TR-312", "is not in this profile's mod list", "A mod this step names is not in this profile's mod list.",
 			"Install the mod or correct its name: in Mod Organizer, or in Settings > Steps where the step names it."),
 

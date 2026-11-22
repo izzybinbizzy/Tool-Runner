@@ -228,6 +228,12 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 		}
 		MustBeClosed("the mod list");
 		var (lines, nl, how) = ReadLines(ModList);
+		// A list in the PC's own code page cannot hold every name: written there, a letter it lacks becomes "?" and the line
+		// no longer names the mod (nothing could find it again, and each try added a line). Such a name is refused, nothing written
+		if (how.GetString(how.GetBytes(a_mod)) != a_mod) {
+			throw new IOException($"the mod list is written in this PC's own code page ({how.WebName}), which cannot hold the name \"{a_mod}\" - " +
+				"rename that mod with letters it can hold, or let Mod Organizer write its mod list again (it writes UTF-8)");
+		}
 		var at = lines.FindIndex(l => l.Length > 1 && l[0] is '+' or '-' or '*');
 		lines.Insert(at < 0 ? lines.Count : at, "-" + a_mod);
 		WriteLines(ModList, lines, nl, how);
@@ -559,6 +565,9 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 			}
 			var (lines, nl, how) = ReadPluginFile(p);
 			var before = lines.ToList();
+			// the plugin last placed after each anchor in this call: several new plugins at one anchor keep their master order,
+			// each going after the one placed there before it (each at the anchor itself put the later one first)
+			var lastAt = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 			foreach (var (pl, path) in news) {
 				var i = lines.FindIndex(l => string.Equals(Bare(l), pl, StringComparison.OrdinalIgnoreCase));
 				if (i >= 0) {
@@ -572,7 +581,9 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 				var anchor = a_placeAfter != null && a_placeAfter.TryGetValue(pl, out var an) ? an.ToLowerInvariant() : "";
 				var ai = anchor == "" ? -1 : lines.FindIndex(l => Bare(l) == anchor);
 				if (ai >= 0) {
-					pos = ai + 1;
+					var prev = lastAt.TryGetValue(anchor, out var placed) ? lines.FindIndex(l => string.Equals(Bare(l), placed, StringComparison.OrdinalIgnoreCase)) : -1;
+					pos = (prev >= 0 ? prev : ai) + 1;
+					lastAt[anchor] = pl;
 				} else if (Plugins.IsMaster(path)) {
 					paths ??= PluginPaths();
 					var last = -1;

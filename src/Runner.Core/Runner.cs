@@ -800,6 +800,17 @@ public static class Runner
 			throw new StepFailedException($"{string.Join(", ", notOn.Select(m => $"the old output \"{m}\""))} could not be switched on: {(notOn.Count == 1 ? "its line is" : "their lines are")} no longer in the mod list " +
 				"(taken out while the run went on?) - the tools after this place would run without it");
 		}
+		// Their masters looked at again, as the profile stands after the wait for Mod Organizer to close: a master the player
+		// unticked in that wait (or while Mod Organizer stayed open) would leave the next tool a plugin with its master off. The
+		// run stops before anything of the group is ticked or carried out
+		if (a_todo.Skip(a_at).Any(s => s.Key != "playsave")) {
+			var ticked = a_ctx.Profile.ActivePlugins();
+			for (var i = 0; i < a_due.Count; ++i) {
+				if (OldOutput.MasterOffNow(a_ctx.Mo2, after, ticked, mods[i], mods) is { } needs) {
+					throw new StepFailedException($"{StepCatalog.Name(a_due[i].Key)}: its old output cannot be used in this run: {needs} - the tools after it would find that plugin with a master missing");
+				}
+			}
+		}
 		// Every plugin of each of them ticked, in master order - also of one whose mod was on already (switched on in Mod
 		// Organizer during an earlier tool, its plugin left unticked): the next tool finds each plugin it was promised
 		a_ctx.Profile.ActivatePlugins(each, a_ctx.Setup.PlaceAfter);

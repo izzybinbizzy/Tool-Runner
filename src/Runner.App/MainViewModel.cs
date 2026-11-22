@@ -898,8 +898,10 @@ public sealed partial class MainViewModel : Observable
 	// True: go on with the start. Shown once, for a setup that has never run and has a tool to set up; what does not read here
 	// is the start's own first finding. a_cannot: what stops the start, asked again once the box has closed (a tool may have
 	// been open for minutes). a_stillPicked: a single run's setup is still the one picked in the window - asked once the
-	// tools are read, before the box opens: another setup picked meanwhile never gets this one's box
-	async Task<bool> ToolsFirst(string a_file, Func<Setup> a_read, Func<string?> a_cannot, Func<bool>? a_stillPicked = null)
+	// tools are read, before the box opens: another setup picked meanwhile never gets this one's box. a_unchanged: no change
+	// was saved into the setup while its tools were read (a step switched on then is not in the list read, and the box would
+	// be skipped or show too few tools) - asked before anything is decided from that list; the offer stays open for the next START
+	async Task<bool> ToolsFirst(string a_file, Func<Setup> a_read, Func<string?> a_cannot, Func<bool>? a_stillPicked = null, Func<bool>? a_unchanged = null)
 	{
 		var key = ToolsOfferedKey(a_file);
 		if (OfferTools == null || UiState.Flag(key)) {
@@ -915,6 +917,10 @@ public sealed partial class MainViewModel : Observable
 			});
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException) {
 			return true;
+		}
+		if (a_unchanged != null && !a_unchanged()) {
+			Say("Not started: the setup changed while its tools were read - press Start again.", "warn");
+			return false;
 		}
 		if (!ToolSettings.OfferFirst(ran, false, tools.Count)) {
 			return true;
@@ -978,7 +984,8 @@ public sealed partial class MainViewModel : Observable
 				// (its tools are read from a copy made here: the worker never walks the shown setup's own step list, which a
 				// step dragged meanwhile rewrites under it)
 				var asItIs = mine.Clone();
-				if (!await ToolsFirst(mine.File, () => asItIs, CannotStart, () => string.Equals(SelectedSetup?.File, picked, StringComparison.OrdinalIgnoreCase))) {
+				var edits = _setupEdits;
+				if (!await ToolsFirst(mine.File, () => asItIs, CannotStart, () => string.Equals(SelectedSetup?.File, picked, StringComparison.OrdinalIgnoreCase), () => _setupEdits == edits)) {
 					return;
 				}
 			} finally {

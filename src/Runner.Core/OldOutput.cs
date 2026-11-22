@@ -334,9 +334,14 @@ public static class OldOutput
 		IEnumerable<string>? a_with = null, bool a_ticksItself = true)
 	{
 		HashSet<string>? on = null;
+		var ticked = new HashSet<string>(a_active, StringComparer.OrdinalIgnoreCase);
 		foreach (var (p, masters) in MastersIn(a_mo2, a_mod)) {
+			// a plugin of the mod that stays unticked loads nothing and needs nothing: only one the profile will load is judged
+			// (where the switch at hand ticks none of the mod's plugins, that is one ticked now)
+			if (!a_ticksItself && !ticked.Contains(p)) {
+				continue;
+			}
 			if (on == null) {
-				var ticked = new HashSet<string>(a_active, StringComparer.OrdinalIgnoreCase);
 				on = new HashSet<string>(Plugins.InMod(Path.Combine(a_mo2.GameDir, "Data")), StringComparer.OrdinalIgnoreCase);
 				on.UnionWith(Plugins.InMod(a_mo2.OverwriteDir).Where(ticked.Contains));
 				foreach (var m in a_states.Where(s => s.Value == '+').Select(s => s.Key)) {

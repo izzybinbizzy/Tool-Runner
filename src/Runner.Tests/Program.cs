@@ -2252,21 +2252,27 @@ public static class Program
 		// An old output that was switched on before the run gets its ticks back as they were, and the put-back ticks none of its
 		// plugins: a master in that same mod counts only while its plugin is ticked. Unticked, the patch would be on with its
 		// master off - the old output is left off and said. Ticked, it stays on (CodeRabbit on pull request #35)
-		foreach (var masterTicked in new[] { false, true }) {
+		// (and with both unticked - an optional patch and its optional master left off by the player - the mod's other plugin
+		// that is ticked keeps it on: a plugin that stays unticked needs nothing, CodeRabbit's seventh round)
+		foreach (var (masterTicked, patchTicked) in new[] { (false, true), (true, true), (false, false) }) {
 			using var ps = new FakeMo2();
 			ps.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
-			ps.Mod("Same Mod", ("SameBase.esp", false, []), ("SamePatch.esp", false, ["SameBase.esp"]));
+			ps.Mod("Same Mod", ("SameBase.esp", false, []), ("SamePatch.esp", false, ["SameBase.esp"]), ("SameOther.esp", false, []));
 			var psList = Path.Combine(ps.ProfileDir, "modlist.txt");
 			File.WriteAllText(psList, File.ReadAllText(psList).Replace("+Base Mod", "+Same Mod\r\n+Base Mod", StringComparison.Ordinal));
-			File.AppendAllText(Path.Combine(ps.ProfileDir, "plugins.txt"), (masterTicked ? "*" : "") + "SameBase.esp\r\n*SamePatch.esp\r\n");
-			File.AppendAllText(Path.Combine(ps.ProfileDir, "loadorder.txt"), "SameBase.esp\r\nSamePatch.esp\r\n");
+			File.AppendAllText(Path.Combine(ps.ProfileDir, "plugins.txt"), (masterTicked ? "*" : "") + "SameBase.esp\r\n" + (patchTicked ? "*" : "") + "SamePatch.esp\r\n*SameOther.esp\r\n");
+			File.AppendAllText(Path.Combine(ps.ProfileDir, "loadorder.txt"), "SameBase.esp\r\nSamePatch.esp\r\nSameOther.esp\r\n");
 			var psc = StepContext(ps, "landscapefixer");
 			try {
 				var psSnap = psc.Profile.Snapshot();
 				psc.Journal.UsedOld.Add(new OldUse { Step = "synthesis", Name = "Synthesis", Mod = "Same Mod", Done = true });
 				Runner.PutBack(psc, psSnap);
 				var psActive = ProfileOf(ps).ActivePlugins();
-				if (masterTicked) {
+				if (!patchTicked) {
+					Check(ProfileOf(ps).IsOn("Same Mod") && psActive.Contains("SameOther.esp", StringComparer.OrdinalIgnoreCase) && !psActive.Contains("SamePatch.esp", StringComparer.OrdinalIgnoreCase),
+						"the patch and its master both unticked: the old output stays on as the player had it: " + string.Join(" | ", psActive));
+					Check(psc.Journal.Notes.All(n => !n.Contains("\"Same Mod\" is left switched off", StringComparison.Ordinal)), "and is not said to be left off");
+				} else if (masterTicked) {
 					Check(ProfileOf(ps).IsOn("Same Mod") && psActive.Contains("SamePatch.esp", StringComparer.OrdinalIgnoreCase) && psActive.Contains("SameBase.esp", StringComparer.OrdinalIgnoreCase),
 						"its master ticked in the same mod: the old output stays on, both plugins ticked: " + string.Join(" | ", psActive));
 					Check(psc.Journal.Notes.All(n => !n.Contains("\"Same Mod\" is left switched off", StringComparison.Ordinal)), "and no note says otherwise");
@@ -2280,6 +2286,36 @@ public static class Program
 				psc.Log.Dispose();
 			}
 		}
+
+		// A master the player unticks while the run waits for Mod Organizer to close at the old output's place - after the old
+		// output was looked at, before its plugins are ticked: looked at again there, the run stops, nothing of it ticked or
+		// carried out, and the tool after it never runs (CodeRabbit's seventh round; the mod list's line is given in that wait,
+		// which is where this test unticks the master)
+		using var pw = new FakeMo2();
+		pw.Mod("Old Patch", ("OldPatch.esp", false, ["BaseMod.esp"]));
+		var pwPlugins = Path.Combine(pw.ProfileDir, "plugins.txt");
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp")));
+		var pwTexGen = false;
+		StepRegistry.Replace(new FakeStep("texgen", (ctx, s) => pwTexGen = true));
+		var inTheWait = pw.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("synthesis", new JsonObject { ["output_mod"] = "Old Patch" }),
+			("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		((JsonArray)inTheWait.Root["steps"]!)[1]![OldOutput.Key] = true;
+		inTheWait.Save();
+		Profile.AfterListMod = m => {
+			if (m == "Old Patch") {
+				File.WriteAllText(pwPlugins, File.ReadAllText(pwPlugins).Replace("*BaseMod.esp", "BaseMod.esp", StringComparison.Ordinal));
+			}
+		};
+		try {
+			ran = Runner.Run(new RunRequest(pw.SetupFile, pw.Data));
+		} finally {
+			Profile.AfterListMod = null;
+		}
+		Equal(RunState.Failed, ran.State, ran.Verdict);
+		Check(ran.Verdict.Contains("OldPatch.esp needs BaseMod.esp, which is not switched on at this point of the run", StringComparison.Ordinal), "a master unticked in the wait stops the run there: " + ran.Verdict);
+		Check(!pwTexGen, "the tool after that place did not run");
+		Check(Journal.Load(ran.Folder!).UsedOld.All(u => !u.Done), "nothing of it is on record as carried out");
+		Check(!ProfileOf(pw).ActivePlugins().Contains("OldPatch.esp", StringComparer.OrdinalIgnoreCase), "and its plugin was never ticked");
 
 		// a copy of a master in Mod Organizer's overwrite folder keeps it there when its mod goes off: what needs it stays on
 		var deps = Mo2Instance.Load(f.Exe, f.Instance);
@@ -2620,19 +2656,25 @@ public static class Program
 	{
 		var dir = Path.Combine(Path.GetTempPath(), "mo2 tool runner tests", "record " + Guid.NewGuid().ToString("N")[..8]);
 		Directory.CreateDirectory(dir);
+		// (the worker's own failure is kept and said here: one left to its thread would end the whole test run)
+		Thread? other = null;
+		Exception? failed = null;
 		try {
 			var j = new Journal { Folder = dir, UsedOld = [new OldUse { Step = "wryebash", Mod = "Bashed" }, new OldUse { Step = "synthesis", Mod = "Patch On Bashed" }] };
 			j.Save();
 			// A thread of its own (a pool task may not have started yet) that says when it is about to save; the change goes on
 			// only once Windows has put that thread to sleep on the record's lock - so the save it races is really under way
-			Thread? other = null;
 			bool reached = false, blocked = false, stillWaiting = false;
 			using var started = new ManualResetEventSlim();
 			j.SaveWith(() => {
 				j.UsedOld[0].Done = true;
 				other = new Thread(() => {
 					started.Set();
-					j.Save();
+					try {
+						j.Save();
+					} catch (Exception e) when (e is not OutOfMemoryException) {
+						failed = e;
+					}
 				}) { IsBackground = true };
 				other.Start();
 				reached = started.Wait(TimeSpan.FromSeconds(10));
@@ -2649,13 +2691,49 @@ public static class Program
 			Check(reached, "the other thread reached its save");
 			Check(blocked && stillWaiting, "a save on another thread waits while the change is made");
 			Check(other != null && other.Join(TimeSpan.FromSeconds(10)), "and goes on once it is done");
+			Check(failed == null, "the other thread's save went through: " + failed?.Message);
 			Check(Journal.Load(dir).UsedOld.All(u => u.Done), "what is on disk holds the whole change, never half of it");
 		} finally {
+			// the worker is done with the folder before it goes
+			other?.Join(TimeSpan.FromSeconds(10));
 			try {
 				Directory.Delete(dir, true);
 			} catch (IOException) {
 			} catch (UnauthorizedAccessException) {
 			}
+		}
+	}
+
+	// CodeRabbit's seventh round on pull request #35: a mod list in the PC's own code page cannot hold every name - one it would
+	// write as "?" is refused and nothing is written; a name it can hold goes in as before. And several new plugins placed
+	// after one anchor keep their master order in both plugin files
+	static void T_TheModListRefusesANameItCannotHold()
+	{
+		using var f = new FakeMo2();
+		var list = Path.Combine(f.ProfileDir, "modlist.txt");
+		var ansi = Files.AnsiEncoding;
+		// a line with a letter in that code page that is no valid UTF-8 makes the list read as written in it
+		var accent = "Mod été";
+		if (ansi.GetString(ansi.GetBytes(accent)) != accent || ansi.CodePage == 65001) {
+			Console.WriteLine("  (skipped: this PC's code page cannot hold the test's own accented name)");
+			return;
+		}
+		File.WriteAllBytes(list, ansi.GetBytes(File.ReadAllText(list).Replace("+Base Mod", "+" + accent + "\r\n+Base Mod", StringComparison.Ordinal)));
+		var before = File.ReadAllBytes(list);
+		var p = ProfileOf(f);
+		Throws<IOException>(() => p.ListMod("漢字 Output"), "a name the list's code page cannot hold is refused");
+		Check(File.ReadAllBytes(list).SequenceEqual(before), "and nothing was written");
+		Check(p.ListMod("Café Output") && p.States().ContainsKey("Café Output"), "a name it can hold goes in and is found again");
+		Check(p.States().ContainsKey(accent), "the line that was there is read as before");
+
+		// two new plugins after one anchor, the master given first: both files keep master, then the plugin that needs it
+		f.Mod("Pair", ("PairBase.esp", false, []), ("PairPatch.esp", false, ["PairBase.esp"]));
+		var anchor = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["PairBase.esp"] = "BaseMod.esp", ["PairPatch.esp"] = "BaseMod.esp" };
+		ProfileOf(f).ActivatePlugins(["Pair"], anchor);
+		foreach (var file in new[] { "loadorder.txt", "plugins.txt" }) {
+			var lines = f.Text(file).Replace("\r\n", "\n").Split('\n').Select(l => l.TrimStart('*')).ToList();
+			var at = lines.IndexOf("BaseMod.esp");
+			Check(at >= 0 && lines.IndexOf("PairBase.esp") == at + 1 && lines.IndexOf("PairPatch.esp") == at + 2, $"{file}: right after the anchor, the master first: " + string.Join(" | ", lines));
 		}
 	}
 
