@@ -13,9 +13,11 @@ public static class OldOutput
 {
 	public const string Key = "useOld";
 
-	// nothing of their own to keep: the save steps and the sort make no output mod, and the shader caches have their own
-	// setting for when they are built again (the setup's "shaderRebuild")
-	static readonly HashSet<string> s_never = ["shaders", "cleansave", "playsave", "loot"];
+	// nothing of their own to keep: the save steps and the sort make no output mod, the shader caches have their own setting
+	// for when they are built again (the setup's "shaderRebuild"), and the three tools that rewrite a player's own mods change
+	// files where they stand (what xEdit's cleaning keeps in its output mod are only copies of the game's own plugins)
+	static readonly HashSet<string> s_inPlace = ["xeditclean", "cao", "nifoptimizer"];
+	static readonly HashSet<string> s_never = ["shaders", "cleansave", "playsave", "loot", .. s_inPlace];
 
 	// a step that builds into an output mod of its own (every one of these has its own words in the table below)
 	public static bool MakesOutput(string a_step) => !s_never.Contains(a_step);
@@ -25,6 +27,7 @@ public static class OldOutput
 	// why a step has no old output to use, for the window (null = it has)
 	public static string? WhyNot(string a_step, StepSettings a_s) => a_step switch {
 		"shaders" => "The shader caches have their own setting for this: Settings > Game steps > Rebuild shader caches (when the shader mod changed, every run, never).",
+		_ when s_inPlace.Contains(a_step) => $"{StepCatalog.Name(a_step)} changes files of your own mods where they stand, so there is no output of its own to use again. To leave your mods as they are, untick the step.",
 		_ when s_never.Contains(a_step) => $"{StepCatalog.Name(a_step)} makes no output of its own, so there is nothing old to use.",
 		_ when a_s.OutputMod == null => $"{StepCatalog.Name(a_step)} has no output mod set (Settings > Steps), so there is nothing old to use.",
 		_ => null,

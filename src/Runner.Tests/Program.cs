@@ -1926,6 +1926,12 @@ public static class Program
 		Check(odd.KeptSteps.Count == 0 && odd.EnabledSteps.Any(x => x.Key == "cleansave"), "a step with no output of its own runs as ever, whatever the setting says");
 		Check(OldOutput.WhyNot("cleansave", new StepSettings([])) is { } why && why.Contains("makes no output of its own", StringComparison.Ordinal), "and the window says why it has nothing to use");
 		Check(OldOutput.WhyNot("shaders", new StepSettings([]))!.Contains("Rebuild shader caches", StringComparison.Ordinal), "the shader caches point at their own setting");
+		// the three tools that rewrite a player's own mods make no output to use again - also xEdit's cleaning, whose output mod
+		// only holds its copies of the game's own plugins
+		foreach (var key in new[] { XEditCleanStep.StepKey, "cao", "nifoptimizer" }) {
+			Check(!OldOutput.CanKeep(key, new StepSettings(new JsonObject { ["output_mod"] = "Cleaned" })) &&
+			      OldOutput.WhyNot(key, new StepSettings([]))!.Contains("where they stand", StringComparison.Ordinal), $"{StepCatalog.Name(key)} has no old output to use, and the window says why");
+		}
 		var none = Setup.FromJson(new JsonObject { ["mo2"] = new JsonObject { ["exe"] = f.Exe, ["profile"] = "Test" }, ["backups"] = f.Backups,
 			["steps"] = new JsonArray(new JsonObject { ["step"] = "synthesis", [OldOutput.Key] = true, ["settings"] = new JsonObject { ["output_mod"] = "Output B" } }) });
 		Check(none.Problems().Any(x => x.Contains("uses its old output - nothing would run", StringComparison.Ordinal) && RunnerErrors.Find(x)?.Code == "TR-112"), "a setup where every step uses its old output has nothing to run: " + string.Join(" | ", none.Problems()));
