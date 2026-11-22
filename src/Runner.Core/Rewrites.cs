@@ -174,12 +174,16 @@ public static class Rewrites
 	public static void Undo(Journal a_j, RunLog a_log, string a_aside)
 	{
 		foreach (var r in a_j.Rewritten.Where(r => r.Settled && !r.PutBack).Reverse().ToList()) {
+			// (an undo is refused while copies it needs are gone - RunUndo.WhyNot: a folder without its backup here is one the
+			// tool changed no file of, and what it made new there can then no longer be told from the mod's own)
 			if (Directory.Exists(r.Backup)) {
 				LayBack(r, AddedOf(r), a_aside);
+				a_log.Detail($"{r.Label}: its files back as they were before this run");
+			} else if (r.Added > 0) {
+				a_log.Warn($"{r.Label}: this run's record of the {r.Added} file(s) the tool made new in it is no longer in the backup - they are left where they are");
 			}
 			r.PutBack = true;
 			a_j.Save();
-			a_log.Detail($"{r.Label}: its files back as they were before this run");
 		}
 	}
 

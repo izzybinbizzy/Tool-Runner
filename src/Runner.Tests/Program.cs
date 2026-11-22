@@ -10025,8 +10025,14 @@ public static class Program
 		string[] dirty = ["Update.esm", "MasterMod.esm", "BaseMod.esp", "NotInAnyMod.esp"];
 		var cleanedNames = new List<string>();
 		// xEdit as Mod Organizer shows it its files: the winning copy leaves for xEdit's backups, the cleaned one is new in overwrite
+		var silent = false;
 		void Xedit(RunContext a_ctx, string a_plugin, string a_log, bool a_finishes)
 		{
+			// an xEdit that came and went without a word: no file touched, no log written
+			if (silent) {
+				cleanedNames.Add(a_plugin);
+				return;
+			}
 			var at = a_ctx.Profile.PluginPaths()[a_plugin];
 			var backups = Path.Combine(f.Overwrite, "SSEEdit Backups");
 			Directory.CreateDirectory(backups);
@@ -10079,6 +10085,16 @@ public static class Program
 			Check(!Journal.Load(r.Folder!).NeedsRestore && !RunUndo.LeftSomething(Journal.Load(r.Folder!)), "and nothing is left of the step");
 			Check(Directory.GetFiles(f.Overwrite, "*", SearchOption.AllDirectories).Length == 0 &&
 				Directory.GetFiles(Path.Combine(Journal.Load(r.Folder!).BackupDir, "xedit backups"), "BaseMod.esp.save.*").Length == 1, "nor of xEdit in overwrite: its unfinished save is in the run's backup");
+
+			// an xEdit that left no log and touched nothing: the plugin stands as before, and the run says it cannot tell whether
+			// xEdit ever opened it - never only "left as it was"
+			cleanedNames.Clear();
+			finishes = true;
+			silent = true;
+			r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+			Equal(RunState.Finished, r.State, "finished without a word from xEdit: " + r.Verdict);
+			Check(File.ReadAllBytes(baseEsp).SequenceEqual(baseWas), "the plugin stands as before");
+			Check(Journal.Load(r.Folder!).Notes.Any(n => n.Contains("xEdit wrote no log for BaseMod.esp", StringComparison.Ordinal)), "and the run's notes say xEdit left no log for it: " + string.Join(" | ", Journal.Load(r.Folder!).Notes));
 		} finally {
 			StepRegistry.Replace(new XEditCleanStep());
 		}

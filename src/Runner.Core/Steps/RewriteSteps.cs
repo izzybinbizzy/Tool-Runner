@@ -204,15 +204,28 @@ public sealed class XEditCleanStep : IStep
 			// is judged (and before a failed step's files are laid back - a cleaned plugin left there would win over them)
 			Collect(a_ctx, plan, before);
 		}
+		var noLog = new List<string>();
 		foreach (var (plugin, at) in plan) {
 			// the original went into xEdit's backups and nothing took its place: its copy is laid back by the step's failure
 			if (!File.Exists(at)) {
 				throw new StepFailedException($"xEdit took {plugin} out of its folder and wrote no cleaned file in its place (its log: {logs[plugin]})");
 			}
+			if (!File.Exists(logs[plugin])) {
+				noLog.Add(plugin);
+				continue;
+			}
 			// its own last line: without it the cleaning was cut off, whatever it wrote
-			if (File.Exists(logs[plugin]) && !Files.ReadSharedText(logs[plugin]).Contains(Done, StringComparison.OrdinalIgnoreCase)) {
+			if (!Files.ReadSharedText(logs[plugin]).Contains(Done, StringComparison.OrdinalIgnoreCase)) {
 				throw new StepFailedException($"xEdit ended before it had finished cleaning {plugin} (its log: {logs[plugin]})");
 			}
+		}
+		// A plugin xEdit left no log for stands as it was, and that is said: "left as it was" alone would read as xEdit having
+		// looked at it and found nothing to clean, when it may never have opened it
+		if (noLog.Count > 0) {
+			var silent = $"xEdit wrote no log for {string.Join(", ", noLog)}: whether it opened {(noLog.Count == 1 ? "it" : "them")} cannot be told from here - " +
+				$"{(noLog.Count == 1 ? "it stands" : "they stand")} as before";
+			a_ctx.Note(silent);
+			a_ctx.Log.Warn(silent);
 		}
 		var cleaned = 0;
 		foreach (var r in records) {
