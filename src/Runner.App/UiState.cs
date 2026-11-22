@@ -12,8 +12,8 @@ public static class UiState
 	// one write at a time, each of the state as it is by then: the file never goes back to an older one
 	static readonly Lock Disk = new();
 	static JsonObject? s_state;
-	// something is kept that the file does not hold yet / a write of it is on its way
-	static bool s_unsaved, s_queued;
+	// something is kept that the file does not hold yet / a write of it is on its way / a write is under way this moment
+	static bool s_unsaved, s_queued, s_writing;
 	// a width and a height kept together are one write
 	static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(150);
 
@@ -105,6 +105,7 @@ public static class UiState
 					return;
 				}
 				s_unsaved = false;
+				s_writing = true;
 				text = System.Text.Encoding.UTF8.GetBytes(State().ToJsonString());
 			}
 			try {
@@ -112,6 +113,27 @@ public static class UiState
 				Directory.CreateDirectory(Path.GetDirectoryName(file)!);
 				Files.WriteAtomic(file, text);
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+				// not in the file after all: the next write - the next change, or the one as the program closes - takes it
+				// along (left as "written", a disk that was full for a moment lost the window's sizes for good)
+				lock (Gate) {
+					s_unsaved = true;
+				}
+			} finally {
+				lock (Gate) {
+					s_writing = false;
+				}
+			}
+		}
+	}
+
+	// Is something kept that the file does not hold yet? Also while a write is under way: until it has ended, nobody knows
+	// that the file holds it (a closing window that asked in that moment was told "nothing", and the program could end
+	// under the write). Save then waits for that write, and writes again only when there is something left to write
+	public static bool Unsaved
+	{
+		get {
+			lock (Gate) {
+				return s_unsaved || s_writing;
 			}
 		}
 	}

@@ -224,6 +224,8 @@ public static class ThemeGallery
 		body.Children.Add(sizeLabel);
 		body.Children.Add(size);
 		body.Children.Add(about);
-		return new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = body, Focusable = false };
+		var all = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = body, Focusable = false };
+		System.Windows.Automation.AutomationProperties.SetName(all, "Themes");
+		return all;
 	}
 }

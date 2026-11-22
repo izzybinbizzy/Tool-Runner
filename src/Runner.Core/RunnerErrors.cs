@@ -39,7 +39,8 @@ public static class RunnerErrors
 		E("TR-111", "Mod Organizer's program is not set|the MO2 profile is not set|the backup folder is not set|must be a whole path on this PC",
 			"The setup is missing a folder or names one that is not a whole path on this PC.", "Open Settings, fill it in with a whole path (like D:\\Modding\\Backups), and save."),
 		E("TR-112", "the setup has no steps|every step is switched off|only the save steps are switched on|uses its old output - nothing would run", "The setup has nothing to run.",
-			"Tick at least one step in the list (for a new game the two save steps are left out, so tick a tool as well; a step set to use its old output does not run)."),
+			"Tick at least one step in the list (for a new game the two save steps are left out, so tick a tool as well). When every ticked step uses its old output, " +
+			"select one of them and press \"Build it again\" under the steps: a step set to use its old output does not run."),
 		E("TR-113", "a step is listed twice|unknown step(s)|is no longer supported - Landscape Fixer replaced it", "The setup's step list holds a step twice, or one this version does not know.",
 			"Make a new setup for the profile (New setup), or take the named step out of the setup file. SnowFixer and AutoBlend were replaced by Landscape Fixer."),
 		E("TR-114", "is not a mod's name", "A setting that must be a mod's name holds a path or a character Windows does not allow in a folder name.",
@@ -115,8 +116,10 @@ public static class RunnerErrors
 			"Reinstall Mod Organizer over itself (it brings its loot folder back), or untick the LOOT sort step."),
 		E("TR-320", "it is set to use its old output, and there is none to use", "A step is set to use the output its tool made before, and that output mod is missing or empty.",
 			"Select the step in the list and press \"Use old output\" again to switch it off, so the tool builds its output in this run. From the next run on that output can be used."),
-		E("TR-321", "its old output cannot be used:", "A plugin of the old output needs a plugin that is no longer in your load order, and the game does not start with a master missing.",
-			"Switch \"Use old output\" off for that step, so its output is built again for the load order you have now - or put the missing plugin's mod back in Mod Organizer."),
+		E("TR-321", "its old output cannot be used:|its old output cannot be used in this run:",
+			"A plugin of the old output needs a plugin that is no longer in your load order, or one this run has switched off while its tools work: the game, or the tool that reads it, stops on a master that is missing.",
+			"Switch \"Use old output\" off for that step, so its output is built again for the load order you have now - or put the missing plugin's mod back in Mod Organizer. " +
+			"When the message says \"in this run\", leaving the tools after that step out of the run works too."),
 		E("TR-312", "is not in this profile's mod list", "A mod this step names is not in this profile's mod list.",
 			"Install the mod or correct its name: in Mod Organizer, or in Settings > A step where the step names it."),
 

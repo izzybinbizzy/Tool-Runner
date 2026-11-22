@@ -225,7 +225,8 @@
            Done is never squeezed out - it is in view, or one scroll away. CardsOverLog lays the three out: the log's heading
            is as tall as it needs and never the part that gives way -->
       <local:CardsOverLog Grid.Column="2" x:Name="RightColumn">
-        <ScrollViewer x:Name="CardsScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+        <ScrollViewer x:Name="CardsScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False"
+                      AutomationProperties.Name="The run and what was found">
         <Grid x:Name="Cards">
         <Grid.RowDefinitions>
           <RowDefinition x:Name="NowRow" Height="Auto"/>
@@ -357,7 +358,7 @@
           <StackPanel>
             <TextBlock Text="{Binding LastCardTitle}" Style="{StaticResource H2}" Margin="0,0,0,6"/>
             <!-- held to a few lines so the log keeps its room in the smallest window -->
-            <ScrollViewer x:Name="LastScroll" MaxHeight="200" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <ScrollViewer x:Name="LastScroll" MaxHeight="200" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Last run">
               <TextBlock Text="{Binding LastCardText}" TextWrapping="Wrap" AutomationProperties.Name="Last run"/>
             </ScrollViewer>
           </StackPanel>

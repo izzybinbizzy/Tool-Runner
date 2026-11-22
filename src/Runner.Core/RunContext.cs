@@ -82,8 +82,19 @@ public sealed class RunContext
 	public string? CleanSaveName { get; set; }
 
 	// when this run last started its game: a crash log is that start's only if written after it (an earlier start's crash, retried
-	// since, is never named as the cause of a later close)
-	public DateTime? GameLaunched { get; set; }
+	// since, is never named as the cause of a later close). Set where a game start begins - and with it the texts of the
+	// boxes the watch answered during an earlier start are dropped: left there, each one cost the next start's load a wait
+	// for a box that was long gone. What the watch answers from here on is this start's
+	public DateTime? GameLaunched
+	{
+		get;
+		set {
+			field = value;
+			lock (_fromWatch) {
+				_boxesAnswered.Clear();
+			}
+		}
+	}
 	public Dictionary<string, string> CleanSaveExtraOff { get; set; } = [];
 	public string Mo2Dir => Path.GetDirectoryName(Mo2.Exe)!;
 
@@ -286,6 +297,13 @@ public sealed class Toggle : IDisposable
 			_ctx.Log.Detail($"kept what you changed in Mod Organizer during {_label}: " + string.Join(", ", theirs.Select(p => (p.Value == '+' ? "on " : "off ") + p.Key)));
 			Runner.ReapplyTheirs(_ctx, theirs, marks);
 			_ctx.Profile.OursBack(expected);
+			// What the player switched stands other than before the step: the game now finds other files than its list names,
+			// whatever was counted or taken back above for the step's own switches (a change of theirs back to how a mod
+			// stood before the step is none)
+			var before = Profile.StatesOf(_snap);
+			if (theirs.Any(p => !before.TryGetValue(p.Key, out var was) || was != p.Value)) {
+				++_ctx.Journal.FilesChanged;
+			}
 		}
 	}
 }

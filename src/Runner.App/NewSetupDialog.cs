@@ -55,7 +55,9 @@ public static class NewSetupDialog
 			ToolTip = "Says which tools Mod Organizer's list holds, which are on this PC but not listed, and where to get the rest" };
 		var toolRows = new StackPanel();
 		stack.Children.Add(findTools);
-		stack.Children.Add(new ScrollViewer { Content = toolRows, MaxHeight = 240, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 6, 0, 0) });
+		var toolsFound = new ScrollViewer { Content = toolRows, MaxHeight = 240, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 6, 0, 0) };
+		System.Windows.Automation.AutomationProperties.SetName(toolsFound, "The tools found");
+		stack.Children.Add(toolsFound);
 
 		// what was found belongs to the Mod Organizer it was found in: its Add button must not write to one the player has left
 		void ForgetTools()
@@ -222,8 +224,11 @@ public static class NewSetupDialog
 		bar.Children.Add(create);
 		bar.Children.Add(cancel);
 		stack.Children.Add(bar);
-		// the box can be sized; its content scrolls when it is made smaller than it needs
-		w.Content = new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+		// the box can be sized; its content scrolls when it is made smaller than it needs (named for a screen reader, which
+		// meets the scrolling region as a pane of its own)
+		var fields = new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+		System.Windows.Automation.AutomationProperties.SetName(fields, "New setup fields");
+		w.Content = fields;
 		w.ShowDialog();
 		return made;
 	}

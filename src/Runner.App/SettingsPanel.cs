@@ -265,6 +265,7 @@ public static class SettingsPanel
 		s_cats = cats;
 		var host = new StackPanel();
 		var scroller = new ScrollViewer { Content = host, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Padding = new Thickness(0, 0, 12, 0) };
+		System.Windows.Automation.AutomationProperties.SetName(scroller, "The settings of the page picked");
 		// with nothing searched for: the picked page alone; with a word: every page that still shows a row
 		void ShowPages(string a_q)
 		{
@@ -316,6 +317,12 @@ public static class SettingsPanel
 			ToolTip = "Writes a copy of this setup (as last saved) for another player: every path of this PC and the commands it runs before and after a run are taken out" };
 		share.Click += async (_, _) => {
 			if (a_vm.Setup is not { } current || !share.IsEnabled) {
+				return;
+			}
+			// These settings stay open when another setup is picked over what was typed: the button then stood under one
+			// setup's name and wrote a copy of the other. Only the setup these settings were opened for is shared from here
+			if (!MainViewModel.StillShown(openedFor, current.File)) {
+				a_vm.Say($"Not shared: these are the settings of \"{openedName}\", and \"{current.Name}\" is picked in the main window now. Pick \"{openedName}\" again to share it.", "bad");
 				return;
 			}
 			// the setup as it is this moment, written off the window's thread; one share at a time
@@ -752,8 +759,10 @@ public static class SettingsPanel
 				Field(stepHost, stepApply, Label(key), o, key, val?.GetValueKind() ?? JsonValueKind.String);
 			}
 			var stepKey = Setup.Str(steps[pick.SelectedIndex], "step") ?? "";
-			// his ask 2026-10-27: the tool's settings from its OWN window, kept for every run (never a copy of its window here)
-			if (ToolSettings.CanLearn(new StepSettings(o)) && a_vm.Setup is { } setupNow) {
+			// his ask 2026-10-27: the tool's settings from its OWN window, kept for every run (never a copy of its window here).
+			// Only while the setup picked in the main window is the one these settings were opened for: with another one
+			// picked, the button stood among this setup's steps and opened - and learned for - the other setup's tool
+			if (ToolSettings.CanLearn(new StepSettings(o)) && a_vm.Setup is { } setupNow && IsFor(setupNow)) {
 				var learned = ToolSettings.Load(setupNow, stepKey);
 				var name = StepCatalog.Name(stepKey);
 				var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Style = (Style)a_w.FindResource("MutedText"), Margin = new Thickness(0, 4, 0, 6),
@@ -769,14 +778,17 @@ public static class SettingsPanel
 					learn.IsEnabled = false;
 					status.Text = $"{name} is open - set it up, save, and close it ...";
 					using var hand = a_w.Working($"{name} is open to learn its settings");
+					// the mod its window was started from, when that could not be switched off again
+					string? stillOn = null;
 					try {
-						var l = await Task.Run(() => ToolSettings.Learn(setupNow, stepKey, RunLog.Null, CancellationToken.None));
+						var l = await Task.Run(() => ToolSettings.Learn(setupNow, stepKey, RunLog.Null, CancellationToken.None, m => stillOn = m));
 						status.Text = $"Learned: {l.Files.Count} settings file(s) ({string.Join(", ", l.Files.Select(f => Path.GetFileName(f.Live)))}) - every run uses them.";
 					} catch (Exception e) {
 						status.Text = "Not learned: " + e.Message;
 					} finally {
 						learn.IsEnabled = true;
 					}
+					status.Text += ToolsDialog.StillOn(stillOn);
 				};
 				stepHost.Children.Add(status);
 				stepHost.Children.Add(learn);
@@ -799,13 +811,17 @@ public static class SettingsPanel
 		var save = new Button { Content = "_Save", Style = (Style)a_w.FindResource("Primary"), Margin = new Thickness(0, 0, 10, 0) };
 		var undo = new Button { Content = "_Undo changes", Style = (Style)a_w.FindResource("Ghost") };
 		var folders = new Button { Content = "Open the data folder", Style = (Style)a_w.FindResource("Ghost"), Margin = new Thickness(10, 0, 0, 0) };
-		save.Click += (_, _) => {
+		save.Click += async (_, _) => {
 			if (NotThisSetup(openedFor, openedName, a_vm.Setup) is { } another) {
 				errors.Text = another;
 				return;
 			}
 			if (a_vm.SetupInUse) {
 				errors.Text = "Not saved: a run is using this setup right now - save when it is done (what you typed stays here).";
+				return;
+			}
+			if (a_vm.Saving) {
+				errors.Text = "Not saved yet: the change before this one is still being saved - press Save again in a moment (what you typed stays here).";
 				return;
 			}
 			var problems = apply.Concat(stepApply).Select(f => f()).OfType<string>().ToList();
@@ -825,7 +841,21 @@ public static class SettingsPanel
 			foreach (var k in work.Select(x => x.Key).ToList()) {
 				a_vm.Setup.Root[k] = work[k]?.DeepClone();
 			}
-			if (!a_vm.SaveSetup()) {
+			// (written away from the window's thread: the button waits for it, so a second press cannot start a second save)
+			save.IsEnabled = false;
+			bool saved;
+			try {
+				saved = await a_vm.SaveSetup();
+			} finally {
+				save.IsEnabled = true;
+			}
+			// another setup was picked while this one was being written: its file holds what was saved (or not), and the
+			// setup shown now is neither read again nor are these settings drawn again over it
+			if (NotThisSetup(openedFor, openedName, a_vm.Setup) != null) {
+				errors.Text = saved ? "" : "Not saved: " + a_vm.Message;
+				return;
+			}
+			if (!saved) {
 				// memory back to what is on disk; the drawer keeps what was typed for another try
 				a_vm.LoadSteps();
 				errors.Text = "Not saved: " + a_vm.Message;

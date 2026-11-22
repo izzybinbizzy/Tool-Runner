@@ -538,11 +538,12 @@ public static partial class InGame
 	// the game's own tutorial pop-up: no message box, and it stops the game under it all the same
 	const string TutorialMenu = "Tutorial Menu";
 
-	static GameBox? ReadGameBox(RunContext a_ctx, int a_timeoutSeconds)
+	// a_send: how this look does something to the game (LookAtGameBox's Send) - it answers false when it may not right now
+	static GameBox? ReadGameBox(RunContext a_ctx, int a_timeoutSeconds, Func<Action, bool> a_send)
 	{
 		var list = a_ctx.DevBench.Call("menu", new { action = "list" }, a_timeoutSeconds);
-		if ((list["openMenus"] as JsonArray)?.Any(m => m?.ToString() == TutorialMenu) == true) {
-			a_ctx.DevBench.Call("menu", new { action = "close", name = TutorialMenu }, a_timeoutSeconds);
+		if ((list["openMenus"] as JsonArray)?.Any(m => m?.ToString() == TutorialMenu) == true &&
+		    a_send(() => a_ctx.DevBench.Call("menu", new { action = "close", name = TutorialMenu }, a_timeoutSeconds))) {
 			a_ctx.Log.Detail("the game's tutorial pop-up closed");
 		}
 		if (list["messageBoxOpen"]?.GetValue<bool>() != true) {
@@ -572,8 +573,19 @@ public static partial class InGame
 	public static string? LookAtGameBox(RunContext a_ctx, out GameBox? a_left, bool a_fromWatch, int a_timeoutSeconds = 10)
 	{
 		a_left = null;
+		// What the watch's look sends to the game (an answer, a pop-up closed) goes through the watch itself: it begins only
+		// while the run still holds the watch (BoxWatch.Do). A look that was still reading when the run let go - DevBench can
+		// take seconds to answer - sent its answer into a game the run had already left. A step's own look sends as ever.
+		bool Send(Action a_call)
+		{
+			if (a_fromWatch && a_ctx.Boxes is { } watch) {
+				return watch.Do(a_call);
+			}
+			a_call();
+			return true;
+		}
 		lock (a_ctx.GameBoxGate) {
-			if (ReadGameBox(a_ctx, a_timeoutSeconds) is not { } box) {
+			if (ReadGameBox(a_ctx, a_timeoutSeconds, Send) is not { } box) {
 				a_ctx.GameBoxAnswered = ("", 0);
 				return null;
 			}
@@ -603,7 +615,10 @@ public static partial class InGame
 				note = $"the game showed a message this run does not know, and it was closed with {with}: {said} - if that was the wrong answer, switch that question off in the mod that asks it, " +
 				       "or have the run leave such messages to you (Settings > Game steps)";
 			}
-			a_ctx.DevBench.Call("menu", new { action = "accept", index = idx });
+			if (!Send(() => a_ctx.DevBench.Call("menu", new { action = "accept", index = idx }))) {
+				// the run has let go of the watch (or the watch is in the middle of something else): nothing was answered
+				return null;
+			}
 			a_ctx.GameBoxAnswered = (box.Body, tries + 1);
 			// said once for a box, however often its answer has to be given
 			if (tries == 0) {

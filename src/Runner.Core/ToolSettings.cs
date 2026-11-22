@@ -137,9 +137,10 @@ public static partial class ToolSettings
 	public sealed record ToSet(string Step, string Name, Learned? Learned);
 
 	// Every switched-on step of the setup whose tool has a window of its own, in the setup's order (his word of 2026-11-21: each
-	// patcher set up by hand before the first run, and again whenever wanted). A step listed twice is one tool.
+	// patcher set up by hand before the first run, and again whenever wanted). A step listed twice is one tool. One that
+	// uses its old output for now is switched on all the same: its tool is set up here for the run that builds it again
 	public static List<ToSet> ToSetUp(Setup a_setup) =>
-		[.. a_setup.EnabledSteps.Where(s => CanLearn(new StepSettings(s.Settings))).DistinctBy(s => s.Key).Select(s => new ToSet(s.Key, StepCatalog.Name(s.Key), Load(a_setup, s.Key)))];
+		[.. a_setup.OnSteps.Where(s => CanLearn(new StepSettings(s.Settings))).DistinctBy(s => s.Key).Select(s => new ToSet(s.Key, StepCatalog.Name(s.Key), Load(a_setup, s.Key)))];
 
 	// The box that lists them shows by itself once, before a setup's first run: not for a setup that has run, not again once
 	// the player went on from it, and not with nothing to set up.
@@ -280,7 +281,9 @@ public static partial class ToolSettings
 		}
 	}
 
-	public static Learned Learn(Setup a_setup, string a_step, RunLog a_log, CancellationToken a_ct)
+	// a_stillOn: told the mod that was switched on for the tool's window when it could not be switched off again (the log
+	// says so too - a window that shows no log says it with this)
+	public static Learned Learn(Setup a_setup, string a_step, RunLog a_log, CancellationToken a_ct, Action<string>? a_stillOn = null)
 	{
 		using var hold = Runner.HoldIfFree() ?? throw new StepFailedException("a run is going - learn a tool's settings when it is done");
 		var s = new StepSettings(a_setup.StepSettings(a_step) ?? throw new StepFailedException("this setup has no such step"));
@@ -324,15 +327,21 @@ public static partial class ToolSettings
 				Thread.Sleep(1000);
 			}
 		} finally {
-			if (toolMod != null) {
-				// even after a Stop; one that cannot go back is named, never left unsaid
-				try {
-					control.Close(null, CancellationToken.None);
-					profile.SetMods([], [toolMod], a_log);
-					Files.Delete(SwitchRecord(a_setup));
-				} catch (Exception e) when (e is Mo2BusyException or IOException or UnauthorizedAccessException or InvalidOperationException or KeyNotFoundException) {
-					a_log.Warn($"the mod \"{toolMod}\" could not be switched off again ({e.Message}) - untick it in Mod Organizer");
+			try {
+				if (toolMod != null) {
+					// even after a Stop; one that cannot go back is named, never left unsaid
+					try {
+						control.Close(null, CancellationToken.None);
+						profile.SetMods([], [toolMod], a_log);
+						Files.Delete(SwitchRecord(a_setup));
+					} catch (Exception e) when (e is Mo2BusyException or IOException or UnauthorizedAccessException or InvalidOperationException or KeyNotFoundException) {
+						a_log.Warn($"the mod \"{toolMod}\" could not be switched off again ({e.Message}) - untick it in Mod Organizer");
+						a_stillOn?.Invoke(toolMod);
+					}
 				}
+			} finally {
+				// the tool and the Mod Organizer it was opened through are no longer held open
+				control.ReleaseOwned();
 			}
 		}
 		var changed = Changed(before, Scan(roots, skip)).Where(f => !f.EndsWith("_Debug_log.txt", StringComparison.OrdinalIgnoreCase)).ToList();

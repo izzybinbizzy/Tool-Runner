@@ -31,6 +31,11 @@ public sealed class StartedSet : IEnumerable<int>
 	// by then is certainly its own; a later one may be the child of whoever had the number next.
 	readonly Dictionary<int, DateTime> _seen = [];
 	readonly Func<int, DateTime, IDisposable?>? _pin;
+	// One look at a time, and no hold is given up while a look is out. A look takes "this number is held" at its start and
+	// relies on it to its end (Sure): a second look on another thread - the watch's beat and a Stop's - that found the
+	// parent ended in between gave its hold up under the first, and from that moment the number could change hands while
+	// the first look still read every child under it as the run's own. Taken before _gate, never inside it.
+	readonly Lock _sweeping = new();
 
 	// (the offline tests hand in start times of their own - and then a hold of their own, or none)
 	public StartedSet(Func<int, DateTime?>? a_startOf = null, Func<int, DateTime, IDisposable?>? a_pin = null)
@@ -61,19 +66,27 @@ public sealed class StartedSet : IEnumerable<int>
 				_images.Add(image);
 			}
 		}
-		old?.Dispose();
+		if (old != null) {
+			// (never under a look that still counts the number as held)
+			lock (_sweeping) {
+				old.Dispose();
+			}
+		}
 	}
 
 	// Every hold given up, when the run this set belongs to is over. What is on record stays on record; from here a number
-	// may change hands again, so nothing more is put on record under a process that has ended.
+	// may change hands again, so nothing more is put on record under a process that has ended. A look that is still out
+	// (the watch's last beat) is waited for: its holds are not given up under it.
 	public void Release()
 	{
-		List<IDisposable> all;
-		lock (_gate) {
-			all = [.. _pins.Values];
-			_pins.Clear();
+		lock (_sweeping) {
+			List<IDisposable> all;
+			lock (_gate) {
+				all = [.. _pins.Values];
+				_pins.Clear();
+			}
+			all.ForEach(p => p.Dispose());
 		}
-		all.ForEach(p => p.Dispose());
 	}
 
 	// how many processes are held open now (the offline tests: a hold is given up with its record)
@@ -172,6 +185,15 @@ public sealed class StartedSet : IEnumerable<int>
 	// a_list: Windows' process list as (process, its parent's number) rows, null when Windows would not give it.
 	// a_clock: the clock process start times are stamped with (the offline tests hand in both)
 	public void Sweep(Func<IReadOnlyCollection<(int Pid, int Parent)>?> a_list, Func<DateTime> a_clock)
+	{
+		// from the moment it reads which numbers are held to the moment it gives a hold up itself, no other look runs and
+		// no hold is given up (_sweeping)
+		lock (_sweeping) {
+			SweepAlone(a_list, a_clock);
+		}
+	}
+
+	void SweepAlone(Func<IReadOnlyCollection<(int Pid, int Parent)>?> a_list, Func<DateTime> a_clock)
 	{
 		Dictionary<int, DateTime> parents;
 		Dictionary<int, DateTime> seen;

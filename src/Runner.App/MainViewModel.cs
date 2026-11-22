@@ -298,7 +298,11 @@ public sealed partial class MainViewModel : Observable
 	Task RunRestore() => Restore();
 	Task RunCheck() => Check();
 
-	public Setup? Setup { get; private set { field = value; OnPropertyChanged(nameof(CanStart)); OnPropertyChanged(nameof(NewGame)); } }
+	public Setup? Setup { get; private set { field = value; ++_setupEdits; OnPropertyChanged(nameof(CanStart)); OnPropertyChanged(nameof(NewGame)); } }
+	// Counts every change to the setup shown: another one picked or read again, and each change saved into it (a step
+	// switched, moved, set to use its old output, its settings). What a check found for the setup as it was before the
+	// change is not shown as the findings of the setup as it is now
+	int _setupEdits;
 	public event Action<string, string>? Alert;
 	// something was just set going from here: the window looks at once and then at its lively pace
 	public event Action? WantsLook;
@@ -458,28 +462,37 @@ public sealed partial class MainViewModel : Observable
 
 	// a new game (the dashboard's tick beside START, kept in the setup): no save of the player's to keep clean, so the clean
 	// save and the save to play are left out of every run while it is on
-	public bool NewGame { get => Setup?.NewGame ?? false; set => SetNewGame(value); }
+	public bool NewGame { get => Setup?.NewGame ?? false; set => _ = SetNewGame(value); }
 
-	void SetNewGame(bool a_on)
+	async Task SetNewGame(bool a_on)
 	{
-		if (Setup == null || a_on == Setup.NewGame) {
+		if (Setup is not { } setup || a_on == setup.NewGame) {
 			return;
 		}
-		if (IsRunning || SetupInUse) {
-			Say("Not changed: a run is using this setup right now.", "bad");
+		if (NotNow("changed") is { } why) {
+			Say(why, "bad");
 		} else {
-			Setup.Root["newGame"] = a_on;
-			if (!SaveSetup()) {
-				Setup.Root["newGame"] = !a_on;
+			setup.Root["newGame"] = a_on;
+			if (!await SaveSetup()) {
+				setup.Root["newGame"] = !a_on;
 			}
-			MarkLeftOut();
-			Estimate();
-			// the last check's findings were for the other set of steps
-			Issues.Clear();
-			ShowReady();
+			if (ReferenceEquals(Setup, setup)) {
+				MarkLeftOut();
+				Estimate();
+				// the last check's findings were for the other set of steps
+				Issues.Clear();
+				ShowReady();
+			}
 		}
 		OnPropertyChanged(nameof(NewGame));
 	}
+
+	// why the setup shown is not changed at this moment, in words (null: it may be) - a run uses it, or the change before
+	// this one is still on its way into the setup's file
+	string? NotNow(string a_done) =>
+		IsRunning || SetupInUse ? $"Not {a_done}: a run is using this setup right now."
+		: Saving ? $"Not {a_done} yet: the change before this one is still being saved - try again in a moment."
+		: null;
 
 	// each row's standing in the setup beyond its tick: left out for a new game, or not run because its old output is used
 	void MarkLeftOut()
@@ -513,7 +526,9 @@ public sealed partial class MainViewModel : Observable
 			var mo2 = Mo2Instance.Load(with.Mo2Exe, with.Mo2Instance);
 			var control = new Mo2Control(mo2, with.Profile, RunLog.Null);
 			var states = new Profile(mo2, with.Profile, () => control.Running).States();
-			return OldOutput.LookAt(with, mo2, states, with.EnabledSteps, DryRun.LastOf(with, mo2, AppPaths.Data), with.KeptSteps.Where(k => k.Key == a_row.Key).ToList()).FirstOrDefault();
+			// every step that uses its old output is looked at, as the check before a run does, and this step's answer taken:
+			// looked at alone, a master that an earlier old output brings was called gone here and found there by the check
+			return OldOutput.LookAt(with, mo2, states, with.EnabledSteps, DryRun.LastOf(with, mo2, AppPaths.Data), with.KeptSteps).FirstOrDefault(l => l.Step == a_row.Key);
 		});
 		return look == null ? (null, $"{a_row.Name} has no old output to use.") : (look, null);
 	}
@@ -524,10 +539,10 @@ public sealed partial class MainViewModel : Observable
 		string.Join("\n\n", OldOutput.Warning(a_look, Setup?.Profile ?? "")) +
 		"\n\nYou can take this back any time: select the step and press \"Build it again\".";
 
-	// a step set to use its old output, or back to being built (saved at once)
-	public void SetUseOld(StepRow a_row, bool a_use)
+	// a step set to use its old output, or back to being built (saved at once; the row shows it once it is saved)
+	public async Task SetUseOld(StepRow a_row, bool a_use)
 	{
-		if (Setup?.Root["steps"] is not JsonArray arr) {
+		if (Setup is not { } setup || setup.Root["steps"] is not JsonArray arr) {
 			return;
 		}
 		// the row of a setup that is no longer the one shown (another was picked while its box was worked out): a step of
@@ -536,8 +551,8 @@ public sealed partial class MainViewModel : Observable
 			Say("Not changed: another setup was picked meanwhile - select the step again.", "warn");
 			return;
 		}
-		if (IsRunning || SetupInUse) {
-			Say("Not changed: a run is using this setup right now.", "bad");
+		if (NotNow("changed") is { } why) {
+			Say(why, "bad");
 			return;
 		}
 		var steps = arr.OfType<JsonObject>().Where(o => Setup.Str(o, "step") == a_row.Key).ToList();
@@ -549,7 +564,7 @@ public sealed partial class MainViewModel : Observable
 				o.Remove(OldOutput.Key);
 			}
 		}
-		if (!SaveSetup()) {
+		if (!await SaveSetup()) {
 			for (var i = 0; i < steps.Count; ++i) {
 				if (before[i] != null) {
 					steps[i][OldOutput.Key] = before[i];
@@ -557,6 +572,10 @@ public sealed partial class MainViewModel : Observable
 					steps[i].Remove(OldOutput.Key);
 				}
 			}
+			return;
+		}
+		// (another setup picked while this one was being written: its file is saved, and nothing shown is its)
+		if (!ReferenceEquals(Setup, setup) || !Steps.Contains(a_row)) {
 			return;
 		}
 		MarkLeftOut();
@@ -1273,11 +1292,16 @@ public sealed partial class MainViewModel : Observable
 		_checking = true;
 		Issues.Clear();
 		Say("Checking every tool and setting ...", "");
-		var setup = Setup;
+		// the setup as it stands at this moment, for the check's own thread, and the count of its changes: the setup shown can
+		// be changed while the check reads (a step set to use its old output during a check of that very tool)
+		var setup = Setup.Clone();
+		var edits = _setupEdits;
 		try {
 			var found = await Task.Run(() => Preflight.Run(setup, Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance), setup.EnabledSteps.Select(s => s.Key).ToList()));
-			// another setup was picked while this one was being checked: its findings are not the new one's, and "checked" is not either
-			if (!string.Equals(setup.File, Setup?.File, StringComparison.OrdinalIgnoreCase)) {
+			// another setup was picked while this one was being checked, or this one was changed: the findings are for a setup
+			// that is no longer the one shown, and "checked" is not true of it either (a finding that stops a tool which no
+			// longer runs stood among the findings of the setup as changed)
+			if (edits != _setupEdits || !StillShown(setup.File, Setup?.File)) {
 				return;
 			}
 			foreach (var i in found) {
@@ -1291,7 +1315,7 @@ public sealed partial class MainViewModel : Observable
 			// his list of 2026-11-16: the check also looks for updates - each tool's and the program's own. Their pages are
 			// asked only on this press; a setup can switch it off (Settings > Tools)
 			if (!App.Headless && ToolRunner.Setup.Bool(setup.Root, "checkUpdates") != false) {
-				await LookForUpdates(setup);
+				await LookForUpdates(setup, edits);
 			}
 		} catch (Exception e) {
 			Say("The check could not finish: " + e.Message, "bad");
@@ -1303,7 +1327,8 @@ public sealed partial class MainViewModel : Observable
 	// The tools of the setup and the program itself, asked for a newer version. Each newer one is a line among the check's
 	// findings, with where to get it: a tool is installed by hand from its own page (the runner replaces no other author's
 	// program on its own), and its settings are learned again after. A look that fails is one plain line, never an error.
-	async Task LookForUpdates(Setup a_setup)
+	// a_edits: the count of the shown setup's changes when its check began (a_setup is that setup as it stood then)
+	async Task LookForUpdates(Setup a_setup, int a_edits)
 	{
 		List<ToolUpdates.Result>? res = null;
 		var failed = "";
@@ -1312,9 +1337,9 @@ public sealed partial class MainViewModel : Observable
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or System.Net.Http.HttpRequestException or TaskCanceledException) {
 			failed = e.Message;
 		}
-		// another setup was picked while this one's pages were asked: neither what they said nor that they could not be asked
-		// belongs among the new setup's findings
-		if (!StillShown(a_setup.File, Setup?.File)) {
+		// another setup was picked while this one's pages were asked, or this one was changed: neither what they said nor
+		// that they could not be asked belongs among the findings of the setup shown now
+		if (a_edits != _setupEdits || !StillShown(a_setup.File, Setup?.File)) {
 			return;
 		}
 		if (res == null) {
@@ -1347,20 +1372,38 @@ public sealed partial class MainViewModel : Observable
 	// a start asked for and not yet in its run record counts too: the engine reads the setup in that gap
 	public bool SetupInUse => Setup != null && (_startAsked != null || (Engine.Active() is { } j && string.Equals(j.SetupFile, Setup.File, StringComparison.OrdinalIgnoreCase)));
 
-	public void SetOn(StepRow a_row, bool a_on)
+	public async Task SetOn(StepRow a_row, bool a_on)
 	{
-		if (Setup?.Root["steps"] is not JsonArray arr) {
+		if (Setup is not { } setup || setup.Root["steps"] is not JsonArray arr) {
 			return;
 		}
-		if (SetupInUse) {
+		if (SetupInUse || Saving) {
 			a_row.On = !a_on;
-			Say("Not changed: a run is using this setup right now.", "bad");
+			Say(SetupInUse ? "Not changed: a run is using this setup right now." : "Not changed yet: the change before this one is still being saved - try again in a moment.", "bad");
 			return;
 		}
-		foreach (var o in arr.OfType<JsonObject>().Where(o => Setup.Str(o, "step") == a_row.Key)) {
+		var mine = arr.OfType<JsonObject>().Where(o => Setup.Str(o, "step") == a_row.Key).ToList();
+		var before = mine.Select(o => o["on"]?.DeepClone()).ToList();
+		foreach (var o in mine) {
 			o["on"] = a_on;
 		}
-		SaveSetup();
+		if (!await SaveSetup()) {
+			// the file holds the step as it was: so does the setup shown again, and its row
+			for (var i = 0; i < mine.Count; ++i) {
+				if (before[i] != null) {
+					mine[i]["on"] = before[i];
+				} else {
+					mine[i].Remove("on");
+				}
+			}
+			if (Steps.Contains(a_row)) {
+				a_row.On = !a_on;
+			}
+			return;
+		}
+		if (!ReferenceEquals(Setup, setup)) {
+			return;
+		}
 		// (a step that is off uses nothing: its "uses its old output" line goes with the tick and comes back with it)
 		MarkLeftOut();
 		Estimate();
@@ -1386,15 +1429,15 @@ public sealed partial class MainViewModel : Observable
 		return StepCatalog.OrderWarnings(on).Where(w => !before.Contains(w)).ToList();
 	}
 
-	public void Move(StepRow a_row, int a_delta) => MoveTo(a_row, Steps.IndexOf(a_row) + a_delta);
+	public Task Move(StepRow a_row, int a_delta) => MoveTo(a_row, Steps.IndexOf(a_row) + a_delta);
 
-	public void MoveTo(StepRow a_row, int a_to)
+	public async Task MoveTo(StepRow a_row, int a_to)
 	{
-		if (Setup?.Root["steps"] is not JsonArray arr) {
+		if (Setup is not { } setup || setup.Root["steps"] is not JsonArray arr) {
 			return;
 		}
-		if (SetupInUse) {
-			Say("Not moved: a run is using this setup right now.", "bad");
+		if (SetupInUse || Saving) {
+			Say(SetupInUse ? "Not moved: a run is using this setup right now." : "Not moved yet: the change before this one is still being saved - try again in a moment.", "bad");
 			return;
 		}
 		var i = Steps.IndexOf(a_row);
@@ -1417,11 +1460,25 @@ public sealed partial class MainViewModel : Observable
 		for (var k = 0; k < shown.Count; ++k) {
 			items[shown[k]] = entries[k];
 		}
+		// the setup's own order as it stood, to go back to when the new one cannot be saved
+		var asItWas = arr.ToList();
 		arr.Clear();
 		foreach (var it in items) {
 			arr.Add(it);
 		}
-		SaveSetup();
+		if (!await SaveSetup()) {
+			// The file holds the old order, and a run reads the file: the setup shown goes back to it and the list stays
+			// as it is drawn - never a list in one order over a file in another
+			arr.Clear();
+			foreach (var it in asItWas) {
+				arr.Add(it);
+			}
+			return;
+		}
+		// the rows move once the new order is in the file (another setup picked meanwhile shows its own rows: nothing moves)
+		if (!ReferenceEquals(Setup, setup) || Steps.IndexOf(a_row) != i || j >= Steps.Count) {
+			return;
+		}
 		Steps.Move(i, j);
 		var n = 0;
 		foreach (var s in Steps) {
@@ -1430,32 +1487,39 @@ public sealed partial class MainViewModel : Observable
 		SelectedStep = a_row;
 	}
 
-	public bool SaveSetup()
+	// a change to the setup shown is on its way into its file (the next change waits for it: NotNow)
+	public bool Saving { get; private set; }
+
+	// The setup shown, written to its file - away from the window's own thread, where the copy into "Setup backups", the
+	// tidying of older copies and the write itself held up every click on a slow disk. Its text is made here (memory
+	// only); one save at a time, and while one is on its way the setup is not changed again, so what is shown and what is
+	// being written never part ways. Says how it went; true when the file holds the setup
+	public async Task<bool> SaveSetup()
 	{
-		if (Setup == null) {
+		if (Setup is not { } setup) {
 			return false;
 		}
-		if (Engine.Active() is { } j && string.Equals(j.SetupFile, Setup.File, StringComparison.OrdinalIgnoreCase)) {
+		if (Saving) {
+			Say("Not saved yet: the change before this one is still being saved - try again in a moment.", "bad");
+			return false;
+		}
+		if (Engine.Active() is { } j && string.Equals(j.SetupFile, setup.File, StringComparison.OrdinalIgnoreCase)) {
 			Say("Not saved: a run is using this setup right now.", "bad");
 			return false;
 		}
+		// what a check that is under way finds is for the setup as it was before this change
+		++_setupEdits;
+		var (file, text) = (setup.File, setup.Text());
+		var copies = Path.Combine(AppPaths.Data, "Setup backups");
+		Saving = true;
+		string? why;
 		try {
-			var backup = Path.Combine(AppPaths.Data, "Setup backups");
-			Directory.CreateDirectory(backup);
-			if (File.Exists(Setup.File)) {
-				File.Copy(Setup.File, Path.Combine(backup, Path.GetFileNameWithoutExtension(Setup.File) + " " + DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss", InvariantCulture) + ".json"), true);
-				var own = new System.Text.RegularExpressions.Regex("^" + System.Text.RegularExpressions.Regex.Escape(Path.GetFileNameWithoutExtension(Setup.File)) + @" \d{4}-\d\d-\d\d \d\d-\d\d-\d\d\.json$");
-				foreach (var old in new DirectoryInfo(backup).GetFiles("*.json").Where(f => own.IsMatch(f.Name)).OrderByDescending(f => f.Name).Skip(20)) {
-					old.Delete();
-				}
-			}
-			Setup.Save();
-			Say("Saved.", "good");
-			return true;
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
-			Say("Not saved: " + e.Message, "bad");
-			return false;
+			why = await Task.Run(() => Setup.WriteKeepingACopy(file, text, copies));
+		} finally {
+			Saving = false;
 		}
+		Say(why == null ? "Saved." : "Not saved: " + why, why == null ? "good" : "bad");
+		return why == null;
 	}
 
 	// each step's usual minutes (the old updater's own logs, 30 Sep - 26 Oct 2026) - the made-up run of the pictures only

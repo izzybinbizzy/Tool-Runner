@@ -319,6 +319,15 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	// under it) and what the run started directly
 	public List<int> RunProcesses() => [.. _ownMo2.Live(), .. Started.Live()];
 
+	// Whoever started processes through this control is done with it (a run, a tool opened to test it or to learn its
+	// settings): every process it held open to know it by is let go - the tools' and the game's, and the Mod Organizers it
+	// started. What is on record stays on record. Called last, after the final look at whose a process is
+	public void ReleaseOwned()
+	{
+		Started.Release();
+		_ownMo2.Release();
+	}
+
 	public bool AllowCloseTheirs { get; set; }
 
 	public static TimeSpan UserWait { get; set; } = TimeSpan.FromMinutes(30);

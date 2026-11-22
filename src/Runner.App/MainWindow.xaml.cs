@@ -290,14 +290,14 @@ public partial class MainWindow : Window
 	// the context menu and the buttons act on the selected step (a right-click selects the row under it)
 	StepRow? RowOf(object a_sender) => a_sender is FrameworkElement { DataContext: StepRow r } ? r : _vm.SelectedStep;
 
-	void StepOn_Click(object a_s, RoutedEventArgs a_e)
+	async void StepOn_Click(object a_s, RoutedEventArgs a_e)
 	{
 		if (a_e.OriginalSource is CheckBox { DataContext: StepRow row } box) {
 			if (_vm.IsRunning) {
 				box.IsChecked = row.On = !(box.IsChecked == true);
 				return;
 			}
-			_vm.SetOn(row, box.IsChecked == true);
+			await _vm.SetOn(row, box.IsChecked == true);
 		}
 	}
 
@@ -339,7 +339,7 @@ public partial class MainWindow : Window
 			return;
 		}
 		if (row.UsesOld) {
-			_vm.SetUseOld(row, false);
+			await _vm.SetUseOld(row, false);
 			return;
 		}
 		if (!row.On || row.LeftOut) {
@@ -357,7 +357,7 @@ public partial class MainWindow : Window
 			} else if (!look.Usable) {
 				Ask.Tell(this, $"{row.Name}'s old output cannot be used", string.Join("\n\n", OldOutput.Warning(look, _vm.Setup?.Profile ?? "")), "OK");
 			} else if (Ask.Show(this, $"Use {row.Name}'s old output?", _vm.OldOutputText(look), "Use the old output", "Build it again")) {
-				_vm.SetUseOld(row, true);
+				await _vm.SetUseOld(row, true);
 			}
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException) {
 			_vm.Say("The old output could not be looked at: " + e.Message, "bad");
@@ -387,15 +387,16 @@ public partial class MainWindow : Window
 	void Up_Click(object a_s, RoutedEventArgs a_e) => Move(RowOf(a_s), -1);
 	void Down_Click(object a_s, RoutedEventArgs a_e) => Move(RowOf(a_s), +1);
 
-	void StepList_KeyDown(object a_s, KeyEventArgs a_e)
+	async void StepList_KeyDown(object a_s, KeyEventArgs a_e)
 	{
 		if (Keyboard.Modifiers == ModifierKeys.Alt && a_e.SystemKey is Key.Up or Key.Down) {
+			// (marked as handled before the save is waited for: the key goes no further meanwhile)
+			a_e.Handled = true;
 			Move(_vm.SelectedStep, a_e.SystemKey == Key.Up ? -1 : +1);
-			a_e.Handled = true;
 		} else if (a_e.Key == Key.Space && _vm.SelectedStep is { } row && !_vm.IsRunning) {
-			row.On = !row.On;
-			_vm.SetOn(row, row.On);
 			a_e.Handled = true;
+			row.On = !row.On;
+			await _vm.SetOn(row, row.On);
 		}
 	}
 
@@ -408,7 +409,7 @@ public partial class MainWindow : Window
 
 	// his rule: players may reorder, behind a warning window saying things could go wrong out of order - the buttons, the
 	// keys and a drag all come through here
-	void MoveTo(StepRow a_row, int a_to)
+	async void MoveTo(StepRow a_row, int a_to)
 	{
 		if (_vm.IsRunning || a_to < 0 || a_to >= _vm.Steps.Count || a_to == _vm.Steps.IndexOf(a_row)) {
 			return;
@@ -419,7 +420,7 @@ public partial class MainWindow : Window
 			    string.Join("\n• ", warn) + "\n\nMove it anyway?", "Move anyway", "Keep the order")) {
 			return;
 		}
-		_vm.MoveTo(a_row, a_to);
+		await _vm.MoveTo(a_row, a_to);
 		StepList.Focus();
 	}
 
@@ -1173,8 +1174,34 @@ public partial class MainWindow : Window
 		Close();
 	}
 
+	// what the window remembers is being written as it closes / is written, and the window goes
+	bool _keeping;
+	bool _kept;
+
+	// the window is out of sight already: what it remembers is written away from its thread, then it closes for good
+	async Task KeepThenClose()
+	{
+		try {
+			await Task.Run(UiState.Save);
+		} finally {
+			_keeping = false;
+			_kept = true;
+			Close();
+		}
+	}
+
 	protected override void OnClosing(System.ComponentModel.CancelEventArgs a_e)
 	{
+		// the second pass, after the write: nothing is asked again, the window goes
+		if (_kept) {
+			base.OnClosing(a_e);
+			return;
+		}
+		if (_keeping) {
+			a_e.Cancel = true;
+			base.OnClosing(a_e);
+			return;
+		}
 		if (!LeaveSettings()) {
 			a_e.Cancel = true;
 		} else if (_vm.InHand != "") {
@@ -1207,6 +1234,18 @@ public partial class MainWindow : Window
 		if (!a_e.Cancel) {
 			_closingAll = true;
 			KeepSize();
+			// its panel windows now, so that their sizes are kept before the write below (closed only as this window goes,
+			// they were kept in memory alone, with nothing left to write them in time)
+			ClosePanels();
+			if (UiState.Unsaved) {
+				// What the window remembers goes into its file before the program ends, and never on this thread: the window
+				// is out of sight at once and closes when the write is done (on a slow disk it stood there frozen, and the
+				// write held this thread). An end that cannot be put off - Windows logging off - is covered by App.OnExit
+				a_e.Cancel = true;
+				_keeping = true;
+				Hide();
+				_ = KeepThenClose();
+			}
 		}
 		base.OnClosing(a_e);
 	}

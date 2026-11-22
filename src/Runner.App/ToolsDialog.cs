@@ -31,6 +31,12 @@ public static class ToolsDialog
 		a_error != null && a_error.Contains(ToolSettings.SavedNothing, StringComparison.Ordinal) ? $"left as it is: {a_name} saved nothing new, so it runs with the settings it had" :
 		"not set up: " + (a_error ?? "its window gave no settings");
 
+	// What is added when the mod a tool's window was started from could not be switched off again afterwards ("" when it
+	// could, or there was none): the tool's settings may be kept all the same, and the mod is still ticked in the player's
+	// profile - said where they look, never only in a log nobody is shown
+	public static string StillOn(string? a_mod) => a_mod == null ? ""
+		: $" The mod \"{a_mod}\", switched on to open it, could not be switched off again: untick it in Mod Organizer (the next run, or the next tool set up here, switches it off too).";
+
 	// true: go on (shown before a first run: the run starts); false: not now
 	public static bool Run(MainWindow a_owner, MainViewModel a_vm, Setup a_setup, IReadOnlyList<ToolSettings.ToSet> a_tools, bool a_beforeFirstRun)
 	{
@@ -130,15 +136,17 @@ public static class ToolsDialog
 			status.Text = "";
 			ToolSettings.Learned? learned = null;
 			string? error = null;
+			// the mod its window was started from, when that could not be switched off again
+			string? stillOn = null;
 			// the main window stays until the tool is closed and its mod is switched off again (WorkInHand)
 			using (a_owner.Working($"{a_r.Name} is open to set it up")) {
 				try {
-					learned = await Task.Run(() => ToolSettings.Learn(a_setup, a_r.Step, RunLog.Null, CancellationToken.None));
+					learned = await Task.Run(() => ToolSettings.Learn(a_setup, a_r.Step, RunLog.Null, CancellationToken.None, m => stillOn = m));
 				} catch (Exception e) when (e is not OutOfMemoryException) {
 					error = e.Message;
 				}
 			}
-			a_r.State.Text = AfterItsWindow(a_r.Name, learned, error);
+			a_r.State.Text = AfterItsWindow(a_r.Name, learned, error) + StillOn(stillOn);
 			if (learned != null) {
 				a_r.SetUp = true;
 				a_r.Open.Content = "Set up again";
@@ -204,8 +212,10 @@ public static class ToolsDialog
 			status.Text = "A run is going: set its tools up when the run is done.";
 		}
 		Buttons();
-		System.Windows.Automation.AutomationProperties.SetName(list, "The setup's tools");
-		dock.Children.Add(new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false, Content = list });
+		// (the scrolling region is what a screen reader meets as a pane of its own: it carries the name)
+		var tools = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false, Content = list };
+		System.Windows.Automation.AutomationProperties.SetName(tools, "The setup's tools");
+		dock.Children.Add(tools);
 		w.Content = new Border { Background = Brushes2.Get("Panel"), Child = dock };
 		w.Loaded += (_, _) => A11y.Say(w, "Set up your tools. " + (rows.Count == 0 ? "No tool to set up." : $"{rows.Count} tool(s), {rows.Count(r => !r.SetUp)} not set up yet."), true);
 		return w;

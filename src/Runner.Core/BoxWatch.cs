@@ -115,7 +115,10 @@ public sealed class BoxWatch : IDisposable
 
 	// One thing the watch does to the world. It begins only while the run still holds the watch, and "begun" is taken in the
 	// same step that Dispose's "released" is given in: a check and then the act would let the act start after the release.
-	bool Do(Action a_act)
+	// Public for what a look itself does to the world while it reads (the game's own message box is answered in the look,
+	// through DevBench - InGame.LookAtGameBox): that answer goes through here too, so none is sent once the run has let
+	// go of the watch. False: nothing was done (released, or another act is under way - the next beat does it).
+	public bool Do(Action a_act)
 	{
 		if (Interlocked.CompareExchange(ref _state, Acting, Idle) != Idle) {
 			return false;

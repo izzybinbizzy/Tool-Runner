@@ -44,6 +44,12 @@ public sealed class OldUse
 	public string Step { get; set; } = "";
 	public string Name { get; set; } = "";
 	public string Mod { get; set; } = "";
+	// the mod had no line in the mod list and the run gave it one, to switch it on: a put-back keeps that line only for a
+	// use that was carried out (the folder and what it holds are the player's either way)
+	public bool Listed { get; set; }
+	// the old output is switched on at its step's place. Until then the record says only what the run was about to do: a
+	// run cut off in between is put back to the profile as it was, the old output as the player had it
+	public bool Done { get; set; }
 }
 
 // an output moved into the run's backup before a tool rewrote it; put back when its step did not finish
@@ -111,8 +117,9 @@ public sealed class Journal
 	public bool StopAfterStep { get; set; }
 	public List<StepRecord> Steps { get; set; } = [];
 	public List<string> Built { get; set; } = [];
-	// the steps this run did not run because the setup uses their old output, each with that output's mod - on record once the
-	// run has switched it back on at the step's place (OldOutput); a put-back switches these on like what the run built
+	// the steps this run did not run because the setup uses their old output, each with that output's mod - on record before
+	// the run switches it back on at the step's place (OldOutput), and Done once it has; a put-back switches the ones that
+	// were carried out on like what the run built, and leaves the others as the profile had them before the run
 	public List<OldUse> UsedOld { get; set; } = [];
 	// LOOT's sort finished: its list is in this run's folder (LootStep.SortedFile) and every put-back of this run keeps it
 	public bool Sorted { get; set; }

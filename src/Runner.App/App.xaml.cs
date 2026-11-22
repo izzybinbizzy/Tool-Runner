@@ -82,12 +82,12 @@ public partial class App : Application
 		};
 		LogCrashes();
 		var args = a_e.Args;
-		if (args.Length == 2 && args[0] == "--snapshot") {
-			Shutdown(Snapshot(args[1]));
-			return;
-		}
-		if (args.Length == 2 && args[0] == "--page") {
-			Shutdown(Page(args[1]));
+		if (args.Length == 2 && args[0] is "--snapshot" or "--page") {
+			// The pictures' own window is the first one made, so it is the program's main window, and closing a main window
+			// ends the program with exit code 0 before the Shutdown below can give its own: a drawing that found the layout
+			// broken (or no setup to draw) came back as a success. Here only Shutdown ends the program.
+			ShutdownMode = ShutdownMode.OnExplicitShutdown;
+			Shutdown(args[0] == "--snapshot" ? Snapshot(args[1]) : Page(args[1]));
 			return;
 		}
 		// what moves in the window (the bar of a step whose share is not known) is drawn thirty times a second, not sixty: it
@@ -133,10 +133,15 @@ public partial class App : Application
 		});
 	}
 
-	// the window's sizes kept a moment ago are written before the process ends (UiState writes them off the window's thread)
+	// What the window remembers is written before the process ends. A window that closes has done that already, away from
+	// its own thread and waited for (MainWindow.OnClosing): nothing is left here then, and nothing is written. Only an end
+	// that passes the window by (Windows logging off, a start that failed) still finds something to write - written here,
+	// in place, since a task left behind would end with the process before its write
 	protected override void OnExit(ExitEventArgs a_e)
 	{
-		UiState.Save();
+		if (UiState.Unsaved) {
+			UiState.Save();
+		}
 		base.OnExit(a_e);
 	}
 

@@ -57,6 +57,7 @@ public static class Reports
 			["usesOldOutput"] = new JsonArray([.. a_p.UsesOld.Select(u => (JsonNode?)new JsonObject {
 				["key"] = u.Step, ["name"] = u.Name, ["output"] = u.Mod, ["usable"] = u.Usable, ["made"] = u.Made is { } made ? Iso(made) : null,
 				["changesSince"] = u.ChangedSince?.Count, ["builtAgainBefore"] = List(u.BuiltAgainBefore), ["builtOnIt"] = List(u.BuiltOnIt), ["missingMaster"] = u.MissingMaster,
+				["masterOffInRun"] = u.OffInRun,
 			})]),
 			["offForTheRun"] = new JsonArray([.. a_p.OffForTheRun.Select(m => (JsonNode?)new JsonObject { ["mod"] = m.Mod, ["why"] = m.Why })]),
 			["replacedForGood"] = List(a_p.ReplacedForGood),

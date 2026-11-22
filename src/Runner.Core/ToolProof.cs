@@ -111,11 +111,16 @@ public static class ToolProof
 			} while (missing != "" && look.Elapsed < TimeSpan.FromSeconds(30));
 			return new Result(a_look.Step, missing == "", missing == "" ? $"{tool}: what a run presses is there" : $"{tool}: {missing}");
 		} finally {
-			StepKit.CloseTool(control, image, a_log);
 			try {
-				control.Close(null, CancellationToken.None);
-			} catch (Exception e) when (e is Mo2BusyException or IOException or UnauthorizedAccessException or InvalidOperationException) {
-				a_log.Warn($"Mod Organizer could not be closed ({e.Message})");
+				StepKit.CloseTool(control, image, a_log);
+				try {
+					control.Close(null, CancellationToken.None);
+				} catch (Exception e) when (e is Mo2BusyException or IOException or UnauthorizedAccessException or InvalidOperationException) {
+					a_log.Warn($"Mod Organizer could not be closed ({e.Message})");
+				}
+			} finally {
+				// the tool and the Mod Organizer this test started are no longer held open
+				control.ReleaseOwned();
 			}
 		}
 	}

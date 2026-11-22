@@ -209,17 +209,27 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 			Files.WriteAtomic(Path.Combine(d, "meta.ini"), $"[General]\r\nmodid=0\r\nversion=\r\ncomments={MadeBy}{Brand.Name}\r\n");
 			a_log?.Detail($"made the output mod {a_mod}");
 		}
-		if (!States().ContainsKey(a_mod)) {
-			MustBeClosed("the mod list");
-			var (lines, nl) = ReadLines(ModList);
-			var at = lines.FindIndex(l => l.Length > 1 && l[0] is '+' or '-' or '*');
-			lines.Insert(at < 0 ? lines.Count : at, "-" + a_mod);
-			Files.WriteAtomic(ModList, string.Join(nl, lines));
-			a_log?.Detail($"{a_mod} added to the mod list (unticked)");
-			Ours(a_mod, '-');
-			SaveOurs();
-		}
+		ListMod(a_mod, a_log);
 		Added.Add(a_mod);
+	}
+
+	// A mod with no line in the mod list gets one, unticked and FIRST in the file (the bottom of MO2's left pane, where MO2
+	// itself puts a mod it finds): nothing can be switched that the list does not name. Its folder is not touched, and it
+	// is not counted among the mods this run made (Added). False: the list named it already.
+	public bool ListMod(string a_mod, RunLog? a_log = null)
+	{
+		if (States().ContainsKey(a_mod)) {
+			return false;
+		}
+		MustBeClosed("the mod list");
+		var (lines, nl) = ReadLines(ModList);
+		var at = lines.FindIndex(l => l.Length > 1 && l[0] is '+' or '-' or '*');
+		lines.Insert(at < 0 ? lines.Count : at, "-" + a_mod);
+		Files.WriteAtomic(ModList, string.Join(nl, lines));
+		a_log?.Detail($"{a_mod} added to the mod list (unticked)");
+		Ours(a_mod, '-');
+		SaveOurs();
+		return true;
 	}
 
 	// an output mod this tool made that holds nothing but its meta.ini (a step that failed, was stopped or wrote nothing): its
@@ -633,18 +643,21 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 	}
 
 	// mods that must also go off because a ticked plugin of theirs masters a plugin of a mod going off (repeats until stable)
-	public Dictionary<string, string> Dependents(IEnumerable<string> a_turningOff)
+	public Dictionary<string, string> Dependents(IEnumerable<string> a_turningOff) => DependentsOf(Mo2, States(), a_turningOff);
+
+	// the same for mod states read earlier (the look at an old output that is used works out what a run would switch off)
+	public static Dictionary<string, string> DependentsOf(Mo2Instance a_mo2, IReadOnlyDictionary<string, char> a_states, IEnumerable<string> a_turningOff)
 	{
-		var st = States();
+		var st = a_states;
 		var off = new HashSet<string>(a_turningOff, StringComparer.OrdinalIgnoreCase);
 		// every ticked mod that ships each plugin, and the game's own Data folder: a master goes missing only when every copy of
 		// it goes off (a second mod's copy, or the game's, keeps it there)
 		var providers = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-		var data = Path.Combine(Mo2.GameDir, "Data");
+		var data = Path.Combine(a_mo2.GameDir, "Data");
 		var inData = Directory.Exists(data) ? Directory.GetFiles(data).Select(Path.GetFileName).OfType<string>().Where(Plugins.IsPlugin).ToHashSet(StringComparer.OrdinalIgnoreCase) : [];
 		// each mod folder listed once (the loop below repeats until nothing more goes off)
 		var inModCache = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-		List<string> InMod(string a_mod) => inModCache.TryGetValue(a_mod, out var l) ? l : inModCache[a_mod] = Plugins.InMod(Mo2.ModDir(a_mod));
+		List<string> InMod(string a_mod) => inModCache.TryGetValue(a_mod, out var l) ? l : inModCache[a_mod] = Plugins.InMod(a_mo2.ModDir(a_mod));
 		foreach (var (name, flag) in st) {
 			if (flag == '+') {
 				foreach (var p in InMod(name)) {
@@ -668,7 +681,7 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 					continue;
 				}
 				foreach (var p in InMod(name)) {
-					var full = Path.Combine(Mo2.ModDir(name), p);
+					var full = Path.Combine(a_mo2.ModDir(name), p);
 					if (!mastersCache.TryGetValue(full, out var ms)) {
 						try {
 							ms = Plugins.Masters(full);

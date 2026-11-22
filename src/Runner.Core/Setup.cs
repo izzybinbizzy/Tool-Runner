@@ -72,8 +72,11 @@ public sealed class Setup
 	// a step that is on, is not left out, and is set to use the output it made before: its tool does not run (OldOutput)
 	public bool UsesOld(StepEntry a_s) => a_s.On && a_s.UseOld && !LeftOutForNewGame(a_s.Key) && OldOutput.CanKeep(a_s.Key, new StepSettings(a_s.Settings));
 
+	// the steps that are switched on (and not left out for a new game), whether a run runs them or uses their old output
+	public List<StepEntry> OnSteps => Steps.Where(s => s.On && !LeftOutForNewGame(s.Key)).ToList();
+
 	// the steps a run runs
-	public List<StepEntry> EnabledSteps => Steps.Where(s => s.On && !LeftOutForNewGame(s.Key) && !UsesOld(s)).ToList();
+	public List<StepEntry> EnabledSteps => OnSteps.Where(s => !UsesOld(s)).ToList();
 
 	// the steps a run does not run, because the output each made before is used
 	public List<StepEntry> KeptSteps => Steps.Where(UsesOld).ToList();
@@ -254,8 +257,39 @@ public sealed class Setup
 	public void Save(string? a_file = null)
 	{
 		File = a_file ?? File;
+		Files.WriteAtomic(File, Text());
+	}
+
+	// the setup as its file holds it
+	public string Text()
+	{
 		Root["schema"] = Schema;
-		Files.WriteAtomic(File, Root.ToJsonString(WriteOptions));
+		return Root.ToJsonString(WriteOptions);
+	}
+
+	// how many copies of a setup's earlier files are kept beside the data (the newest ones)
+	public const int CopiesKept = 20;
+
+	// A setup's text written to its file, with the file as it stood copied into a_copies first (under the setup's name and
+	// the time; only the newest CopiesKept of that setup stay). Disk work alone, on text made beforehand: the window calls
+	// it away from its own thread, where a slow disk held up every click. Returns why it was not written, or null when it was
+	public static string? WriteKeepingACopy(string a_file, string a_text, string a_copies)
+	{
+		try {
+			Directory.CreateDirectory(a_copies);
+			if (System.IO.File.Exists(a_file)) {
+				var name = Path.GetFileNameWithoutExtension(a_file);
+				System.IO.File.Copy(a_file, Path.Combine(a_copies, name + " " + DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss", InvariantCulture) + ".json"), true);
+				var own = new System.Text.RegularExpressions.Regex("^" + System.Text.RegularExpressions.Regex.Escape(name) + @" \d{4}-\d\d-\d\d \d\d-\d\d-\d\d\.json$");
+				foreach (var old in new DirectoryInfo(a_copies).GetFiles("*.json").Where(f => own.IsMatch(f.Name)).OrderByDescending(f => f.Name).Skip(CopiesKept)) {
+					old.Delete();
+				}
+			}
+			Files.WriteAtomic(a_file, a_text);
+			return null;
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			return e.Message;
+		}
 	}
 
 	public Setup Clone() => FromJson((JsonObject)Root.DeepClone(), File);
