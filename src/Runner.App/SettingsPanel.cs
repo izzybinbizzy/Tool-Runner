@@ -230,8 +230,14 @@ public static class SettingsPanel
 			"and nothing is downloaded: the page opens in your browser when you choose.", Style = (Style)a_w.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap });
 	}
 
+	// Which drawing of the settings is the one on screen: counted on with every drawing, and when the settings window closes.
+	// A save that ends later goes on only for the drawing it was started from (a setup's file alone does not tell: the
+	// window may have been closed and opened again for the same setup, with new edits in it)
+	static int s_drawing;
+
 	public static FrameworkElement Build(MainWindow a_w, MainViewModel a_vm)
 	{
+		var drawing = ++s_drawing;
 		s_openedFor = a_vm.Setup?.File;
 		if (a_vm.Setup == null) {
 			// the program's own new-version look happens with no setup too, so its switch is here as well
@@ -866,6 +872,16 @@ public static class SettingsPanel
 					save.Focus();
 				}
 			}
+			// The settings window was closed while this was being written - or closed and opened again, for this setup or
+			// another: what is on screen now is not the drawing this save was started from. It is left exactly as it is
+			// (drawn again from here, edits made in the new one were gone without a question, and a window the player
+			// had closed came back). The main window's list still follows what was saved
+			if (drawing != s_drawing) {
+				if (NotThisSetup(openedFor, openedName, a_vm.Setup) == null) {
+					a_vm.LoadSteps();
+				}
+				return;
+			}
 			// another setup was picked while this one was being written: its file holds what was saved (or not), and the
 			// setup shown now is neither read again nor are these settings drawn again over it
 			if (NotThisSetup(openedFor, openedName, a_vm.Setup) != null) {
@@ -931,6 +947,7 @@ public static class SettingsPanel
 	// the settings window closed: nothing typed is left to ask about
 	public static void Closed()
 	{
+		++s_drawing;
 		HasChanges = false;
 		s_openedFor = null;
 		s_find = null;

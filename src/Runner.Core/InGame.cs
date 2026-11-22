@@ -1179,7 +1179,11 @@ public static partial class InGame
 		var watch = TimeSpan.FromSeconds(a_s.Int("compile_watch_s", 300));
 		var max = TimeSpan.FromMinutes(a_s.Int("compile_max_min", 90));
 		var sw = Stopwatch.StartNew();
+		// seen: the shader mod was at work - the wait goes on while it is. compiledSome: something says shaders were really
+		// compiled (its own count, or its log). The two are not one: reading a whole cache back is work too, and a start that
+		// only read its cache must never be reported as a cache that was out of date
 		var seen = false;
+		var compiledSome = false;
 		var quietSince = TimeSpan.Zero;
 		TimeSpan? passOverSince = null;
 		TimeSpan? saidOverSince = null;
@@ -1197,10 +1201,13 @@ public static partial class InGame
 				saidOverSince ??= sw.Elapsed;
 				if (sw.Elapsed - saidOverSince >= TimeSpan.FromSeconds(10)) {
 					a_ctx.Log.Detail(ShaderPassSaid(pass));
-					return pass.Compiled is { } compiled ? compiled > 0 : seen;
+					return pass.Compiled is { } count ? count > 0 : compiledSome;
 				}
 			} else {
 				saidOverSince = null;
+			}
+			if (pass is { Compiled: > 0 }) {
+				compiledSome = true;
 			}
 			if (pass is { Compiling: true }) {
 				if (!seen) {
@@ -1228,12 +1235,14 @@ public static partial class InGame
 					a_ctx.Activity(a_step, "waiting for the game's shaders to compile");
 				}
 				seen = true;
+				compiledSome = true;
 				quietSince = sw.Elapsed;
 			} else if ((seen && sw.Elapsed - quietSince > TimeSpan.FromSeconds(30)) || (!seen && sw.Elapsed > watch)) {
 				if (seen) {
-					a_ctx.Log.Detail($"the shader compile finished after {sw.Elapsed.TotalMinutes:0.0} min");
+					a_ctx.Log.Detail(compiledSome ? $"the shader compile finished after {sw.Elapsed.TotalMinutes:0.0} min"
+						: $"the shader mod went quiet after {sw.Elapsed.TotalMinutes:0.0} min and could no longer be asked - nothing says a shader was compiled");
 				}
-				return seen;
+				return compiledSome;
 			}
 			a_ctx.Pause(TimeSpan.FromSeconds(5));
 		}

@@ -273,28 +273,27 @@ public sealed class Setup
 	// A setup's text written to its file, with the file as it stood copied into a_copies first (under the setup's name and
 	// the time; only the newest CopiesKept of that setup stay). Disk work alone, on text made beforehand: the window calls
 	// it away from its own thread, where a slow disk held up every click. Returns why it was not written, or null when it was
-	public static string? WriteKeepingACopy(string a_file, string a_text, string a_copies)
+	// a_now: the time the copy is named after (the offline tests name one; else now)
+	public static string? WriteKeepingACopy(string a_file, string a_text, string a_copies, DateTime? a_now = null)
 	{
 		try {
 			Directory.CreateDirectory(a_copies);
 			if (System.IO.File.Exists(a_file)) {
 				var name = Path.GetFileNameWithoutExtension(a_file);
-				var stamp = DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss", InvariantCulture);
-				// A copy is never written over: two saves within one second each keep the file as it stood before them (the
-				// later ones carry a number after the time - written over, the first save's copy was lost to the second's)
-				for (var n = 1; ; ++n) {
-					var copy = Path.Combine(a_copies, $"{name} {stamp}{(n == 1 ? "" : " " + n.ToString(InvariantCulture))}.json");
-					if (!System.IO.File.Exists(copy)) {
-						System.IO.File.Copy(a_file, copy, false);
-						break;
-					}
-				}
-				// this setup's own copies, the newest first: by their time, then by the number of those made in one second
+				var stamp = (a_now ?? DateTime.Now).ToString("yyyy-MM-dd HH-mm-ss", InvariantCulture);
+				// this setup's own copies: its name, the time, and for the later ones of one second a number
 				var own = new System.Text.RegularExpressions.Regex("^" + System.Text.RegularExpressions.Regex.Escape(name) + @" (\d{4}-\d\d-\d\d \d\d-\d\d-\d\d)(?: (\d{1,9}))?\.json$");
-				var copies = new DirectoryInfo(a_copies).GetFiles("*.json").Select(f => (File: f, Is: own.Match(f.Name))).Where(c => c.Is.Success)
-					.OrderByDescending(c => c.Is.Groups[1].Value, StringComparer.Ordinal)
-					.ThenByDescending(c => c.Is.Groups[2].Success ? int.Parse(c.Is.Groups[2].Value, InvariantCulture) : 1);
-				foreach (var old in copies.Skip(CopiesKept)) {
+				List<(FileInfo File, string Stamp, int Number)> Own() => [.. new DirectoryInfo(a_copies).GetFiles("*.json").Select(f => (File: f, Is: own.Match(f.Name))).Where(c => c.Is.Success)
+					.Select(c => (c.File, c.Is.Groups[1].Value, c.Is.Groups[2].Success ? int.Parse(c.Is.Groups[2].Value, InvariantCulture) : 1))];
+				// A copy is never written over: two saves within one second each keep the file as it stood before them (the
+				// later ones carry a number after the time - written over, the first save's copy was lost to the second's).
+				// The number is one above the highest of that second that is still there, never a free one below it: once the
+				// tidy below has taken the oldest of that second away, its name read as the oldest again and the copy just
+				// made under it was the next one tidied away
+				var number = Own().Where(c => c.Stamp == stamp).Select(c => c.Number).DefaultIfEmpty(0).Max() + 1;
+				System.IO.File.Copy(a_file, Path.Combine(a_copies, $"{name} {stamp}{(number == 1 ? "" : " " + number.ToString(InvariantCulture))}.json"), false);
+				// the newest first: by their time, then by the number of those made in one second
+				foreach (var old in Own().OrderByDescending(c => c.Stamp, StringComparer.Ordinal).ThenByDescending(c => c.Number).Skip(CopiesKept)) {
 					old.File.Delete();
 				}
 			}

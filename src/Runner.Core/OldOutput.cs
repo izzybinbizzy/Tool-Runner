@@ -319,7 +319,12 @@ public static class OldOutput
 	// moment): a plugin of it and a master of that plugin that is not switched on now, in words - the tool that runs next
 	// would find the plugin with a master missing. Null: every master is on
 	// a_with: the other old outputs that come on at the same place (they are on before the next tool runs)
-	public static string? MasterOffNow(Mo2Instance a_mo2, IReadOnlyDictionary<string, char> a_states, string a_mod, IEnumerable<string>? a_with = null)
+	public static string? MasterOffNow(Mo2Instance a_mo2, IReadOnlyDictionary<string, char> a_states, string a_mod, IEnumerable<string>? a_with = null) =>
+		MasterNotOn(a_mo2, a_states, a_mod, a_with) is { } m ? $"{m.Plugin} needs {m.Master}, which is not switched on at this point of the run" : null;
+
+	// the same as its two parts: a plugin of the mod, and the master of it that no switched-on mod (nor a_with, nor the game's
+	// Data and overwrite folders) holds. Null: every master is on
+	public static (string Plugin, string Master)? MasterNotOn(Mo2Instance a_mo2, IReadOnlyDictionary<string, char> a_states, string a_mod, IEnumerable<string>? a_with = null)
 	{
 		HashSet<string>? on = null;
 		foreach (var (p, masters) in MastersIn(a_mo2, a_mod)) {
@@ -331,7 +336,7 @@ public static class OldOutput
 				}
 			}
 			if (masters.FirstOrDefault(m => !on.Contains(m)) is { } away) {
-				return $"{p} needs {away}, which is not switched on at this point of the run";
+				return (p, away);
 			}
 		}
 		return null;
@@ -373,20 +378,25 @@ public static class OldOutput
 	// The old outputs that come on at one place of a run, each one that another of them needs before that other: a plugin
 	// the order files do not hold yet gets its place as its mod is switched on, and a master stands before what needs it.
 	// Two that need each other, and the ones that need none of the others, keep the order they were given in
-	public static List<Setup.StepEntry> InMasterOrder(Mo2Instance a_mo2, IReadOnlyList<Setup.StepEntry> a_due)
+	public static List<Setup.StepEntry> InMasterOrder(Mo2Instance a_mo2, IReadOnlyList<Setup.StepEntry> a_due) =>
+		[.. MasterOrder(a_mo2, [.. a_due.Select(s => new StepSettings(s.Settings).OutputMod ?? "")]).Select(i => a_due[i])];
+
+	// the same for mods by name (a put-back switches what a run built and used on in this order)
+	public static List<string> ModsInMasterOrder(Mo2Instance a_mo2, IReadOnlyList<string> a_mods) => [.. MasterOrder(a_mo2, a_mods).Select(i => a_mods[i])];
+
+	static List<int> MasterOrder(Mo2Instance a_mo2, IReadOnlyList<string> a_mods)
 	{
-		if (a_due.Count < 2) {
-			return [.. a_due];
+		var left = Enumerable.Range(0, a_mods.Count).ToList();
+		if (a_mods.Count < 2) {
+			return left;
 		}
-		var mods = a_due.Select(s => new StepSettings(s.Settings).OutputMod ?? "").ToList();
-		var has = mods.Select(m => (m == "" ? [] : Plugins.InMod(a_mo2.ModDir(m))).ToHashSet(StringComparer.OrdinalIgnoreCase)).ToList();
-		var needs = mods.Select(m => (m == "" ? [] : MastersIn(a_mo2, m).SelectMany(x => x.Masters)).ToHashSet(StringComparer.OrdinalIgnoreCase)).ToList();
-		var left = Enumerable.Range(0, a_due.Count).ToList();
-		var order = new List<Setup.StepEntry>();
+		var has = a_mods.Select(m => (m == "" ? [] : Plugins.InMod(a_mo2.ModDir(m))).ToHashSet(StringComparer.OrdinalIgnoreCase)).ToList();
+		var needs = a_mods.Select(m => (m == "" ? [] : MastersIn(a_mo2, m).SelectMany(x => x.Masters)).ToHashSet(StringComparer.OrdinalIgnoreCase)).ToList();
+		var order = new List<int>();
 		while (left.Count > 0) {
 			var free = left.Where(i => !left.Any(o => o != i && needs[i].Overlaps(has[o]))).ToList();
 			var next = free.Count > 0 ? free[0] : left[0];
-			order.Add(a_due[next]);
+			order.Add(next);
 			left.Remove(next);
 		}
 		return order;

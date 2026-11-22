@@ -1104,9 +1104,12 @@ public partial class MainWindow : Window
 		}
 		_toolsAsked = true;
 		try {
-			var tools = await Task.Run(() => ToolSettings.ToSetUp(setup));
-			ToolsDialog.Run(this, _vm, setup, tools, false);
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			// (read from a copy made here, on the window's thread: the worker never walks the setup's own step list, which a
+			// step dragged meanwhile rewrites under it)
+			var asItIs = setup.Clone();
+			var tools = await Task.Run(() => ToolSettings.ToSetUp(asItIs));
+			ToolsDialog.Run(this, _vm, asItIs, tools, false);
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) {
 			_vm.Say("This setup's tools could not be read: " + e.Message, "bad");
 		} finally {
 			_toolsAsked = false;

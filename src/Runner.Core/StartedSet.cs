@@ -153,6 +153,22 @@ public sealed class StartedSet : IEnumerable<int>
 		return copy.Where(p => p.Value != null && _startOf(p.Key) == p.Value).Select(p => p.Key).ToList();
 	}
 
+	// the same, each with the start time on its record: who ends one of them names it by both (Procs.KillTree)
+	public Dictionary<int, DateTime> LiveAt()
+	{
+		KeyValuePair<int, DateTime?>[] copy;
+		lock (_gate) {
+			copy = [.. _pids];
+		}
+		var live = new Dictionary<int, DateTime>();
+		foreach (var (pid, at) in copy) {
+			if (at is { } t && _startOf(pid) == t) {
+				live[pid] = t;
+			}
+		}
+		return live;
+	}
+
 	// those, and what they started that is on record (Sweep) and still that very process - what "the run's own" means for
 	// closing a tool, for a Stop, and for telling the player's programs under Mod Organizer from the run's
 	public List<int> Owned() => [.. OwnedAt().Keys];

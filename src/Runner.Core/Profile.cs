@@ -229,8 +229,13 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 		a_log?.Detail($"{a_mod} added to the mod list (unticked)");
 		Ours(a_mod, '-');
 		SaveOurs();
+		AfterListMod?.Invoke(a_mod);
 		return true;
 	}
+
+	// The offline tests only: told right after a mod got its line in the mod list. A test that must show what a run has on
+	// record at that very moment - a crash there is put back from that record alone - takes its copy of the run's files here
+	public static Action<string>? AfterListMod { get; set; }
 
 	// A mod's line taken out of the mod list again: the line a run had given a mod that had none (ListMod), when the run then
 	// left that mod as it was. Its folder is not touched. False: the list does not name it.
@@ -673,6 +678,8 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 		var providers = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 		var data = Path.Combine(a_mo2.GameDir, "Data");
 		var inData = Directory.Exists(data) ? Directory.GetFiles(data).Select(Path.GetFileName).OfType<string>().Where(Plugins.IsPlugin).ToHashSet(StringComparer.OrdinalIgnoreCase) : [];
+		// (Mod Organizer's overwrite folder is in the game's Data whatever is ticked: a copy there keeps a master there too)
+		inData.UnionWith(Plugins.InMod(a_mo2.OverwriteDir));
 		// each mod folder listed once (the loop below repeats until nothing more goes off)
 		var inModCache = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 		List<string> InMod(string a_mod) => inModCache.TryGetValue(a_mod, out var l) ? l : inModCache[a_mod] = Plugins.InMod(a_mo2.ModDir(a_mod));

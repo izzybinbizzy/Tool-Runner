@@ -2041,6 +2041,89 @@ public static class Program
 		Check(RunSummary.Of(sharedRun).Lines().Any(l => l.Contains("Synthesis (Bashed)", StringComparison.Ordinal) && l.Contains("(Bashed)", StringComparison.Ordinal) && l.Split("(Bashed)").Length == 3),
 			"and the summary names both: " + string.Join(" | ", RunSummary.Of(sharedRun).Lines()));
 
+		// ... and when the one that is needed was in the mod list, switched off, and the other had no line at all: the put-back
+		// brings one back still off and the other switched on - their plugins get their places in master order all the same,
+		// in one pass (CodeRabbit on pull request #35: in two, the master was listed after the plugin that needs it)
+		using var g2 = new FakeMo2();
+		g2.Mod("Bashed", ("Bashed Patch, 0.esp", false, []));
+		g2.Mod("Patch On Bashed", ("PatchOnBashed.esp", false, ["Bashed Patch, 0.esp"]));
+		ProfileOf(g2).EnsureMod("Bashed");
+		var mixed = g2.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Patch On Bashed" }), ("wryebash", new JsonObject { ["output_mod"] = "Bashed" }),
+			("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		((JsonArray)mixed.Root["steps"]!)[0]![OldOutput.Key] = true;
+		((JsonArray)mixed.Root["steps"]!)[1]![OldOutput.Key] = true;
+		mixed.Save();
+		ran = Runner.Run(new RunRequest(g2.SetupFile, g2.Data));
+		Equal(RunState.Finished, ran.State, ran.Verdict);
+		order = g2.Text("loadorder.txt").Replace("\r\n", "\n").Split('\n').ToList();
+		Check(order.IndexOf("Bashed Patch, 0.esp") >= 0 && order.IndexOf("Bashed Patch, 0.esp") < order.IndexOf("PatchOnBashed.esp"),
+			"one listed and off, the other not listed: after the run the master stands before the plugin that needs it: " + string.Join(" | ", order));
+		Check(ProfileOf(g2).IsOn("Bashed") && ProfileOf(g2).IsOn("Patch On Bashed"), "and both are switched on");
+
+		// The old outputs due at one place are taken as one: when one of them cannot be used after all, none of that place is
+		// put on the run's record or switched on. (Taken one by one, the first was carried out before the second was found
+		// gone - and stayed switched on after the run.)
+		using var g3 = new FakeMo2();
+		g3.Mod("Bashed", ("Bashed Patch, 0.esp", false, []));
+		g3.Mod("Patch On Bashed", ("PatchOnBashed.esp", false, ["Bashed Patch, 0.esp"]));
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
+			WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp");
+			File.Delete(Path.Combine(ctx.Mo2.ModDir("Patch On Bashed"), "PatchOnBashed.esp"));
+		}));
+		var half = g3.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("wryebash", new JsonObject { ["output_mod"] = "Bashed" }),
+			("synthesis", new JsonObject { ["output_mod"] = "Patch On Bashed" }), ("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		((JsonArray)half.Root["steps"]!)[1]![OldOutput.Key] = true;
+		((JsonArray)half.Root["steps"]!)[2]![OldOutput.Key] = true;
+		half.Save();
+		ran = Runner.Run(new RunRequest(g3.SetupFile, g3.Data));
+		Equal(RunState.Failed, ran.State, ran.Verdict);
+		Equal(0, Journal.Load(ran.Folder!).UsedOld.Count, "when one old output of a place cannot be used, none of that place is put on the run's record");
+		Check(!ProfileOf(g3).States().ContainsKey("Bashed") && !ProfileOf(g3).States().ContainsKey("Patch On Bashed"), "and none of them is in the mod list or switched on after the run");
+
+		// What the player switches in Mod Organizer during the run counts for the profile the run's end leaves. A master's
+		// mod they untick while an earlier tool works is off at the end: the old output that needs it is refused at its
+		// place - also with no tool after it
+		using var p1 = new FakeMo2();
+		p1.Mod("Old Patch", ("OldPatch.esp", false, ["BaseMod.esp"]));
+		var p1List = Path.Combine(p1.ProfileDir, "modlist.txt");
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
+			WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp");
+			File.WriteAllText(p1List, File.ReadAllText(p1List).Replace("+Base Mod", "-Base Mod", StringComparison.Ordinal));
+		}));
+		var unticked = p1.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("synthesis", new JsonObject { ["output_mod"] = "Old Patch" }));
+		((JsonArray)unticked.Root["steps"]!)[1]![OldOutput.Key] = true;
+		unticked.Save();
+		ran = Runner.Run(new RunRequest(p1.SetupFile, p1.Data));
+		Equal(RunState.Failed, ran.State, ran.Verdict);
+		Check(ran.Verdict.Contains("its old output cannot be used: OldPatch.esp needs BaseMod.esp", StringComparison.Ordinal), "an old output whose master the player switched off during the run is refused at its place: " + ran.Verdict);
+		Check(!ProfileOf(p1).IsOn("Old Patch") && !ProfileOf(p1).IsOn("Base Mod"), "it is not switched on, and what the player unticked stays unticked");
+		// ... and one they untick after the old output is on (a later tool is at work): the put-back keeps what the player did,
+		// leaves that old output switched off, and the run's notes say why - never on with its master off
+		using var p2 = new FakeMo2();
+		p2.Mod("Old Patch", ("OldPatch.esp", false, ["BaseMod.esp"]));
+		var p2List = Path.Combine(p2.ProfileDir, "modlist.txt");
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
+			WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp");
+			File.WriteAllText(p2List, File.ReadAllText(p2List).Replace("+Base Mod", "-Base Mod", StringComparison.Ordinal));
+		}));
+		var untickedLater = p2.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Old Patch" }), ("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		((JsonArray)untickedLater.Root["steps"]!)[0]![OldOutput.Key] = true;
+		untickedLater.Save();
+		ran = Runner.Run(new RunRequest(p2.SetupFile, p2.Data));
+		Equal(RunState.Finished, ran.State, ran.Verdict);
+		Check(!ProfileOf(p2).IsOn("Old Patch") && !ProfileOf(p2).IsOn("Base Mod"), "the old output is left switched off, and what the player unticked stays unticked");
+		Check(!ProfileOf(p2).ActivePlugins().Contains("OldPatch.esp", StringComparer.OrdinalIgnoreCase), "its plugin is not ticked");
+		Check(Journal.Load(ran.Folder!).Notes.Any(n => n.Contains("\"Old Patch\" is left switched off", StringComparison.Ordinal) && n.Contains("BaseMod.esp", StringComparison.Ordinal)),
+			"and the run's notes say why: " + string.Join(" | ", Journal.Load(ran.Folder!).Notes));
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => { }));
+
+		// a copy of a master in Mod Organizer's overwrite folder keeps it there when its mod goes off: what needs it stays on
+		var deps = Mo2Instance.Load(f.Exe, f.Instance);
+		Check(Profile.DependentsOf(deps, ProfileOf(f).States(), ["Output B"]).ContainsKey("Needs B"), "(a mod that needs a plugin of a mod going off goes off with it)");
+		FakeMo2.Plugin(Path.Combine(f.Overwrite, "OutB.esp"), false);
+		Check(!Profile.DependentsOf(deps, ProfileOf(f).States(), ["Output B"]).ContainsKey("Needs B"), "with a copy of that plugin in the overwrite folder it stays on");
+		File.Delete(Path.Combine(f.Overwrite, "OutB.esp"));
+
 		// a tool that uses its old output is still one of the setup's tools to set up in its own window
 		var tools = Setup.FromJson(new JsonObject { ["mo2"] = new JsonObject { ["exe"] = f.Exe, ["profile"] = "Test" }, ["backups"] = f.Backups,
 			["steps"] = new JsonArray(new JsonObject { ["step"] = "texgen", [OldOutput.Key] = true, ["settings"] = new JsonObject { ["output_mod"] = "Output B", ["executable"] = "TexGen" } },
@@ -2145,6 +2228,52 @@ public static class Program
 		Check(r.Verdict.StartsWith("stopped before anything was changed", StringComparison.Ordinal), "a mod list that cannot be written stops the run before anything was changed: " + r.Verdict);
 		Equal("Shared", string.Join(",", Journal.Load(r.Folder!).Listed), "the mod was on the run's record before its line was written");
 		Equal(listHeld, k.Text("modlist.txt"), "and the mod list is as it was");
+		// Cut off by a crash right after the run wrote that line and before it read the order files: all a put-back has is
+		// the record the RUN itself had written by then. Both are taken as they stood at that moment - the run's record and
+		// the mod list - and laid out again once this run is over: nothing of the record is written by the test but that
+		// its process is gone
+		byte[]? cutRecord = null, cutList = null;
+		Profile.AfterListMod = m => {
+			if (m == "Shared" && cutRecord == null) {
+				var newest = Directory.GetDirectories(Runner.RunsDir(k.Data)).OrderByDescending(Directory.GetCreationTimeUtc).First();
+				cutRecord = File.ReadAllBytes(Path.Combine(newest, "journal.json"));
+				cutList = File.ReadAllBytes(Path.Combine(k.ProfileDir, "modlist.txt"));
+			}
+		};
+		try {
+			how = "fail";
+			r = Runner.Run(new RunRequest(k.SetupFile, k.Data));
+		} finally {
+			Profile.AfterListMod = null;
+		}
+		Equal(RunState.Failed, r.State, r.Verdict);
+		Check(cutRecord != null && cutList != null, "(the run's record and the mod list were taken as the line was written)");
+		var cutFolder = Path.Combine(Runner.RunsDir(k.Data), "0002 cut off");
+		Directory.CreateDirectory(cutFolder);
+		File.WriteAllBytes(Path.Combine(cutFolder, "journal.json"), cutRecord!);
+		File.WriteAllBytes(Path.Combine(k.ProfileDir, "modlist.txt"), cutList!);
+		var cut = Journal.Load(cutFolder);
+		Equal("Shared", string.Join(",", cut.Listed), "the record the run had written before the line names the mod");
+		cut.Pid = 999999;
+		cut.Save();
+		Check(ProfileOf(k).States().ContainsKey("Shared"), "(the line is in the mod list, as the crash left it)");
+		var afterCut = Runner.Restore(Journal.Load(cutFolder));
+		Equal(RunState.Restored, afterCut.State, afterCut.Verdict);
+		Equal(sharedBefore, k.Text("modlist.txt"), "put back from the run's own record alone, the mod list is as it was");
+		// A folder that was there before the run with nothing in it but a meta.ini this program once wrote (an earlier run's
+		// empty output, its line gone): the run gives it a line, fails before its tool - and only the line goes again. The
+		// folder is not the run's to move away
+		var emptyOne = Path.Combine(k.Mods, "Shared Empty");
+		Directory.CreateDirectory(emptyOne);
+		File.WriteAllText(Path.Combine(emptyOne, "meta.ini"), $"[General]\r\ncomments=made by {Brand.Name}\r\n");
+		Check(Profile.IsEmptyOutput(emptyOne), "(it reads as an empty output of this program's)");
+		k.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("texgen", new JsonObject { ["output_mod"] = "Shared Empty" }));
+		var emptyBefore = k.Text("modlist.txt");
+		how = "fail";
+		r = Runner.Run(new RunRequest(k.SetupFile, k.Data));
+		Equal(RunState.Failed, r.State, r.Verdict);
+		Check(File.Exists(Path.Combine(emptyOne, "meta.ini")), "an empty folder that was there before the run is still there after a run that failed");
+		Equal(emptyBefore, k.Text("modlist.txt"), "and its new line is gone again");
 
 		// A line the put-back cannot take out again (the mod list held by another program for a moment) is named as not back -
 		// the run and "Put my profile back" then stay on offer -, and the next put-back takes it out
@@ -6847,6 +6976,19 @@ public static class Program
 		// a write that cannot be made says why, and the setup's file is as it was
 		Check(Setup.WriteKeepingACopy(Path.Combine(file, "inside a file.json"), "x", copies) is { Length: > 0 }, "a setup that cannot be written says why");
 		Equal("third", File.ReadAllText(file), "and nothing else is changed");
+		// More saves within ONE second than copies are kept: once the tidy has taken that second's oldest away, the next
+		// copy is numbered past the highest still there, never into the freed name - under it, it read as the oldest and was
+		// the next one tidied away, and the version just replaced had no copy at all
+		var burst = Path.Combine(f.Root, "Burst backups");
+		var oneSecond = new DateTime(2026, 3, 4, 5, 6, 7, DateTimeKind.Local);
+		File.WriteAllText(file, "v0");
+		for (var i = 1; i <= Setup.CopiesKept + 2; ++i) {
+			Equal<string?>(null, Setup.WriteKeepingACopy(file, $"v{i}", burst, oneSecond), $"(save {i} within that second)");
+		}
+		var keptNow = Directory.GetFiles(burst).Select(File.ReadAllText).ToHashSet(StringComparer.Ordinal);
+		Equal(Setup.CopiesKept, keptNow.Count, "the newest copies of that second are kept");
+		Check(keptNow.Contains($"v{Setup.CopiesKept + 1}") && keptNow.Contains($"v{Setup.CopiesKept}") && !keptNow.Contains("v0") && !keptNow.Contains("v1"),
+			"the version each save replaced has its copy, the last one too; the oldest two went: " + string.Join(",", keptNow.Order(StringComparer.Ordinal)));
 	}
 
 	// a tool that never appeared keeps Mod Organizer's whole log since the request: every line after the place the request was made,
@@ -7939,7 +8081,9 @@ public static class Program
 			Throws<OperationCanceledException>(() => Mo2Control.WaitForClear(() => true, stop.Token, stop.Token), "the caller's own token still throws");
 
 			// a put-back's close (no token of its own) under a pressed Stop: Root Builder is not waited for
+			// (its log is let go however this block ends: left open after a check that failed, it held the test's folder)
 			var ctx = StepContext(f, "landscapefixer");
+			using var ctxLog = ctx.Log;
 			var looks = 0;
 			var control = new Mo2Control(ctx.Mo2, "Test", ctx.Log) { RunningProbe = () => ++looks < 2, ForeignProbe = () => [], RootBuilderProbe = () => true, StopAsked = stop.Token };
 			t.Restart();
@@ -7950,6 +8094,7 @@ public static class Program
 			// a Stop already asked for: no switch is written and nothing starts
 			var before = f.Text("modlist.txt");
 			var cancelled = StepContext(f, "landscapefixer", a_cancel: stop.Token);
+			using var cancelledLog = cancelled.Log;
 			Throws<OperationCanceledException>(() => new Toggle(cancelled, [], ["Base Mod"], "a test", stop.Token).Dispose(), "a switch under a pressed Stop");
 			Equal(before, f.Text("modlist.txt"), "the mod list was not touched");
 			var started = 0;
@@ -8014,8 +8159,19 @@ public static class Program
 			Check(f.Text("modlist.txt").Contains("-Master Mod", StringComparison.Ordinal), "(what they switched is kept)");
 			Crdw.StepEnded(changed, true, false);
 			Equal(1, ctx.Journal.FilesChanged, "a mod the player switched after the game made its list leaves that list old: counted once, after the step called it current");
-			ctx.Log.Dispose();
-			cancelled.Log.Dispose();
+			// The player takes that switch back, and no step's own switching ends before the next game start: the look
+			// right before the start knows it as taken back (the game makes its list with the mod on). The same switch made
+			// again after that start counts again - against the state the list was made from (CodeRabbit on pull request #35)
+			File.WriteAllText(listFile, File.ReadAllText(listFile).Replace("-Master Mod", "+Master Mod", StringComparison.Ordinal));
+			Crdw.Apply(changed);
+			Equal(2, ctx.Journal.FilesChanged, "a switch taken back before a game start is seen right before that start");
+			changed.FreshList = true;
+			Crdw.StepEnded(changed, true, false);
+			Equal(0, ctx.Journal.FilesChanged, "(the game made its list with that mod on: the list is current)");
+			File.WriteAllText(listFile, File.ReadAllText(listFile).Replace("+Master Mod", "-Master Mod", StringComparison.Ordinal));
+			var fifth = new Toggle(changed, [], [], "a later step");
+			fifth.Dispose();
+			Equal(1, ctx.Journal.FilesChanged, "made again after that start, the switch counts again: the game's list was made without it");
 		} finally {
 			(Mo2Control.RootBuilderWait, Mo2Control.RootBuilderLook, Mo2Control.StartingGrace, Mo2Control.ReadyQuiet) = keep;
 		}

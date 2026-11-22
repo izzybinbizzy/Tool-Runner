@@ -424,6 +424,14 @@ public static partial class Crdw
 	// The mod's own file goes back when the step ends (GameStart.Change)
 	public static void Apply(RunContext a_ctx)
 	{
+		// What the player switched in Mod Organizer since the run last looked is looked at HERE too, right before the game
+		// starts: no step's own switching may have ended since to count it (Toggle). A switch counts against the state the
+		// game's list is made from - so one that was made, counted, and taken back before this start is known as taken back
+		// now, and the same switch made again after this start counts again (left at the old count, it read as nothing new
+		// and the game kept a list made without that mod)
+		if (a_ctx.CountTheirs(a_ctx.Profile.ChangedByOthers())) {
+			++a_ctx.Journal.FilesChanged;
+		}
 		var when = When(a_ctx.Setup);
 		if (when == Renew.Never || (when == Renew.Changed && a_ctx.Journal.FilesChanged == 0) || Read(a_ctx.Profile) is not { Ini: { } ini } s || !LoadsBlind(s)) {
 			return;

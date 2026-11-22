@@ -970,7 +970,10 @@ public sealed partial class MainViewModel : Observable
 			var picked = SelectedSetup!.File;
 			_previewing = true;
 			try {
-				if (!await ToolsFirst(mine.File, () => mine, CannotStart)) {
+				// (its tools are read from a copy made here: the worker never walks the shown setup's own step list, which a
+				// step dragged meanwhile rewrites under it)
+				var asItIs = mine.Clone();
+				if (!await ToolsFirst(mine.File, () => asItIs, CannotStart)) {
 					return;
 				}
 			} finally {
@@ -1061,6 +1064,12 @@ public sealed partial class MainViewModel : Observable
 			return;
 		}
 		if (a_dryOnly) {
+			return;
+		}
+		// (no preview: looked at again here - the tools box may have waited on the player or on the disk, and a change to
+		// the setup begun meanwhile is still on its way into the file the run reads)
+		if (CannotStart() is { } notNow) {
+			Say(notNow, "bad");
 			return;
 		}
 		StartNow(SelectedSetup!.File, a_only, a_from, a_until);
