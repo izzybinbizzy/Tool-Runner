@@ -373,8 +373,11 @@ public abstract class RewriteToolStep : IStep
 			a_ctx.Guide.Ask(Key, a_ask, a_ctx.Cancel);
 			var sw = Stopwatch.StartNew();
 			while (StepKit.StartedRunning(a_ctx.Control, image).Count > 0) {
+				// still open after Done: the player is asked again, and the step waits - failing here would lay every file back
+				// and throw away what the player just did in the tool (a Stop still ends the wait)
 				if (sw.Elapsed > TimeSpan.FromMinutes(2)) {
-					throw new StepFailedException($"{Tool} is still open - close it, then start the step again");
+					a_ctx.Guide.Ask(Key, $"{Tool} is still open. Close it - what it did is kept - then press Done.", a_ctx.Cancel);
+					sw.Restart();
 				}
 				a_ctx.Pause(TimeSpan.FromSeconds(1));
 			}
@@ -437,7 +440,14 @@ public sealed class NifOptimizerStep : RewriteToolStep
 		try {
 			Waits.Tool(a_ctx, Key, p, a_s.Deadline(60), () => p.HasExited ? Waits.Poll.Done : Waits.Poll.Wait);
 		} catch {
-			Procs.KillTree(p.Id);
+			// ended through the very process object started here (its number cannot change hands while this handle is held),
+			// never looked up again by number
+			try {
+				p.Kill(true);
+				p.WaitForExit(10000);
+			} catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException) {
+				// gone already, or one of its children would not go: the step's own failure says what matters
+			}
 			throw;
 		}
 		Verdict(a_ctx, a_mod, log);
