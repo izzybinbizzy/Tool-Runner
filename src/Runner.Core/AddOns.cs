@@ -237,7 +237,7 @@ public sealed class AddOnStep(string a_key) : IStep
 		}
 		var addOn = AddOns.Read(file, modDir)!;
 		if (addOn.Hash != a_s.Str("sha") && Setup.Bool(a_c.Setup.Root, AddOns.NoAskSetting) != true) {
-			yield return new Issue(Key, true, "its add-on file or the program it starts changed since you allowed it: look at it again in Settings > ADD-ONS");
+			yield return new Issue(Key, true, "its add-on file or the program it starts changed since you allowed it: look at it again in Settings > Tools > ADD-ONS");
 		}
 		if (a_c.States.TryGetValue(Path.GetFileName(modDir), out var state) && state != '+') {
 			yield return new Issue(Key, true, $"the mod that holds it, {Path.GetFileName(modDir)}, is switched off in this profile");
@@ -252,15 +252,15 @@ public sealed class AddOnStep(string a_key) : IStep
 		var file = a_s.Req("file");
 		// read once for where its program is, that program then held (AddOns.Hold), and the add-on read AGAIN under the hold:
 		// the bytes that are compared with what the player allowed are the bytes that start
-		var first = AddOns.Read(file, ModDirOf(file)) ?? throw new StepFailedException("its add-on file has problems - Settings > ADD-ONS names them");
+		var first = AddOns.Read(file, ModDirOf(file)) ?? throw new StepFailedException("its add-on file has problems - Settings > Tools > ADD-ONS names them");
 		using var held = AddOns.Hold(first.ProgramPath);
-		var addOn = AddOns.Read(file, ModDirOf(file)) ?? throw new StepFailedException("its add-on file has problems - Settings > ADD-ONS names them");
+		var addOn = AddOns.Read(file, ModDirOf(file)) ?? throw new StepFailedException("its add-on file has problems - Settings > Tools > ADD-ONS names them");
 		if (!Files.SamePath(addOn.ProgramPath, first.ProgramPath)) {
 			throw new StepFailedException("its add-on file changed while it was being read - run again from this step");
 		}
 		// the file as it stands now is what starts: changed since the pre-check, it is not what the player allowed
 		if (addOn.Hash != a_s.Str("sha") && Setup.Bool(a_ctx.Setup.Root, AddOns.NoAskSetting) != true) {
-			throw new StepFailedException("its add-on file or the program it starts changed since you allowed it: look at it again in Settings > ADD-ONS");
+			throw new StepFailedException("its add-on file or the program it starts changed since you allowed it: look at it again in Settings > Tools > ADD-ONS");
 		}
 		var output = a_s.OutputMod ?? throw new StepFailedException("no output mod is set");
 		var image = Path.GetFileName(addOn.ProgramPath);

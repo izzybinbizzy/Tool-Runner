@@ -82,12 +82,12 @@ public partial class App : Application
 		};
 		LogCrashes();
 		var args = a_e.Args;
-		if (args.Length == 2 && args[0] == "--snapshot") {
-			Shutdown(Snapshot(args[1]));
-			return;
-		}
-		if (args.Length == 2 && args[0] == "--page") {
-			Shutdown(Page(args[1]));
+		if (args.Length == 2 && args[0] is "--snapshot" or "--page") {
+			// The pictures' own window is the first one made, so it is the program's main window, and closing a main window
+			// ends the program with exit code 0 before the Shutdown below can give its own: a drawing that found the layout
+			// broken (or no setup to draw) came back as a success. Here only Shutdown ends the program.
+			ShutdownMode = ShutdownMode.OnExplicitShutdown;
+			Shutdown(args[0] == "--snapshot" ? Snapshot(args[1]) : Page(args[1]));
 			return;
 		}
 		// what moves in the window (the bar of a step whose share is not known) is drawn thirty times a second, not sixty: it
@@ -131,6 +131,26 @@ public partial class App : Application
 			} catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) {
 			}
 		});
+	}
+
+	// What the window remembers is written before the process ends. A window that closes has done that already, away from
+	// its own thread and waited for (MainWindow.OnClosing): nothing is left here then, and nothing is written. Only an end
+	// that passes the window by (Windows logging off, a start that failed) still finds something to write - written here,
+	// in place, since a task left behind would end with the process before its write
+	protected override void OnExit(ExitEventArgs a_e)
+	{
+		// (a setup still being written runs on a worker and needs nothing of this thread: waited for, never left to end with
+		// the process; it says itself when it could not write)
+		try {
+			MainViewModel.PendingSetupSave.Wait(TimeSpan.FromSeconds(30));
+		} catch (AggregateException) {
+		}
+		// (a window that closed the usual way has written on a worker, and tried once more there: nothing is written here
+		// then, on the window's thread - this write is for an end that passed the closing window by)
+		if (!UiState.WrittenAtClose && UiState.Unsaved) {
+			UiState.Save();
+		}
+		base.OnExit(a_e);
 	}
 
 	static void Pump(Window a_w, int a_ms)
@@ -231,9 +251,9 @@ public partial class App : Application
 			}
 			w.DemoReady();
 			w.DemoHistory(rows);
-			w.ShowPanel("history", true);
+			var past = w.ShowPanel("history", true);
 			Pump(w, 800);
-			Picture(w, a_dir, "4 past runs");
+			Picture(past, a_dir, "4 past runs");
 		} finally {
 			try {
 				Directory.Delete(runs, true);
@@ -252,8 +272,8 @@ public partial class App : Application
 			new(t, run, "Old Grass Cache", "unticked", [name]),
 		]);
 		Pump(w, 600);
-		Picture(w, a_dir, "5 what MO2 changed");
-		w.CloseDrawerNow();
+		Picture(w.ShowPanel("changes"), a_dir, "5 what MO2 changed");
+		w.ClosePanels();
 		var demo = new RunPreview();
 		demo.Steps.AddRange([new("synthesis", "Synthesis", "Synthesis - " + name, false), new("xlodgen", "xLODGen", "xLODGen Output - " + name, false),
 			new("texgen", "TexGen", "TexGen Output - " + name, false), new("dyndolod", "DynDOLOD", "DynDOLOD Output - " + name, false),
@@ -273,6 +293,8 @@ public partial class App : Application
 	static int Snapshot(string a_dir)
 	{
 		Directory.CreateDirectory(a_dir);
+		// (an earlier drawing's verdict on the layout is not this one's)
+		File.Delete(Path.Combine(a_dir, "layout problems.txt"));
 		// the built-in look exactly as a start with no theme picked lays it out (its accent brushes last, over the Fluent theme's)
 		Theme.Apply(Theme.Default, false);
 		var w = new MainWindow { ShowActivated = false, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.Manual, Left = -30000, Top = -30000 };
@@ -280,9 +302,9 @@ public partial class App : Application
 		Pump(w, 2500);
 		void Save(string a_name, Window? a_of = null) => Picture(a_of ?? w, a_dir, a_name);
 		Save("1 dashboard");
-		w.ShowPanel("history");
+		var history = w.ShowPanel("history");
 		Pump(w, 600);
-		Save("2 history");
+		Save("2 history", history);
 		// History > What MO2 changed, with made-up rows (nothing read from or written to a Mod Organizer)
 		var t = new DateTime(2026, 10, 27, 22, 41, 0);
 		w.ShowChangesDemo([
@@ -294,21 +316,26 @@ public partial class App : Application
 			new(t, "the run of Oct 27 22:39 (Bottled Shaders)", "Old Grass Cache", "removed from Mod Organizer", []),
 		]);
 		Pump(w, 600);
-		Save("2b what MO2 changed");
-		w.ShowPanel("settings");
+		Save("2b what MO2 changed", history);
+		// the settings: each of its pages in turn
+		var settings = w.ShowPanel("settings");
 		Pump(w, 600);
-		Save("3 settings");
-		// the settings further down: the run options, tool updates
-		foreach (var (y, name) in new[] { (420.0, "3b settings, run options"), (900.0, "3c settings, tool updates"), (1500.0, "3c2 settings, further down"), (99999.0, "3c3 settings, the end") }) {
-			w.ScrollDrawer(y);
+		Save("3 settings", settings);
+		for (var page = 1; SettingsPanel.ShowPage(page) is { } pageName; ++page) {
 			Pump(w, 400);
-			Save(name);
+			Save($"3 settings {page + 1} {pageName.ToLowerInvariant()}", settings);
 		}
 		// the theme gallery: every look as its own card (its themes are read off the window's thread, so it gets a moment)
-		w.ShowPanel("themes");
+		var themes = w.ShowPanel("themes");
 		Pump(w, 1500);
-		Save("3d themes");
-		w.CloseDrawerNow();
+		Save("3d themes", themes);
+		// the log in a window of its own, and the main window with its log hidden there
+		var logWindow = w.PopLog();
+		Pump(w, 600);
+		Save("3e the log in its own window", logWindow);
+		Save("3f dashboard, the log popped out");
+		w.ClosePanels();
+		Pump(w, 300);
 		// the preview before a run (his checklist 270), for a made-up run
 		var demo = new RunPreview();
 		demo.Steps.AddRange([new("synthesis", "Synthesis", "Synthesis Output", false), new("xlodgen", "xLODGen", "xLODGen Output", false),
@@ -326,11 +353,54 @@ public partial class App : Application
 		Pump(box, 600);
 		Save("7 preview before a run", box);
 		box.Close();
+		// the tools of a setup that has not run yet, each to set up in its own window (his word of 2026-11-21)
+		var toolsBox = w.DemoToolsBox();
+		toolsBox.ShowActivated = false;
+		toolsBox.WindowStartupLocation = WindowStartupLocation.Manual;
+		toolsBox.Left = -30000;
+		toolsBox.Top = -30000;
+		toolsBox.Show();
+		Pump(toolsBox, 600);
+		Save("7c set up your tools", toolsBox);
+		toolsBox.Close();
+		// a tool's old output used instead of building it again: the box that says what that means for this tool (his word of 2026-11-21)
+		var oldBox = w.DemoOldOutputBox();
+		oldBox.ShowActivated = false;
+		oldBox.WindowStartupLocation = WindowStartupLocation.Manual;
+		oldBox.Left = -30000;
+		oldBox.Top = -30000;
+		oldBox.Show();
+		Pump(oldBox, 600);
+		Save("7d use its old output", oldBox);
+		oldBox.Close();
+		// ... and the steps with one of them set so
+		w.DemoUsesOld("dyndolod", true);
+		Pump(w, 300);
+		Save("7e a step that uses its old output");
+		w.DemoUsesOld("dyndolod", false);
+		Pump(w, 200);
 		// the smallest window the program allows: nothing may be cut off there
 		w.Width = w.MinWidth;
 		w.Height = w.MinHeight;
 		Pump(w, 600);
 		Save("4 smallest window");
+		// The smallest window with more findings than fit, its log hidden and shown: the run's own card keeps its room - START
+		// in view, or one scroll away. Checked by measure too, not only by eye: a START squeezed out fails the whole job
+		var squeezed = new List<string>();
+		w.DemoFindings(16);
+		w.DemoLogHidden(true);
+		Pump(w, 600);
+		Save("4b smallest window, the log hidden, many findings");
+		if (w.RunControlsProblem() is { } hidden) {
+			squeezed.Add("the smallest window, the log hidden, many findings: " + hidden);
+		}
+		w.DemoLogHidden(false);
+		Pump(w, 600);
+		Save("4c smallest window, many findings");
+		if (w.RunControlsProblem() is { } shown) {
+			squeezed.Add("the smallest window, many findings: " + shown);
+		}
+		w.DemoFindings(0);
 		w.Width = 1240;
 		w.Height = 800;
 		w.Demo(false);
@@ -354,6 +424,9 @@ public partial class App : Application
 		w.Height = w.MinHeight;
 		Pump(w, 600);
 		Save("9d a run stopped, smallest window");
+		if (w.LogHeadProblem() is { } ended) {
+			squeezed.Add("a run stopped, the smallest window: " + ended);
+		}
 		// the first start, step by step, in the smallest window and at its usual size
 		w.DemoFirstStart();
 		Pump(w, 600);
@@ -386,6 +459,15 @@ public partial class App : Application
 		}
 		Theme.Apply(Theme.Default, false);
 		w.Close();
+		if (squeezed.Count > 0) {
+			File.WriteAllLines(Path.Combine(a_dir, "layout problems.txt"), squeezed);
+			ConsoleAttach.ToParent();
+			try {
+				Console.Error.WriteLine("The window's layout: " + string.Join("; ", squeezed));
+			} catch (IOException) {
+			}
+			return 1;
+		}
 		return 0;
 	}
 }

@@ -525,41 +525,165 @@ public static partial class InGame
 		}
 	}
 
-	// the game's message box, if one is open: answered by its text and labels (DecideBox); returns its text, or null when none
-	// was open - one this step cannot answer stops it, since an open box pauses the game under everything that follows
-	static string? AnswerGameBox(RunContext a_ctx)
+	// The setup's word on a message box of the game that the run does not know: "close" (the default: it is closed at once
+	// and named) or "stop" (it is the player's to answer; nobody there, the step stops naming it).
+	public const string UnknownBoxSetting = "unknownGameBox";
+
+	public static bool ClosesUnknown(Setup a_setup) => !"stop".Equals(Setup.Str(a_setup.Root, UnknownBoxSetting)?.Trim(), StringComparison.OrdinalIgnoreCase);
+
+	// the game's own message box as DevBench reads it: its text, its buttons' words, how many there are when their words
+	// are not given, and the button the game itself marks as its cancel (-1: none)
+	public sealed record GameBox(string Body, IReadOnlyList<string> Labels, int? Count, int Cancel);
+
+	// the game's own tutorial pop-up: no message box, and it stops the game under it all the same
+	const string TutorialMenu = "Tutorial Menu";
+
+	// a_send: how this look does something to the game (LookAtGameBox's Send) - it answers false when it may not right now
+	static GameBox? ReadGameBox(RunContext a_ctx, int a_timeoutSeconds, Func<Action, bool> a_send)
 	{
-		if (a_ctx.DevBench.Call("menu", new { action = "list" }, 10)["messageBoxOpen"]?.GetValue<bool>() != true) {
+		var list = a_ctx.DevBench.Call("menu", new { action = "list" }, a_timeoutSeconds);
+		if ((list["openMenus"] as JsonArray)?.Any(m => m?.ToString() == TutorialMenu) == true &&
+		    a_send(() => a_ctx.DevBench.Call("menu", new { action = "close", name = TutorialMenu }, a_timeoutSeconds))) {
+			a_ctx.Log.Detail("the game's tutorial pop-up closed");
+		}
+		if (list["messageBoxOpen"]?.GetValue<bool>() != true) {
 			return null;
 		}
-		var d = a_ctx.DevBench.Call("menu", new { action = "describe" }, 10);
+		var d = a_ctx.DevBench.Call("menu", new { action = "describe" }, a_timeoutSeconds);
 		if (d["messageBoxOpen"]?.GetValue<bool>() == false) {
 			return null;
 		}
 		var body = string.Join(" ", new[] { "bodyText", "text", "message" }.Select(k => d[k]?.ToString() ?? "")).Trim();
 		var labels = (d["buttons"] as JsonArray ?? d["buttonTexts"] as JsonArray ?? [])
 			.Select(b => b is JsonObject bo ? (bo["text"] ?? bo["label"])?.ToString() ?? "" : b?.ToString() ?? "").ToList();
-		var (answer, idx) = DevBench.DecideBox(body, labels, d["buttonCount"]?.GetValue<int>());
-		if (answer == null) {
-			// a game in another language (his checklist 439); read again until the game settings answer, a load may not serve them yet
-			if (a_ctx.GameWords is not { HasAskYes: > 0 }) {
-				a_ctx.GameWords = GameWords.Read(a_ctx.Mo2.GameDir, s => GameSetting(a_ctx, s));
+		return new GameBox(body, labels, d["buttonCount"]?.GetValue<int>(), d["cancelIndex"] is JsonValue c && c.TryGetValue<int>(out var cancel) ? cancel : -1);
+	}
+
+	// how often the same box is answered before it is taken for one that does not close
+	const int GameBoxTries = 5;
+
+	// One look at the game's own message box. One the run knows is answered by its text and labels (DecideBox). One it does
+	// not know is closed all the same, by the button that takes nothing on (DevBench.CloseIndex) - his word of 2026-11-21:
+	// "it needs to be externally found no matter what the box could potentially be and immediately closed" - and named in the
+	// log and the run's notes; a setup may say such a box is the player's (ClosesUnknown), and then a_left gets it,
+	// unanswered - as it gets a box that still stands after its answer was given GameBoxTries times.
+	// Returns the text of a box that was answered or closed, else null. The run's watch makes this look every few seconds
+	// for as long as the run's game is up, whatever the step in hand does, and a step makes it where it waits on the game:
+	// one look at a time. a_fromWatch: what was answered is left for the step in hand to take (AnswerGameBox).
+	public static string? LookAtGameBox(RunContext a_ctx, out GameBox? a_left, bool a_fromWatch, int a_timeoutSeconds = 10)
+	{
+		a_left = null;
+		// What the watch's look sends to the game (an answer, a pop-up closed) goes through the watch itself: it begins only
+		// while the run still holds the watch (BoxWatch.Do). A look that was still reading when the run let go - DevBench can
+		// take seconds to answer - sent its answer into a game the run had already left. A step's own look sends as ever.
+		bool Send(Action a_call)
+		{
+			if (a_fromWatch && a_ctx.Boxes is { } watch) {
+				return watch.Do(a_call);
 			}
-			(answer, idx) = DevBench.DecideBox(body, labels, d["buttonCount"]?.GetValue<int>(), a_ctx.GameWords);
+			a_call();
+			return true;
 		}
-		if (answer == null) {
-			throw new StepFailedException("the game shows a box this step does not answer: " + body);
+		lock (a_ctx.GameBoxGate) {
+			if (ReadGameBox(a_ctx, a_timeoutSeconds, Send) is not { } box) {
+				a_ctx.GameBoxAnswered = ("", 0);
+				return null;
+			}
+			var tries = a_ctx.GameBoxAnswered.Body == box.Body ? a_ctx.GameBoxAnswered.Times : 0;
+			if (tries >= GameBoxTries) {
+				a_left = box;
+				return null;
+			}
+			var (answer, idx) = DevBench.DecideBox(box.Body, box.Labels, box.Count);
+			if (answer == null) {
+				// a game in another language (his checklist 439); read again until the game settings answer, a load may not serve them yet
+				if (a_ctx.GameWords is not { HasAskYes: > 0 }) {
+					a_ctx.GameWords = GameWords.Read(a_ctx.Mo2.GameDir, s => GameSetting(a_ctx, s));
+				}
+				(answer, idx) = DevBench.DecideBox(box.Body, box.Labels, box.Count, a_ctx.GameWords);
+			}
+			var said = box.Body.Length > 160 ? box.Body[..160] + " ..." : box.Body;
+			string? note = null;
+			if (answer == null) {
+				if (!ClosesUnknown(a_ctx.Setup)) {
+					a_left = box;
+					return null;
+				}
+				idx = DevBench.CloseIndex(box.Labels, box.Cancel, box.Count, a_ctx.GameWords);
+				var with = idx < box.Labels.Count && box.Labels[idx].Trim() != "" ? $"\"{box.Labels[idx].Trim()}\"" : $"its button {idx + 1}";
+				answer = $"closed with {with} (the run does not know this box)";
+				note = $"the game showed a message this run does not know, and it was closed with {with}: {said} - if that was the wrong answer, switch that question off in the mod that asks it, " +
+				       "or have the run leave such messages to you (Settings > Game steps)";
+			}
+			if (!Send(() => a_ctx.DevBench.Call("menu", new { action = "accept", index = idx }))) {
+				// the run has let go of the watch (or the watch is in the middle of something else): nothing was answered
+				return null;
+			}
+			a_ctx.GameBoxAnswered = (box.Body, tries + 1);
+			// said once for a box, however often its answer has to be given
+			if (tries == 0) {
+				a_ctx.Log.Say($"game box {answer}: {said}", note != null ? Level.Warn : Level.Detail);
+				a_ctx.BoxAnswered(a_fromWatch ? box.Body : null, note);
+			}
+			return box.Body;
 		}
-		a_ctx.DevBench.Call("menu", new { action = "accept", index = idx });
-		a_ctx.Log.Detail($"game box {answer}: {(body.Length > 160 ? body[..160] + " ..." : body)}");
+	}
+
+	// The game's message box for the step in hand: what the run's watch answered since the step last asked, else a look of
+	// its own. Returns the text of a box that was answered or closed, or null when none was. A box that is left to the player
+	// stops a step that runs without the run's watch (the watch itself gives the player their time, then stops the step).
+	static string? AnswerGameBox(RunContext a_ctx)
+	{
+		if (a_ctx.TakeAnsweredBox() is { } byTheWatch) {
+			return byTheWatch;
+		}
+		var body = LookAtGameBox(a_ctx, out var left, false);
+		if (left != null && a_ctx.Boxes == null) {
+			throw new StepFailedException("the game shows a box this step does not answer: " + left.Body);
+		}
 		return body;
+	}
+
+	// The run's watch looks into the run's own game for its message boxes (BoxWatch's beat, every few seconds from the
+	// run's first step to its last): what the game shows on its own screen is no window of Windows', so nothing outside the
+	// game sees it but DevBench. Returns a box that was left unanswered, for the watch to name and to give the player
+	// their time with; null when there is none (or no game of the run's, or a DevBench that does not answer right now).
+	public static BoxWatch.Open? WatchGameBox(RunContext a_ctx)
+	{
+		try {
+			using var game = Game(a_ctx);
+			if (game == null) {
+				a_ctx.DevBenchGame = 0;
+				return null;
+			}
+			// DevBench answers for whichever game holds its port: only the run's own game is ever answered for
+			if (a_ctx.DevBenchGame != game.Id) {
+				var health = a_ctx.DevBench.Call("inspect", new { kind = "health" }, 3);
+				if (health["pid"] is JsonValue p && p.TryGetValue<int>(out var pid) && pid != game.Id) {
+					return null;
+				}
+				a_ctx.DevBenchGame = game.Id;
+			}
+			LookAtGameBox(a_ctx, out var left, true, 4);
+			if (left == null) {
+				return null;
+			}
+			// (told apart from a window's handle and from every other text by a number made of its own words)
+			var id = unchecked((long)0x4000_0000_0000_0000 | (uint)string.GetHashCode(left.Body + "\n" + string.Join("\n", left.Labels), StringComparison.Ordinal));
+			return new BoxWatch.Open(id, new BoxSeen(GameImage, true, "a message of the game", left.Body, left.Labels), _ => { });
+		} catch (Exception e) when (e is not OutOfMemoryException) {
+			// The game is loading, DevBench is not up yet, or it answered something this look cannot read: the next beat looks
+			// again. Nothing leaves this look - what it throws would take the beat's look at Windows' own boxes with it
+			return null;
+		}
 	}
 
 	static string? GameSetting(RunContext a_ctx, string a_name)
 	{
 		try {
 			return a_ctx.DevBench.Papyrus("Game", "GetGameSettingString", a_name)?.ToString();
-		} catch (Exception e) when (e is HttpRequestException or TaskCanceledException or InvalidOperationException or FormatException or System.Text.Json.JsonException) {
+		} catch (Exception e) when (e is HttpRequestException or TaskCanceledException or InvalidOperationException or FormatException or System.Text.Json.JsonException or StepFailedException) {
+			// (a game that did not run the call - a load in its way - has no word to give right now)
 			return null;
 		}
 	}
@@ -911,6 +1035,18 @@ public static partial class InGame
 		}
 		a_ctx.Log.Detail($"the game is up after {sw.Elapsed.TotalSeconds:0} s");
 		var compiled = WaitCompile(a_ctx, a_step, a_s, started);
+		// His rule of 2026-11-21: a run builds its shader cache once, in its first step, and every later game start uses it.
+		// Shaders compiled at a start that comes after this run's own shader step are a fault to look into - said in the
+		// log and in the run's notes, never only waited out.
+		if (compiled && a_ctx.Journal.Step("shaders") is { State: StepState.Done }) {
+			const string Again = "the game compiled shaders at this start although this run's shader step had made the cache ready - " +
+				"this start needed shaders that step did not build (a mod switched for this step that changes shaders, or a shader mod that does not keep its cache)";
+			a_ctx.Log.Warn(Again);
+			// once in the run's notes, however many of its game starts it happens at (the log has each)
+			if (!a_ctx.Journal.Notes.Contains("shaders: " + Again)) {
+				a_ctx.Note("shaders: " + Again);
+			}
+		}
 		a_ctx.Activity(a_step, $"loading \"{a_save}\"");
 		a_ctx.Log.Detail($"loading \"{a_save}\"");
 		var t = Stopwatch.StartNew();
@@ -988,8 +1124,56 @@ public static partial class InGame
 		}
 	}
 
+	// What the shader mod itself says about its start-up pass, where it says anything (Open Shaders does, through DevBench's
+	// "shadercache"): is it compiling, how many shaders it queued, how many of them are done, and how many it took from its
+	// cache on disk (null where it does not say that).
+	public sealed record ShaderPass(bool Compiling, long Total, long Done, long? FromCache)
+	{
+		// its pass ran and is over: nothing is left to wait for
+		public bool Over => !Compiling && Total > 0 && Done >= Total;
+
+		// how many shaders this start had to compile itself (0: every one came from the cache; null: it does not say)
+		public long? Compiled => FromCache is { } hits ? Math.Max(0, Total - hits) : null;
+
+		// how many of those it has compiled so far: the ones done that did not come from the cache. While the pass is still
+		// going, the shaders not done yet say nothing - they may all still come from the cache (3,201 queued, 40 done, 40 of
+		// them read from disk: none compiled so far, though Compiled reads 3,161)
+		public long? CompiledSoFar => FromCache is { } hits ? Math.Max(0, Done - hits) : null;
+	}
+
+	// null: this shader mod's answer does not say (another shader mod, an older version)
+	public static ShaderPass? ReadShaderPass(JsonObject a_state)
+	{
+		static long? Number(JsonNode? a_n) => a_n is JsonValue v && v.TryGetValue<long>(out var n) ? n : null;
+		if (a_state["compiling"] is not JsonValue c || !c.TryGetValue<bool>(out var compiling) || Number(a_state["totalTasks"]) is not { } total ||
+		    Number(a_state["completedTasks"]) is not { } done) {
+			return null;
+		}
+		return new ShaderPass(compiling, total, done, Number(a_state["diskHitTasks"]));
+	}
+
+	static ShaderPass? ShaderPassNow(RunContext a_ctx)
+	{
+		try {
+			return ReadShaderPass(a_ctx.DevBench.Call("inspect", new { kind = "shadercache" }, 5));
+		} catch (Exception e) when (e is HttpRequestException or TaskCanceledException or InvalidOperationException or FormatException or System.Text.Json.JsonException) {
+			// no shader mod that answers this, or a game that does not answer right now
+			return null;
+		}
+	}
+
+	// what a start's shader pass came to, in the log's words
+	public static string ShaderPassSaid(ShaderPass a_pass) => a_pass.Compiled switch {
+		0 => $"the shader mod says its shaders are ready: all {a_pass.Total} taken from its cache, none compiled",
+		{ } compiled => $"the shader mod says its shaders are ready: {compiled} of {a_pass.Total} compiled at this start, the rest taken from its cache",
+		_ => $"the shader mod says its shaders are ready ({a_pass.Done} of {a_pass.Total})",
+	};
+
 	// "You can't load a save while shaders are compiling" (his word). A compile can begin a minute after the game answers and
-	// write its first line only when a shader finishes, so it is watched for `compile_watch_s` (300) before a load is sent.
+	// write its first line only when a shader finishes, so it is watched for `compile_watch_s` (300) before a load is sent -
+	// unless the shader mod itself says its start-up pass is over: then there is nothing to watch for, and the load is sent
+	// (a start with its cache whole once sat out the full five minutes at the main menu, at every game start of a run).
+	// Returns whether shaders were compiled at this start (taken from the cache is not compiled).
 	public static bool WaitCompile(RunContext a_ctx, string a_step, StepSettings a_s, DateTime a_since)
 	{
 		var logs = LogFolders(a_ctx.Setup, a_ctx.Mo2);
@@ -1000,9 +1184,14 @@ public static partial class InGame
 		var watch = TimeSpan.FromSeconds(a_s.Int("compile_watch_s", 300));
 		var max = TimeSpan.FromMinutes(a_s.Int("compile_max_min", 90));
 		var sw = Stopwatch.StartNew();
+		// seen: the shader mod was at work - the wait goes on while it is. compiledSome: something says shaders were really
+		// compiled (its own count, or its log). The two are not one: reading a whole cache back is work too, and a start that
+		// only read its cache must never be reported as a cache that was out of date
 		var seen = false;
+		var compiledSome = false;
 		var quietSince = TimeSpan.Zero;
 		TimeSpan? passOverSince = null;
+		TimeSpan? saidOverSince = null;
 		while (sw.Elapsed < max) {
 			a_ctx.Cancel.ThrowIfCancellationRequested();
 			if (!GameUp(a_ctx)) {
@@ -1010,6 +1199,33 @@ public static partial class InGame
 			}
 			// looked up again at every look: a folder a plugin maps the logs to may only be made, or get its first log, during the watch
 			logs = LogFolders(a_ctx.Setup, a_ctx.Mo2);
+			// The shader mod's own word comes first. Over (not compiling, every shader it queued done) and still over ten
+			// seconds on: the load is sent. Compiling: that counts as seen, whatever its log shows.
+			var pass = ShaderPassNow(a_ctx);
+			if (pass is { Over: true }) {
+				saidOverSince ??= sw.Elapsed;
+				if (sw.Elapsed - saidOverSince >= TimeSpan.FromSeconds(10)) {
+					a_ctx.Log.Detail(ShaderPassSaid(pass));
+					return pass.Compiled is { } count ? count > 0 : compiledSome;
+				}
+			} else {
+				saidOverSince = null;
+			}
+			// (only what it has done counts: a pass still going that has read every shader so far from the cache has compiled none)
+			if (pass is { CompiledSoFar: > 0 }) {
+				compiledSome = true;
+			}
+			if (pass is { Compiling: true }) {
+				if (!seen) {
+					// (compiled, or read back from the cache: the shader mod works through every shader either way)
+					a_ctx.Log.Detail("the shader mod is making its shaders ready - the load waits for it");
+					a_ctx.Activity(a_step, "waiting for the game's shaders to be ready");
+				}
+				seen = true;
+				quietSince = sw.Elapsed;
+				a_ctx.Pause(TimeSpan.FromSeconds(5));
+				continue;
+			}
 			if (!seen && BootPassOverIn(logs, a_since) && !Compiling(logs, a_ctx.Mo2.OverwriteDir, a_since)) {
 				passOverSince ??= sw.Elapsed;
 				if (sw.Elapsed - passOverSince >= TimeSpan.FromSeconds(30)) {
@@ -1025,12 +1241,14 @@ public static partial class InGame
 					a_ctx.Activity(a_step, "waiting for the game's shaders to compile");
 				}
 				seen = true;
+				compiledSome = true;
 				quietSince = sw.Elapsed;
 			} else if ((seen && sw.Elapsed - quietSince > TimeSpan.FromSeconds(30)) || (!seen && sw.Elapsed > watch)) {
 				if (seen) {
-					a_ctx.Log.Detail($"the shader compile finished after {sw.Elapsed.TotalMinutes:0.0} min");
+					a_ctx.Log.Detail(compiledSome ? $"the shader compile finished after {sw.Elapsed.TotalMinutes:0.0} min"
+						: $"the shader mod went quiet after {sw.Elapsed.TotalMinutes:0.0} min and could no longer be asked - nothing says a shader was compiled");
 				}
-				return seen;
+				return compiledSome;
 			}
 			a_ctx.Pause(TimeSpan.FromSeconds(5));
 		}
@@ -1045,7 +1263,7 @@ public static partial class InGame
 	public static string SaveNotMade(string a_name, bool a_forced) =>
 		$"the save \"{a_name}\" was not made" + (a_forced
 			? " - not even with the game's saving switched back on, so a mod blocks it some other way: switch that mod off for this run, or save by hand with the guided route"
-			: " - a mod may be blocking saves (some survival or hardcore mods do). Settings > \"Force the save\" tries once more with the game's saving switched back on");
+			: " - a mod may be blocking saves (some survival or hardcore mods do). Settings > Game steps > \"Force the save\" tries once more with the game's saving switched back on");
 
 	// true = the save is whole on disk; false = it never appeared within SaveWait
 	static bool WaitForSave(RunContext a_ctx, string a_path, DateTime a_since)
@@ -1110,11 +1328,23 @@ public static partial class InGame
 			return;
 		}
 		Procs.KillTree(g.Id);
+		// Waited for by the process in hand. Listed again, a game that is still going away no longer says when it started and so
+		// reads as not this run's: it was called closed while it ran on for most of a minute (a big load order lets go slowly)
 		var sw = Stopwatch.StartNew();
-		while (GameUp(a_ctx) && sw.Elapsed < TimeSpan.FromSeconds(30)) {
+		while (!Gone(g) && sw.Elapsed < TimeSpan.FromSeconds(30)) {
 			Thread.Sleep(500);
 		}
-		a_ctx.Log.Detail("the game is closed");
+		a_ctx.Log.Detail(Gone(g) ? "the game is closed" : "the game is closing - it has not let go yet, and Mod Organizer's close waits for it");
+	}
+
+	// has this very process ended? (one Windows no longer lets us ask about is gone)
+	static bool Gone(Process a_p)
+	{
+		try {
+			return a_p.HasExited;
+		} catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) {
+			return true;
+		}
 	}
 
 	// guided: the player does the in-game part; the runner starts the game and checks a NEW save appeared and the game closed
@@ -1145,7 +1375,8 @@ public static partial class InGame
 	public static void Deactivate(RunContext a_ctx, StepSettings a_s)
 	{
 		CopySaves(a_ctx);
-		var outs = a_ctx.Setup.EnabledSteps.Select(s => new StepSettings(s.Settings).OutputMod).OfType<string>().ToList();
+		// (an old output that is used goes off with the rest before the first tool, so what needs it is off for the clean save too)
+		var outs = a_ctx.Setup.EnabledSteps.Concat(a_ctx.Setup.KeptSteps).Select(s => new StepSettings(s.Settings).OutputMod).OfType<string>().ToList();
 		a_ctx.CleanSaveExtraOff = a_ctx.Profile.Dependents(outs);
 		var dyn = a_s.Raw["dyndolod_off"] != null ? a_s.Bool("dyndolod_off", false) : HasDynDolod(a_ctx.Profile);
 		var cell = a_s.Str("interior_cell") ?? "QASmoke";

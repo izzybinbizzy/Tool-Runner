@@ -25,18 +25,109 @@ public sealed class RunContext
 	// the box nobody here could answer that ended the game of the step in hand, in words
 	public string? BlockedBy => Boxes?.Blocked;
 
+	// One look at the game's own message box at a time (InGame.LookAtGameBox): the run's watch and the step in hand both
+	// look. GameBoxAnswered: the box last answered and how often in a row; DevBenchGame: the run's game DevBench was last
+	// found to answer for (0: none yet).
+	public Lock GameBoxGate { get; } = new();
+	public (string Body, int Times) GameBoxAnswered { get; set; } = ("", 0);
+	public int DevBenchGame { get; set; }
+
+	// What the watch leaves for the run's own thread: the texts of the game's boxes it answered (the step in hand takes them:
+	// a box that says another follows holds its settle), and lines for the run's notes (only the run's thread writes the
+	// run's record).
+	readonly Lock _fromWatch = new();
+	readonly Queue<string> _boxesAnswered = new();
+	readonly List<string> _notesToAdd = [];
+
+	public void BoxAnswered(string? a_body, string? a_note)
+	{
+		lock (_fromWatch) {
+			if (a_body != null) {
+				_boxesAnswered.Enqueue(a_body);
+				// (a step that never asks leaves them here: only the newest few are kept)
+				while (_boxesAnswered.Count > 20) {
+					_boxesAnswered.Dequeue();
+				}
+			}
+			if (a_note != null && !_notesToAdd.Contains(a_note)) {
+				_notesToAdd.Add(a_note);
+			}
+		}
+	}
+
+	public string? TakeAnsweredBox()
+	{
+		lock (_fromWatch) {
+			return _boxesAnswered.TryDequeue(out var body) ? body : null;
+		}
+	}
+
+	// the notes left so far go into the run's record - called by the run's own thread, after each step and at the run's end
+	public void AddWatchNotes()
+	{
+		List<string> notes;
+		lock (_fromWatch) {
+			notes = [.. _notesToAdd];
+			_notesToAdd.Clear();
+		}
+		notes.RemoveAll(Journal.Notes.Contains);
+		if (notes.Count > 0) {
+			Journal.Notes.AddRange(notes);
+			Journal.TrySave();
+		}
+	}
+
 	// outputs to tick once the step's mods are put back (applied by the runner after each step)
 	public List<string> PendingEnable { get; } = [];
 	public string? CleanSaveName { get; set; }
 
 	// when this run last started its game: a crash log is that start's only if written after it (an earlier start's crash, retried
-	// since, is never named as the cause of a later close)
-	public DateTime? GameLaunched { get; set; }
+	// since, is never named as the cause of a later close). Set where a game start begins - and with it the texts of the
+	// boxes the watch answered during an earlier start are dropped: left there, each one cost the next start's load a wait
+	// for a box that was long gone. What the watch answers from here on is this start's
+	public DateTime? GameLaunched
+	{
+		get;
+		set {
+			field = value;
+			lock (_fromWatch) {
+				_boxesAnswered.Clear();
+			}
+		}
+	}
 	public Dictionary<string, string> CleanSaveExtraOff { get; set; } = [];
 	public string Mo2Dir => Path.GetDirectoryName(Mo2.Exe)!;
 
 	// this step made nothing of its output mod (a guided tool wrote elsewhere): the mod is not this run's, so a put-back and Undo leave it as it was
 	public bool OutputUntouched { get; set; }
+
+	// the step in hand starts the game with a mod set to list the game's files anew (Crdw.Apply): when it finishes, that list is current
+	public bool FreshList { get; set; }
+
+	// the step in hand put its mods back as they were after such a list was made (Toggle), or the player switched a mod
+	// while it ran: the list is older than that again
+	public bool SwitchedBack { get; set; }
+
+	// The player's own switches in Mod Organizer that the run has counted as a change to the game's files so far (mod ->
+	// how they left it). True when a_theirs - their switches as a step finds them - is not what was counted: one is new,
+	// stands otherwise, or was taken back. The same switch, met again at every later step, is counted once.
+	readonly Dictionary<string, char> _theirsCounted = new(StringComparer.OrdinalIgnoreCase);
+
+	public bool CountTheirs(IReadOnlyDictionary<string, char> a_theirs)
+	{
+		if (a_theirs.Count == _theirsCounted.Count && a_theirs.All(p => _theirsCounted.TryGetValue(p.Key, out var was) && was == p.Value)) {
+			return false;
+		}
+		_theirsCounted.Clear();
+		foreach (var (mod, state) in a_theirs) {
+			_theirsCounted[mod] = state;
+		}
+		return true;
+	}
+
+	// After a put-back: the mods whose line in the mod list the run had written and the put-back could not take out again
+	// (the list was held by another program). The profile is not whole back while one is left: the put-back stays on offer
+	public List<string> LinesLeft { get; } = [];
 
 	public void SetAfter(params string[] a_mods) => PendingEnable.AddRange(a_mods);
 
@@ -155,9 +246,16 @@ public sealed class Toggle : IDisposable
 		_snap = a_ctx.Profile.Snapshot();
 		_oursBefore = a_ctx.Profile.OursNow();
 		if (en.Count > 0 || dis.Count > 0) {
-			a_ctx.Log.Detail($"mods for {a_label}:");
+			// A profile that already stands as the step needs it has nothing switched: nothing is said, and nothing counts as
+			// changed (a real run's log read "mods for TexGen:" with nothing under it, and counted a change that was none)
+			var now = Profile.StatesOf(_snap);
+			bool Stands(string a_mod, char a_as) => now.TryGetValue(a_mod, out var flag) && flag == a_as;
+			if (en.Any(m => Stands(m, '-')) || dis.Any(m => Stands(m, '+'))) {
+				a_ctx.Log.Detail($"mods for {a_label}:");
+			}
+			Dictionary<string, char> switched;
 			try {
-				a_ctx.Profile.SetMods(en, dis, a_ctx.Log);
+				switched = a_ctx.Profile.SetMods(en, dis, a_ctx.Log);
 				a_ctx.Profile.ActivatePlugins(en, a_ctx.Setup.PlaceAfter);
 			} catch {
 				// half switched: the order files back byte for byte at once, as the put-back promises
@@ -165,10 +263,17 @@ public sealed class Toggle : IDisposable
 				a_ctx.Profile.OursBack(_oursBefore);
 				throw;
 			}
+			// With these mods switched the game finds other files than its last list names: a game start of this step makes
+			// the list anew (Crdw.Apply). Taken back in Dispose when no list was made while they were switched.
+			if (switched.Count > 0) {
+				_switched = true;
+				++a_ctx.Journal.FilesChanged;
+			}
 		}
 	}
 
 	readonly Dictionary<string, char>? _oursBefore;
+	readonly bool _switched;
 
 	public void Dispose()
 	{
@@ -197,11 +302,36 @@ public sealed class Toggle : IDisposable
 			_ctx.Profile.Restore(_snap);
 		}
 		_ctx.Profile.OursBack(_oursBefore);
+		if (_switched) {
+			if (_ctx.FreshList) {
+				// The game made its list of files while this step's mods were switched: with them back as they were, that list
+				// names other files than the game now finds. Counted when the step ends, after a finished game step has called
+				// its list current (Crdw.StepEnded) - a game step that writes nothing left a list from before the put-back
+				// marked current, and no later game start made a new one (CodeRabbit on pull request #35)
+				_ctx.SwitchedBack = true;
+			} else if (_ctx.Journal.FilesChanged > 0) {
+				// no list was made meanwhile, and the mods are as they were before: nothing has changed for the game's list
+				--_ctx.Journal.FilesChanged;
+			}
+		}
 		if (theirs.Count > 0) {
 			var expected = _ctx.Profile.OursNow();
 			_ctx.Log.Detail($"kept what you changed in Mod Organizer during {_label}: " + string.Join(", ", theirs.Select(p => (p.Value == '+' ? "on " : "off ") + p.Key)));
 			Runner.ReapplyTheirs(_ctx, theirs, marks);
 			_ctx.Profile.OursBack(expected);
+		}
+		// What the player switched in Mod Organizer changes the files the game finds, whatever was counted or taken back
+		// above for the step's own switches. Each such switch counts once, when it is first met here: by what the run has
+		// counted so far - never by this step's own snapshot, which already holds a switch made before the step began.
+		if (_ctx.CountTheirs(theirs)) {
+			if (_ctx.FreshList) {
+				// The game made its list during this step, and when the player switched cannot be told from here: counted
+				// when the step ends, after the finished step has called that list current (Crdw.StepEnded) - counted
+				// now, it was wiped by that very reset
+				_ctx.SwitchedBack = true;
+			} else {
+				++_ctx.Journal.FilesChanged;
+			}
 		}
 	}
 }

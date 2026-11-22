@@ -10,6 +10,10 @@ public sealed class RunPreview
 	public sealed record StepLine(string Key, string Name, string? Output, bool OutputIsNew);
 
 	public List<StepLine> Steps { get; } = [];
+	// the steps that are not run because the setup uses their old output, each as it stands now (OldOutput)
+	public List<OldOutput.Look> UsesOld { get; } = [];
+	// the profile the run is for, as the old outputs' lines name it
+	string ProfileName { get; init; } = "";
 	public List<(string Mod, string Why)> OffForTheRun { get; } = [];
 	public List<string> ReplacedForGood { get; } = [];
 	public List<string> StartsTheGame { get; } = [];
@@ -22,12 +26,18 @@ public sealed class RunPreview
 	// the room the run takes on each disk (null: it could not be worked out - the check says why)
 	public DiskForecast? Forecast { get; private set; }
 
-	public static RunPreview Build(Setup a_setup, Mo2Instance a_mo2, IReadOnlyList<Setup.StepEntry> a_todo)
+	// a_last: each step's last runs (LastRuns.Build) when the caller has them - an old output that is used is then dated by the
+	// run that made it, with what changed in the profile since
+	public static RunPreview Build(Setup a_setup, Mo2Instance a_mo2, IReadOnlyList<Setup.StepEntry> a_todo, IReadOnlyList<LastRuns.Section>? a_last = null)
 	{
 		var control = new Mo2Control(a_mo2, a_setup.Profile, RunLog.Null);
 		var profile = new Profile(a_mo2, a_setup.Profile, () => control.Running);
 		var st = profile.States();
-		var p = new RunPreview { ClosesMo2 = control.Running };
+		var p = new RunPreview { ClosesMo2 = control.Running, ProfileName = a_setup.Profile };
+		// only when a step past the shader caches runs do the outputs go off, and with them the old ones come back at their places
+		if (a_todo.Any(s => s.Key is not "shaders" and not "playsave")) {
+			p.UsesOld.AddRange(OldOutput.LookAt(a_setup, a_mo2, st, a_todo, a_last));
+		}
 		p.LeftOutForNewGame.AddRange(a_setup.Steps.Where(s => s.On && a_setup.LeftOutForNewGame(s.Key)).Select(s => StepCatalog.Name(s.Key)));
 		p.CommandsBefore.AddRange(a_setup.BeforeRun);
 		p.CommandsAfter.AddRange(a_setup.AfterRun);
@@ -73,6 +83,14 @@ public sealed class RunPreview
 		if (total > TimeSpan.Zero) {
 			l.Add($"About {Minutes(total)} in all{(untimed > 0 ? $", plus {untimed} step(s) never timed yet" : "")}.");
 		}
+		if (UsesOld.Count > 0) {
+			l.Add("");
+			l.Add("NOT built again - the old output is used, as this setup says (the Steps list: Use old output):");
+			foreach (var u in UsesOld) {
+				l.Add($"  - {u.Name}: \"{u.Mod}\"");
+				l.AddRange(OldOutput.Warning(u, ProfileName).Select(w => "      " + w));
+			}
+		}
 		if (Steps.Any(s => s.Key == "loot")) {
 			l.Add("");
 			l.Add("LOOT sorts your plugins. The new order stays; Undo the last run takes it back.");
@@ -105,7 +123,7 @@ public sealed class RunPreview
 		}
 		if (CommandsBefore.Count + CommandsAfter.Count > 0) {
 			l.Add("");
-			l.Add("This setup runs its own commands on this PC (Settings > commands before and after a run):");
+			l.Add("This setup runs its own commands on this PC (Settings > Run):");
 			l.AddRange(CommandsBefore.Select(c => "  - before the first step: " + c));
 			l.AddRange(CommandsAfter.Select(c => "  - after the run: " + c));
 		}

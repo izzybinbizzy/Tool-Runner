@@ -256,7 +256,8 @@ public sealed class GrassStep : IStep
 // overwrite), then the cache moves into that shader mod's own cache mod. A setup lists `caches` (one per shader mod: its
 // mod, its output mod, an optional settings mod). The cache the profile itself runs is built first, with every ticked shader
 // mod on as the game loads them; a shader mod that is switched off gets one only when the setup asks (Plan). A cache is rebuilt
-// only when its shader mod (or its settings) changed since the cache was made - the setup's "shaderRebuild" (his "configurable").
+// only when what it is built from changed since it was made (Fingerprint: the shader mod, the shader files, the features
+// switched off at the game's start, the game's version) - the setup's "shaderRebuild" (his "configurable").
 public sealed class ShaderStep : IStep
 {
 	public string Key => "shaders";
@@ -303,13 +304,18 @@ public sealed class ShaderStep : IStep
 	// 2026-10-27, "can you confirm rebuilding another tool wont cause shaders to need to be rebuilt")
 	public static readonly string[] ShaderFileKinds = [".hlsl", ".hlsli", ".ini", ".json", ".fx", ".fxh", ".csh", ".vsh", ".psh"];
 
+	// the part of a Community Shaders settings file that names the features left out when the game starts: a feature switched
+	// there changes which shaders exist at all
+	public const string BootKey = "Disable at Boot";
+
 	// a_otherCaches: the mods of the setup's OTHER caches (shader, output and settings mod) - left out, so switching the tick
 	// between two shader mods or updating one never makes the other's cache stale (the fourth review, M1)
 	// a_layers: the other ticked shader mods this cache is built together with - part of it, hashed with it (none = the
 	// fingerprint a cache had before layers were known, so an older stamp still reads)
 	// a_winners: false = the fingerprint as it was before it knew which mod wins a shader file two mods ship (an older stamp)
+	// a_bootOnly: false = the fingerprint as it was while a settings file counted with every value in it (an older stamp)
 	public static string Fingerprint(Mo2Instance a_mo2, Cache a_c, Profile? a_profile = null, IReadOnlyCollection<string>? a_otherCaches = null,
-		IReadOnlyCollection<string>? a_layers = null, bool a_winners = true)
+		IReadOnlyCollection<string>? a_layers = null, bool a_winners = true, bool a_bootOnly = true)
 	{
 		using var sha = SHA256.Create();
 		void Add(string a_file)
@@ -321,6 +327,39 @@ public sealed class ShaderStep : IStep
 			sha.TransformBlock(name, 0, name.Length, null, 0);
 			var data = File.ReadAllBytes(a_file);
 			sha.TransformBlock(data, 0, data.Length, null, 0);
+		}
+		// A settings file counts by the one part of it that says what is built: the features it switches off at the game's
+		// start (BootKey). Its other values are not part of the cache, and the game rewrites them by itself: in a real run
+		// (2026-11-21) it changed three preset fields at a start, the file no longer matched, and the next run built the whole
+		// cache again - twenty minutes for nothing, at every run. What the shader mod itself decides to compile again at a
+		// start, the run waits for before it loads a save (InGame.WaitCompile) and says in its notes.
+		void AddSettings(string a_file)
+		{
+			if (!a_bootOnly) {
+				Add(a_file);
+				return;
+			}
+			if (!File.Exists(a_file)) {
+				return;
+			}
+			string boot;
+			try {
+				// (a file saved with a byte order mark reads all the same)
+				var text = Files.ReadShared(a_file).AsSpan();
+				if (text.StartsWith<byte>([0xEF, 0xBB, 0xBF])) {
+					text = text[3..];
+				}
+				boot = JsonNode.Parse(text, null, new System.Text.Json.JsonDocumentOptions { CommentHandling = System.Text.Json.JsonCommentHandling.Skip, AllowTrailingCommas = true })
+					is JsonObject o && o[BootKey] is JsonObject off
+					? string.Join("|", off.Select(kv => kv.Key + "=" + (kv.Value?.ToJsonString() ?? "null")).Order(StringComparer.Ordinal))
+					: "";
+			} catch (Exception e) when (e is System.Text.Json.JsonException or ArgumentException) {
+				// a file that does not read as settings (no JSON, or a name twice in one object) counts whole, as before
+				Add(a_file);
+				return;
+			}
+			var line = System.Text.Encoding.UTF8.GetBytes(Path.GetFileName(a_file).ToLowerInvariant() + "|boot|" + boot);
+			sha.TransformBlock(line, 0, line.Length, null, 0);
 		}
 		// each shader file by the mods that ship it: where two do, which one wins is part of what the cache is built from
 		var shippedBy = new Dictionary<string, List<string>>(StringComparer.Ordinal);
@@ -352,12 +391,12 @@ public sealed class ShaderStep : IStep
 			}
 			Add(Path.Combine(dir, "meta.ini"));
 			foreach (var f in Directory.EnumerateFiles(dir, "Settings*.json", SearchOption.AllDirectories).Order(StringComparer.OrdinalIgnoreCase)) {
-				Add(f);
+				AddSettings(f);
 			}
 		}
 		if (a_c.SettingsMod != null && Directory.Exists(a_mo2.ModDir(a_c.SettingsMod))) {
 			foreach (var f in Directory.EnumerateFiles(a_mo2.ModDir(a_c.SettingsMod), "Settings*.json", SearchOption.AllDirectories).Order(StringComparer.OrdinalIgnoreCase)) {
-				Add(f);
+				AddSettings(f);
 			}
 		}
 		var layers = (a_layers ?? []).Where(l => !l.Equals(a_c.ShaderMod, StringComparison.OrdinalIgnoreCase) && !l.Equals(a_c.SettingsMod, StringComparison.OrdinalIgnoreCase))
@@ -367,7 +406,11 @@ public sealed class ShaderStep : IStep
 			sha.TransformBlock(name, 0, name.Length, null, 0);
 			foreach (var f in Directory.EnumerateFiles(a_mo2.ModDir(layer), "*.dll", SearchOption.AllDirectories)
 				         .Concat(Directory.EnumerateFiles(a_mo2.ModDir(layer), "Settings*.json", SearchOption.AllDirectories)).Order(StringComparer.OrdinalIgnoreCase)) {
-				Add(f);
+				if (f.EndsWith(".json", StringComparison.OrdinalIgnoreCase)) {
+					AddSettings(f);
+				} else {
+					Add(f);
+				}
 			}
 			Add(Path.Combine(a_mo2.ModDir(layer), "meta.ini"));
 			AddShaders(layer);
@@ -420,11 +463,15 @@ public sealed class ShaderStep : IStep
 			.FirstOrDefault() ?? StampFile(a_mo2, a_c);
 
 	public static bool UpToDate(Mo2Instance a_mo2, Cache a_c, Profile? a_profile = null, IReadOnlyCollection<string>? a_otherCaches = null,
+		IReadOnlyCollection<string>? a_layers = null) => WhyStale(a_mo2, a_c, a_profile, a_otherCaches, a_layers) == null;
+
+	// why the cache is built again (null: it is current) - said in the run's log, so a rebuild is never a riddle
+	public static string? WhyStale(Mo2Instance a_mo2, Cache a_c, Profile? a_profile = null, IReadOnlyCollection<string>? a_otherCaches = null,
 		IReadOnlyCollection<string>? a_layers = null)
 	{
 		var stamp = ReadStampFile(a_mo2, a_c);
 		if (!File.Exists(stamp)) {
-			return false;
+			return "it has no record of a build by this program";
 		}
 		try {
 			var o = JsonNode.Parse(Files.ReadSharedText(stamp)) as JsonObject;
@@ -432,19 +479,30 @@ public sealed class ShaderStep : IStep
 			// fixed 50 files, a small shader mod's cache that the step had accepted with fewer read as out of date at every run
 			// and was built again each time. A stamp from before the count was kept is held to the old 50
 			var stamped = o?["files"] is JsonValue fv && fv.TryGetValue<int>(out var count) ? count : 50;
-			if (Files.CountFiles(Path.Combine(a_mo2.ModDir(a_c.OutputMod), "ShaderCache")) < Math.Max(1, stamped * 9 / 10)) {
-				return false;
+			var holds = Files.CountFiles(Path.Combine(a_mo2.ModDir(a_c.OutputMod), "ShaderCache"));
+			if (holds < Math.Max(1, stamped * 9 / 10)) {
+				return $"it holds {holds} shader(s), and held {stamped} when it was built";
 			}
-			// A stamp from before the fingerprint knew which mod wins a shared shader file ("winners") is read by the fingerprint
-			// it was written with: the cache it stands for is still that cache, and reading it the new way would have built
-			// every such cache again for nothing. The next build stamps it the new way
-			var winners = o?["winners"] is JsonValue wv && wv.TryGetValue<bool>(out var w) && w;
 			// a cache that ended by quiet (the log never said it was done) is built again
-			return o?["verified"]?.GetValue<bool>() != false && o?["fingerprint"]?.ToString() == Fingerprint(a_mo2, a_c, a_profile, a_otherCaches, a_layers, winners);
-		} catch (System.Text.Json.JsonException) {
-			return false;
+			if (o?["verified"]?.GetValue<bool>() == false) {
+				return "its last build ended without the shader mod saying it was done";
+			}
+			// A stamp from before the fingerprint knew which mod wins a shared shader file ("winners"), or from while a settings
+			// file counted with every value in it (no "settings"), is read by the fingerprint it was written with: the cache it
+			// stands for is still that cache, and reading it the new way would have built every such cache again for nothing.
+			// The next build stamps it the new way
+			var winners = o?["winners"] is JsonValue wv && wv.TryGetValue<bool>(out var w) && w;
+			var bootOnly = o?["settings"]?.ToString() == StampSettings;
+			return o?["fingerprint"]?.ToString() == Fingerprint(a_mo2, a_c, a_profile, a_otherCaches, a_layers, winners, bootOnly) ? null :
+				"what it is built from changed since its build: the shader mod or its version, a shader file of a ticked mod, " +
+				(bootOnly ? "the features switched off at the game's start" : "a settings file of the shader mod") + ", or the game's version";
+		} catch (Exception e) when (e is System.Text.Json.JsonException or InvalidOperationException or FormatException) {
+			return "its record of the last build does not read";
 		}
 	}
+
+	// how a stamp says its fingerprint takes a settings file by its boot part only
+	const string StampSettings = "boot";
 
 	// one cache to build: its switches for the compile, the other ticked shader mods it is built together with (Layers), and
 	// whether it is the cache the profile itself runs
@@ -513,10 +571,13 @@ public sealed class ShaderStep : IStep
 			}
 			// the layers are part of this cache (hashed with it); every other cache's mods are left out of its fingerprint
 			var theirs = OtherCacheMods(all, c).Except(b.Layers, StringComparer.OrdinalIgnoreCase).ToList();
-			if (mode == ShaderRebuild.WhenChanged && UpToDate(a_ctx.Mo2, c, a_ctx.Profile, theirs, b.Layers)) {
-				// left exactly as the player has it: a cache this run did not build is never recorded as this run's output
-				a_ctx.Log.Detail($"the {c.ShaderMod} cache is current (nothing it depends on changed) - not rebuilt");
-				continue;
+			if (mode == ShaderRebuild.WhenChanged) {
+				if (WhyStale(a_ctx.Mo2, c, a_ctx.Profile, theirs, b.Layers) is not { } why) {
+					// left exactly as the player has it: a cache this run did not build is never recorded as this run's output
+					a_ctx.Log.Detail($"the {c.ShaderMod} cache is current (nothing it depends on changed) - not rebuilt");
+					continue;
+				}
+				a_ctx.Log.Say($"the {c.ShaderMod} cache is built again: {why}");
 			}
 			StepKit.EnsureOutput(a_ctx, c.OutputMod);
 			if (c.SettingsMod != null) {
@@ -714,7 +775,7 @@ public sealed class ShaderStep : IStep
 								if (!logFresh && !toldNoLog) {
 									toldNoLog = true;
 									a_ctx.Log.Detail($"no shader log of this start in {string.Join(" or ", logs)} - the compile's end is judged by the game itself (new shaders, its processor use); " +
-										"if your SKSE logs are written elsewhere, name that folder in Settings > SKSE log folder");
+										"if your SKSE logs are written elsewhere, name that folder in Settings > Setup > SKSE log folder");
 								}
 							} else if (sw.Elapsed > TimeSpan.FromMinutes(a_s.Int("sanity_min", 3))) {
 								// never blamed on the shader mod while something else holds the game: what is on screen is named
@@ -797,7 +858,7 @@ public sealed class ShaderStep : IStep
 		}
 		// stamped against the profile as it is put back, the state the next freshness check reads - never the compile's own switches
 		Files.WriteAtomic(StampFile(a_ctx.Mo2, c), new JsonObject { ["fingerprint"] = Fingerprint(a_ctx.Mo2, c, a_ctx.Profile, a_otherCaches, a_b.Layers), ["built"] = DateTime.Now.ToString("O"), ["files"] = count,
-			["verified"] = verified, ["winners"] = true }.ToJsonString());
+			["verified"] = verified, ["winners"] = true, ["settings"] = StampSettings }.ToJsonString());
 		a_ctx.Note($"shaders ({c.OutputMod}): {result}");
 	}
 }

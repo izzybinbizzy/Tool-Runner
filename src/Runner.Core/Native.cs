@@ -436,7 +436,13 @@ public static partial class Procs
 	// The same for the very process that was put on record: opened once, its start time read and the end made through that
 	// one handle. Asked by number twice - "is it still the one?", then "end it" - a number that changed hands in between
 	// would end somebody else's program. False: it was no longer that process (or could not be opened), and nothing was ended.
-	public static bool KillTree(int a_root, DateTime a_startedUtc)
+	public static bool KillTree(int a_root, DateTime a_startedUtc) => KillVerified(a_root, a_startedUtc, true);
+
+	// That one process alone, the same way: what it started is left running (whoever ends those names each one by its own
+	// number and start time)
+	public static bool KillOnly(int a_pid, DateTime a_startedUtc) => KillVerified(a_pid, a_startedUtc, false);
+
+	static bool KillVerified(int a_root, DateTime a_startedUtc, bool a_tree)
 	{
 		try {
 			using var p = Process.GetProcessById(a_root);
@@ -445,7 +451,7 @@ public static partial class Procs
 			if (p.HasExited || p.StartTime.ToUniversalTime() != a_startedUtc) {
 				return false;
 			}
-			p.Kill(true);
+			p.Kill(a_tree);
 			p.WaitForExit(10000);
 			return true;
 		} catch (ArgumentException) {
@@ -469,6 +475,37 @@ public static partial class Procs
 		} catch (Win32Exception) {
 		}
 		return null;
+	}
+
+	[LibraryImport("kernel32.dll", SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	private static partial bool GetProcessTimes(nint a_process, out long a_created, out long a_ended, out long a_kernel, out long a_user);
+
+	// The process under a_pid held open - when it is the very process that started at a_startedUtc, else null. Windows
+	// frees a process's number only together with the process object, and that object lives for as long as anyone holds a
+	// handle to it: while this one is held the number is nobody else's, also after the process has ended (it then reads as
+	// gone to StartTime, Alive and the process list). The handle can ask when the process started and whether it has
+	// ended, nothing more.
+	public static IDisposable? Pin(int a_pid, DateTime a_startedUtc)
+	{
+		var pin = new Microsoft.Win32.SafeHandles.SafeProcessHandle(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, false, (uint)a_pid), true);
+		if (!pin.IsInvalid && GetProcessTimes(pin.DangerousGetHandle(), out var created, out _, out _, out _) && DateTime.FromFileTimeUtc(created) == a_startedUtc) {
+			return pin;
+		}
+		pin.Dispose();
+		return null;
+	}
+
+	[LibraryImport("kernel32.dll")]
+	private static partial void GetSystemTimeAsFileTime(out long a_time);
+
+	// The clock Windows stamps a process's start with: the system time as of its last timer tick. DateTime.UtcNow reads the
+	// precise time, which runs up to a tick ahead of that - a process started right after such a reading can carry a start
+	// time from before it. Read from this clock, no process created after the reading has a start time before it.
+	public static DateTime StartClock()
+	{
+		GetSystemTimeAsFileTime(out var time);
+		return DateTime.FromFileTimeUtc(time);
 	}
 
 	// the process's image name as Windows lists it, "ModOrganizer.exe" ("" when gone): asked of the process itself through a

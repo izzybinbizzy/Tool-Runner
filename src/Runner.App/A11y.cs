@@ -34,13 +34,15 @@ public static class A11y
 	}
 
 	// a whole step in one sentence, for the step list's screen-reader status (its glyph and color say it to the eye)
-	public static string StepStatus(bool a_on, bool a_leftOut, StepState? a_state, string a_elapsed, string a_usual, string a_note)
+	public static string StepStatus(bool a_on, bool a_leftOut, StepState? a_state, string a_elapsed, string a_usual, string a_note, bool a_usesOld = false)
 	{
 		var parts = new List<string>();
 		if (!a_on) {
 			parts.Add("switched off");
 		} else if (a_leftOut) {
 			parts.Add("left out for a new game");
+		} else if (a_usesOld) {
+			parts.Add("not run, its old output is used");
 		}
 		parts.Add(a_state switch {
 			StepState.Running => "running" + (a_elapsed == "" ? "" : " for " + a_elapsed),

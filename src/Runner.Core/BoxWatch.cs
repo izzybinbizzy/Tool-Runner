@@ -50,6 +50,9 @@ public sealed class BoxWatch : IDisposable
 	// how long a box of the game that the runner cannot answer may stay open (a player at the PC answers it) before its step stops
 	public TimeSpan Wait { get; init; } = TimeSpan.FromSeconds(60);
 
+	// a box of the game the runner does not know is closed, by the button that takes nothing on (the setup's default in a run)
+	public bool CloseUnknown { get; init; }
+
 	// the box that stopped the step in hand, in words; null while none did
 	public string? Blocked => _blocked;
 
@@ -90,6 +93,9 @@ public sealed class BoxWatch : IDisposable
 		while (!Gone) {
 			try {
 				LookOnce(DateTime.UtcNow);
+			} catch (OutOfMemoryException) {
+				// no memory for this look (nor for a line about it): it is made again at the next beat. Left to leave this thread
+				// it would end the whole program, and a run that ends that way never puts the profile back
 			} catch (Exception e) when (e is not OutOfMemoryException) {
 				// a look that could not be made is made again; the watch is never what ends a run. Said once per kind of fault
 				if (e.Message != _lastFault && !Gone) {
@@ -109,7 +115,10 @@ public sealed class BoxWatch : IDisposable
 
 	// One thing the watch does to the world. It begins only while the run still holds the watch, and "begun" is taken in the
 	// same step that Dispose's "released" is given in: a check and then the act would let the act start after the release.
-	bool Do(Action a_act)
+	// Public for what a look itself does to the world while it reads (the game's own message box is answered in the look,
+	// through DevBench - InGame.LookAtGameBox): that answer goes through here too, so none is sent once the run has let
+	// go of the watch. False: nothing was done (released, or another act is under way - the next beat does it).
+	public bool Do(Action a_act)
 	{
 		if (Interlocked.CompareExchange(ref _state, Acting, Idle) != Idle) {
 			return false;
@@ -144,7 +153,7 @@ public sealed class BoxWatch : IDisposable
 			if (Gone) {
 				return;
 			}
-			var v = KnownBoxes.Judge(b.Box);
+			var v = KnownBoxes.Judge(b.Box, CloseUnknown);
 			if (!_open.TryGetValue(b.Id, out var k)) {
 				k = _open[b.Id] = new Known { First = a_now };
 				// the game's among the log's warnings; a tool's or Mod Organizer's as a plain line (their steps show boxes as a matter of course)
@@ -188,11 +197,14 @@ public sealed class BoxWatch : IDisposable
 				waiting.Add(words + $" - answer it within {Wait.TotalSeconds:0} seconds, or the step stops here");
 				continue;
 			}
-			k.Blocked = true;
-			_blocked = v.Move == BoxMove.Stop ? v.Note :
+			// on record as blocked only once the game's end is under way: a look cut short before that (no memory for the line
+			// below) leaves the box as it was, and the next look does this again
+			var why = v.Move == BoxMove.Stop ? v.Note :
 				$"the game's box did not close after its answer was pressed {PressTries} times - {KnownBoxes.Describe(b.Box)}. Answer it in the game once, then run again from this step";
-			_log.Warn(_blocked);
+			_blocked = why;
+			_log.Warn(why);
 			Do(() => _endGame?.Invoke());
+			k.Blocked = true;
 		}
 		var show = string.Join("; ", waiting.Distinct(StringComparer.Ordinal));
 		// (never after the run let go of the watch: a look that was stuck in a hung window would write into a finished run's record)

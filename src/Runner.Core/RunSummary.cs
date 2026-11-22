@@ -72,6 +72,10 @@ public sealed class RunSummary
 				(a_j.Undoing ? " - built; the undo that was cut off sets them aside when it is finished" :
 					cutOff ? " - built; switched on once your profile is put back" : " - on in Mod Organizer")));
 		}
+		// (only the ones whose old output the run did switch on: one a Stop cut off before that is as the profile had it)
+		if (a_j.UsedOld.Any(u => u.Done) && !a_j.Undone) {
+			s.Rows.Add(new Row("Not built again", string.Join(", ", a_j.UsedOld.Where(u => u.Done).Select(u => $"{u.Name} ({u.Mod})")) + " - the old output is used, as this setup says"));
+		}
 		if (a_j.OrderChanged && !a_j.Undone) {
 			s.Rows.Add(new Row("Plugin order", "sorted by LOOT - the new order stays (History > Undo this run takes it back)"));
 		}

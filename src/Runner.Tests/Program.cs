@@ -479,6 +479,31 @@ public static class Program
 			Equal(0, ended, "and the game goes on");
 		}
 
+		// the same question from a Skyrim the PLAYER started under the run's Mod Organizer: theirs to answer - only named
+		pressed.Clear();
+		shown.Clear();
+		lines.Clear();
+		using (var w = Watch()) {
+			open.Add(Box(11, "SkyrimSE.exe", false, "Cache Recursive Directory Walk", "Do you want to generate CRDW cache files?", "Yes", "No"));
+			w.LookOnce(t0);
+			w.LookOnce(t0.AddSeconds(61));
+			Equal(0, pressed.Count, "the cache mod's question in a game the player started is never answered for them");
+			Check(lines.Any(l => l.StartsWith("a box is open - SkyrimSE.exe: \"Cache Recursive Directory Walk\"", StringComparison.Ordinal)) && !lines.Contains(Crdw.Answered), "it is named, and not said to be answered: " + string.Join(" | ", lines));
+			Check(w.Blocked == null && ended == 0, "and it neither stops a step nor ends a game");
+			open.Clear();
+		}
+		Equal(BoxMove.Press, KnownBoxes.Judge(new BoxSeen("SkyrimSE.exe", true, "Cache Recursive Directory Walk", "Do you want to generate CRDW cache files?", ["Yes", "No"])).Move, "the run's own game's is answered");
+		Equal(BoxMove.Name, KnownBoxes.Judge(new BoxSeen("SkyrimSE.exe", false, "Cache Recursive Directory Walk", "Do you want to generate CRDW cache files?", ["Yes", "No"])).Move, "the player's game's is only named");
+		// a box of the run's game that nothing here knows: closed by the button that takes nothing on (his word of 2026-11-21),
+		// unless the setup leaves such boxes to the player
+		var notKnown = new BoxSeen("SkyrimSE.exe", true, "Some Mod", "Reset all of its settings?", ["Yes", "No"]);
+		Equal(BoxMove.Stop, KnownBoxes.Judge(notKnown).Move, "left to the player where the setup says so: never guessed at");
+		var closedBox = KnownBoxes.Judge(notKnown, true);
+		Check(closedBox.Move == BoxMove.Press && closedBox.Button == "No" && closedBox.Note.Contains("does not know", StringComparison.Ordinal), "closed with its declining button, and named: " + closedBox.Note);
+		Equal("Ignore", KnownBoxes.Judge(new BoxSeen("SkyrimSE.exe", true, "Error", "Something failed", ["Abort", "Retry", "Ignore"]), true).Button, "Windows' own three: Ignore");
+		Equal(BoxMove.Stop, KnownBoxes.Judge(new BoxSeen("SkyrimSE.exe", true, "Working", "Packing the archives ...", ["Cancel"]), true).Move, "a box whose one button is Cancel shows something at work: never pressed");
+		Equal(BoxMove.Name, KnownBoxes.Judge(new BoxSeen("TexGenx64.exe", false, "TexGen", "Exit TexGen?", ["Yes", "No"]), true).Move, "a tool's own box is only named, whatever the setup says about the game's");
+
 		pressed.Clear();
 		shown.Clear();
 		using (var w = Watch()) {
@@ -633,15 +658,34 @@ public static class Program
 		Equal((false, "CACHE"), Crdw.Parse("[General]\nShowPopUp = b:false\nMode = s:cache\n"), "spaces and case");
 		var blind = new Crdw.State("x", false, "LOAD");
 		var asks = new Crdw.State("x", true, "LOAD");
-		var s0 = Setup.FromJson(new JsonObject());
-		var sRefresh = Setup.FromJson(new JsonObject { [Crdw.SettingName] = "refresh" });
-		Equal(null, Crdw.AfterRun(s0, null, true, false), "the mod is not there: nothing to say");
-		Equal(null, Crdw.AfterRun(s0, blind, false, false), "a run that built nothing made nothing old");
-		Check(Crdw.AfterRun(s0, blind, true, true)?.Contains("CACHE", StringComparison.Ordinal) == true, "it loads its old list without asking: said after the run");
-		Equal(null, Crdw.AfterRun(sRefresh, blind, true, true), "the run made its list anew at the save to play: nothing left to do");
-		Check(Crdw.AfterRun(sRefresh, blind, true, false) != null, "no game start after the last tool: still to do");
-		Equal(null, Crdw.AfterRun(s0, asks, true, true), "its question was answered Yes at the run's last game start");
-		Check(Crdw.AfterRun(s0, asks, true, false)?.Contains("answer Yes", StringComparison.Ordinal) == true, "no game start after the last tool: answer Yes next time");
+		Equal(null, Crdw.AfterRun(null, true, false, false), "the mod is not there: nothing to say");
+		Equal(null, Crdw.AfterRun(blind, false, false, false), "a run that built nothing made nothing old");
+		Check(Crdw.AfterRun(blind, true, false, true)?.Contains("CACHE", StringComparison.Ordinal) == true, "it loads its old list without asking, and the game made none anew after the run's last change: said after the run");
+		Equal(null, Crdw.AfterRun(blind, true, true, true), "the game made its list anew after the last thing the run changed: nothing left to do");
+		Equal(null, Crdw.AfterRun(asks, true, false, true), "its question was answered Yes at the run's last game start");
+		Check(Crdw.AfterRun(asks, true, false, false)?.Contains("answer Yes", StringComparison.Ordinal) == true, "no game start after the last tool: answer Yes next time");
+		// a command of the setup ran after the game last made its list: whether it changed a game file nobody can tell from
+		// here, so the list is never called current after it - the player is told what to do if it does
+		Check(Crdw.AfterRun(blind, true, false, true, true)?.Contains("command after the run", StringComparison.Ordinal) == true, "a command after the run, after the game's last list: said, with what to do if it changes game files");
+		Check(Crdw.AfterRun(blind, false, false, false, true)?.Contains("command after the run", StringComparison.Ordinal) == true, "also after a run that changed nothing itself");
+		Check(Crdw.AfterRun(blind, true, false, false, false)?.Contains("older than what this run changed", StringComparison.Ordinal) == true, "a list the run itself left old is said as that, command or no command");
+		Equal(null, Crdw.AfterRun(asks, true, false, true, true), "with its question on, the mod asks at the next game start itself");
+		// when the run has it make a new list: his answer ("mod makes a new list when files are changed during the run") is
+		// the rule for a setup that says nothing
+		Equal(Crdw.Renew.Changed, Crdw.When(Setup.FromJson(new JsonObject())), "a setup that says nothing: a new list when the run changed files");
+		Equal(Crdw.Renew.Always, Crdw.When(Setup.FromJson(new JsonObject { [Crdw.SettingName] = "always" })), "at every game start, when the setup says so");
+		Equal(Crdw.Renew.Never, Crdw.When(Setup.FromJson(new JsonObject { [Crdw.SettingName] = "Never" })), "or never");
+		Equal(Crdw.Renew.Changed, Crdw.When(Setup.FromJson(new JsonObject { ["crdwCache"] = "leave" })), "the first builds' \"leave\" was written by every save of the settings, chosen or not: it says nothing");
+		Equal(Crdw.Renew.Always, Crdw.When(Setup.FromJson(new JsonObject { ["crdwCache"] = "refresh" })), "their \"refresh\" had to be picked: it still counts");
+		Equal(Crdw.Renew.Never, Crdw.When(Setup.FromJson(new JsonObject { ["crdwCache"] = "refresh", [Crdw.SettingName] = "never" })), "and what is picked now outranks it");
+		// what the settings window shows (and so what a save writes) is what the run does today - never the list's first
+		// choice for a key that is empty or holds a word the list does not have
+		Equal("always", Crdw.Word(Setup.FromJson(new JsonObject { [Crdw.SettingName] = "", ["crdwCache"] = "refresh" })), "an empty value under the new key says nothing: the old key's \"refresh\" is shown, and a save keeps it");
+		Equal("always", Crdw.Word(Setup.FromJson(new JsonObject { [Crdw.SettingName] = "  ", ["crdwCache"] = "refresh" })), "nor does one of blanks");
+		Equal("never", Crdw.Word(Setup.FromJson(new JsonObject { [Crdw.SettingName] = "Never" })), "what was picked is shown in the list's own word");
+		Equal("changed", Crdw.Word(Setup.FromJson(new JsonObject { [Crdw.SettingName] = "sometimes" })), "a word it does not know is shown as what the run does with it");
+		Equal("changed", Crdw.Word(Setup.FromJson(new JsonObject())), "and a setup that says nothing as the rule for it");
+		Check(Crdw.Writes("landscapefixer") && Crdw.Writes("grass") && !Crdw.Writes("cleansave") && !Crdw.Writes("playsave") && !Crdw.Writes("shaders"), "a step that only starts the game and saves changes no file the mod lists");
 
 		using var f = new FakeMo2();
 		f.Mod("CRDW Low");
@@ -681,13 +725,89 @@ public static class Program
 		var me = Environment.ProcessId;
 		Check(fam.Now([me]).ContainsKey(me) && !fam.Now([me])[me].Game, "a process that is no game is none");
 
-		// left alone unless the setup says so
+		// a run that has changed nothing yet touches neither mod's own settings; once it has changed the game's files, the
+		// cache mod makes a new list at the next step's game starts, and its own file goes back after that step
+		var crdwOwn = Path.Combine(f.Overwrite, Crdw.IniRel);
+		var crdwAsWas = File.ReadAllBytes(crdwOwn);
 		var ctx = StepContext(f, "landscapefixer");
 		using (ctx.Log) {
 			GameStart.Prepare(ctx);
-			Equal(0, ctx.Journal.Kept.Count, "by default a run changes neither mod's own settings");
+			Equal(0, ctx.Journal.Kept.Count, "a run that has changed nothing yet changes neither mod's own settings");
+			Crdw.StepEnded(ctx, true, true);
+			Equal(1, ctx.Journal.FilesChanged, "a step that writes files ended: the game's files have changed");
+			GameStart.Prepare(ctx);
+			Equal((false, "CACHE"), Crdw.Parse(File.ReadAllText(crdwOwn)), "the next game start makes the list anew");
+			Equal(1, ctx.Journal.Kept.Count, "only the cache mod's file is touched for it");
+			Crdw.StepEnded(ctx, false, false);
+			Equal(1, ctx.Journal.FilesChanged, "a game step that did not finish leaves the list as old as it was");
+			Equal(0, StepKit.PutFilesBack(ctx).Count, "its file goes back after the failed step");
+			GameStart.Prepare(ctx);
+			GameStart.Prepare(ctx);
+			Equal((false, "CACHE"), Crdw.Parse(File.ReadAllText(crdwOwn)), "set again for the next step, and a second game start of that step changes nothing more");
+			Crdw.StepEnded(ctx, true, false);
+			Equal(0, ctx.Journal.FilesChanged, "a game step that finished with a new list: the list is current");
+			Equal(0, StepKit.PutFilesBack(ctx).Count, "the mod's own file goes back when the step ends");
+			Check(File.ReadAllBytes(crdwOwn).SequenceEqual(crdwAsWas), "byte for byte as the player had it");
+			GameStart.Prepare(ctx);
+			Equal((false, "LOAD"), Crdw.Parse(File.ReadAllText(crdwOwn)), "nothing changed since: the next game start leaves the mod as the player set it");
+			// a step that starts the game with a new list and then writes files itself (the grass cache): changed again
+			ctx.Journal.FilesChanged = 1;
+			GameStart.Prepare(ctx);
+			Crdw.StepEnded(ctx, true, true);
+			Equal(1, ctx.Journal.FilesChanged, "what a step wrote after its own game start counts as changed again");
+			Equal(0, StepKit.PutFilesBack(ctx).Count, "and its file goes back as well");
+			// A game step that switches a mod off for its game start (CodeRabbit on pull request #35): the list the game makes
+			// then is of the mods as they are switched. With the mod back, that list is old again - also when the step itself
+			// writes nothing, where it once stayed "current" and no later game start made a new one
+			ctx.Journal.FilesChanged = 0;
+			using (new Toggle(ctx, [], ["Faster Archives"], "the test")) {
+				Equal(1, ctx.Journal.FilesChanged, "mods switched for a step: the game would find other files than its list names");
+				GameStart.Prepare(ctx);
+				Equal((false, "CACHE"), Crdw.Parse(File.ReadAllText(crdwOwn)), "so this step's game start makes the list anew");
+			}
+			Crdw.StepEnded(ctx, true, false);
+			Equal(1, ctx.Journal.FilesChanged, "the list was made with the mod switched off: with the mod back it is old again, though the step wrote nothing");
+			Equal(0, StepKit.PutFilesBack(ctx).Count, "(the mod's own file back)");
+			GameStart.Prepare(ctx);
+			Equal((false, "CACHE"), Crdw.Parse(File.ReadAllText(crdwOwn)), "and the next game start makes a new one");
+			Crdw.StepEnded(ctx, true, false);
+			Equal(0, ctx.Journal.FilesChanged, "which is current: nothing was switched for that start");
+			Equal(0, StepKit.PutFilesBack(ctx).Count, "(and back again)");
+			// mods switched for a tool and put back, with no game start in between, change nothing for the game's list
+			using (new Toggle(ctx, [], ["Faster Archives"], "the test")) {
+			}
+			Equal(0, ctx.Journal.FilesChanged, "switched and put back with no list made meanwhile: as it was");
+			// a step that asks for a mod as it already stands switches nothing: the game's files are what its list names
+			using (new Toggle(ctx, ["Faster Archives"], [], "the test")) {
+				Equal(0, ctx.Journal.FilesChanged, "a mod asked on that is on already: nothing switched, nothing changed for the game's list");
+				ctx.FreshList = true;
+			}
+			Check(!ctx.SwitchedBack, "and with nothing switched there is nothing to put back after the list was made");
+			ctx.FreshList = false;
+			// The save to play runs after the run's record says finished. A file kept for it is on record as "to put back" in
+			// the very write that records the file - before the file is changed (said only after the change, a crash in
+			// between left a changed file that nothing offered to put back)
+			var forPlay = Path.Combine(f.Root, "changed for the save to play.ini");
+			File.WriteAllText(forPlay, "as it was");
+			ctx.Journal.InGameAfter = true;
+			ctx.Journal.NeedsRestore = false;
+			StepKit.KeepFile(ctx, forPlay);
+			var onDisk = Journal.Load(ctx.Journal.Folder);
+			Check(onDisk.NeedsRestore && onDisk.Unfinished && onDisk.Kept.Any(k => k.Path == forPlay && !k.Done), "the record on disk says there is something to put back, with the file named");
+			Equal("as it was", File.ReadAllText(forPlay), "before the file itself is touched");
+			Equal(0, StepKit.PutFilesBack(ctx).Count, "(put back)");
+			ctx.Journal.InGameAfter = false;
+			ctx.Journal.NeedsRestore = false;
 		}
-		setup.Root[Crdw.SettingName] = "refresh";
+		setup.Root[Crdw.SettingName] = "never";
+		setup.Save();
+		ctx = StepContext(f, "landscapefixer");
+		using (ctx.Log) {
+			ctx.Journal.FilesChanged = 3;
+			GameStart.Prepare(ctx);
+			Equal(0, ctx.Journal.Kept.Count, "a setup that says never: the mod is left alone whatever the run changed");
+		}
+		setup.Root[Crdw.SettingName] = "always";
 		setup.Root[FasterArchives.SettingName] = "skip";
 		setup.Save();
 		Check(!Preflight.Run(Setup.Load(f.SetupFile), mo2, ["landscapefixer"]).Any(i => i.Text.StartsWith("Faster Archives is ticked", StringComparison.Ordinal)), "a setup that passes the offer over is not warned of it");
@@ -698,7 +818,7 @@ public static class Program
 		ctx = StepContext(f, "landscapefixer");
 		using (ctx.Log) {
 			GameStart.Prepare(ctx);
-			Equal((false, "CACHE"), Crdw.Parse(File.ReadAllText(crdwFile)), "refresh: it makes its list anew at this step's game starts");
+			Equal((false, "CACHE"), Crdw.Parse(File.ReadAllText(crdwFile)), "always: it makes its list anew at this step's game starts, whether or not anything changed");
 			Check(!FasterArchives.OfferOn(File.ReadAllText(faFile)), "skip: no offer at this step's game starts");
 			Check(File.ReadAllText(faFile).Contains("bEnableParallel=1", StringComparison.Ordinal) && File.ReadAllText(faFile).Contains("; 1 = offer", StringComparison.Ordinal), "every other line of the file as it was");
 			GameStart.Prepare(ctx);
@@ -842,7 +962,8 @@ public static class Program
 		Check(gaveUp?.Contains("nobody chose", StringComparison.Ordinal) == true, "nobody chose within the wait: the step stops and says so: " + gaveUp);
 		Check(idle.WaitForExit(5000), "and the window that only waited is closed, so Mod Organizer can close");
 
-		// a Stop while its window only waits closes that window too
+		// a Stop never closes its window, the run's own too: whether it only waits or a repack began a moment ago cannot be
+		// told for certain from outside, and a repack cut off leaves archives half written
 		var since3 = DateTime.Now;
 		using var stopMe = Process.Start(new ProcessStartInfo(tool, "-n 60 127.0.0.1") { UseShellExecute = false, CreateNoWindow = true })!;
 		using var endStopMe = new StandIn(stopMe);
@@ -850,8 +971,37 @@ public static class Program
 		var stopping = StepContext(f, "shaders", a_cancel: stop.Token);
 		stopping.Control.Started.Add(Environment.ProcessId);
 		using var log2 = stopping.Log;
+		var atStop = new List<string>();
+		stopping.Log.Line += (t, _) => {
+			lock (atStop) {
+				atStop.Add(t);
+			}
+		};
 		Throws<OperationCanceledException>(() => FasterArchives.Wait(stopping, "shaders", new StepSettings([]), 1, since3), "a Stop ends the wait");
-		Check(stopMe.WaitForExit(5000), "and closes a window that only waits for a choice");
+		Check(!stopMe.WaitForExit(1500), "and leaves its window open, one that only waits too");
+		lock (atStop) {
+			Check(atStop.Any(l => l.Contains(FasterArchives.LeftAtStop, StringComparison.Ordinal)), "said in words, with what to do: " + string.Join(" | ", atStop.TakeLast(3)));
+		}
+		stopMe.Kill();
+
+		// ... and the choice at the edge: a window that sits idle up to the Stop and starts to work right after it (the
+		// player chose "Repack now" as Stop was pressed) is not cut off, at the offer limit either
+		var edgeDir = Path.Combine(f.Root, "edge");
+		Directory.CreateDirectory(edgeDir);
+		var edgeTool = Path.Combine(edgeDir, FasterArchives.ToolImage);
+		File.Copy(Path.Combine(Environment.SystemDirectory, "cmd.exe"), edgeTool);
+		foreach (var time in new[] { 1, 4 }) {
+			var sinceEdge = DateTime.Now;
+			// idle for about a second, then busy (a loop that ends by itself after a few minutes at most)
+			using var edge = Process.Start(new ProcessStartInfo(edgeTool, "/d /c \"ping -n 2 127.0.0.1 >nul & for /l %i in (1,1,200000000) do @rem\"") { UseShellExecute = false, CreateNoWindow = true })!;
+			using var endEdge = new StandIn(edge);
+			using var stopEdge = new CancellationTokenSource(TimeSpan.FromMilliseconds(600));
+			var edgeCtx = StepContext(f, "shaders", a_cancel: stopEdge.Token);
+			edgeCtx.Control.Started.Add(Environment.ProcessId);
+			using var edgeLog = edgeCtx.Log;
+			Throws<OperationCanceledException>(() => FasterArchives.Wait(edgeCtx, "shaders", new StepSettings([]), time, sinceEdge), $"a Stop ends the wait (offer {time})");
+			Check(!edge.WaitForExit(2000), $"a window that began to work as the Stop came is left to it (offer {time})");
+		}
 	}
 
 	// CodeRabbit's first round on 1.0 (pull request 32): the points a test can hold
@@ -1027,6 +1177,34 @@ public static class Program
 		Equal(("answered YES", 0), DevBench.DecideBox("Some content is missing. Continue loading?", ["Yes", "No"], 2), "continue -> Yes");
 		Equal(("acknowledged", 0), DevBench.DecideBox("Perks reset", ["Ok"], 1), "one button");
 		Equal<string?>(null, DevBench.DecideBox("Delete your save?", ["Yes", "No"], 2).Answer, "an unknown question is not answered");
+		// ... it is CLOSED (his word of 2026-11-21: whatever the box is, it is closed at once) - by the button that takes nothing on
+		Equal(1, DevBench.CloseIndex(["Yes", "No"], -1, 2), "a box the run does not know: the button that declines");
+		Equal(2, DevBench.CloseIndex(["Enable", "Disable", "Ask me later"], 2, 3), "the button the game itself marks as the box's cancel comes first");
+		Equal(0, DevBench.CloseIndex(["Cancel", "Delete everything"], -1, 2), "a declining button wherever it stands");
+		Equal(1, DevBench.CloseIndex(["Install now", "Not now"], -1, 2), "one that puts it off");
+		Equal(1, DevBench.CloseIndex(["Yes, reset", "No, keep them"], -1, 2), "one whose words begin by declining");
+		Equal(2, DevBench.CloseIndex(["Abort", "Retry", "Ignore"], -1, 3), "Windows' own: Ignore");
+		Equal(2, DevBench.CloseIndex(["Warrior", "Mage", "Thief"], -1, 3), "none declines: the last, where the way out stands");
+		Equal(0, DevBench.CloseIndex(["Ok"], -1, 1), "its only button");
+		Equal(1, DevBench.CloseIndex([], -1, 2), "buttons without words: the last of them");
+		Equal(1, DevBench.CloseIndex(["Yes", "No"], 7, 2), "a cancel place the box does not have says nothing");
+		// the shader mod's own word about its start-up pass (Open Shaders, through DevBench): over or not, and how much it compiled
+		var whole = InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":false,"totalTasks":3201,"completedTasks":3201,"diskHitTasks":3201,"failedTasks":0}""")!.AsObject())!;
+		Check(whole.Over && whole.Compiled == 0 && InGame.ShaderPassSaid(whole).Contains("all 3201 taken from its cache, none compiled", StringComparison.Ordinal),
+			"every shader from the cache: over, and nothing compiled - " + InGame.ShaderPassSaid(whole));
+		var rebuilt = InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":false,"totalTasks":3201,"completedTasks":3201,"diskHitTasks":1589}""")!.AsObject())!;
+		Check(rebuilt.Over && rebuilt.Compiled == 1612 && InGame.ShaderPassSaid(rebuilt).Contains("1612 of 3201 compiled", StringComparison.Ordinal), "what did not come from the cache was compiled at this start");
+		var going = InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":true,"totalTasks":3201,"completedTasks":40,"diskHitTasks":40}""")!.AsObject())!;
+		Check(!going.Over, "still at it: not over");
+		// ... and while it is still at it, what it has not done yet says nothing: 40 done, all 40 from the cache, is none
+		// compiled so far - never 3,161 (a wait that can no longer ask it once took that for a cache out of date - CodeRabbit
+		// on pull request #35)
+		Equal<long?>(0, going.CompiledSoFar, "a pass still going that has read every shader so far from its cache has compiled none");
+		Equal<long?>(10, InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":true,"totalTasks":3201,"completedTasks":50,"diskHitTasks":40}""")!.AsObject())!.CompiledSoFar,
+			"one that has done more than it read from its cache has compiled the rest of what it did");
+		Check(!InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":false,"totalTasks":0,"completedTasks":0}""")!.AsObject())!.Over, "nothing queued yet (the game has only just come up): not over");
+		Equal<long?>(null, InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":false,"totalTasks":12,"completedTasks":12}""")!.AsObject())!.Compiled, "a shader mod that does not say what came from its cache");
+		Equal<InGame.ShaderPass?>(null, InGame.ReadShaderPass(JsonNode.Parse("""{"cacheFiles":3201}""")!.AsObject()), "an answer that says nothing about a pass");
 	}
 
 	static void T_FollowersAreLivingTeammates()
@@ -1128,6 +1306,199 @@ public static class Program
 		}
 	}
 
+	// His word of 2026-11-21: "the tool is not catching pop up boxes in game ... it needs to be externally found no matter
+	// what the box could potentially be and immediately closed." Against a local stand-in for DevBench that shows one box
+	// after another: the ones the run knows get their answer, one it does not know is closed by the button that takes
+	// nothing on and goes into the run's notes, a setup may leave such a box to the player, and one that will not close is
+	// not answered for ever.
+	static void T_AGameBoxIsClosedWhateverItIs()
+	{
+		using var f = new FakeMo2();
+		var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+		probe.Start();
+		var port = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port;
+		probe.Stop();
+		using var http = new System.Net.HttpListener();
+		http.Prefixes.Add($"http://localhost:{port}/");
+		http.Start();
+		// the boxes the made-up game shows, first to last; closes: false = its answer never takes
+		var boxes = new Queue<(string Body, string[] Buttons, int Cancel)>();
+		var accepted = new List<int>();
+		var closes = true;
+		// the game's own tutorial pop-up (no message box): shown or not, and the menus the run closed by name
+		var tutorial = false;
+		var closedMenus = new List<string>();
+		// the game's answer to "describe" held back until a test lets it go (a look that is still reading)
+		ManualResetEventSlim? holdDescribe = null;
+		using var describeAsked = new ManualResetEventSlim();
+		var serve = Task.Run(() => {
+			while (http.IsListening) {
+				System.Net.HttpListenerContext c;
+				try {
+					c = http.GetContext();
+				} catch (Exception e) when (e is System.Net.HttpListenerException or ObjectDisposedException or InvalidOperationException) {
+					return;
+				}
+				using var reader = new StreamReader(c.Request.InputStream);
+				var asked = JsonNode.Parse(reader.ReadToEnd()) as JsonObject ?? [];
+				if (asked["action"]?.ToString() == "describe" && Volatile.Read(ref holdDescribe) is { } held) {
+					describeAsked.Set();
+					held.Wait(TimeSpan.FromSeconds(10));
+				}
+				var reply = new JsonObject();
+				lock (boxes) {
+					switch (asked["action"]?.ToString()) {
+					case "list":
+						reply["messageBoxOpen"] = boxes.Count > 0;
+						reply["openMenus"] = tutorial ? new JsonArray("Main Menu", "Tutorial Menu") : new JsonArray("Main Menu");
+						break;
+					case "close":
+						closedMenus.Add(asked["name"]?.ToString() ?? "");
+						tutorial = false;
+						break;
+					case "describe" when boxes.Count > 0:
+						var (body, buttons, cancel) = boxes.Peek();
+						reply["messageBoxOpen"] = true;
+						reply["bodyText"] = body;
+						reply["buttons"] = new JsonArray(buttons.Select(b => (JsonNode?)b).ToArray());
+						reply["cancelIndex"] = cancel;
+						break;
+					case "describe":
+						reply["messageBoxOpen"] = false;
+						break;
+					case "call":
+						// (the game's own words for its boxes, asked for a box that is not in English: this game has none to give)
+						reply["called"] = true;
+						reply["returned"] = "";
+						break;
+					case "accept":
+						accepted.Add(asked["index"]?.GetValue<int>() ?? -1);
+						if (closes && boxes.Count > 0) {
+							boxes.Dequeue();
+						}
+						break;
+					}
+				}
+				var bytes = Encoding.UTF8.GetBytes(new JsonObject { ["result"] = reply }.ToJsonString());
+				c.Response.ContentType = "application/json";
+				c.Response.OutputStream.Write(bytes);
+				c.Response.Close();
+			}
+		});
+		try {
+			var setup = f.WriteSetup(("cleansave", new JsonObject()));
+			var ctx = StepContext(f, "cleansave", new DevBench($"http://localhost:{port}/api/tool/"), CancellationToken.None);
+			using (ctx.Log) {
+				Equal(null, InGame.LookAtGameBox(ctx, out var none, true), "no box open: nothing to do");
+				Check(none == null && accepted.Count == 0, "and nothing pressed");
+				// the game's tutorial pop-up is no message box, and stops the game under it all the same: closed by its name
+				tutorial = true;
+				Equal(null, InGame.LookAtGameBox(ctx, out _, true), "a tutorial pop-up is no message box");
+				Equal("Tutorial Menu", string.Join(",", closedMenus), "and it is closed at the look that finds it");
+				InGame.LookAtGameBox(ctx, out _, true);
+				Equal(1, closedMenus.Count, "once: nothing is closed that is not there");
+				lock (boxes) {
+					boxes.Enqueue(("Grass cache files are missing. You will see no grass unless you generate a cache.", ["Ok"], -1));
+					boxes.Enqueue(("This save relies on missing content. Would you like to search for your unidentified content in the Creations menu?", ["Yes", "No"], -1));
+					boxes.Enqueue(("The following content is not present. Continue loading?", ["Yes", "No"], -1));
+					boxes.Enqueue(("Some Mod: a new version changed its settings. Reset them now?", ["Reset", "Keep mine", "Ask me later"], 2));
+					boxes.Enqueue(("Another Mod: delete its old data?", ["Yes", "No"], -1));
+					boxes.Enqueue(("Choose your path", ["Warrior", "Mage", "Thief"], -1));
+				}
+				for (var look = 0; look < 6; ++look) {
+					Check(InGame.LookAtGameBox(ctx, out var left, true) != null && left == null, $"box {look + 1} is answered or closed at the look that finds it");
+				}
+				Equal("0,1,0,2,1,2", string.Join(",", accepted), "a notice acknowledged; the missing-content questions No then Yes; a box the run does not know by the game's own cancel button, " +
+					"by its declining button, and - with no button that declines - by its last");
+				Equal(null, InGame.LookAtGameBox(ctx, out _, true), "and the game shows nothing more");
+				// what the watch answered is there for the step in hand, and what it closed without knowing it is in the run's notes
+				var told = 0;
+				while (ctx.TakeAnsweredBox() != null) {
+					++told;
+				}
+				Equal(6, told, "each box the watch answered is handed to the step in hand, once");
+				ctx.AddWatchNotes();
+				Equal(3, ctx.Journal.Notes.Count(n => n.Contains("this run does not know", StringComparison.Ordinal)), "the three it did not know are in the run's notes: " + string.Join(" | ", ctx.Journal.Notes));
+				Check(ctx.Journal.Notes.Any(n => n.Contains("\"Ask me later\"", StringComparison.Ordinal) && n.Contains("Some Mod", StringComparison.Ordinal)), "each with what it was closed with");
+				Check(!ctx.Journal.Notes.Any(n => n.Contains("Grass cache", StringComparison.Ordinal)), "a box the run knows is no note");
+				// a box that will not close is not answered for ever: after its tries it is left, for the watch to name and stop on
+				accepted.Clear();
+				closes = false;
+				lock (boxes) {
+					boxes.Enqueue(("A notice that stays", ["Ok"], -1));
+				}
+				InGame.GameBox? stuck = null;
+				for (var look = 0; look < 8 && stuck == null; ++look) {
+					InGame.LookAtGameBox(ctx, out stuck, true);
+				}
+				Check(stuck is { Body: "A notice that stays" } && accepted.Count == 5, $"answered five times, then left as a box that does not close ({accepted.Count} answers)");
+				lock (boxes) {
+					boxes.Clear();
+				}
+				closes = true;
+				Equal(null, InGame.LookAtGameBox(ctx, out _, true), "(gone)");
+			}
+			// a setup that leaves a box the run does not know to the player: never pressed, and handed on unanswered
+			setup.Root[InGame.UnknownBoxSetting] = "stop";
+			setup.Save();
+			Check(!InGame.ClosesUnknown(Setup.Load(f.SetupFile)) && InGame.ClosesUnknown(Setup.FromJson(new JsonObject())), "close is the rule for a setup that says nothing; \"stop\" leaves such boxes to the player");
+			ctx = StepContext(f, "cleansave", new DevBench($"http://localhost:{port}/api/tool/"), CancellationToken.None);
+			using (ctx.Log) {
+				accepted.Clear();
+				lock (boxes) {
+					boxes.Enqueue(("Another Mod: delete its old data?", ["Yes", "No"], -1));
+				}
+				Equal(null, InGame.LookAtGameBox(ctx, out var theirs, true), "left to the player: not answered");
+				Check(theirs is { Body: "Another Mod: delete its old data?" } && accepted.Count == 0, "handed on as it is, nothing pressed");
+				lock (boxes) {
+					boxes.Clear();
+					boxes.Enqueue(("Grass cache files are missing.", ["Ok"], -1));
+				}
+				Check(InGame.LookAtGameBox(ctx, out var known, true) != null && known == null && accepted.Count == 1, "a box the run knows is answered all the same");
+			}
+			// The watch's own look answers only while the run holds the watch (CodeRabbit on pull request #35): a look that was
+			// still reading when the run let go sends no answer into a game the run has left. A step's own look answers as ever
+			ctx = StepContext(f, "cleansave", new DevBench($"http://localhost:{port}/api/tool/"), CancellationToken.None);
+			using (ctx.Log) {
+				using var watch = new BoxWatch(() => [], ctx.Log, _ => { });
+				var watched = new RunContext { Setup = ctx.Setup, Mo2 = ctx.Mo2, Profile = ctx.Profile, Control = ctx.Control, Log = ctx.Log, Journal = ctx.Journal,
+					Cancel = CancellationToken.None, BackupFolder = ctx.BackupFolder, DevBench = ctx.DevBench, Boxes = watch };
+				accepted.Clear();
+				lock (boxes) {
+					boxes.Clear();
+					boxes.Enqueue(("Grass cache files are missing.", ["Ok"], -1));
+				}
+				Check(InGame.LookAtGameBox(watched, out _, true) != null && accepted.Count == 1, "while the run holds the watch, its look answers the game's box");
+				// what the watch answered during one game start is not the next start's: dropped where a game start begins
+				watched.GameLaunched = DateTime.Now;
+				Equal(null, watched.TakeAnsweredBox(), "a box answered during an earlier start is not handed to the next start's load");
+				lock (boxes) {
+					boxes.Enqueue(("Perks were reset.", ["Ok"], -1));
+				}
+				Check(InGame.LookAtGameBox(watched, out _, true) != null && watched.TakeAnsweredBox() == "Perks were reset.", "one answered during this start is");
+				// The run lets go of the watch WHILE its look is reading the box (the game's answer to "describe" is held back
+				// until then): a guard that only looked as the look began would still send the answer afterwards
+				lock (boxes) {
+					boxes.Enqueue(("A late notice.", ["Ok"], -1));
+				}
+				var before = accepted.Count;
+				using var letDescribeGo = new ManualResetEventSlim();
+				Volatile.Write(ref holdDescribe, letDescribeGo);
+				var reading = Task.Run(() => InGame.LookAtGameBox(watched, out _, true));
+				Check(describeAsked.Wait(TimeSpan.FromSeconds(10)), "(the watch's look is reading the game's box)");
+				watch.Dispose();
+				Volatile.Write(ref holdDescribe, null);
+				letDescribeGo.Set();
+				Check(reading.Wait(TimeSpan.FromSeconds(10)) && reading.Result == null && accepted.Count == before, "let go of while its look was reading, the watch sends no answer to the game");
+				Check(InGame.LookAtGameBox(watched, out _, true) == null && accepted.Count == before, "nor at a look that begins after it");
+				Check(InGame.LookAtGameBox(watched, out _, false) != null && accepted.Count == before + 1, "a step's own look answers as ever");
+			}
+		} finally {
+			http.Stop();
+			serve.Wait(TimeSpan.FromSeconds(5));
+		}
+	}
+
 	static void T_CompilingSignals()
 	{
 		using var f = new FakeMo2();
@@ -1207,6 +1578,49 @@ public static class Program
 		var apart = ShaderStep.Fingerprint(mo2, c, p);
 		File.WriteAllText(list, "+Look A\r\n+Look B\r\n" + rest);
 		Equal(apart, ShaderStep.Fingerprint(mo2, c, p), "an order that changes no winner leaves the fingerprint, and the cache, as they were");
+
+		// The shader mod's settings file counts by the features it switches off at the game's start and by nothing else in it:
+		// the game rewrites the rest by itself (a real run, 2026-11-21: three preset fields changed at a start, and the next
+		// run built the whole cache again for it)
+		var settings = Path.Combine(f.Mods, "Shader Mod", "SKSE", "Plugins", "CommunityShaders", "SettingsUser.json");
+		Directory.CreateDirectory(Path.GetDirectoryName(settings)!);
+		f.Mod("Cache Mod");
+		var withCacheMod = ShaderStep.Fingerprint(mo2, c, p);
+		File.WriteAllText(settings, """{ "Menu": { "LastSettingsSection": "General" }, "Presets": { "activePackId": "legacy:effects11" }, "Disable at Boot": { "Grass Lighting": false, "Skylighting": true } }""");
+		var set = ShaderStep.Fingerprint(mo2, c, p);
+		var setOld = ShaderStep.Fingerprint(mo2, c, p, null, null, true, false);
+		Check(set != withCacheMod, "(the settings file is part of it)");
+		File.WriteAllText(settings, """{ "Presets": { "activePackId": "" }, "Menu": { "LastSettingsSection": "ShadersCache" }, "Disable at Boot": { "Skylighting": true, "Grass Lighting": false } }""");
+		Equal(set, ShaderStep.Fingerprint(mo2, c, p), "values the game rewrites by itself (the menu's last page, the active preset) leave the cache current");
+		Check(setOld != ShaderStep.Fingerprint(mo2, c, p, null, null, true, false), "read the way an older stamp was written, every value still counts");
+		// a stamp says which way it was written, and is read that way
+		var cacheDir = Path.Combine(f.Mods, "Cache Mod", "ShaderCache");
+		Directory.CreateDirectory(cacheDir);
+		File.WriteAllText(Path.Combine(cacheDir, "a shader.bin"), "compiled");
+		var stamp = Path.Combine(f.Mods, "Cache Mod", Brand.Name + " cache.json");
+		File.WriteAllText(stamp, new JsonObject { ["fingerprint"] = set, ["files"] = 1, ["verified"] = true, ["winners"] = true, ["settings"] = "boot" }.ToJsonString());
+		Equal(null, ShaderStep.WhyStale(mo2, c, p), "a cache stamped the new way is current");
+		File.WriteAllText(settings, """{ "Presets": { "activePackId": "another" }, "Disable at Boot": { "Skylighting": true, "Grass Lighting": false } }""");
+		Check(ShaderStep.UpToDate(mo2, c, p), "and stays current when the game rewrites its settings");
+		File.WriteAllText(settings, """{ "Presets": { "activePackId": "another" }, "Disable at Boot": { "Skylighting": false, "Grass Lighting": false } }""");
+		Check((ShaderStep.WhyStale(mo2, c, p) ?? "").Contains("features switched off at the game's start", StringComparison.Ordinal),
+			"a feature switched at the game's start is another cache, and the reason is said: " + ShaderStep.WhyStale(mo2, c, p));
+		File.WriteAllText(stamp, new JsonObject { ["fingerprint"] = ShaderStep.Fingerprint(mo2, c, p, null, null, true, false), ["files"] = 1, ["verified"] = true, ["winners"] = true }.ToJsonString());
+		Equal(null, ShaderStep.WhyStale(mo2, c, p), "an older stamp (every value counted) is read the way it was written: no cache is built again for the change");
+		File.Delete(Path.Combine(cacheDir, "a shader.bin"));
+		Check((ShaderStep.WhyStale(mo2, c, p) ?? "").Contains("holds 0 shader(s)", StringComparison.Ordinal), "a cache that lost its shaders says so: " + ShaderStep.WhyStale(mo2, c, p));
+		File.Delete(stamp);
+		Check((ShaderStep.WhyStale(mo2, c, p) ?? "").Contains("no record", StringComparison.Ordinal), "no stamp: built, and the reason is said");
+		// a file saved with a byte order mark is the same settings
+		File.WriteAllText(settings, """{ "Disable at Boot": { "Skylighting": true } }""", new UTF8Encoding(false));
+		var plain = ShaderStep.Fingerprint(mo2, c, p);
+		File.WriteAllText(settings, """{ "Menu": 1, "Disable at Boot": { "Skylighting": true } }""", new UTF8Encoding(true));
+		Equal(plain, ShaderStep.Fingerprint(mo2, c, p), "a byte order mark in front of the settings changes nothing");
+		// a settings file that does not read counts whole
+		File.WriteAllText(settings, "not settings at all");
+		var unread = ShaderStep.Fingerprint(mo2, c, p);
+		File.WriteAllText(settings, "still not settings");
+		Check(unread != ShaderStep.Fingerprint(mo2, c, p), "a settings file that does not read counts with all of it");
 	}
 
 	// the fourth review, M1: his Bottled profile keeps a cache for each of two shader mods - switching the tick between them, or
@@ -1312,6 +1726,50 @@ public static class Program
 		a_ctx.SetAfter(a_mod);
 	}
 
+	// A whole run with the directory cache mod loading its cache blind: the save to play makes the game's list anew after
+	// everything the run changed, so nothing is left to say - and a command of the setup that runs after it counts as a
+	// change again, said with what to do if it changes game files (CodeRabbit on pull request #35)
+	static void T_ACommandAfterTheRunCountsAsAChange()
+	{
+		using var f = new FakeMo2();
+		f.Mod("CRDW");
+		var modlist = Path.Combine(f.ProfileDir, "modlist.txt");
+		File.WriteAllText(modlist, File.ReadAllText(modlist).Replace("+Base Mod", "+CRDW\r\n+Base Mod", StringComparison.Ordinal));
+		var own = Path.Combine(f.Mods, "CRDW", Crdw.IniRel);
+		Directory.CreateDirectory(Path.GetDirectoryName(own)!);
+		File.WriteAllText(Path.Combine(Path.GetDirectoryName(own)!, "CRDW.dll"), "x");
+		var asThePlayerHasIt = "[General]\r\nShowPopUp=b:false\r\nMode=s:LOAD\r\n";
+		File.WriteAllText(own, asThePlayerHasIt);
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp")));
+		// the save to play's game start, as far as the game's list goes
+		var modeAtTheStart = "";
+		StepRegistry.Replace(new FakeStep("playsave", (ctx, s) => {
+			GameStart.Prepare(ctx);
+			modeAtTheStart = Crdw.Parse(File.ReadAllText(own)).Mode;
+		}));
+		var setup = f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("playsave", []));
+		setup.Root["skseLogs"] = Path.Combine(f.Root, "no logs here");
+		setup.Save();
+		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+		Equal(RunState.Finished, r.State, r.Verdict);
+		Equal("CACHE", modeAtTheStart, "the save to play's game start makes the list anew: the run changed the game's files before it");
+		var j = Journal.Load(r.Folder!);
+		Equal(0, j.FilesChanged, "and nothing changed after that list was made");
+		Check(!j.Notes.Any(n => n.Contains("Cached Recursive Directory Walk", StringComparison.Ordinal)), "so nothing is left to say about it: " + string.Join(" | ", j.Notes));
+		Equal(asThePlayerHasIt, File.ReadAllText(own), "the mod's own file is back as the player had it");
+		Check(!j.NeedsRestore, "and nothing is left to put back");
+		var cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+		setup = Setup.Load(f.SetupFile);
+		setup.Root["afterRun"] = new JsonArray($"\"{cmd}\" /c exit 0");
+		setup.Save();
+		r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+		Equal(RunState.Finished, r.State, r.Verdict);
+		j = Journal.Load(r.Folder!);
+		Equal(1, j.FilesChanged, "a command of the setup ran after that list was made: counted as a change, whatever the command did");
+		Check(j.Notes.Any(n => n.Contains("Cached Recursive Directory Walk", StringComparison.Ordinal) && n.Contains("command after the run", StringComparison.Ordinal)),
+			"and said, with what to do if the command changes game files: " + string.Join(" | ", j.Notes));
+	}
+
 	static void T_RunSwitchesOutputsOffAndBuiltOnesBackOn()
 	{
 		using var f = new FakeMo2();
@@ -1334,6 +1792,978 @@ public static class Program
 		Check(zips.Length == 1, "the old outputs are packed in the backup");
 		using var packed = System.IO.Compression.ZipFile.OpenRead(zips[0]);
 		Check(packed.Entries.Any(e => e.Name == "OutA.esp"), "the old output is in it");
+	}
+
+	// His word of 2026-11-21: a step may use the output its tool made before. Its tool does not run; the old output goes off with
+	// the others before the first tool, comes back on at the step's own place - so the tool before it never reads it and the tool
+	// after it does -, is on after the run, untouched, and the run says so in its record, its log and its summary
+	static void T_AStepThatUsesItsOldOutputIsNotRunAndItsOutputComesBackAtItsPlace()
+	{
+		using var f = new FakeMo2();
+		bool? offForTheToolBefore = null, onForTheToolAfter = null, pluginOnForTheToolAfter = null;
+		var ranAnyway = false;
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
+			offForTheToolBefore = !ctx.Profile.IsOn("Output B");
+			WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp");
+		}));
+		StepRegistry.Replace(new FakeStep("pgpatcher", (ctx, s) => ranAnyway = true));
+		StepRegistry.Replace(new FakeStep("texgen", (ctx, s) => {
+			onForTheToolAfter = ctx.Profile.IsOn("Output B");
+			pluginOnForTheToolAfter = ctx.Profile.ActivePlugins().Contains("OutB.esp", StringComparer.OrdinalIgnoreCase);
+			WriteOutput(ctx, "texgen", "Output C", "OutC.esp");
+		}));
+		var setup = f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("pgpatcher", new JsonObject { ["output_mod"] = "Output B" }),
+			("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		((JsonArray)setup.Root["steps"]!)[1]![OldOutput.Key] = true;
+		setup.Save();
+		Equal("landscapefixer,texgen", string.Join(",", setup.EnabledSteps.Select(x => x.Key)), "the step that uses its old output is not among the steps that run");
+		Equal("pgpatcher", string.Join(",", setup.KeptSteps.Select(x => x.Key)), "it is the one whose old output is used");
+		var was = File.ReadAllBytes(Path.Combine(f.Mods, "Output B", "OutB.esp"));
+		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+		Equal(RunState.Finished, r.State, "finished: " + r.Verdict);
+		Check(!ranAnyway, "its tool was not run");
+		Check(offForTheToolBefore == true, "the old output was OFF while the tool before its place ran");
+		Check(onForTheToolAfter == true, "and back ON for the tool after its place");
+		Check(pluginOnForTheToolAfter == true, "with its plugin ticked");
+		var p = ProfileOf(f);
+		Check(p.IsOn("Output A") && p.IsOn("Output B") && p.IsOn("Output C") && p.IsOn("Needs B"), "after the run: what was built is on, the old output is on, and what needs it is on as before");
+		Check(was.AsSpan().SequenceEqual(File.ReadAllBytes(Path.Combine(f.Mods, "Output B", "OutB.esp"))) && !File.Exists(Path.Combine(f.Mods, "Output B", "new.txt")), "the old output is as it was, byte for byte");
+		var j = Journal.Load(r.Folder!);
+		Equal("pgpatcher:Output B", string.Join(",", j.UsedOld.Select(u => $"{u.Step}:{u.Mod}")), "the run's record names the step and the old output it used");
+		Check(j.Steps.All(x => x.Key != "pgpatcher") && !j.Built.Contains("Output B") && j.Parked.All(x => x.Mod != "Output B"), "it is no step the run ran, nothing it built, and nothing it moved into its backup");
+		Check(j.Notes.Any(n => n.Contains("PGPatcher was not run: its old output \"Output B\" is used", StringComparison.Ordinal)), "the run's notes say so: " + string.Join(" | ", j.Notes));
+		Check(RunSummary.Of(j).Lines().Any(l => l.Contains("Not built again: PGPatcher (Output B)", StringComparison.Ordinal)), "and its summary: " + string.Join(" | ", RunSummary.Of(j).Lines()));
+		var log = File.ReadAllText(Path.Combine(r.Folder!, "log.txt"));
+		// (the check's note at the run's start says "PGPatcher: not run ..." too: the step's own place is its "===" line)
+		const string place = "=== PGPatcher: not run - its old output \"Output B\" is used";
+		Check(log.Contains(place, StringComparison.Ordinal) && log.Contains("In the game: ", StringComparison.Ordinal) &&
+		      log.Contains("Built again in this run before its place: Landscape Fixer", StringComparison.Ordinal), "the log carries the whole warning at the step's place");
+		// (each line must be there before its place is compared: a line that is missing reads -1, which is "before" everything)
+		var toolBefore = log.IndexOf("=== Landscape Fixer done", StringComparison.Ordinal);
+		var itsPlace = log.IndexOf(place, StringComparison.Ordinal);
+		var toolAfter = log.IndexOf("=== TexGen ===", StringComparison.Ordinal);
+		Check(toolBefore >= 0 && itsPlace > toolBefore && toolAfter > itsPlace, "between the tool before it and the tool after it");
+		var saidAtTheStart = log.IndexOf("PGPatcher: not run - its old output", StringComparison.Ordinal);
+		var firstTool = log.IndexOf("=== Landscape Fixer ===", StringComparison.Ordinal);
+		Check(saidAtTheStart >= 0 && firstTool > saidAtTheStart, "and the run's notes at its start say it before any tool runs");
+		Check(j.UsedOld.Single() is { Done: true, Listed: false }, "on record as carried out, for a mod the list named already");
+		Check(!LastRuns.Of(Journal.All(Runner.RunsDir(f.Data)), f.SetupFile).ContainsKey("pgpatcher"), "a step that was not run has no last run: its output is not called current because of this run");
+		// asked for by name it is refused in words; set for a step that is switched off it means nothing
+		try {
+			Runner.Plan(setup, "pgpatcher", null, null);
+			Check(false, "a run of only that step is refused");
+		} catch (ArgumentException e) {
+			Check(e.Message.Contains("is set to use its old output in this setup", StringComparison.Ordinal) && RunnerErrors.Find(e.Message)?.Code == "TR-107", "refused naming why: " + e.Message);
+		}
+		((JsonArray)setup.Root["steps"]!)[1]!["on"] = false;
+		Check(setup.KeptSteps.Count == 0 && setup.EnabledSteps.All(x => x.Key != "pgpatcher"), "a step that is switched off neither runs nor has its old output switched by the run");
+	}
+
+	// ... and the two things that cannot work are refused before anything is touched: no old output there to use, and one whose
+	// plugin needs a master that is nowhere in the load order (the game would not start). One that can be used is a note. A step
+	// with nothing of its own to keep ignores the setting; a setup where nothing would run says so
+	static void T_AnOldOutputThatCannotBeUsedStopsTheStart()
+	{
+		using var f = new FakeMo2();
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp")));
+		StepRegistry.Replace(new FakeStep("synthesis", (ctx, s) => { }));
+		Setup With(string a_output, params string[] a_old)
+		{
+			var setup = f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("synthesis", new JsonObject { ["output_mod"] = a_output }), ("cleansave", []));
+			var steps = (JsonArray)setup.Root["steps"]!;
+			foreach (var o in steps.OfType<JsonObject>().Where(o => a_old.Contains(o["step"]!.ToString()))) {
+				o[OldOutput.Key] = true;
+			}
+			steps[2]!["on"] = a_old.Contains("cleansave");
+			setup.Save();
+			return setup;
+		}
+		With("No Such Output", "synthesis");
+		var gate = Runner.CheckStart(new RunRequest(f.SetupFile, f.Data));
+		Check(!gate.Starts && gate.Why.Contains("there is none to use: \"No Such Output\" is missing or holds nothing", StringComparison.Ordinal), "no old output there: " + gate.Why);
+		Equal("TR-320", RunnerErrors.Find(gate.Why)?.Code ?? "", "with what to do about it");
+		// an output mod that holds only Mod Organizer's own file is as good as none
+		f.Mod("Empty Output");
+		With("Empty Output", "synthesis");
+		Check(Runner.CheckStart(new RunRequest(f.SetupFile, f.Data)).Why.Contains("\"Empty Output\" is missing or holds nothing", StringComparison.Ordinal), "an empty one is none");
+		// ... and so is one that holds only folders with nothing in them (a cache whose files were cleared away): it takes a file
+		Directory.CreateDirectory(Path.Combine(f.Mods, "Empty Output", "grass", "Tamriel"));
+		Check(Runner.CheckStart(new RunRequest(f.SetupFile, f.Data)).Why.Contains("\"Empty Output\" is missing or holds nothing", StringComparison.Ordinal), "folders with nothing in them are no output");
+		File.WriteAllText(Path.Combine(f.Mods, "Empty Output", "grass", "Tamriel", "x0y0.cgid"), "cache");
+		gate = Runner.CheckStart(new RunRequest(f.SetupFile, f.Data));
+		Check(gate.Starts, "a file in a folder of it makes it an output: " + gate.Why);
+		// a run of only the shader caches or the save to play switches no output off and none back on: an old output that
+		// is not there is not that run's business, and does not stop it (the run of a tool is stopped, as above)
+		// (a setup with a shader step that is switched on, asked for alone - and, as the control, together with a tool)
+		var realShaders = StepRegistry.For("shaders")!;
+		StepRegistry.Replace(new FakeStep("shaders", (ctx, s) => { }));
+		try {
+			var shaderSetup = f.WriteSetup(("shaders", []), ("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("synthesis", new JsonObject { ["output_mod"] = "No Such Output" }));
+			((JsonArray)shaderSetup.Root["steps"]!)[2]![OldOutput.Key] = true;
+			shaderSetup.Save();
+			var shaderMo2 = Mo2Instance.Load(f.Exe, f.Instance);
+			Equal("shaders,landscapefixer", string.Join(",", shaderSetup.EnabledSteps.Select(x => x.Key)), "(the shader step is one of the steps that run)");
+			var onlyShaders = Preflight.Run(shaderSetup, shaderMo2, ["shaders"]);
+			Check(!onlyShaders.Any(i => i.Step == "synthesis"), "a run of the shader caches alone says nothing about a step it never touches: " + string.Join(" | ", onlyShaders.Select(i => $"{i.Step}: {i.Text}")));
+			var withATool = Preflight.Run(shaderSetup, shaderMo2, ["shaders", "landscapefixer"]);
+			Check(withATool.Any(i => i.Step == "synthesis" && i.Blocking && i.Text.Contains("there is none to use", StringComparison.Ordinal)), "the same setup with a tool in the run is stopped over it");
+		} finally {
+			StepRegistry.Replace(realShaders);
+		}
+		f.Mod("Old Patch", ("OldPatch.esp", false, ["BaseMod.esp", "Gone.esp"]));
+		With("Old Patch", "synthesis");
+		gate = Runner.CheckStart(new RunRequest(f.SetupFile, f.Data));
+		Check(!gate.Starts && gate.Why.Contains("its old output cannot be used: OldPatch.esp needs Gone.esp, which is no longer in your load order", StringComparison.Ordinal), "a master that is gone: " + gate.Why);
+		Equal("TR-321", RunnerErrors.Find(gate.Why)?.Code ?? "", "with what to do about it");
+		// (the mod list does not name "Old Patch" yet: the run adds its line and switches it on)
+		With("Output B", "synthesis");
+		gate = Runner.CheckStart(new RunRequest(f.SetupFile, f.Data));
+		Check(gate.Starts, "an old output that is there, with every master in the load order, starts: " + gate.Why);
+		Check(gate.Check.Any(i => !i.Blocking && i.Step == "synthesis" && i.Text.Contains("not run - its old output \"Output B\" is used", StringComparison.Ordinal)), "and is a note of the run");
+		// a master the run itself builds is there (Output B's plugin needs Output A's, which is built again in this run)
+		Check(OldOutput.LookAt(Setup.Load(f.SetupFile), Mo2Instance.Load(f.Exe, f.Instance), ProfileOf(f).States(), Setup.Load(f.SetupFile).EnabledSteps).Single().Usable, "a master in an output the run builds is not called gone");
+		var odd = With("Output B", "cleansave");
+		Check(odd.KeptSteps.Count == 0 && odd.EnabledSteps.Any(x => x.Key == "cleansave"), "a step with no output of its own runs as ever, whatever the setting says");
+		Check(OldOutput.WhyNot("cleansave", new StepSettings([])) is { } why && why.Contains("makes no output of its own", StringComparison.Ordinal), "and the window says why it has nothing to use");
+		Check(OldOutput.WhyNot("shaders", new StepSettings([]))!.Contains("Rebuild shader caches", StringComparison.Ordinal), "the shader caches point at their own setting");
+		var none = Setup.FromJson(new JsonObject { ["mo2"] = new JsonObject { ["exe"] = f.Exe, ["profile"] = "Test" }, ["backups"] = f.Backups,
+			["steps"] = new JsonArray(new JsonObject { ["step"] = "synthesis", [OldOutput.Key] = true, ["settings"] = new JsonObject { ["output_mod"] = "Output B" } }) });
+		Check(none.Problems().Any(x => x.Contains("uses its old output - nothing would run", StringComparison.Ordinal) && RunnerErrors.Find(x)?.Code == "TR-112"), "a setup where every step uses its old output has nothing to run: " + string.Join(" | ", none.Problems()));
+	}
+
+	// A master of an old output's plugin is judged by what the run switches, not by what is ticked now (CodeRabbit on pull
+	// request #35): one in a mod the run replaces is gone for good; one that is off while a tool works after the old output's
+	// place stops that tool; one that is only off for the run, with no tool after the place, harms nothing
+	static void T_AnOldOutputsMastersAreJudgedByWhatTheRunSwitches()
+	{
+		using var f = new FakeMo2();
+		// (its own stand-ins for the tools that run here, so the test stands alone: the real steps' checks ask for their programs)
+		foreach (var tool in new[] { "landscapefixer", "pgpatcher", "texgen" }) {
+			StepRegistry.Replace(new FakeStep(tool, (ctx, s) => { }));
+		}
+		Setup With(params (string Step, string Output, bool Old, string[] Replaces)[] a_steps)
+		{
+			var setup = f.WriteSetup([.. a_steps.Select(s => (s.Step, new JsonObject { ["output_mod"] = s.Output, ["replaces"] = new JsonArray([.. s.Replaces.Select(r => (JsonNode?)r)]) }))]);
+			var steps = (JsonArray)setup.Root["steps"]!;
+			for (var i = 0; i < a_steps.Length; ++i) {
+				if (a_steps[i].Old) {
+					steps[i]![OldOutput.Key] = true;
+				}
+			}
+			setup.Save();
+			return setup;
+		}
+		// its master is in a mod that a tool of this run replaces: that mod stays off after the run, so the game would not start
+		f.Mod("Patch On Old", ("PatchOnOld.esp", false, ["Old.esp"]));
+		With(("landscapefixer", "Output A", false, ["Replaced"]), ("synthesis", "Patch On Old", true, []));
+		var gate = Runner.CheckStart(new RunRequest(f.SetupFile, f.Data));
+		Check(!gate.Starts && gate.Why.Contains("its old output cannot be used: PatchOnOld.esp needs Old.esp, which is in \"Replaced\" - a mod this run replaces and leaves switched off", StringComparison.Ordinal),
+			"a master in a mod the run replaces: " + gate.Why);
+		Equal("TR-321", RunnerErrors.Find(gate.Why)?.Code ?? "", "with what to do about it");
+		With(("landscapefixer", "Output A", false, []), ("synthesis", "Patch On Old", true, []));
+		gate = Runner.CheckStart(new RunRequest(f.SetupFile, f.Data));
+		Check(gate.Starts, "the same master in a mod the run leaves alone is there: " + gate.Why);
+		// its master is built only later in this run: the tool that builds it would read the old output's plugin without it
+		With(("pgpatcher", "Output B", true, []), ("landscapefixer", "Output A", false, []));
+		gate = Runner.CheckStart(new RunRequest(f.SetupFile, f.Data));
+		Check(!gate.Starts && gate.Why.Contains("its old output cannot be used in this run: OutB.esp needs OutA.esp: it is built again only later in this run, by Landscape Fixer", StringComparison.Ordinal),
+			"a master that is built only after the old output's place: " + gate.Why);
+		Equal("TR-321", RunnerErrors.Find(gate.Why)?.Code ?? "", "with what to do about it");
+		// its master is in a mod that goes off for the run (a plugin of that mod needs an output the run builds again), and a
+		// tool works after the old output's place
+		f.Mod("Patch On Needs", ("PatchOnNeeds.esp", false, ["NeedsB.esp"]));
+		var both = With(("pgpatcher", "Output B", false, []), ("synthesis", "Patch On Needs", true, []), ("texgen", "Output C", false, []));
+		gate = Runner.CheckStart(new RunRequest(f.SetupFile, f.Data));
+		Check(!gate.Starts && gate.Why.Contains("PatchOnNeeds.esp needs NeedsB.esp: it is in \"Needs B\", which is switched off while the run's tools work", StringComparison.Ordinal),
+			"a master in a mod that is off while a tool works after it: " + gate.Why);
+		var look = OldOutput.LookAt(both, Mo2Instance.Load(f.Exe, f.Instance), ProfileOf(f).States(), both.EnabledSteps).Single();
+		Check(look is { Usable: false, MissingMaster: null, OffInRun: not null } && OldOutput.Warning(look, "Test").Any(l => l.StartsWith("It cannot be used in this run: PatchOnNeeds.esp needs NeedsB.esp", StringComparison.Ordinal)),
+			"the window's box and START's preview say it as well");
+		// ... with no tool after its place it is switched on only as the run ends, when everything is back on: nothing reads it half
+		With(("pgpatcher", "Output B", false, []), ("synthesis", "Patch On Needs", true, []));
+		gate = Runner.CheckStart(new RunRequest(f.SetupFile, f.Data));
+		Check(gate.Starts, "the same old output with no tool after its place starts: " + gate.Why);
+		// a master that lies in Mod Organizer's overwrite folder is in the game's Data for every tool and for the game
+		FakeMo2.Plugin(Path.Combine(f.Overwrite, "InOverwrite.esp"), false);
+		f.Mod("Patch On Overwrite", ("PatchOnOverwrite.esp", false, ["InOverwrite.esp"]));
+		With(("landscapefixer", "Output A", false, []), ("synthesis", "Patch On Overwrite", true, []), ("texgen", "Output C", false, []));
+		gate = Runner.CheckStart(new RunRequest(f.SetupFile, f.Data));
+		Check(gate.Starts, "a master in the overwrite folder is there: " + gate.Why);
+		File.Delete(Path.Combine(f.Overwrite, "InOverwrite.esp"));
+		gate = Runner.CheckStart(new RunRequest(f.SetupFile, f.Data));
+		Check(!gate.Starts && gate.Why.Contains("PatchOnOverwrite.esp needs InOverwrite.esp, which is no longer in your load order", StringComparison.Ordinal), "and one that is nowhere still stops the start: " + gate.Why);
+		// the profile a run's end leaves is what counts for the game: a master whose mod was switched off after the check
+		// (a command of the setup before the run) is not there, whatever was ticked when the check looked
+		f.Mod("Old Patch", ("OldPatch.esp", false, ["BaseMod.esp"]));
+		var last = With(("landscapefixer", "Output A", false, []), ("synthesis", "Old Patch", true, []));
+		var lastMo2 = Mo2Instance.Load(f.Exe, f.Instance);
+		Equal<string?>(null, OldOutput.MasterGoneAfterRun(last, lastMo2, ProfileOf(f).States(), last.EnabledSteps, "Old Patch"), "with its master's mod on as the run began, the old output is good for the run's end");
+		var switchedOff = ProfileOf(f).States();
+		switchedOff["Base Mod"] = '-';
+		Check(OldOutput.MasterGoneAfterRun(last, lastMo2, switchedOff, last.EnabledSteps, "Old Patch") is { } goneAfter && goneAfter.StartsWith("OldPatch.esp needs BaseMod.esp", StringComparison.Ordinal),
+			"with that mod switched off by then, its master is not there once the run has ended");
+
+		// Two old outputs that come on before the same tool, the one listed first needing the other's plugin: no tool works
+		// between them, so the run takes them as one - the one that is needed is switched on first - and the tool finds both
+		using var g = new FakeMo2();
+		g.Mod("Bashed", ("Bashed Patch, 0.esp", false, []));
+		g.Mod("Patch On Bashed", ("PatchOnBashed.esp", false, ["Bashed Patch, 0.esp"]));
+		bool? bothOnForTheTool = null, masterFirstForTheTool = null;
+		StepRegistry.Replace(new FakeStep("texgen", (ctx, s) => {
+			bothOnForTheTool = ctx.Profile.IsOn("Bashed") && ctx.Profile.IsOn("Patch On Bashed");
+			var inOrder = File.ReadAllLines(ctx.Profile.LoadOrderTxt).ToList();
+			masterFirstForTheTool = inOrder.IndexOf("Bashed Patch, 0.esp") >= 0 && inOrder.IndexOf("Bashed Patch, 0.esp") < inOrder.IndexOf("PatchOnBashed.esp");
+			WriteOutput(ctx, "texgen", "Output C", "OutC.esp");
+		}));
+		var pair = g.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Patch On Bashed" }), ("wryebash", new JsonObject { ["output_mod"] = "Bashed" }),
+			("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		((JsonArray)pair.Root["steps"]!)[0]![OldOutput.Key] = true;
+		((JsonArray)pair.Root["steps"]!)[1]![OldOutput.Key] = true;
+		pair.Save();
+		Equal("0,0", string.Join(",", OldOutput.Places(pair, pair.EnabledSteps).Select(x => x.At)), "(both come on before the same tool)");
+		Equal("wryebash,synthesis", string.Join(",", OldOutput.InMasterOrder(Mo2Instance.Load(g.Exe, g.Instance), pair.KeptSteps).Select(x => x.Key)), "the one whose plugin the other needs comes on first");
+		gate = Runner.CheckStart(new RunRequest(g.SetupFile, g.Data));
+		Check(gate.Starts, "two old outputs due before the same tool are judged together: " + gate.Why);
+		var ran = Runner.Run(new RunRequest(g.SetupFile, g.Data));
+		Equal(RunState.Finished, ran.State, ran.Verdict);
+		Check(bothOnForTheTool == true, "the tool after them found both switched on");
+		Check(masterFirstForTheTool == true, "with the master before the plugin that needs it in the load order");
+		// ... and after the run: both were in no order file before it, so the put-back gives their plugins their ticks and
+		// places again (the order files of before the run hold neither)
+		var order = g.Text("loadorder.txt").Replace("\r\n", "\n").Split('\n').ToList();
+		Check(order.IndexOf("Bashed Patch, 0.esp") >= 0 && order.IndexOf("Bashed Patch, 0.esp") < order.IndexOf("PatchOnBashed.esp"), "after the run the master still stands before the plugin that needs it: " + string.Join(" | ", order));
+		var ticked = ProfileOf(g).ActivePlugins();
+		Check(ticked.Contains("Bashed Patch, 0.esp", StringComparer.OrdinalIgnoreCase) && ticked.Contains("PatchOnBashed.esp", StringComparer.OrdinalIgnoreCase) && ticked.Contains("OutC.esp", StringComparer.OrdinalIgnoreCase),
+			"and their plugins, and the new output's, are ticked: " + string.Join(" | ", ticked));
+		// two steps that share one output mod are two uses: the run's record and its summary name both
+		var shared = g.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Bashed" }), ("wryebash", new JsonObject { ["output_mod"] = "Bashed" }),
+			("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		((JsonArray)shared.Root["steps"]!)[0]![OldOutput.Key] = true;
+		((JsonArray)shared.Root["steps"]!)[1]![OldOutput.Key] = true;
+		shared.Save();
+		ran = Runner.Run(new RunRequest(g.SetupFile, g.Data));
+		Equal(RunState.Finished, ran.State, ran.Verdict);
+		var sharedRun = Journal.Load(ran.Folder!);
+		Equal("synthesis:Bashed,wryebash:Bashed", string.Join(",", sharedRun.UsedOld.Where(u => u.Done).Select(u => $"{u.Step}:{u.Mod}").Order()), "each step that used the shared output is on record");
+		Check(RunSummary.Of(sharedRun).Lines().Any(l => l.Contains("Synthesis (Bashed)", StringComparison.Ordinal) && l.Contains("(Bashed)", StringComparison.Ordinal) && l.Split("(Bashed)").Length == 3),
+			"and the summary names both: " + string.Join(" | ", RunSummary.Of(sharedRun).Lines()));
+
+		// ... and when the one that is needed was in the mod list, switched off, and the other had no line at all: the put-back
+		// brings one back still off and the other switched on - their plugins get their places in master order all the same,
+		// in one pass (CodeRabbit on pull request #35: in two, the master was listed after the plugin that needs it)
+		using var g2 = new FakeMo2();
+		g2.Mod("Bashed", ("Bashed Patch, 0.esp", false, []));
+		g2.Mod("Patch On Bashed", ("PatchOnBashed.esp", false, ["Bashed Patch, 0.esp"]));
+		ProfileOf(g2).EnsureMod("Bashed");
+		var mixed = g2.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Patch On Bashed" }), ("wryebash", new JsonObject { ["output_mod"] = "Bashed" }),
+			("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		((JsonArray)mixed.Root["steps"]!)[0]![OldOutput.Key] = true;
+		((JsonArray)mixed.Root["steps"]!)[1]![OldOutput.Key] = true;
+		mixed.Save();
+		ran = Runner.Run(new RunRequest(g2.SetupFile, g2.Data));
+		Equal(RunState.Finished, ran.State, ran.Verdict);
+		order = g2.Text("loadorder.txt").Replace("\r\n", "\n").Split('\n').ToList();
+		Check(order.IndexOf("Bashed Patch, 0.esp") >= 0 && order.IndexOf("Bashed Patch, 0.esp") < order.IndexOf("PatchOnBashed.esp"),
+			"one listed and off, the other not listed: after the run the master stands before the plugin that needs it: " + string.Join(" | ", order));
+		Check(ProfileOf(g2).IsOn("Bashed") && ProfileOf(g2).IsOn("Patch On Bashed"), "and both are switched on");
+
+		// The old outputs due at one place are taken as one: when one of them cannot be used after all, none of that place is
+		// put on the run's record or switched on. (Taken one by one, the first was carried out before the second was found
+		// gone - and stayed switched on after the run.)
+		using var g3 = new FakeMo2();
+		g3.Mod("Bashed", ("Bashed Patch, 0.esp", false, []));
+		g3.Mod("Patch On Bashed", ("PatchOnBashed.esp", false, ["Bashed Patch, 0.esp"]));
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
+			WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp");
+			File.Delete(Path.Combine(ctx.Mo2.ModDir("Patch On Bashed"), "PatchOnBashed.esp"));
+		}));
+		var texGenRan = false;
+		StepRegistry.Replace(new FakeStep("texgen", (ctx, s) => texGenRan = true));
+		var half = g3.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("wryebash", new JsonObject { ["output_mod"] = "Bashed" }),
+			("synthesis", new JsonObject { ["output_mod"] = "Patch On Bashed" }), ("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		((JsonArray)half.Root["steps"]!)[1]![OldOutput.Key] = true;
+		((JsonArray)half.Root["steps"]!)[2]![OldOutput.Key] = true;
+		half.Save();
+		ran = Runner.Run(new RunRequest(g3.SetupFile, g3.Data));
+		Equal(RunState.Failed, ran.State, ran.Verdict);
+		// (stopped by that very look, and nothing else: the verdict names the old output that is gone, and the tool after the
+		// place never ran)
+		Check(ran.Verdict.Contains("there is none to use any more - \"Patch On Bashed\" is missing or holds nothing now", StringComparison.Ordinal), "the run stopped on the old output that is gone: " + ran.Verdict);
+		Check(!texGenRan, "and the tool after that place did not run");
+		Equal(0, Journal.Load(ran.Folder!).UsedOld.Count, "when one old output of a place cannot be used, none of that place is put on the run's record");
+		Check(!ProfileOf(g3).States().ContainsKey("Bashed") && !ProfileOf(g3).States().ContainsKey("Patch On Bashed"), "and none of them is in the mod list or switched on after the run");
+
+		// ... and when one of them cannot be switched on at its place after all (its line taken out of the mod list while the
+		// run gave the other its line), none is carried out: the run stops there, and the put-back leaves both as the profile
+		// had them (CodeRabbit on pull request #35)
+		using var g4 = new FakeMo2();
+		g4.Mod("Bashed", ("Bashed Patch, 0.esp", false, []));
+		g4.Mod("Patch On Bashed", ("PatchOnBashed.esp", false, ["Bashed Patch, 0.esp"]));
+		ProfileOf(g4).EnsureMod("Bashed");
+		var g4Before = g4.Text("modlist.txt");
+		var g4List = Path.Combine(g4.ProfileDir, "modlist.txt");
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp")));
+		texGenRan = false;
+		var lineGone = g4.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("wryebash", new JsonObject { ["output_mod"] = "Bashed" }),
+			("synthesis", new JsonObject { ["output_mod"] = "Patch On Bashed" }), ("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		((JsonArray)lineGone.Root["steps"]!)[1]![OldOutput.Key] = true;
+		((JsonArray)lineGone.Root["steps"]!)[2]![OldOutput.Key] = true;
+		lineGone.Save();
+		Profile.AfterListMod = m => {
+			if (m == "Patch On Bashed") {
+				File.WriteAllText(g4List, File.ReadAllText(g4List).Replace("-Bashed\r\n", "", StringComparison.Ordinal));
+			}
+		};
+		try {
+			ran = Runner.Run(new RunRequest(g4.SetupFile, g4.Data));
+		} finally {
+			Profile.AfterListMod = null;
+		}
+		Equal(RunState.Failed, ran.State, ran.Verdict);
+		Check(ran.Verdict.Contains("the old output \"Bashed\" could not be switched on: its line is no longer in the mod list", StringComparison.Ordinal), "the run stops on the old output it could not switch on: " + ran.Verdict);
+		Equal("TR-322", RunnerErrors.Find(ran.Verdict)?.Code ?? "", "with what to do about it");
+		Check(!texGenRan, "the tool after that place did not run");
+		Check(Journal.Load(ran.Folder!).UsedOld.All(u => !u.Done), "none of the group is on record as carried out");
+		Check(!ProfileOf(g4).IsOn("Patch On Bashed") && !ProfileOf(g4).ActivePlugins().Contains("PatchOnBashed.esp", StringComparer.OrdinalIgnoreCase),
+			"and the one that was switched on is not on after the run, its plugin not ticked");
+		Check(ProfileOf(g4).States().TryGetValue("Bashed", out var bashedFlag) && bashedFlag == '-', "the other has its line back, off, as the profile had it: " + g4.Text("modlist.txt"));
+		Equal(g4Before, g4.Text("modlist.txt"), "the mod list is as it was before the run");
+
+		// What the player switches in Mod Organizer during the run counts for the profile the run's end leaves. A master's
+		// mod they untick while an earlier tool works is off at the end: the old output that needs it is refused at its
+		// place - also with no tool after it
+		using var p1 = new FakeMo2();
+		p1.Mod("Old Patch", ("OldPatch.esp", false, ["BaseMod.esp"]));
+		var p1List = Path.Combine(p1.ProfileDir, "modlist.txt");
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
+			WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp");
+			File.WriteAllText(p1List, File.ReadAllText(p1List).Replace("+Base Mod", "-Base Mod", StringComparison.Ordinal));
+		}));
+		var unticked = p1.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("synthesis", new JsonObject { ["output_mod"] = "Old Patch" }));
+		((JsonArray)unticked.Root["steps"]!)[1]![OldOutput.Key] = true;
+		unticked.Save();
+		ran = Runner.Run(new RunRequest(p1.SetupFile, p1.Data));
+		Equal(RunState.Failed, ran.State, ran.Verdict);
+		Check(ran.Verdict.Contains("its old output cannot be used: OldPatch.esp needs BaseMod.esp", StringComparison.Ordinal), "an old output whose master the player switched off during the run is refused at its place: " + ran.Verdict);
+		Check(!ProfileOf(p1).IsOn("Old Patch") && !ProfileOf(p1).IsOn("Base Mod"), "it is not switched on, and what the player unticked stays unticked");
+		// ... and one they untick after the old output is on (a later tool is at work): the put-back keeps what the player did,
+		// leaves that old output switched off, and the run's notes say why - never on with its master off
+		using var p2 = new FakeMo2();
+		p2.Mod("Old Patch", ("OldPatch.esp", false, ["BaseMod.esp"]));
+		var p2List = Path.Combine(p2.ProfileDir, "modlist.txt");
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
+			WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp");
+			File.WriteAllText(p2List, File.ReadAllText(p2List).Replace("+Base Mod", "-Base Mod", StringComparison.Ordinal));
+		}));
+		var untickedLater = p2.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Old Patch" }), ("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		((JsonArray)untickedLater.Root["steps"]!)[0]![OldOutput.Key] = true;
+		untickedLater.Save();
+		ran = Runner.Run(new RunRequest(p2.SetupFile, p2.Data));
+		Equal(RunState.Finished, ran.State, ran.Verdict);
+		Check(!ProfileOf(p2).IsOn("Old Patch") && !ProfileOf(p2).IsOn("Base Mod"), "the old output is left switched off, and what the player unticked stays unticked");
+		Check(!ProfileOf(p2).ActivePlugins().Contains("OldPatch.esp", StringComparer.OrdinalIgnoreCase), "its plugin is not ticked");
+		Check(Journal.Load(ran.Folder!).Notes.Any(n => n.Contains("\"Old Patch\" is left switched off", StringComparison.Ordinal) && n.Contains("BaseMod.esp", StringComparison.Ordinal)),
+			"and the run's notes say why: " + string.Join(" | ", Journal.Load(ran.Folder!).Notes));
+
+		// A master's mod switched on with that plugin unticked in the plugin list loads no master: at its place, with a tool
+		// after it, the old output that needs it is refused - a master counts only while its plugin is ticked (CodeRabbit on
+		// pull request #35)
+		using var p3 = new FakeMo2();
+		p3.Mod("Old Patch", ("OldPatch.esp", false, ["BaseMod.esp"]));
+		var p3Plugins = Path.Combine(p3.ProfileDir, "plugins.txt");
+		File.WriteAllText(p3Plugins, File.ReadAllText(p3Plugins).Replace("*BaseMod.esp", "BaseMod.esp", StringComparison.Ordinal));
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp")));
+		var masterUnticked = p3.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Old Patch" }), ("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		((JsonArray)masterUnticked.Root["steps"]!)[0]![OldOutput.Key] = true;
+		masterUnticked.Save();
+		ran = Runner.Run(new RunRequest(p3.SetupFile, p3.Data));
+		Equal(RunState.Failed, ran.State, ran.Verdict);
+		Check(ran.Verdict.Contains("OldPatch.esp needs BaseMod.esp, which is not switched on at this point of the run", StringComparison.Ordinal), "a master whose plugin is not ticked is not there for the tool after it: " + ran.Verdict);
+		Check(!ProfileOf(p3).IsOn("Old Patch") && !ProfileOf(p3).ActivePlugins().Contains("OldPatch.esp", StringComparer.OrdinalIgnoreCase), "the old output is not switched on");
+
+		// An old output whose mod the player switches on in Mod Organizer while an earlier tool works, its plugin left unticked:
+		// at its place its plugin is ticked all the same - the tool after it finds the plugin it was promised (CodeRabbit on
+		// pull request #35: only a mod that was off had its plugins ticked)
+		using var p4 = new FakeMo2();
+		p4.Mod("Kept", ("Kept.esp", false, []));
+		ProfileOf(p4).EnsureMod("Kept");
+		var p4List = Path.Combine(p4.ProfileDir, "modlist.txt");
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
+			WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp");
+			File.WriteAllText(p4List, File.ReadAllText(p4List).Replace("-Kept", "+Kept", StringComparison.Ordinal));
+		}));
+		bool? keptTickedForTheTool = null;
+		StepRegistry.Replace(new FakeStep("texgen", (ctx, s) => {
+			keptTickedForTheTool = ctx.Profile.ActivePlugins().Contains("Kept.esp", StringComparer.OrdinalIgnoreCase);
+			WriteOutput(ctx, "texgen", "Output C", "OutC.esp");
+		}));
+		var onByThem = p4.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("synthesis", new JsonObject { ["output_mod"] = "Kept" }),
+			("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		((JsonArray)onByThem.Root["steps"]!)[1]![OldOutput.Key] = true;
+		onByThem.Save();
+		ran = Runner.Run(new RunRequest(p4.SetupFile, p4.Data));
+		Equal(RunState.Finished, ran.State, ran.Verdict);
+		Check(keptTickedForTheTool == true, "the tool after its place found its plugin ticked");
+		Check(ProfileOf(p4).IsOn("Kept") && ProfileOf(p4).ActivePlugins().Contains("Kept.esp", StringComparer.OrdinalIgnoreCase), "and after the run it is on, its plugin ticked");
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => { }));
+
+		// Plugins whose masters lie in each other's mods: "Mod A" holds ABase.esp and APatch.esp, "Mod B" holds B.esp; APatch.esp
+		// needs B.esp, and B.esp needs ABase.esp. Mod by mod, either order lists a plugin before its master - plugin by plugin,
+		// never (CodeRabbit on pull request #35)
+		using var po = new FakeMo2();
+		po.Mod("Mod A", ("ABase.esp", false, []), ("APatch.esp", false, ["B.esp"]));
+		po.Mod("Mod B", ("B.esp", false, ["ABase.esp"]));
+		foreach (var given in new[] { new[] { "Mod A", "Mod B" }, new[] { "Mod B", "Mod A" } }) {
+			File.WriteAllText(Path.Combine(po.ProfileDir, "plugins.txt"), "*BaseMod.esp\r\n");
+			File.WriteAllText(Path.Combine(po.ProfileDir, "loadorder.txt"), "Skyrim.esm\r\nBaseMod.esp\r\n");
+			ProfileOf(po).ActivatePlugins(given);
+			var lo = po.Text("loadorder.txt").Replace("\r\n", "\n").Split('\n').ToList();
+			Check(lo.IndexOf("ABase.esp") > 0 && lo.IndexOf("ABase.esp") < lo.IndexOf("B.esp") && lo.IndexOf("B.esp") < lo.IndexOf("APatch.esp"),
+				$"given as {string.Join(", ", given)}: each master stands before what needs it: " + string.Join(" | ", lo));
+			Check(po.Text("plugins.txt").Replace("\r\n", "\n").Split('\n').Where(l => l.StartsWith('*')).Select(l => l[1..]).SequenceEqual(["BaseMod.esp", "ABase.esp", "B.esp", "APatch.esp"]),
+				"and ticked in that order: " + po.Text("plugins.txt"));
+		}
+
+		// The put-back never switches on a mod a later step of the run replaced for good - also not one the run had switched on
+		// as an old output before that step - and an old output whose master is in such a mod is left off, and said
+		// (CodeRabbit on pull request #35: the masters were judged by the profile as it stood before those mods went off)
+		using var pr = new FakeMo2();
+		pr.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		pr.Mod("Old Patch", ("OldPatch.esp", false, ["BaseMod.esp"]));
+		var prc = StepContext(pr, "landscapefixer");
+		try {
+			prc.Profile.EnsureMod("Old Patch");
+			prc.Profile.SetMods([], ["Output B", "Needs B"]);
+			var prSnap = prc.Profile.Snapshot();
+			prc.Journal.UsedOld.Add(new OldUse { Step = "pgpatcher", Name = "PGPatcher", Mod = "Output B", Done = true });
+			prc.Journal.UsedOld.Add(new OldUse { Step = "synthesis", Name = "Synthesis", Mod = "Old Patch", Done = true });
+			prc.Journal.Retire.AddRange(["Output B", "Base Mod"]);
+			Runner.PutBack(prc, prSnap);
+			Check(!ProfileOf(pr).IsOn("Output B"), "a used old output that a later step replaced stays off");
+			Check(!ProfileOf(pr).IsOn("Base Mod"), "(the replaced mod that holds the master is off)");
+			Check(!ProfileOf(pr).IsOn("Old Patch") && !ProfileOf(pr).ActivePlugins().Contains("OldPatch.esp", StringComparer.OrdinalIgnoreCase),
+				"an old output whose master is in a mod that went off for good is left off");
+			Check(prc.Journal.Notes.Any(n => n.Contains("\"Old Patch\" is left switched off", StringComparison.Ordinal) && n.Contains("BaseMod.esp", StringComparison.Ordinal)),
+				"and the run's notes say why: " + string.Join(" | ", prc.Journal.Notes));
+		} finally {
+			prc.Log.Dispose();
+		}
+
+		// An old output that was switched on before the run gets its ticks back as they were, and the put-back ticks none of its
+		// plugins: a master in that same mod counts only while its plugin is ticked. Unticked, the patch would be on with its
+		// master off - the old output is left off and said. Ticked, it stays on (CodeRabbit on pull request #35)
+		// (and with both unticked - an optional patch and its optional master left off by the player - the mod's other plugin
+		// that is ticked keeps it on: a plugin that stays unticked needs nothing, CodeRabbit's seventh round)
+		foreach (var (masterTicked, patchTicked) in new[] { (false, true), (true, true), (false, false) }) {
+			using var ps = new FakeMo2();
+			ps.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+			ps.Mod("Same Mod", ("SameBase.esp", false, []), ("SamePatch.esp", false, ["SameBase.esp"]), ("SameOther.esp", false, []));
+			var psList = Path.Combine(ps.ProfileDir, "modlist.txt");
+			File.WriteAllText(psList, File.ReadAllText(psList).Replace("+Base Mod", "+Same Mod\r\n+Base Mod", StringComparison.Ordinal));
+			File.AppendAllText(Path.Combine(ps.ProfileDir, "plugins.txt"), (masterTicked ? "*" : "") + "SameBase.esp\r\n" + (patchTicked ? "*" : "") + "SamePatch.esp\r\n*SameOther.esp\r\n");
+			File.AppendAllText(Path.Combine(ps.ProfileDir, "loadorder.txt"), "SameBase.esp\r\nSamePatch.esp\r\nSameOther.esp\r\n");
+			var psc = StepContext(ps, "landscapefixer");
+			try {
+				var psSnap = psc.Profile.Snapshot();
+				psc.Journal.UsedOld.Add(new OldUse { Step = "synthesis", Name = "Synthesis", Mod = "Same Mod", Done = true });
+				Runner.PutBack(psc, psSnap);
+				var psActive = ProfileOf(ps).ActivePlugins();
+				if (!patchTicked) {
+					Check(ProfileOf(ps).IsOn("Same Mod") && psActive.Contains("SameOther.esp", StringComparer.OrdinalIgnoreCase) && !psActive.Contains("SamePatch.esp", StringComparer.OrdinalIgnoreCase),
+						"the patch and its master both unticked: the old output stays on as the player had it: " + string.Join(" | ", psActive));
+					Check(psc.Journal.Notes.All(n => !n.Contains("\"Same Mod\" is left switched off", StringComparison.Ordinal)), "and is not said to be left off");
+				} else if (masterTicked) {
+					Check(ProfileOf(ps).IsOn("Same Mod") && psActive.Contains("SamePatch.esp", StringComparer.OrdinalIgnoreCase) && psActive.Contains("SameBase.esp", StringComparer.OrdinalIgnoreCase),
+						"its master ticked in the same mod: the old output stays on, both plugins ticked: " + string.Join(" | ", psActive));
+					Check(psc.Journal.Notes.All(n => !n.Contains("\"Same Mod\" is left switched off", StringComparison.Ordinal)), "and no note says otherwise");
+				} else {
+					Check(!ProfileOf(ps).IsOn("Same Mod") && !psActive.Contains("SamePatch.esp", StringComparer.OrdinalIgnoreCase),
+						"its master unticked in the same mod: the old output is left off, its patch not ticked: " + string.Join(" | ", psActive));
+					Check(psc.Journal.Notes.Any(n => n.Contains("\"Same Mod\" is left switched off", StringComparison.Ordinal) && n.Contains("SameBase.esp", StringComparison.Ordinal)),
+						"and the run's notes say why: " + string.Join(" | ", psc.Journal.Notes));
+				}
+			} finally {
+				psc.Log.Dispose();
+			}
+		}
+
+		// A master the player unticks while the run waits for Mod Organizer to close at the old output's place - after the old
+		// output was looked at, before its plugins are ticked: looked at again there, the run stops, nothing of it ticked or
+		// carried out, and the tool after it never runs (CodeRabbit's seventh round; the mod list's line is given in that wait,
+		// which is where this test unticks the master)
+		using var pw = new FakeMo2();
+		pw.Mod("Old Patch", ("OldPatch.esp", false, ["BaseMod.esp"]));
+		var pwPlugins = Path.Combine(pw.ProfileDir, "plugins.txt");
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp")));
+		var pwTexGen = false;
+		StepRegistry.Replace(new FakeStep("texgen", (ctx, s) => pwTexGen = true));
+		var inTheWait = pw.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("synthesis", new JsonObject { ["output_mod"] = "Old Patch" }),
+			("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		((JsonArray)inTheWait.Root["steps"]!)[1]![OldOutput.Key] = true;
+		inTheWait.Save();
+		Profile.AfterListMod = m => {
+			if (m == "Old Patch") {
+				File.WriteAllText(pwPlugins, File.ReadAllText(pwPlugins).Replace("*BaseMod.esp", "BaseMod.esp", StringComparison.Ordinal));
+			}
+		};
+		try {
+			ran = Runner.Run(new RunRequest(pw.SetupFile, pw.Data));
+		} finally {
+			Profile.AfterListMod = null;
+		}
+		Equal(RunState.Failed, ran.State, ran.Verdict);
+		Check(ran.Verdict.Contains("OldPatch.esp needs BaseMod.esp, which is not switched on at this point of the run", StringComparison.Ordinal), "a master unticked in the wait stops the run there: " + ran.Verdict);
+		Check(!pwTexGen, "the tool after that place did not run");
+		Check(Journal.Load(ran.Folder!).UsedOld.All(u => !u.Done), "nothing of it is on record as carried out");
+		Check(!ProfileOf(pw).ActivePlugins().Contains("OldPatch.esp", StringComparer.OrdinalIgnoreCase), "and its plugin was never ticked");
+
+		// a copy of a master in Mod Organizer's overwrite folder keeps it there when its mod goes off: what needs it stays on
+		var deps = Mo2Instance.Load(f.Exe, f.Instance);
+		Check(Profile.DependentsOf(deps, ProfileOf(f).States(), ["Output B"]).ContainsKey("Needs B"), "(a mod that needs a plugin of a mod going off goes off with it)");
+		FakeMo2.Plugin(Path.Combine(f.Overwrite, "OutB.esp"), false);
+		Check(!Profile.DependentsOf(deps, ProfileOf(f).States(), ["Output B"]).ContainsKey("Needs B"), "with a copy of that plugin in the overwrite folder it stays on");
+		File.Delete(Path.Combine(f.Overwrite, "OutB.esp"));
+
+		// a tool that uses its old output is still one of the setup's tools to set up in its own window
+		var tools = Setup.FromJson(new JsonObject { ["mo2"] = new JsonObject { ["exe"] = f.Exe, ["profile"] = "Test" }, ["backups"] = f.Backups,
+			["steps"] = new JsonArray(new JsonObject { ["step"] = "texgen", [OldOutput.Key] = true, ["settings"] = new JsonObject { ["output_mod"] = "Output B", ["executable"] = "TexGen" } },
+				new JsonObject { ["step"] = "dyndolod", ["on"] = false, ["settings"] = new JsonObject { ["output_mod"] = "Output A", ["executable"] = "DynDOLOD" } }) }, f.SetupFile);
+		Equal("texgen", string.Join(",", ToolSettings.ToSetUp(tools).Select(x => x.Step)), "a step that uses its old output is switched on: its tool is in the box that sets tools up, one that is switched off is not");
+	}
+
+	// The record of an old output that is used, and what a put-back makes of it (CodeRabbit on pull request #35). Nothing is
+	// written for it before its place: a mod the list does not name gets its line there, once the run's record names it, and a
+	// run that fails earlier leaves the mod list as it was. One that is gone by then stops the run before the tools after it.
+	// And a put-back switches on only a use that was carried out, never a mod whose files are still in the run's backup
+	static void T_AnOldOutputIsSwitchedOnOnlyOnceItsUseWasCarriedOut()
+	{
+		using var f = new FakeMo2();
+		// an old output that Mod Organizer's list does not name (unpacked by hand, the list never refreshed)
+		f.Mod("Old Patch", ("OldPatch.esp", false, ["BaseMod.esp"]));
+		var fail = true;
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
+			if (fail) {
+				throw new StepFailedException("the tool gave up");
+			}
+			WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp");
+		}));
+		var setup = f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("synthesis", new JsonObject { ["output_mod"] = "Old Patch" }));
+		((JsonArray)setup.Root["steps"]!)[1]![OldOutput.Key] = true;
+		setup.Save();
+		var listBefore = f.Text("modlist.txt");
+		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+		Equal(RunState.Failed, r.State, r.Verdict);
+		Equal(listBefore, f.Text("modlist.txt"), "a run that failed before the old output's place leaves the mod list byte for byte as it was: no line was written for it");
+		Equal(0, Journal.Load(r.Folder!).UsedOld.Count, "and its record names no old output as used");
+		fail = false;
+		r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+		Equal(RunState.Finished, r.State, r.Verdict);
+		var j = Journal.Load(r.Folder!);
+		Check(j.UsedOld.Single() is { Mod: "Old Patch", Listed: true, Done: true }, "used: on record as carried out, with the line the run gave it");
+		Check(ProfileOf(f).IsOn("Old Patch"), "it is in the mod list now, and switched on");
+		Check(ProfileOf(f).ActivePlugins().Contains("OldPatch.esp", StringComparer.OrdinalIgnoreCase), "with its plugin ticked (the plugin lists of before the run did not hold it)");
+		Check(!j.Added.Contains("Old Patch") && File.Exists(Path.Combine(f.Mods, "Old Patch", "OldPatch.esp")), "it is not counted among the mods the run made: its folder is the player's, untouched");
+
+		// A mod that is there as a folder with no line in the mod list, which a step of the run builds into - here it is also
+		// the old output another step uses. The run gives it its line before its first step: it is one of the run's
+		// outputs. A run that ends before anything was built into that mod or used of it takes the line out again - after a
+		// step that failed, and after a crash once the profile is put back - so the mod list is as it was. The folder is
+		// the player's: as it was
+		using var k = new FakeMo2();
+		k.Mod("Shared", ("Shared.esp", false, []));
+		var how = "fail";
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
+			if (how == "crash") {
+				// (what the run had on record by then: the mod it gave a line)
+				ctx.Journal.Added.Add("Shared");
+				ctx.Journal.Listed.Add("Shared");
+				ctx.Journal.Pid = 999999;
+				ctx.Journal.Save();
+				throw new CrashForTest();
+			}
+			if (how == "fail") {
+				throw new StepFailedException("the tool gave up");
+			}
+			WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp");
+		}));
+		StepRegistry.Replace(new FakeStep("texgen", (ctx, s) => WriteOutput(ctx, "texgen", "Shared", "Shared.esp")));
+		var both = k.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("synthesis", new JsonObject { ["output_mod"] = "Shared" }),
+			("texgen", new JsonObject { ["output_mod"] = "Shared" }));
+		((JsonArray)both.Root["steps"]!)[1]![OldOutput.Key] = true;
+		both.Save();
+		var sharedBefore = k.Text("modlist.txt");
+		var sharedBytes = File.ReadAllBytes(Path.Combine(k.Mods, "Shared", "Shared.esp"));
+		r = Runner.Run(new RunRequest(k.SetupFile, k.Data));
+		Equal(RunState.Failed, r.State, r.Verdict);
+		Equal("Shared", string.Join(",", Journal.Load(r.Folder!).Listed), "(on record: the run gave that mod its line)");
+		Equal(sharedBefore, k.Text("modlist.txt"), "a run that failed before it built into that mod or used it leaves the mod list byte for byte as it was");
+		Check(File.ReadAllBytes(Path.Combine(k.Mods, "Shared", "Shared.esp")).SequenceEqual(sharedBytes), "and what the mod holds as it was");
+		// cut off by a crash in its first step: the line the run wrote, and the order files it read after writing it
+		how = "crash";
+		ProfileOf(k).EnsureMod("Shared");
+		try {
+			RunUntilCrash(k);
+		} catch (CrashForTest) {
+		}
+		Check(ProfileOf(k).States().ContainsKey("Shared"), "(after the crash the line the run wrote is still in the mod list)");
+		Equal(RunState.Restored, Runner.Restore(Journal.Interrupted(Runner.RunsDir(k.Data))!).State, "the profile put back after the crash");
+		Equal(sharedBefore, k.Text("modlist.txt"), "the put-back after a crash takes that line out again too");
+		// the run that goes through uses the old output at its place and then builds into the mod: it keeps its line, on
+		how = "";
+		r = Runner.Run(new RunRequest(k.SetupFile, k.Data));
+		Equal(RunState.Finished, r.State, r.Verdict);
+		Check(ProfileOf(k).IsOn("Shared") && File.Exists(Path.Combine(k.Mods, "Shared", "new.txt")), "built into by the run, the mod keeps its line and is switched on");
+		// ... and undone, that run leaves the list as it was before it, and the mod with what it held
+		var undone = Runner.Undo(Journal.Load(r.Folder!));
+		Equal(RunState.Restored, undone.State, undone.Verdict);
+		Check(!ProfileOf(k).States().ContainsKey("Shared"), "undone, the mod has no line again");
+		Check(File.ReadAllBytes(Path.Combine(k.Mods, "Shared", "Shared.esp")).SequenceEqual(sharedBytes) && !File.Exists(Path.Combine(k.Mods, "Shared", "new.txt")), "and holds what it held before the run");
+		// The run puts that mod on record BEFORE it writes the line. With the mod list held by another program the line
+		// cannot be written: the run stops before anything was changed, and its record already names the mod
+		var listHeld = k.Text("modlist.txt");
+		using (new FileStream(Path.Combine(k.ProfileDir, "modlist.txt"), FileMode.Open, FileAccess.Read, FileShare.Read)) {
+			r = Runner.Run(new RunRequest(k.SetupFile, k.Data));
+		}
+		Equal(RunState.Failed, r.State, r.Verdict);
+		Check(r.Verdict.StartsWith("stopped before anything was changed", StringComparison.Ordinal), "a mod list that cannot be written stops the run before anything was changed: " + r.Verdict);
+		Equal("Shared", string.Join(",", Journal.Load(r.Folder!).Listed), "the mod was on the run's record before its line was written");
+		Equal(listHeld, k.Text("modlist.txt"), "and the mod list is as it was");
+		// Cut off by a crash right after the run wrote that line and before it read the order files: all a put-back has is
+		// the record the RUN itself had written by then. Both are taken as they stood at that moment - the run's record and
+		// the mod list - and laid out again once this run is over: nothing of the record is written by the test but that
+		// its process is gone. On a Mod Organizer of its own, where this run is the only one on record: the record taken is
+		// that very run's (picked from several by their times, two made within one tick could be taken for each other)
+		using var k2 = new FakeMo2();
+		k2.Mod("Shared", ("Shared.esp", false, []));
+		var both2 = k2.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("synthesis", new JsonObject { ["output_mod"] = "Shared" }),
+			("texgen", new JsonObject { ["output_mod"] = "Shared" }));
+		((JsonArray)both2.Root["steps"]!)[1]![OldOutput.Key] = true;
+		both2.Save();
+		var k2Before = k2.Text("modlist.txt");
+		byte[]? cutRecord = null, cutList = null;
+		var runsThen = -1;
+		Profile.AfterListMod = m => {
+			if (m == "Shared" && cutRecord == null) {
+				var runs = Directory.GetDirectories(Runner.RunsDir(k2.Data));
+				runsThen = runs.Length;
+				if (runs.Length == 1) {
+					cutRecord = File.ReadAllBytes(Path.Combine(runs[0], "journal.json"));
+					cutList = File.ReadAllBytes(Path.Combine(k2.ProfileDir, "modlist.txt"));
+				}
+			}
+		};
+		try {
+			how = "fail";
+			r = Runner.Run(new RunRequest(k2.SetupFile, k2.Data));
+		} finally {
+			Profile.AfterListMod = null;
+		}
+		Equal(RunState.Failed, r.State, r.Verdict);
+		Equal(1, runsThen, "(the run that wrote the line is the only run on record)");
+		Check(cutRecord != null && cutList != null, "(the run's record and the mod list were taken as the line was written)");
+		var cutFolder = Path.Combine(Runner.RunsDir(k2.Data), "0002 cut off");
+		Directory.CreateDirectory(cutFolder);
+		File.WriteAllBytes(Path.Combine(cutFolder, "journal.json"), cutRecord!);
+		File.WriteAllBytes(Path.Combine(k2.ProfileDir, "modlist.txt"), cutList!);
+		var cut = Journal.Load(cutFolder);
+		Equal("Shared", string.Join(",", cut.Listed), "the record the run had written before the line names the mod");
+		cut.Pid = 999999;
+		cut.Save();
+		Check(ProfileOf(k2).States().ContainsKey("Shared"), "(the line is in the mod list, as the crash left it)");
+		var afterCut = Runner.Restore(Journal.Load(cutFolder));
+		Equal(RunState.Restored, afterCut.State, afterCut.Verdict);
+		Equal(k2Before, k2.Text("modlist.txt"), "put back from the run's own record alone, the mod list is as it was");
+
+		// A run that lists one output's line, and then meets the mod list held by another program - its next line cannot be
+		// written, nor the first one taken out again - stops at the start with the put-back ON OFFER: the line it wrote is
+		// still there. Once the list is free, "Put my profile back" takes the line out, and the mod's folder is as it was
+		// (CodeRabbit on pull request #35)
+		using var k3 = new FakeMo2();
+		k3.Mod("Shared", ("Shared.esp", false, []));
+		k3.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Shared" }), ("texgen", new JsonObject { ["output_mod"] = "Output New" }));
+		var k3Before = k3.Text("modlist.txt");
+		var k3Bytes = File.ReadAllBytes(Path.Combine(k3.Mods, "Shared", "Shared.esp"));
+		FileStream? k3Held = null;
+		Profile.AfterListMod = m => {
+			if (m == "Shared" && k3Held == null) {
+				k3Held = new FileStream(Path.Combine(k3.ProfileDir, "modlist.txt"), FileMode.Open, FileAccess.Read, FileShare.Read);
+			}
+		};
+		try {
+			r = Runner.Run(new RunRequest(k3.SetupFile, k3.Data));
+		} finally {
+			Profile.AfterListMod = null;
+			k3Held?.Dispose();
+		}
+		Equal(RunState.Failed, r.State, r.Verdict);
+		Check(r.Verdict.Contains("the profile is back except the line this run gave \"Shared\" in the mod list", StringComparison.Ordinal), "the verdict names the line that is still there: " + r.Verdict);
+		Equal("TR-401", RunnerErrors.Find(r.Verdict)?.Code ?? "", "with what to do about it");
+		var k3Run = Journal.Load(r.Folder!);
+		Check(k3Run.NeedsRestore && k3Run.Unfinished, "the put-back stays on offer");
+		Check(ProfileOf(k3).States().ContainsKey("Shared"), "(the line the run wrote is still in the mod list)");
+		Check(Runner.CheckStart(new RunRequest(k3.SetupFile, k3.Data)) is { Starts: false } k3Gate && k3Gate.Why.Contains("did not finish", StringComparison.Ordinal), "and no new run starts over it");
+		var k3Back = Runner.Restore(Journal.Interrupted(Runner.RunsDir(k3.Data))!);
+		Equal(RunState.Restored, k3Back.State, k3Back.Verdict);
+		Equal(k3Before, k3.Text("modlist.txt"), "the list free again, the put-back takes the line out: the mod list is as it was");
+		Check(File.ReadAllBytes(Path.Combine(k3.Mods, "Shared", "Shared.esp")).SequenceEqual(k3Bytes), "and the mod's folder holds what it held");
+		// A folder that was there before the run with nothing in it but a meta.ini this program once wrote (an earlier run's
+		// empty output, its line gone): the run gives it a line, fails before its tool - and only the line goes again. The
+		// folder is not the run's to move away
+		var emptyOne = Path.Combine(k.Mods, "Shared Empty");
+		Directory.CreateDirectory(emptyOne);
+		File.WriteAllText(Path.Combine(emptyOne, "meta.ini"), $"[General]\r\ncomments=made by {Brand.Name}\r\n");
+		Check(Profile.IsEmptyOutput(emptyOne), "(it reads as an empty output of this program's)");
+		k.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("texgen", new JsonObject { ["output_mod"] = "Shared Empty" }));
+		var emptyBefore = k.Text("modlist.txt");
+		how = "fail";
+		r = Runner.Run(new RunRequest(k.SetupFile, k.Data));
+		Equal(RunState.Failed, r.State, r.Verdict);
+		Check(File.Exists(Path.Combine(emptyOne, "meta.ini")), "an empty folder that was there before the run is still there after a run that failed");
+		Equal(emptyBefore, k.Text("modlist.txt"), "and its new line is gone again");
+
+		// A line the put-back cannot take out again (the mod list held by another program for a moment) is named as not back -
+		// the run and "Put my profile back" then stay on offer -, and the next put-back takes it out
+		using var q = new FakeMo2();
+		q.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		q.Mod("Loose", ("Loose.esp", false, []));
+		var held = StepContext(q, "landscapefixer");
+		try {
+			var looseBefore = q.Text("modlist.txt");
+			held.Profile.EnsureMod("Loose");
+			var looseSnap = held.Profile.Snapshot();
+			held.Journal.Added.Add("Loose");
+			held.Journal.Listed.Add("Loose");
+			using (new FileStream(Path.Combine(q.ProfileDir, "modlist.txt"), FileMode.Open, FileAccess.Read, FileShare.Read)) {
+				Runner.PutBack(held, looseSnap);
+			}
+			Equal("Loose", string.Join(",", held.LinesLeft), "a line that could not be taken out is named as not back");
+			Check(ProfileOf(q).States().ContainsKey("Loose"), "(it is still in the mod list)");
+			Runner.PutBack(held, looseSnap);
+			Check(held.LinesLeft.Count == 0, "the next put-back takes it out");
+			Equal(looseBefore, q.Text("modlist.txt"), "and the mod list is as it was before the run wrote the line");
+		} finally {
+			held.Log.Dispose();
+		}
+
+		// gone by the time its place comes (a tool, or a command of the setup, moved it away after the check): the run stops
+		// there, and the tool after it never runs on an output that is not there
+		using var g = new FakeMo2();
+		var ranAfter = false;
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
+			WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp");
+			File.Delete(Path.Combine(ctx.Mo2.ModDir("Output B"), "OutB.esp"));
+		}));
+		StepRegistry.Replace(new FakeStep("texgen", (ctx, s) => ranAfter = true));
+		var gone = g.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("pgpatcher", new JsonObject { ["output_mod"] = "Output B" }),
+			("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		((JsonArray)gone.Root["steps"]!)[1]![OldOutput.Key] = true;
+		gone.Save();
+		r = Runner.Run(new RunRequest(g.SetupFile, g.Data));
+		Equal(RunState.Failed, r.State, r.Verdict);
+		Check(!ranAfter, "the tool after its place did not run");
+		Check(r.Verdict.Contains("there is none to use any more - \"Output B\" is missing or holds nothing now", StringComparison.Ordinal), "the run says why it stopped: " + r.Verdict);
+		Equal("TR-320", RunnerErrors.Find(r.Verdict)?.Code ?? "", "with what to do about it");
+		Equal(0, Journal.Load(r.Folder!).UsedOld.Count, "nothing is on record as used");
+		Check(ProfileOf(g).IsOn("Output A"), "what the run had built before it is on");
+
+		// the put-back: a use the run was only about to make switches nothing on; one it carried out is on, like what was built
+		using var h = new FakeMo2();
+		h.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		var ctx = StepContext(h, "landscapefixer");
+		try {
+			// before the run the old output was switched off; the run was cut off with its use on record and nothing switched
+			// (a Stop while Mod Organizer closed for it, a crash after the record was written)
+			ctx.Profile.SetMods([], ["Needs B", "Output B"]);
+			var snap = ctx.Profile.Snapshot();
+			ctx.Journal.UsedOld.Add(new OldUse { Step = "synthesis", Name = "Synthesis", Mod = "Output B" });
+			// (The ask to switch that old output on was still standing when the run was cut off - the read of the mod list that
+			// follows it had failed, say - and so was one for a mod some step had asked for and never got. No record calls
+			// either built or used, so the put-back switches neither on: it goes by its records, never by a standing ask)
+			ctx.SetAfter("Output B", "Needs B");
+			Runner.PutBack(ctx, snap);
+			Check(!ProfileOf(h).IsOn("Output B"), "a use that was never carried out leaves the old output as the profile had it before the run");
+			Check(!ProfileOf(h).IsOn("Needs B"), "and what was only asked for, on no record as built or used, is not switched on by the put-back");
+			ctx.Journal.UsedOld[0].Done = true;
+			Runner.PutBack(ctx, snap);
+			Check(ProfileOf(h).IsOn("Output B"), "one that was carried out is switched on by the put-back");
+			// a later step moved that mod's files into the run's backup and could not bring them back (two steps can share an
+			// output mod): the mod stays off - it never goes on holding nothing
+			ctx.Journal.Parked.Add(new ParkRecord { Step = "texgen", Mod = "Output B", From = h.Mods, To = Path.Combine(h.Backups, "not back") });
+			Runner.PutBack(ctx, snap);
+			Check(!ProfileOf(h).IsOn("Output B"), "while its files are still in the backup, the old output is not switched on");
+		} finally {
+			ctx.Log.Dispose();
+		}
+	}
+
+	// The warning is the tool's own: every tool that makes an output says what an old one of ITS kind does in the game, and the
+	// program adds what it can work out - when it was made, what changed in the profile since, which tools of this run it was made
+	// before, which build on it. START's preview and the command line's report carry it
+	static void T_TheOldOutputWarningSaysWhatItMeansForThatTool()
+	{
+		var general = OldOutput.Of("addon:somebody's patcher");
+		foreach (var s in StepCatalog.All.Where(s => OldOutput.MakesOutput(s.Key))) {
+			var m = OldOutput.Of(s.Key);
+			Check(m != general && m.Holds.Length > 30 && m.WhenOld.Length > 60 && m.WhenOld.EndsWith('.') && !m.Holds.EndsWith('.'), $"{s.Name} has words of its own for what its old output holds and does");
+			Check(!(m.Holds + m.WhenOld).Contains("colour", StringComparison.OrdinalIgnoreCase), $"{s.Name}: color, as everywhere");
+		}
+		Check(general.WhenOld.Length > 20, "an add-on's output gets the general words");
+		var made = new DateTime(2026, 10, 27, 21, 52, 0, DateTimeKind.Local);
+		var look = new OldOutput.Look("dyndolod", "DynDOLOD", "DynDOLOD Output", true, false, made, true,
+			[("Blubbos Trees", "added"), ("Skyland AIO", "ticked"), ("Old Town", "removed"), ("Fourth", "added")], ["xLODGen", "TexGen"], [], null);
+		var w = OldOutput.Warning(look, "My Profile");
+		Check(w.Any(l => l.StartsWith("Made Tue Oct 27 21:52 by a run of this setup", StringComparison.Ordinal)), "when it was made: " + string.Join(" | ", w));
+		Check(w.Any(l => l.StartsWith("4 changes in the profile My Profile since then (2 added, 1 removed, 1 ticked), e.g. Blubbos Trees added; Skyland AIO ticked; Old Town removed - none of them is in it", StringComparison.Ordinal)), "what changed since, counted and named");
+		Check(w.Any(l => l.StartsWith("Built again in this run before its place: xLODGen, TexGen. This old output was made from what those tools made before, not from what they make now", StringComparison.Ordinal)), "the tools of this run it no longer fits");
+		Check(w.Any(l => l.StartsWith("In the game: ", StringComparison.Ordinal) && l.Contains("the distance shows things that are not there up close", StringComparison.Ordinal)), "what the player sees, for this tool");
+		Check(w.Any(l => l.Contains("the settings its tool had then", StringComparison.Ordinal)) && w.Any(l => l.Contains("switched off in Mod Organizer now: the run switches it on", StringComparison.Ordinal)), "its old settings, and that the run switches it on");
+		var unknown = OldOutput.Warning(look with { ChangedSince = null, ByRun = false, BuiltAgainBefore = [], BuiltOnIt = ["DynDOLOD"], On = true, Step = "texgen", Name = "TexGen" }, "My Profile");
+		Check(unknown.Any(l => l.Contains("no run of this setup on record built it", StringComparison.Ordinal)) && unknown.Any(l => l.StartsWith("What changed in your mods since then is not known", StringComparison.Ordinal)), "what is not known is said as not known");
+		Check(unknown.Any(l => l.StartsWith("Built on top of it in this run: DynDOLOD - it reads this old output", StringComparison.Ordinal)), "and the tool that builds on it");
+
+		using var f = new FakeMo2();
+		var setup = f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("pgpatcher", new JsonObject { ["output_mod"] = "Output B" }),
+			("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		((JsonArray)setup.Root["steps"]!)[1]![OldOutput.Key] = true;
+		setup.Save();
+		var mo2 = Mo2Instance.Load(f.Exe, f.Instance);
+		var ran = new LastRuns.Ran(made, "", "PGPatcher", StepState.Done, made, made.AddMinutes(9), "", "Output B");
+		var preview = RunPreview.Build(setup, mo2, setup.EnabledSteps, [new LastRuns.Section("pgpatcher", ran, ran, [("Some Texture Mod", "added")], "Output B")]);
+		var only = preview.UsesOld.Single();
+		Check(only is { Step: "pgpatcher", Mod: "Output B", There: true, On: true, ByRun: true, ChangedSince.Count: 1 } && only.Made == made.AddMinutes(9), "the step as it stands, dated by the run that made its output");
+		Equal("Landscape Fixer", string.Join(",", only.BuiltAgainBefore), "built again before it in this run");
+		Equal("TexGen", string.Join(",", only.BuiltOnIt), "built on it in this run");
+		var lines = preview.Lines(_ => null);
+		Check(lines.Any(l => l.StartsWith("NOT built again - the old output is used", StringComparison.Ordinal)) && lines.Any(l => l == "  - PGPatcher: \"Output B\"") &&
+		      lines.Any(l => l.Contains("1 change in the profile Test since then (1 added), e.g. Some Texture Mod added - it is not in it", StringComparison.Ordinal)) &&
+		      lines.Any(l => l.Contains("In the game: A texture or mesh mod added or updated since is not patched", StringComparison.Ordinal)), "START's preview carries the warning: " + string.Join(" | ", lines));
+		Check(lines.Count(l => l.Contains("remakes \"", StringComparison.Ordinal)) == 1 && lines.All(l => !l.Contains("PGPatcher - remakes", StringComparison.Ordinal)), "and never lists the step among the tools that run");
+		Check(preview.OffForTheRun.Any(o => o.Mod == "Output B" && o.Why.Contains("the old output of PGPatcher, used again: back on at that step's place", StringComparison.Ordinal)), "the old output is among what goes off for the run, with why");
+		var json = JsonNode.Parse(Reports.Text(Reports.Preview(setup, preview, _ => null)))!;
+		Check(json["usesOldOutput"]![0]!["key"]!.ToString() == "pgpatcher" && json["usesOldOutput"]![0]!["usable"]!.GetValue<bool>() && json["usesOldOutput"]![0]!["changesSince"]!.GetValue<int>() == 1, "the command line's report names it too");
+		// without a run on record its files date it, and what changed since is not known
+		var plain = OldOutput.LookAt(setup, mo2, ProfileOf(f).States(), setup.EnabledSteps).Single();
+		Check(plain is { ByRun: false, ChangedSince: null, Made: not null }, "no run on record: dated by its files");
+		Equal(1, OldOutput.Places(setup, setup.EnabledSteps).Single().At, "its place: before the first step of the run that stands after it");
+		Equal(0, OldOutput.Places(setup, setup.EnabledSteps.Where(x => x.Key == "texgen").ToList()).Single().At, "in a run of only a later step: before that step");
+		Equal(1, OldOutput.Places(setup, setup.EnabledSteps.Where(x => x.Key == "landscapefixer").ToList()).Single().At, "in a run of only an earlier step: after it");
+	}
+
+	// A change of several fields of the run's record made as one is written whole: a save on another thread (the run's box
+	// watch saves the record too) waits until the whole change is made. Written half way, a crash right then left half of a
+	// group of old outputs carried out (CodeRabbit on pull request #35)
+	static void T_AChangeOfTheRunsRecordIsWrittenWhole()
+	{
+		var dir = Path.Combine(Path.GetTempPath(), "mo2 tool runner tests", "record " + Guid.NewGuid().ToString("N")[..8]);
+		Directory.CreateDirectory(dir);
+		// (the worker's own failure is kept and said here: one left to its thread would end the whole test run)
+		Thread? other = null;
+		Exception? failed = null;
+		try {
+			var j = new Journal { Folder = dir, UsedOld = [new OldUse { Step = "wryebash", Mod = "Bashed" }, new OldUse { Step = "synthesis", Mod = "Patch On Bashed" }] };
+			j.Save();
+			// A thread of its own (a pool task may not have started yet) that says when it is about to save; the change goes on
+			// only once Windows has put that thread to sleep on the record's lock - so the save it races is really under way
+			bool reached = false, blocked = false, stillWaiting = false;
+			using var started = new ManualResetEventSlim();
+			j.SaveWith(() => {
+				j.UsedOld[0].Done = true;
+				other = new Thread(() => {
+					started.Set();
+					try {
+						j.Save();
+					} catch (Exception e) when (e is not OutOfMemoryException) {
+						failed = e;
+					}
+				}) { IsBackground = true };
+				other.Start();
+				reached = started.Wait(TimeSpan.FromSeconds(10));
+				for (var until = Environment.TickCount64 + 10_000; reached && !blocked && other.IsAlive && Environment.TickCount64 < until;) {
+					blocked = (other.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0;
+					if (!blocked) {
+						Thread.Sleep(5);
+					}
+				}
+				Thread.Sleep(100);
+				stillWaiting = other.IsAlive;
+				j.UsedOld[1].Done = true;
+			});
+			Check(reached, "the other thread reached its save");
+			Check(blocked && stillWaiting, "a save on another thread waits while the change is made");
+			Check(other != null && other.Join(TimeSpan.FromSeconds(10)), "and goes on once it is done");
+			Check(failed == null, "the other thread's save went through: " + failed?.Message);
+			Check(Journal.Load(dir).UsedOld.All(u => u.Done), "what is on disk holds the whole change, never half of it");
+		} finally {
+			// the worker is done with the folder before it goes
+			other?.Join(TimeSpan.FromSeconds(10));
+			try {
+				Directory.Delete(dir, true);
+			} catch (IOException) {
+			} catch (UnauthorizedAccessException) {
+			}
+		}
+	}
+
+	// CodeRabbit's seventh round on pull request #35: a mod list in the PC's own code page cannot hold every name - one it would
+	// write as "?" is refused and nothing is written; a name it can hold goes in as before. And several new plugins placed
+	// after one anchor keep their master order in both plugin files
+	static void T_TheModListRefusesANameItCannotHold()
+	{
+		using var f = new FakeMo2();
+		var list = Path.Combine(f.ProfileDir, "modlist.txt");
+		var ansi = Files.AnsiEncoding;
+		// a line with a letter in that code page that is no valid UTF-8 makes the list read as written in it
+		var accent = "Mod été";
+		// (a code page that holds the name this test expects refused - CP936 on Simplified Chinese Windows - writes it rightly)
+		var refused = "漢字 Output";
+		if (ansi.GetString(ansi.GetBytes(accent)) != accent || ansi.GetString(ansi.GetBytes(refused)) == refused || ansi.CodePage == 65001) {
+			Console.WriteLine("  (skipped: this PC's code page cannot hold the accented name, or can hold the refused one)");
+			return;
+		}
+		File.WriteAllBytes(list, ansi.GetBytes(File.ReadAllText(list).Replace("+Base Mod", "+" + accent + "\r\n+Base Mod", StringComparison.Ordinal)));
+		var before = File.ReadAllBytes(list);
+		var p = ProfileOf(f);
+		Throws<IOException>(() => p.ListMod(refused), "a name the list's code page cannot hold is refused");
+		Check(File.ReadAllBytes(list).SequenceEqual(before), "and nothing was written");
+		Check(p.ListMod("Café Output") && p.States().ContainsKey("Café Output"), "a name it can hold goes in and is found again");
+		Check(p.States().ContainsKey(accent), "the line that was there is read as before");
+	}
+
+	// ... and several new plugins placed after one anchor keep their master order in both plugin files (a test of its own:
+	// nothing of a PC's code page may skip it)
+	static void T_OneAnchorKeepsTheMasterOrder()
+	{
+		using var f = new FakeMo2();
+		// two new plugins after one anchor, the master given first: both files keep master, then the plugin that needs it
+		f.Mod("Pair", ("PairBase.esp", false, []), ("PairPatch.esp", false, ["PairBase.esp"]));
+		var anchor = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["PairBase.esp"] = "BaseMod.esp", ["PairPatch.esp"] = "BaseMod.esp" };
+		ProfileOf(f).ActivatePlugins(["Pair"], anchor);
+		foreach (var file in new[] { "loadorder.txt", "plugins.txt" }) {
+			var lines = f.Text(file).Replace("\r\n", "\n").Split('\n').Select(l => l.TrimStart('*')).ToList();
+			var at = lines.IndexOf("BaseMod.esp");
+			Check(at >= 0 && lines.IndexOf("PairBase.esp") == at + 1 && lines.IndexOf("PairPatch.esp") == at + 2, $"{file}: right after the anchor, the master first: " + string.Join(" | ", lines));
+		}
+	}
+
+	// A mod list that begins with a UTF-8 mark keeps it: a line written into it and taken out again leaves the file byte for
+	// byte as it was - what the put-back of a run that only listed a mod must leave (CodeRabbit on pull request #35)
+	static void T_TheModListKeepsHowItIsWritten()
+	{
+		using var f = new FakeMo2();
+		var list = Path.Combine(f.ProfileDir, "modlist.txt");
+		var mark = Encoding.UTF8.GetPreamble();
+		File.WriteAllBytes(list, [.. mark, .. File.ReadAllBytes(list)]);
+		var before = File.ReadAllBytes(list);
+		f.Mod("Loose", ("Loose.esp", false, []));
+		var p = ProfileOf(f);
+		Check(p.ListMod("Loose") && p.States().ContainsKey("Loose"), "(its line written)");
+		Check(File.ReadAllBytes(list).AsSpan().StartsWith(mark), "the mark is kept when a line is written");
+		p.SetMods(["Loose"], []);
+		Check(File.ReadAllBytes(list).AsSpan().StartsWith(mark) && p.IsOn("Loose"), "and when a mod is switched");
+		p.SetMods([], ["Loose"]);
+		Check(p.UnlistMod("Loose") && !p.States().ContainsKey("Loose"), "(the line taken out again)");
+		Check(File.ReadAllBytes(list).SequenceEqual(before), "the mod list is byte for byte as it was");
+		Check(Profile.KeepAdded(before, new Dictionary<string, char>(), ["New One"]).AsSpan().StartsWith(mark), "a saved list put back with a line kept for a mod keeps its mark too");
 	}
 
 	// his checklist 454: a finished run's old outputs are packed, its folder gone; undoing the run puts each output and the lists back,
@@ -1683,6 +3113,104 @@ public static class Program
 		Equal(1, RunUndo.FirstStates([new KeptFile { Path = @"X:\mods\Other\a.esp", Settled = true, Seq = 2 }], [new ParkRecord { Mod = "M", From = @"X:\mods\M", To = "y", Replaced = true, Seq = 1 }]).Count, "another mod's park says nothing about it");
 	}
 
+	// a made-up hold on a process (StartedSet): it says when it was given up
+	sealed class Hold : IDisposable
+	{
+		public bool GivenUp { get; private set; }
+
+		public void Dispose() => GivenUp = true;
+	}
+
+	// Two looks at once - the watch's beat and a Stop's (CodeRabbit on pull request #35). A look reads which numbers are held
+	// open as it begins and counts on that to its end. A second look on another thread that found the parent ended gave its
+	// hold up under the first: from then on the number could change hands while the first still read every child under it as
+	// the run's own. Looks take turns: the second begins only when the first is done, and no hold is given up under a look.
+	static void T_ALookKeepsWhatItHoldsUntilItIsDone()
+	{
+		var t = new DateTime(2026, 11, 15, 8, 0, 0, DateTimeKind.Utc);
+		var world = new System.Collections.Concurrent.ConcurrentDictionary<int, DateTime?>();
+		world[10] = t;
+		var holds = new System.Collections.Concurrent.ConcurrentBag<Hold>();
+		var set = new StartedSet(p => world.GetValueOrDefault(p), (_, _) => {
+			var hold = new Hold();
+			holds.Add(hold);
+			return hold;
+		});
+		set.Add(10);
+		// the second look has come to the point where it waits for its turn / has begun its own work (its list was asked for)
+		using var secondAtItsTurn = new ManualResetEventSlim();
+		using var secondBegan = new ManualResetEventSlim();
+		var cameToItsTurn = false;
+		var beganUnderTheFirst = false;
+		var givenUpUnderTheFirst = false;
+		Task? second = null;
+		var lists = 0;
+		IReadOnlyCollection<(int Pid, int Parent)>? FirstLooksList()
+		{
+			if (++lists == 1) {
+				// The first look has read "10 is held". Now the parent ends and a second look starts on another thread: let in,
+				// it would find the parent ended, look for its children one last time and give its hold up - under the first.
+				// That the second one has COME to its turn is told by the set itself (a look that had merely not started yet
+				// would prove nothing); from there, only the wait for its turn can keep it from asking for its list
+				world.TryRemove(10, out _);
+				set.AboutToWaitForItsTurn = secondAtItsTurn.Set;
+				second = Task.Run(() => set.Sweep(() => {
+					secondBegan.Set();
+					return [];
+				}, () => t.AddSeconds(20)));
+				cameToItsTurn = secondAtItsTurn.Wait(TimeSpan.FromSeconds(10));
+				beganUnderTheFirst = secondBegan.Wait(TimeSpan.FromMilliseconds(300));
+				givenUpUnderTheFirst = holds.Any(h => h.GivenUp);
+			}
+			return [];
+		}
+		set.Sweep(FirstLooksList, () => t.AddSeconds(10));
+		set.AboutToWaitForItsTurn = null;
+		Check(cameToItsTurn, "(the second look had come to its turn while the first was out)");
+		Check(!beganUnderTheFirst, "a second look that has come to its turn does not begin while the first is out");
+		Check(!givenUpUnderTheFirst, "so no hold the first look counts on is given up under it");
+		Check(second != null && second.Wait(TimeSpan.FromSeconds(10)), "the second look runs once the first is done");
+		Check(holds.Count == 1 && holds.All(h => h.GivenUp) && set.Held == 0, "the ended parent's hold is given up in the end, by the look that retired it");
+		// ... and the run's end waits for a look that is out before it gives every hold up
+		var late = new StartedSet(p => world.GetValueOrDefault(p), (_, _) => new Hold());
+		world[30] = t;
+		late.Add(30);
+		using var lookIsOut = new ManualResetEventSlim();
+		using var letItEnd = new ManualResetEventSlim();
+		using var releaseAtItsTurn = new ManualResetEventSlim();
+		var look = Task.Run(() => late.Sweep(() => {
+			lookIsOut.Set();
+			letItEnd.Wait(TimeSpan.FromSeconds(10));
+			return [];
+		}, () => t.AddSeconds(10)));
+		Check(lookIsOut.Wait(TimeSpan.FromSeconds(10)), "(a look is out)");
+		late.AboutToWaitForItsTurn = releaseAtItsTurn.Set;
+		var release = Task.Run(late.Release);
+		Check(releaseAtItsTurn.Wait(TimeSpan.FromSeconds(10)), "(the giving up of the holds has come to its turn while that look is out)");
+		Check(!release.Wait(TimeSpan.FromMilliseconds(300)) && late.Held == 1, "the holds are not given up while that look is out");
+		letItEnd.Set();
+		Check(look.Wait(TimeSpan.FromSeconds(10)) && release.Wait(TimeSpan.FromSeconds(10)) && late.Held == 0, "they are once it is done");
+		// ... and once they are given up nothing takes a new one: a look that comes late (the watch's last beat, when its
+		// thread was slow to end) or a process put on record after it - nothing would ever give such a hold up (CodeRabbit
+		// on pull request #35). What is on record can still be asked
+		var taken = new System.Collections.Concurrent.ConcurrentBag<Hold>();
+		var over = new StartedSet(p => world.GetValueOrDefault(p), (_, _) => {
+			var hold = new Hold();
+			taken.Add(hold);
+			return hold;
+		});
+		world[50] = t;
+		over.Add(50);
+		over.Release();
+		Check(taken.Count == 1 && taken.All(h => h.GivenUp) && over.Released, "(every hold given up)");
+		world[51] = t.AddSeconds(1);
+		over.Sweep(() => [(51, 50)], () => t.AddSeconds(10));
+		world[52] = t.AddSeconds(2);
+		over.Add(52);
+		Check(taken.Count == 1 && over.Held == 0, "after that, neither a late look nor a process put on record takes a hold");
+		Check(over.Contains(50) && over.Contains(52) && over.Owned().Contains(51) && over.LiveAt().ContainsKey(52), "and what is on record can still be asked");
+	}
+
 	// what the run's processes start themselves stays the run's own after the one that started it has ended
 	static void T_AChildOfWhatTheRunStartedIsTheRunsToo()
 	{
@@ -1690,21 +3218,144 @@ public static class Program
 		var starts = new Dictionary<int, DateTime?> { [10] = t, [11] = t.AddSeconds(5), [12] = t.AddSeconds(6), [13] = t.AddSeconds(-60), [14] = t.AddSeconds(7) };
 		DateTime? StartOf(int a_pid) => starts.GetValueOrDefault(a_pid);
 		var launcher = new Dictionary<int, DateTime> { [10] = t };
+		// a parent that is held open: its number is certainly its own for good
+		static DateTime Held(int a_pid) => DateTime.MaxValue;
 		// 11 the launcher's child, 12 that one's child, 13 older than the launcher under the same parent number, 14 somebody else's
 		var listed = t.AddMinutes(5);
-		var kids = StartedSet.Children(launcher, [(10, 1), (11, 10), (12, 11), (13, 10), (14, 99)], StartOf, listed);
+		var kids = StartedSet.Children(launcher, [(10, 1), (11, 10), (12, 11), (13, 10), (14, 99)], StartOf, listed, Held);
 		Equal("11,12", string.Join(",", kids.Keys.Order()), "a child and its child are the run's; one older than its \"parent\" and a stranger are not");
 		// the launcher has ended and nothing has its number
 		starts.Remove(10);
-		Equal("11,12", string.Join(",", StartedSet.Children(launcher, [(11, 10), (12, 11)], StartOf, listed).Keys.Order()), "found all the same once the launcher has ended");
+		Equal("11,12", string.Join(",", StartedSet.Children(launcher, [(11, 10), (12, 11)], StartOf, listed, Held).Keys.Order()), "found all the same once the launcher has ended");
+		// The launcher was NOT held open: its number may have been another program's since it was last seen alive, and a holder
+		// that has ended again leaves nothing to tell it by. Only a child that had started by then is certainly its own
+		Equal("11,12", string.Join(",", StartedSet.Children(launcher, [(11, 10), (12, 11)], StartOf, listed, _ => t.AddSeconds(5)).Keys.Order()),
+			"a child that had started while the launcher was last seen alive is its own, and that child's child with it");
+		Equal("", string.Join(",", StartedSet.Children(launcher, [(11, 10), (12, 11)], StartOf, listed, _ => t.AddSeconds(4)).Keys.Order()),
+			"one that started after that is taken for nobody's: the number may have changed hands in between");
 		// the launcher's number is another program's by now: what that one started is never the run's
 		starts[10] = t.AddSeconds(30);
 		starts[15] = t.AddSeconds(40);
-		Equal("11", string.Join(",", StartedSet.Children(launcher, [(10, 1), (11, 10), (15, 10)], StartOf, listed).Keys.Order()), "a child started after the number changed hands is the new owner's");
+		Equal("11", string.Join(",", StartedSet.Children(launcher, [(10, 1), (11, 10), (15, 10)], StartOf, listed, Held).Keys.Order()), "a child started after the number changed hands is the new owner's");
 		// a child's own number changed hands after the list was taken: the row named the child that has ended, not the newcomer
 		starts.Remove(10);
 		starts[11] = listed.AddSeconds(2);
-		Equal("", string.Join(",", StartedSet.Children(launcher, [(11, 10)], StartOf, listed).Keys.Order()), "a process that started after the list was taken is nobody's child by that list");
+		Equal("", string.Join(",", StartedSet.Children(launcher, [(11, 10)], StartOf, listed, Held).Keys.Order()), "a process that started after the list was taken is nobody's child by that list");
+		starts[11] = listed;
+		Equal("", string.Join(",", StartedSet.Children(launcher, [(11, 10)], StartOf, listed, Held).Keys.Order()), "nor one that started at the very reading of the clock: only before it is certain");
+
+		// A number that changes hands between the list and the clock. The look reads its clock BEFORE each list, so a
+		// newcomer that took an ended child's number right after the list never passes for that child - at the first list
+		// and at the second one (made when a parent has ended) alike.
+		var world = new Dictionary<int, DateTime?> { [10] = t, [13] = t.AddSeconds(1) };
+		// what is on record is held open (in these made-up worlds: a marker that counts when it is given up)
+		var holds = new List<Hold>();
+		Hold Keep(int a_pid, DateTime a_at)
+		{
+			holds.Add(new Hold());
+			return holds[^1];
+		}
+		var set = new StartedSet(p => world.GetValueOrDefault(p), Keep);
+		set.Add(10);
+		var tick = 0;
+		DateTime Clock() => t.AddSeconds(10 + ++tick);
+		var lists = 0;
+		IReadOnlyCollection<(int Pid, int Parent)>? List()
+		{
+			if (++lists == 1) {
+				// the first list names child 11 and child 13; right after it 11 ends and a stranger gets its number - and the
+				// launcher ends too, so a second list is made
+				world[11] = Clock();
+				world.Remove(10);
+				return [(10, 1), (11, 10), (13, 10)];
+			}
+			// the second list names child 12 (and the stranger under 11 with its own parent); right after it 12 ends and
+			// another stranger gets its number
+			world[12] = Clock();
+			return [(11, 99), (12, 10), (13, 10)];
+		}
+		set.Sweep(List, Clock);
+		Equal(2, lists, "a parent that has ended is looked for once more, in a list read fresh");
+		Equal("13", string.Join(",", set.Owned().Order()), "a number that changed hands right after a list was taken is nobody's child; the child that had started before the clock was read is the run's");
+		// Windows would not give its list: nothing is learned from that look, and nothing forgotten
+		set.Sweep(() => null, Clock);
+		Equal("13", string.Join(",", set.Owned().Order()), "a look Windows would not answer changes nothing");
+		// The clock has ticks: both readings of one look can fall in the tick a child started in. That child is not taken
+		// at that look - and its ended parent is NOT retired over it, so the next look, with a later reading, finds it.
+		var tickWorld = new Dictionary<int, DateTime?> { [20] = t, [21] = t.AddSeconds(30) };
+		var tickSet = new StartedSet(p => tickWorld.GetValueOrDefault(p), Keep);
+		tickSet.Add(20);
+		tickWorld.Remove(20);
+		var sameTick = t.AddSeconds(30);
+		tickSet.Sweep(() => [(21, 20)], () => sameTick);
+		Equal("", string.Join(",", tickSet.Owned().Order()), "a child that started in the very tick of the reading is not taken yet");
+		Equal(1, tickSet.Held, "and its ended parent is still held open for it");
+		tickSet.Sweep(() => [(21, 20)], () => sameTick.AddSeconds(3));
+		Equal("21", string.Join(",", tickSet.Owned().Order()), "its parent was kept for it: the next look, a tick later, puts it on record");
+		Equal(1, tickSet.Held, "the parent's hold is given up once its children were looked for the last time; the child is held in its place");
+		tickWorld.Remove(21);
+		tickSet.Sweep(() => [], () => sameTick.AddSeconds(6));
+		Equal(0, tickSet.Held, "and the child's when it has ended too: nothing is held for a record that is done");
+		Check(holds.Count > 0 && holds.Count(h => !h.GivenUp) == set.Held, "every hold that is no longer on record was given up");
+		set.Release();
+		Check(set.Held == 0 && holds.All(h => h.GivenUp), "and the rest when the run is over");
+
+		// The number that changes hands twice between two looks (CodeRabbit on pull request #35): parent 30 starts child 31 in
+		// the very tick of a look and ends, so it is kept for the next look; before that look a stranger gets the number 30,
+		// starts 32 and ends. Nothing is left of the stranger - only 32, with "30" as its parent.
+		void TwiceBetweenLooks(StartedSet a_set, Dictionary<int, DateTime?> a_world)
+		{
+			a_set.Add(30);
+			a_set.Sweep(() => [(30, 1)], () => t.AddSeconds(28));
+			a_world[31] = t.AddSeconds(30);
+			a_world.Remove(30);
+			a_set.Sweep(() => [(31, 30)], () => t.AddSeconds(30));
+			a_world[32] = t.AddSeconds(32);
+			a_set.Sweep(() => [(31, 30), (32, 30)], () => t.AddSeconds(35));
+		}
+		// not held open (its hold could not be taken): a child that started after it was last seen alive is nobody's - the
+		// stranger's 32 is never the run's, and 31 is given up with it rather than guessed at
+		var loose = new Dictionary<int, DateTime?> { [30] = t };
+		var looseSet = new StartedSet(p => loose.GetValueOrDefault(p), (_, _) => null);
+		TwiceBetweenLooks(looseSet, loose);
+		Equal("", string.Join(",", looseSet.Owned().Order()), "a number that may have changed hands since its process was last seen alive brings no child onto the record");
+		// seen alive at a look whose own tick its child started in: that child was not taken then, and is certainly its own
+		// at the next look, held or not (it had started by the time its parent was last seen alive)
+		var late = new Dictionary<int, DateTime?> { [40] = t, [41] = t.AddSeconds(10) };
+		var lateSet = new StartedSet(p => late.GetValueOrDefault(p), (_, _) => null);
+		lateSet.Add(40);
+		lateSet.Sweep(() => [(40, 1), (41, 40)], () => t.AddSeconds(10));
+		Equal("40", string.Join(",", lateSet.Owned().Order()), "(at the look whose tick the child started in, only the parent itself is on record)");
+		late.Remove(40);
+		lateSet.Sweep(() => [(41, 40)], () => t.AddSeconds(13));
+		Equal("41", string.Join(",", lateSet.Owned().Order()), "a child that had started by the time its parent was last seen alive is the run's, hold or no hold");
+		// held open: Windows gives the number 30 to nobody else, so the stranger cannot have had it - and the child that
+		// started in the tick of the look is found at the next one, as before
+		var tight = new Dictionary<int, DateTime?> { [30] = t };
+		var tightSet = new StartedSet(p => tight.GetValueOrDefault(p), Keep);
+		tightSet.Add(30);
+		tightSet.Sweep(() => [(30, 1)], () => t.AddSeconds(28));
+		tight[31] = t.AddSeconds(30);
+		tight.Remove(30);
+		tightSet.Sweep(() => [(31, 30)], () => t.AddSeconds(30));
+		tightSet.Sweep(() => [(31, 30)], () => t.AddSeconds(35));
+		Equal("31", string.Join(",", tightSet.Owned().Order()), "held open, the ended parent's late child is still found");
+		// for real: a process held open keeps its number after it has ended, and reads as gone all the same
+		using (var held = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "PING.EXE"), "-n 30 127.0.0.1") { UseShellExecute = false, CreateNoWindow = true })!) {
+			using var endHeld = new StandIn(held);
+			var heldAt = Procs.StartTime(held.Id) ?? throw new InvalidOperationException("the stand-in's start time could not be read");
+			Check(Procs.Pin(held.Id, heldAt.AddSeconds(-90)) == null, "a process that started at another time is not the one to hold");
+			using var pin = Procs.Pin(held.Id, heldAt);
+			Check(pin != null, "the very process is held open");
+			held.Kill();
+			Check(held.WaitForExit(10000), "the held process has ended");
+			Check(Procs.StartTime(held.Id) == null && !Procs.Alive(held.Id) && Procs.Image(held.Id) == "", "ended and still held, it reads as gone - never as a program that still runs");
+			Check(!Procs.Snapshot().Any(r => r.Pid == held.Id), "and Windows lists nobody under its number while it is held");
+		}
+		Check(Procs.StartClock() <= DateTime.UtcNow.AddSeconds(1) && Procs.StartClock() > DateTime.UtcNow.AddMinutes(-1), "the clock process starts are stamped with is the PC's own");
+		using (var self = Process.GetCurrentProcess()) {
+			Check(self.StartTime.ToUniversalTime() < Procs.StartClock(), "and a process that runs started before a reading of it");
+		}
 
 		// for real: a launcher starts its program and ends (ping stands in for the program)
 		using var f = new FakeMo2();
@@ -1736,6 +3387,28 @@ public static class Program
 		var began = Procs.StartTime(bystander.Id) ?? throw new InvalidOperationException("the stand-in's start time could not be read");
 		Check(!Procs.KillTree(bystander.Id, began.AddSeconds(-90)) && !bystander.HasExited, "a process that has the number of one on record but started at another time is never ended as that one");
 		Check(Procs.KillTree(bystander.Id, began) && bystander.WaitForExit(5000), "the very process on record is");
+
+		// ... and ended ALONE: what it started keeps running (the game ended over a box it cannot have answered takes nothing
+		// under it with it that the run has no record of - CodeRabbit on pull request #35)
+		using var parent = Process.Start(new ProcessStartInfo("cmd.exe", "/d /c \"ping -n 30 127.0.0.1 >nul\"") { UseShellExecute = false, CreateNoWindow = true })!;
+		using var endParent = new StandIn(parent);
+		var parentBegan = Procs.StartTime(parent.Id) ?? throw new InvalidOperationException("the stand-in's start time could not be read");
+		var child = 0;
+		for (var i = 0; i < 100 && child == 0; ++i) {
+			child = Procs.Tree(parent.Id).FirstOrDefault(p => p != parent.Id && Procs.Image(p).Equals("PING.EXE", StringComparison.OrdinalIgnoreCase));
+			if (child == 0) {
+				Thread.Sleep(50);
+			}
+		}
+		Check(child != 0, "(the stand-in started its child)");
+		var childBegan = Procs.StartTime(child) ?? throw new InvalidOperationException("the child's start time could not be read");
+		try {
+			Check(!Procs.KillOnly(parent.Id, parentBegan.AddSeconds(-90)) && !parent.HasExited, "ended alone: never under a number that is another process's by now");
+			Check(Procs.KillOnly(parent.Id, parentBegan) && parent.WaitForExit(5000), "the very process on record is ended");
+			Check(Procs.StartTime(child) == childBegan, "and what it started is still running");
+		} finally {
+			Procs.KillTree(child, childBegan);
+		}
 	}
 
 	// what a run's backup holds is never written over: not by a put-back that is tried again, not by a second failed step
@@ -1816,8 +3489,27 @@ public static class Program
 			} catch (Mo2BusyException e) {
 				Check(e.Message.Contains("Faster Archives", StringComparison.Ordinal), "the reason is named: " + e.Message);
 			}
+			// ... nor when Windows would not list the running programs: that is no answer, least of all "no repack runs"
+			var blind = new Mo2Control(mo2, "Test", RunLog.Null) { RunningProbe = () => true, ForeignProbe = () => [], RepackProbe = () => null };
+			try {
+				blind.Close();
+				Check(false, "Mod Organizer was closed on a process list Windows would not give");
+			} catch (Mo2BusyException e) {
+				Check(e.Message.Contains("would not list the running programs", StringComparison.Ordinal), "the reason is named: " + e.Message);
+			}
+			var real = new Mo2Control(mo2, "Test", RunLog.Null);
+			Check(real.Repackers() != null, "the look for a repack, read off Windows, is an answer");
+			Procs.FailLooks = 1;
+			Check(real.Repackers() == null, "a look that failed is told apart from \"none runs\"");
+			Check(real.Repackers() != null, "and read again once Windows answers");
+			Procs.FailLooks = 1;
+			_ = real.ForeignChildren(false);
+			Check(real.ForeignBlind, "the look for the player's own programs under Mod Organizer says when Windows would not answer it");
+			_ = real.ForeignChildren(false);
+			Check(!real.ForeignBlind, "and when it did");
 		} finally {
 			Mo2Control.BusyWait = busyWait;
+			Procs.FailLooks = 0;
 		}
 	}
 
@@ -1837,6 +3529,20 @@ public static class Program
 			}
 		}
 		Check(got.Count == 50 && got[0].EndsWith("line 0", StringComparison.Ordinal) && got[49].EndsWith("line 49", StringComparison.Ordinal), $"every line reaches the command line, in order, before the run's end returns ({got.Count})");
+		// whatever the reader of the live copy throws stays on its thread - out of memory too: left to leave it, it would end
+		// the whole program before the profile is put back (this test would not get past the next lines)
+		var reached = 0;
+		using (var log = new RunLog(Path.Combine(f.Data, "echo log 3"))) {
+			log.EchoTo(_ => {
+				Interlocked.Increment(ref reached);
+				throw new OutOfMemoryException("no memory for the live copy");
+			});
+			for (var i = 0; i < 20; ++i) {
+				log.Say("line " + i);
+			}
+		}
+		Check(reached >= 1, "the live copy was handed a line");
+		Equal(20, File.ReadAllLines(Path.Combine(f.Data, "echo log 3", "log.txt")).Length, "the run's own log has every line, and the program lives on");
 		var wait = RunLog.EchoWait;
 		RunLog.EchoWait = TimeSpan.FromMilliseconds(300);
 		using var stuck = new ManualResetEventSlim(false);
@@ -2395,6 +4101,54 @@ public static class Program
 		Check(seen.Contains("by its window", StringComparison.Ordinal), "the run used the learned settings: " + seen);
 		Equal("{\"a\": 3}", File.ReadAllText(settings), "the player's own settings are back after the run");
 		Equal(l.Files.Count, 2, "(learned set)");
+	}
+
+	// his word of 2026-11-21: each patcher set up by hand before a setup's first run, and again whenever wanted - the box
+	// lists the setup's tools that have a window of their own, and shows by itself once, before the first run only
+	static void T_TheToolsOfASetupAreOfferedBeforeItsFirstRun()
+	{
+		using var f = new FakeMo2();
+		var setup = f.WriteSetup(("xlodgen", new JsonObject { ["executable"] = "xLODGen", ["output_mod"] = "Output A" }),
+			("synthesis", new JsonObject { ["output_mod"] = "Output B" }),
+			("texgen", new JsonObject { ["executable"] = "TexGen", ["output_mod"] = "Output A" }),
+			("xlodgen", new JsonObject { ["executable"] = "xLODGen", ["output_mod"] = "Output A" }));
+		// one more with a window of its own, switched off
+		var root = (JsonObject)setup.Root.DeepClone();
+		((JsonArray)root["steps"]!).Add(new JsonObject { ["step"] = "dyndolod", ["on"] = false, ["settings"] = new JsonObject { ["executable"] = "DynDOLOD" } });
+		setup = Setup.FromJson(root, f.SetupFile);
+		var tools = ToolSettings.ToSetUp(setup);
+		Equal("xlodgen, texgen", string.Join(", ", tools.Select(t => t.Step)),
+			"the switched-on steps with a window of their own, in the setup's order, each once (not the command-line one, not the switched-off one)");
+		Equal(StepCatalog.Name("texgen"), tools[1].Name, "each under its tool's name");
+		Check(tools.All(t => t.Learned == null), "none set up yet");
+		var kept = Path.Combine(f.Root, "TexGen settings.ini");
+		File.WriteAllText(kept, "a=1");
+		ToolSettings.Keep(setup, "texgen", "TexGen", [kept]);
+		tools = ToolSettings.ToSetUp(setup);
+		Check(tools[0].Learned == null && tools[1].Learned is { Files.Count: 1 }, "a tool set up since is listed with what is kept of it, the other still without");
+
+		// the box shows by itself once: before a first run, with something to set up, and not after the player went on from it
+		Check(ToolSettings.OfferFirst(false, false, 2), "a setup that never ran and has tools to set up: offered");
+		Check(!ToolSettings.OfferFirst(true, false, 2), "a setup that has run: not offered again");
+		Check(!ToolSettings.OfferFirst(false, true, 2), "the player went on from the box before: not offered again");
+		Check(!ToolSettings.OfferFirst(false, false, 0), "no tool with a window of its own: no box");
+		Equal("tools.offered.my lumina", ToolRunner.App.MainViewModel.ToolsOfferedKey(@"C:\Setups\My Lumina.json"), "kept per setup, by its file's name");
+
+		// what a row of the box says
+		Check(ToolRunner.App.ToolsDialog.StateOf(null).StartsWith("not set up yet", StringComparison.Ordinal), "a tool not set up says so: " + ToolRunner.App.ToolsDialog.StateOf(null));
+		Check(ToolRunner.App.ToolsDialog.StateOf(tools[1].Learned).StartsWith("set up ", StringComparison.Ordinal), "one set up says when: " + ToolRunner.App.ToolsDialog.StateOf(tools[1].Learned));
+		Check(ToolRunner.App.ToolsDialog.AfterItsWindow("TexGen", tools[1].Learned, null).Contains("1 settings file(s) kept", StringComparison.Ordinal), "after its window: what was kept");
+		// a tool closed with nothing changed is no fault: it is left as it is (the words are Learn's own, and the catalog's)
+		var nothing = $"TexGen {ToolSettings.SavedNothing} - change a setting (or change one and back), save, close it, and learn again";
+		Check(ToolRunner.App.ToolsDialog.AfterItsWindow("TexGen", null, nothing).StartsWith("left as it is", StringComparison.Ordinal), "a window closed with nothing saved leaves the tool as it is");
+		Check(RunnerErrors.Find(nothing) != null, "and those words are still in the catalog");
+		Equal("not set up: Mod Organizer has no executable called \"TexGen\"", ToolRunner.App.ToolsDialog.AfterItsWindow("TexGen", null, "Mod Organizer has no executable called \"TexGen\""),
+			"any other reason is said as it is");
+		// the mod a tool's window was started from, when it could not be switched off again: named on the tool's row, where the
+		// player looks (the box shows no log) - CodeRabbit on pull request #35
+		Equal("", ToolRunner.App.ToolsDialog.StillOn(null), "nothing is added when the mod went off again, or there was none");
+		var left = ToolRunner.App.ToolsDialog.StillOn("TexGen in a mod");
+		Check(left.Contains("\"TexGen in a mod\"", StringComparison.Ordinal) && left.Contains("untick it in Mod Organizer", StringComparison.Ordinal), "a mod left switched on is named, with what to do: " + left);
 	}
 
 	sealed class CrashForTest : Exception;
@@ -3448,12 +5202,20 @@ public static class Program
 		Equal("Close", string.Join(",", Uia.BoxNames([("Cancel", "Close")], "Abbrechen")), "a lone Close under Cancel's id acknowledges");
 		Equal("Cancel", string.Join(",", Uia.BoxNames([("Cancel", "Cancel")], "")), "a lone Cancel is a Cancel");
 		Equal("Cancel", string.Join(",", Uia.BoxNames([("Cancel", "abbrechen")], "Abbrechen")), "in Windows' own language too");
-		Equal("Yes,No", string.Join(",", Uia.BoxNames([("Yes", "Ja"), ("No", "Nein")], "Abbrechen")), "two buttons: each by what it is");
+		// Windows' own words for its buttons on a German Windows
+		static string German(string a_standard) => a_standard switch { "Yes" => "Ja", "No" => "Nein", "Cancel" => "Abbrechen", "Close" => "Schliessen", "OK" => "OK", _ => "" };
+		Equal("Yes,No", string.Join(",", Uia.BoxNames([("Yes", "Ja"), ("No", "Nein")], "Abbrechen", null, German)), "two buttons: each by what it is, in Windows' own words");
 		Equal("OK,Cancel", string.Join(",", Uia.BoxNames([("OK", "OK"), ("Cancel", "Abbrechen")], "Abbrechen")), "a Cancel beside an OK keeps its name");
 		Equal("Repack now", string.Join(",", Uia.BoxNames([(null, "Repack now")], "")), "a button of the program's own by its words");
 		Equal("Cancel", string.Join(",", Uia.BoxNames([(null, "Abbrechen")], "Abbrechen")), "a lone Cancel by its words alone, whatever its id");
 		Equal("OK", string.Join(",", Uia.BoxNames([("OK", "OK")], "Abbrechen")), "a lone OK under its own id");
-		Equal("Close", string.Join(",", Uia.BoxNames([("Close", "Schliessen")], "Abbrechen")), "a lone Close stays a notice's button");
+		Equal("Close", string.Join(",", Uia.BoxNames([("Close", "Schliessen")], "Abbrechen", null, German)), "a lone Close stays a notice's button");
+		// A program's own buttons under the ids of standard ones keep their own words (TexGen's last question, as a real run met it: read
+		// by the ids alone it was a question with a No, and the run stopped on a TexGen that had finished)
+		Equal("Exit TexGen,Zip and Exit,Check log,Restart", string.Join(",", Uia.BoxNames([("OK", "Exit TexGen"), ("Cancel", "Zip and Exit"), ("Yes", "Check log"), ("No", "Restart")], "Cancel", null, German)),
+			"a program's own words under standard ids are never a Yes, a No or an OK");
+		Equal("Zip and Exit", string.Join(",", Uia.BoxNames([("OK", "Zip and Exit")], "Cancel")), "nor is a lone button of its own an OK to acknowledge");
+		Equal("Ja,Nein", string.Join(",", Uia.BoxNames([("Yes", "Ja"), ("No", "Nein")], "Cancel")), "words Windows does not use here stay the program's own");
 	}
 
 	// a mod's box that promises a second one (perks being reset) keeps the settle going; an ordinary notice does not
@@ -5494,6 +7256,157 @@ public static class Program
 		Equal(0, ToolRunner.App.SettingsPanel.StepsWith(steps, " ", -1).Count, "no word, no steps");
 	}
 
+	// his list of 2026-11-16: a step dragged to any place, a check that also looks for updates, windows that keep their size
+	static void T_TheWindowListOfNovember()
+	{
+		// where a dragged row lands: its place in the list afterwards (taking it out first moves the rows after it up by one)
+		Equal(0, ToolRunner.App.MainWindow.DropPlace(3, 0, false), "on the first row's upper half: it becomes the first");
+		Equal(1, ToolRunner.App.MainWindow.DropPlace(3, 0, true), "on its lower half: the second");
+		Equal(3, ToolRunner.App.MainWindow.DropPlace(1, 3, true), "from above, under the last of four rows: the last");
+		Equal(2, ToolRunner.App.MainWindow.DropPlace(1, 3, false), "from above, on a row's upper half: right before that row");
+		Equal(1, ToolRunner.App.MainWindow.DropPlace(1, 1, true), "on its own lower half: it stays");
+		Equal(1, ToolRunner.App.MainWindow.DropPlace(1, 1, false), "on its own upper half: it stays");
+		Equal(1, ToolRunner.App.MainWindow.DropPlace(1, 0, true), "right under the row above it: it stays");
+		Equal(1, ToolRunner.App.MainWindow.DropPlace(1, 2, false), "right above the row below it: it stays");
+
+		// what the check says about the tools' versions
+		var newer = new ToolUpdates.Result("synthesis", "Synthesis", "0.35", "0.36", true, "https://example.invalid/synthesis", null);
+		var same = new ToolUpdates.Result("dyndolod", "TexGen / DynDOLOD", "3.0", "3.0", false, "https://example.invalid/dyndolod", null, 2);
+		var unasked = new ToolUpdates.Result("pandora", "Pandora", "?", "", false, "https://example.invalid/pandora", "could not ask its page: offline");
+		var lines = ToolRunner.App.MainViewModel.UpdateLines([newer, same]);
+		Check(lines.Count == 1 && lines[0].Contains("Synthesis 0.36 is out (you have 0.35)", StringComparison.Ordinal) && lines[0].Contains("by hand", StringComparison.Ordinal),
+			"a newer tool is one line with both versions and how it is installed: " + string.Join(" | ", lines));
+		Equal("Updates: every tool is up to date.", string.Join(" | ", ToolRunner.App.MainViewModel.UpdateLines([same])), "nothing newer: one line for all");
+		Check(string.Join(" | ", ToolRunner.App.MainViewModel.UpdateLines([same, unasked])).Contains("1 tool(s) could not be checked", StringComparison.Ordinal), "a tool that could not be asked is never counted as up to date");
+		Equal(0, ToolRunner.App.MainViewModel.UpdateLines([]).Count, "a setup with no tool to ask: nothing said");
+
+		// a remembered size is held to what the screen has room for now
+		Equal(900.0, ToolRunner.App.UiState.Fit(900, 780, 420, 1920), "a kept size that fits is used");
+		Equal(780.0, ToolRunner.App.UiState.Fit(null, 780, 420, 1920), "none kept: the usual one");
+		Equal(1280.0, ToolRunner.App.UiState.Fit(2400, 780, 420, 1280), "kept on a bigger screen: held to this one");
+		Equal(420.0, ToolRunner.App.UiState.Fit(100, 780, 420, 1920), "never under the least it needs");
+		Equal(300.0, ToolRunner.App.UiState.Fit(100, 780, 420, 300), "unless the screen itself is smaller");
+		// a window's least size is held to the screen too: a least height the screen does not have won over the height given
+		Equal(300.0, ToolRunner.App.UiState.Least(380, 300), "a least size above the screen's room is the room");
+		Equal(380.0, ToolRunner.App.UiState.Least(380, 1040), "and stays what it is where there is room");
+
+		// what was asked or opened for one setup is no other setup's: the check's findings, and the settings window's Save
+		Check(ToolRunner.App.MainViewModel.StillShown(@"C:\Setups\A.json", @"c:\setups\a.JSON"), "the same setup's file, however it is spelled, is still the one shown");
+		Check(!ToolRunner.App.MainViewModel.StillShown(@"C:\Setups\A.json", @"C:\Setups\B.json") && !ToolRunner.App.MainViewModel.StillShown(@"C:\Setups\A.json", null),
+			"another setup picked, or none: what was asked for the first is not shown under it");
+		var picked = Setup.FromJson(new JsonObject(), @"C:\Setups\B.json");
+		Equal(null, ToolRunner.App.SettingsPanel.NotThisSetup(@"c:\setups\b.json", "B", picked), "settings opened for the setup that is picked are saved to it");
+		var why = ToolRunner.App.SettingsPanel.NotThisSetup(@"C:\Setups\A.json", "Lumina", picked) ?? "";
+		Check(why.StartsWith("Not saved", StringComparison.Ordinal) && why.Contains("\"Lumina\"", StringComparison.Ordinal) && why.Contains($"\"{picked.Name}\"", StringComparison.Ordinal),
+			"settings opened for one setup are not saved while another is picked - both are named: " + why);
+		Check((ToolRunner.App.SettingsPanel.NotThisSetup(@"C:\Setups\A.json", "Lumina", null) ?? "").Contains("no setup", StringComparison.Ordinal), "nor while none is picked");
+
+		// The window's own sizes: kept at once, written a moment later and never on the window's thread - and whatever is kept
+		// is in the file once the program asks for it as it closes, the newest of each
+		using var f = new FakeMo2();
+		var kept = Path.Combine(f.Root, "window.json");
+		ToolRunner.App.UiState.FileForTests = kept;
+		try {
+			ToolRunner.App.UiState.Set("test.width", 640);
+			ToolRunner.App.UiState.Set("test.height", 480);
+			Equal(640.0, ToolRunner.App.UiState.Number("test.width") ?? 0, "a size is kept the moment it is set");
+			ToolRunner.App.UiState.Save();
+			var first = JsonNode.Parse(File.ReadAllText(kept))!;
+			Check(first["test.width"]?.GetValue<double>() == 640 && first["test.height"]?.GetValue<double>() == 480, "both sizes are in the file once it is written: " + first.ToJsonString());
+			ToolRunner.App.UiState.Set("test.width", 800);
+			ToolRunner.App.UiState.Save();
+			Equal(800.0, JsonNode.Parse(File.ReadAllText(kept))!["test.width"]!.GetValue<double>(), "a later size replaces the earlier one in the file");
+			var stamp = File.GetLastWriteTimeUtc(kept);
+			ToolRunner.App.UiState.Save();
+			Equal(stamp, File.GetLastWriteTimeUtc(kept), "with nothing new kept, nothing is written");
+			// a write the disk refuses (here: a folder stands where the file goes) is not counted as written: the next write
+			// takes it along (CodeRabbit on pull request #35)
+			File.Delete(kept);
+			Directory.CreateDirectory(kept);
+			ToolRunner.App.UiState.Set("test.width", 900);
+			ToolRunner.App.UiState.Save();
+			Check(ToolRunner.App.UiState.Unsaved, "a write that failed leaves what is kept still to be written");
+			Directory.Delete(kept, true);
+			ToolRunner.App.UiState.Save();
+			Check(!ToolRunner.App.UiState.Unsaved && JsonNode.Parse(File.ReadAllText(kept))!["test.width"]!.GetValue<double>() == 900, "and the next write puts it in the file");
+			// The closing window's last write is made on a worker: tried, and tried once more when the disk refused. After it
+			// the program's end leaves the file alone - its own write would be made on the window's thread (CodeRabbit on
+			// pull request #35)
+			Check(!ToolRunner.App.UiState.WrittenAtClose, "(no window has made its last write yet)");
+			File.Delete(kept);
+			Directory.CreateDirectory(kept);
+			ToolRunner.App.UiState.Set("test.width", 1000);
+			ToolRunner.App.UiState.SaveAtClose();
+			Check(ToolRunner.App.UiState.Unsaved && ToolRunner.App.UiState.WrittenAtClose, "a last write the disk refused twice leaves it unsaved, and the program's end is told that the window has done its part");
+			Directory.Delete(kept, true);
+			ToolRunner.App.UiState.FileForTests = kept;
+			Check(!ToolRunner.App.UiState.WrittenAtClose, "(a new start begins without it)");
+			ToolRunner.App.UiState.Set("test.width", 1100);
+			ToolRunner.App.UiState.SaveAtClose();
+			Check(!ToolRunner.App.UiState.Unsaved && ToolRunner.App.UiState.WrittenAtClose && JsonNode.Parse(File.ReadAllText(kept))!["test.width"]!.GetValue<double>() == 1100,
+				"a last write that goes through is in the file");
+		} finally {
+			ToolRunner.App.UiState.FileForTests = null;
+		}
+	}
+
+	// A setup's file is written with the file as it stood copied aside first - disk work alone, which the window does away
+	// from its own thread (CodeRabbit on pull request #35). A write that cannot be made says why and changes nothing
+	static void T_ASetupIsWrittenWithACopyOfHowItStood()
+	{
+		using var f = new FakeMo2();
+		var file = Path.Combine(f.Root, "Setups", "My Setup.json");
+		var copies = Path.Combine(f.Root, "Setup backups");
+		Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+		Equal<string?>(null, Setup.WriteKeepingACopy(file, "first", copies), "a new setup is written");
+		Check(File.ReadAllText(file) == "first" && Directory.GetFiles(copies).Length == 0, "with nothing to copy aside yet");
+		Equal<string?>(null, Setup.WriteKeepingACopy(file, "second", copies), "written again");
+		var kept = Directory.GetFiles(copies);
+		Check(File.ReadAllText(file) == "second" && kept.Length == 1 && File.ReadAllText(kept[0]) == "first" && Path.GetFileName(kept[0]).StartsWith("My Setup 20", StringComparison.Ordinal),
+			"the file as it stood is kept under the setup's name and the time");
+		// two more saves, as fast as they come (most often inside one second): each keeps the file as it stood before it -
+		// a copy is never written over by the next one
+		Equal<string?>(null, Setup.WriteKeepingACopy(file, "second b", copies), "written again at once");
+		Equal<string?>(null, Setup.WriteKeepingACopy(file, "second c", copies), "and once more");
+		Equal("first,second,second b", string.Join(",", Directory.GetFiles(copies).Select(File.ReadAllText).Order(StringComparer.Ordinal)), "every save's copy is there");
+		// only the newest copies of that setup stay; another setup's copies are not its to tidy
+		for (var i = 0; i < Setup.CopiesKept + 5; ++i) {
+			File.WriteAllText(Path.Combine(copies, $"My Setup 2026-01-{1 + i:00} 10-00-00.json"), "old");
+		}
+		File.WriteAllText(Path.Combine(copies, "Other Setup 2026-01-01 10-00-00.json"), "theirs");
+		Equal<string?>(null, Setup.WriteKeepingACopy(file, "third", copies), "written once more");
+		Equal(Setup.CopiesKept, Directory.GetFiles(copies, "My Setup *.json").Length, "the newest copies of this setup are kept, the older ones tidied away");
+		Check(File.Exists(Path.Combine(copies, "Other Setup 2026-01-01 10-00-00.json")), "another setup's copies stay");
+		// a write that cannot be made says why, and the setup's file is as it was
+		Check(Setup.WriteKeepingACopy(Path.Combine(file, "inside a file.json"), "x", copies) is { Length: > 0 }, "a setup that cannot be written says why");
+		Equal("third", File.ReadAllText(file), "and nothing else is changed");
+		// More saves within ONE second than copies are kept: once the tidy has taken that second's oldest away, the next
+		// copy is numbered past the highest still there, never into the freed name - under it, it read as the oldest and was
+		// the next one tidied away, and the version just replaced had no copy at all
+		var burst = Path.Combine(f.Root, "Burst backups");
+		var oneSecond = new DateTime(2026, 3, 4, 5, 6, 7, DateTimeKind.Local);
+		File.WriteAllText(file, "v0");
+		for (var i = 1; i <= Setup.CopiesKept + 2; ++i) {
+			Equal<string?>(null, Setup.WriteKeepingACopy(file, $"v{i}", burst, oneSecond), $"(save {i} within that second)");
+		}
+		var keptNow = Directory.GetFiles(burst).Select(File.ReadAllText).ToHashSet(StringComparer.Ordinal);
+		Equal(Setup.CopiesKept, keptNow.Count, "the newest copies of that second are kept");
+		Check(keptNow.Contains($"v{Setup.CopiesKept + 1}") && keptNow.Contains($"v{Setup.CopiesKept}") && !keptNow.Contains("v0") && !keptNow.Contains("v1"),
+			"the version each save replaced has its copy, the last one too; the oldest two went: " + string.Join(",", keptNow.Order(StringComparer.Ordinal)));
+		// The PC's clock set back: every copy there reads newer than the one this save makes. That one still stays - the
+		// version a save replaced always has its copy - with the newest of the others (CodeRabbit on pull request #35)
+		var back = Path.Combine(f.Root, "Clock backups");
+		Directory.CreateDirectory(back);
+		for (var i = 0; i < Setup.CopiesKept; ++i) {
+			File.WriteAllText(Path.Combine(back, $"My Setup 2027-01-{1 + i:00} 10-00-00.json"), "later");
+		}
+		File.WriteAllText(file, "before the clock went back");
+		Equal<string?>(null, Setup.WriteKeepingACopy(file, "after", back, new DateTime(2026, 6, 1, 12, 0, 0, DateTimeKind.Local)), "written with the clock set back");
+		var backNow = Directory.GetFiles(back, "My Setup *.json");
+		Equal(Setup.CopiesKept, backNow.Length, "as many copies are kept as ever");
+		Check(backNow.Any(p => File.ReadAllText(p) == "before the clock went back"), "and the copy of the version this save replaced is one of them");
+	}
+
 	// a tool that never appeared keeps Mod Organizer's whole log since the request: every line after the place the request was made,
 	// the whole log when it was started again meanwhile, the last lines only when there are many
 	static void T_AFailedStartKeepsMo2sWholeLog()
@@ -5829,6 +7742,14 @@ public static class Program
 		Equal<string?>(null, Uia.StandardName("0"), "nor this");
 		Equal<string?>(null, Uia.StandardName("mainWindow.closeButton"), "a Qt name is no id");
 		Equal<string?>(null, Uia.StandardName(""), "no id at all");
+		// the id names a standard button only when the button's words are Windows' own for it, here or in English
+		static string Spanish(string a_standard) => a_standard switch { "Yes" => "Sí", "No" => "No", "OK" => "Aceptar", _ => "" };
+		Equal("No", Uia.StandardName("CommandButton_7", "&No", Spanish), "its English word, the access mark left out");
+		Equal("Yes", Uia.StandardName("6", "Sí", Spanish), "Windows' own word for it");
+		Equal<string?>(null, Uia.StandardName("CommandButton_7", "Restart", Spanish), "a program's own button under No's id is no No");
+		Equal<string?>(null, Uia.StandardName("1", "Zip and Exit", Spanish), "nor one under OK's id an OK");
+		Equal<string?>(null, Uia.StandardName("6", "Ja", Spanish), "a word of another language than Windows' is the program's own");
+		Equal<string?>(null, Uia.StandardName("9", "OK", Spanish), "no standard id, whatever it reads");
 		Equal("1|0", string.Join("|", Uia.ReadingOrder([(100.0, 50.0), (10.0, 50.0)])), "a row is read left to right");
 		Equal("0|1", string.Join("|", Uia.ReadingOrder([(10.0, 50.0), (10.0, 90.0)])), "a column top to bottom");
 		Check(!Mo2Control.SpeaksOther("en", "de-DE") && !Mo2Control.SpeaksOther("", "en-US"), "English by its setting, or by Windows when it has none");
@@ -6576,7 +8497,9 @@ public static class Program
 			Throws<OperationCanceledException>(() => Mo2Control.WaitForClear(() => true, stop.Token, stop.Token), "the caller's own token still throws");
 
 			// a put-back's close (no token of its own) under a pressed Stop: Root Builder is not waited for
+			// (its log is let go however this block ends: left open after a check that failed, it held the test's folder)
 			var ctx = StepContext(f, "landscapefixer");
+			using var ctxLog = ctx.Log;
 			var looks = 0;
 			var control = new Mo2Control(ctx.Mo2, "Test", ctx.Log) { RunningProbe = () => ++looks < 2, ForeignProbe = () => [], RootBuilderProbe = () => true, StopAsked = stop.Token };
 			t.Restart();
@@ -6587,6 +8510,7 @@ public static class Program
 			// a Stop already asked for: no switch is written and nothing starts
 			var before = f.Text("modlist.txt");
 			var cancelled = StepContext(f, "landscapefixer", a_cancel: stop.Token);
+			using var cancelledLog = cancelled.Log;
 			Throws<OperationCanceledException>(() => new Toggle(cancelled, [], ["Base Mod"], "a test", stop.Token).Dispose(), "a switch under a pressed Stop");
 			Equal(before, f.Text("modlist.txt"), "the mod list was not touched");
 			var started = 0;
@@ -6628,13 +8552,42 @@ public static class Program
 			watched.WatchForOthers();
 			var changed = new RunContext { Setup = ctx.Setup, Mo2 = mo2, Profile = watched, Control = new Mo2Control(mo2, "Test", RunLog.Null) { RunningProbe = () => false },
 				Log = ctx.Log, Journal = ctx.Journal, Cancel = CancellationToken.None, BackupFolder = ctx.BackupFolder };
+			var countedBefore = ctx.Journal.FilesChanged;
 			var second = new Toggle(changed, [], ["Base Mod"], "a test");
 			comesUp = true;
 			second.Dispose();
 			Check(f.Text("modlist.txt").Contains("-Replaced", StringComparison.Ordinal) && f.Text("modlist.txt").Contains("+Base Mod", StringComparison.Ordinal),
 				"what the player changed in the Mod Organizer that came up is kept, and the step's own switch is back: " + f.Text("modlist.txt").Replace("\r\n", " "));
-			ctx.Log.Dispose();
-			cancelled.Log.Dispose();
+			// the step's own switch is taken back and counts for nothing; the mod the player switched stands otherwise than
+			// before the step, so the game finds other files than its list names (CodeRabbit on pull request #35)
+			Equal(countedBefore + 1, ctx.Journal.FilesChanged, "what the player switched during the step counts as a change to the game's files");
+			// the same switch, still standing at the next step, was counted: it is not counted at every step again
+			var third = new Toggle(changed, [], ["Base Mod"], "a test");
+			third.Dispose();
+			Equal(countedBefore + 1, ctx.Journal.FilesChanged, "a switch of theirs that was counted is not counted a second time at the next step");
+			// A step that starts the game with a new list of its files and switches no mod itself; the player switches one
+			// while it runs. The finished step calls that list current (the count goes to nothing) - and the player's switch
+			// is counted after that, not wiped with it: the list is older than what they switched
+			changed.FreshList = true;
+			var fourth = new Toggle(changed, [], [], "a game step");
+			File.WriteAllText(listFile, File.ReadAllText(listFile).Replace("+Master Mod", "-Master Mod", StringComparison.Ordinal));
+			fourth.Dispose();
+			Check(f.Text("modlist.txt").Contains("-Master Mod", StringComparison.Ordinal), "(what they switched is kept)");
+			Crdw.StepEnded(changed, true, false);
+			Equal(1, ctx.Journal.FilesChanged, "a mod the player switched after the game made its list leaves that list old: counted once, after the step called it current");
+			// The player takes that switch back, and no step's own switching ends before the next game start: the look
+			// right before the start knows it as taken back (the game makes its list with the mod on). The same switch made
+			// again after that start counts again - against the state the list was made from (CodeRabbit on pull request #35)
+			File.WriteAllText(listFile, File.ReadAllText(listFile).Replace("-Master Mod", "+Master Mod", StringComparison.Ordinal));
+			Crdw.Apply(changed);
+			Equal(2, ctx.Journal.FilesChanged, "a switch taken back before a game start is seen right before that start");
+			changed.FreshList = true;
+			Crdw.StepEnded(changed, true, false);
+			Equal(0, ctx.Journal.FilesChanged, "(the game made its list with that mod on: the list is current)");
+			File.WriteAllText(listFile, File.ReadAllText(listFile).Replace("+Master Mod", "-Master Mod", StringComparison.Ordinal));
+			var fifth = new Toggle(changed, [], [], "a later step");
+			fifth.Dispose();
+			Equal(1, ctx.Journal.FilesChanged, "made again after that start, the switch counts again: the game's list was made without it");
 		} finally {
 			(Mo2Control.RootBuilderWait, Mo2Control.RootBuilderLook, Mo2Control.StartingGrace, Mo2Control.ReadyQuiet) = keep;
 		}
@@ -8629,12 +10582,26 @@ public static class Program
 				run();
 			}
 		}
+		// Explorer's own dialogs that stand open on this PC right now (a Properties window, a copy in progress). Each look
+		// makes UI Automation elements for those - that is what the look is for - and .NET's client keeps a little of every
+		// element it makes (measured 2026-11-21: about 10 KB a look for one Properties window, 6 MB over this soak, where the
+		// same code kept nothing an hour earlier with no dialog open). They are the PC's state, not the program's: the
+		// path's allowance grows with them, so the test judges the same thing on every PC - and still fails when elements
+		// are made for windows that are no boxes (that keeps tens of megabytes over the soak).
+		int BoxWindows() => Native.TopWindowsOf(explorer).Count(h => Uia.BoxClass(Native.ClassName(h)) || Native.ClassName(h).StartsWith("Qt", StringComparison.Ordinal));
 		var grew = new List<string>();
 		var before = Held();
 		foreach (var (name, every, run) in parts) {
+			// counted at each look of the path that reads them, and added up: the allowance is for the dialogs that stood
+			// open when a look ran - never for one that came up after the last look, or stood there for a part of them only
+			var readsDialogs = name == "UI Automation boxes";
+			long dialogLooks = 0;
 			var p0 = Held();
 			var marks = new List<string>();
 			for (var i = 1; i <= rounds; i += every) {
+				if (readsDialogs) {
+					dialogLooks += BoxWindows();
+				}
 				run();
 				if (i % Math.Max(1, rounds / 3) == 0) {
 					var m = Held();
@@ -8643,8 +10610,11 @@ public static class Program
 			}
 			var p1 = Held();
 			Console.WriteLine($"      {name}: {rounds / every} calls, managed {p0.Managed / 1024} -> {p1.Managed / 1024} KB, handles {p0.Handles} -> {p1.Handles}  ({string.Join(", ", marks)})");
+			if (dialogLooks > 0) {
+				Console.WriteLine($"      (dialogs of Explorer's own stood open at its looks, {dialogLooks} dialog-look(s) in all: its allowance grows by 16 KB for each)");
+			}
 			// a growth is a leak when it goes on to the end: a cache fills and stops, so the last third must not grow like the first
-			if (p1.Managed - p0.Managed > 1024 * 1024 || p1.Handles - p0.Handles > 20) {
+			if (p1.Managed - p0.Managed > 1024 * 1024 + 16L * 1024 * dialogLooks || p1.Handles - p0.Handles > 20) {
 				grew.Add($"{name} grew {(p1.Managed - p0.Managed) / 1024} KB and {p1.Handles - p0.Handles} handles");
 			}
 		}

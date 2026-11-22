@@ -24,7 +24,7 @@ public static class ToolProof
 
 	public static Issue? Newer(string a_step, string a_yours) =>
 		a_yours != "" && ProvenWith.TryGetValue(a_step, out var proven) && ToolUpdates.IsNewer(proven, a_yours) ?
-			new Issue(a_step, false, $"yours is {a_yours}, newer than the {proven} this version was proven with: if it stops at a window, Settings > Test my tools shows what changed") : null;
+			new Issue(a_step, false, $"yours is {a_yours}, newer than the {proven} this version was proven with: if it stops at a window, Settings > Tools > Test my tools shows what changed") : null;
 
 	// how long a tool may take to reach the window a run presses (the LOD tools read the whole load order first)
 	static readonly TimeSpan LongLoad = TimeSpan.FromMinutes(20), ShortLoad = TimeSpan.FromMinutes(3);
@@ -111,11 +111,16 @@ public static class ToolProof
 			} while (missing != "" && look.Elapsed < TimeSpan.FromSeconds(30));
 			return new Result(a_look.Step, missing == "", missing == "" ? $"{tool}: what a run presses is there" : $"{tool}: {missing}");
 		} finally {
-			StepKit.CloseTool(control, image, a_log);
 			try {
-				control.Close(null, CancellationToken.None);
-			} catch (Exception e) when (e is Mo2BusyException or IOException or UnauthorizedAccessException or InvalidOperationException) {
-				a_log.Warn($"Mod Organizer could not be closed ({e.Message})");
+				StepKit.CloseTool(control, image, a_log);
+				try {
+					control.Close(null, CancellationToken.None);
+				} catch (Exception e) when (e is Mo2BusyException or IOException or UnauthorizedAccessException or InvalidOperationException) {
+					a_log.Warn($"Mod Organizer could not be closed ({e.Message})");
+				}
+			} finally {
+				// the tool and the Mod Organizer this test started are no longer held open
+				control.ReleaseOwned();
 			}
 		}
 	}

@@ -130,6 +130,22 @@ public static partial class ToolSettings
 	// a step whose tool has a window of its own (it runs through MO2's Executables list)
 	public static bool CanLearn(StepSettings a_s) => a_s.Str("executable") != null;
 
+	// what Learn says of a tool whose window closed with nothing new written
+	public const string SavedNothing = "saved no settings file while it was open";
+
+	// a tool of the setup the player can set up in its own window: its step, its name, what is kept of it so far
+	public sealed record ToSet(string Step, string Name, Learned? Learned);
+
+	// Every switched-on step of the setup whose tool has a window of its own, in the setup's order (his word of 2026-11-21: each
+	// patcher set up by hand before the first run, and again whenever wanted). A step listed twice is one tool. One that
+	// uses its old output for now is switched on all the same: its tool is set up here for the run that builds it again
+	public static List<ToSet> ToSetUp(Setup a_setup) =>
+		[.. a_setup.OnSteps.Where(s => CanLearn(new StepSettings(s.Settings))).DistinctBy(s => s.Key).Select(s => new ToSet(s.Key, StepCatalog.Name(s.Key), Load(a_setup, s.Key)))];
+
+	// The box that lists them shows by itself once, before a setup's first run: not for a setup that has run, not again once
+	// the player went on from it, and not with nothing to set up.
+	public static bool OfferFirst(bool a_everRan, bool a_offered, int a_tools) => !a_everRan && !a_offered && a_tools > 0;
+
 	// every settings-like file under these folders (4 levels), with its time and size
 	public static Dictionary<string, (DateTime Time, long Size)> Scan(IEnumerable<string> a_roots, IReadOnlyCollection<string> a_skip)
 	{
@@ -265,7 +281,9 @@ public static partial class ToolSettings
 		}
 	}
 
-	public static Learned Learn(Setup a_setup, string a_step, RunLog a_log, CancellationToken a_ct)
+	// a_stillOn: told the mod that was switched on for the tool's window when it could not be switched off again (the log
+	// says so too - a window that shows no log says it with this)
+	public static Learned Learn(Setup a_setup, string a_step, RunLog a_log, CancellationToken a_ct, Action<string>? a_stillOn = null)
 	{
 		using var hold = Runner.HoldIfFree() ?? throw new StepFailedException("a run is going - learn a tool's settings when it is done");
 		var s = new StepSettings(a_setup.StepSettings(a_step) ?? throw new StepFailedException("this setup has no such step"));
@@ -309,22 +327,30 @@ public static partial class ToolSettings
 				Thread.Sleep(1000);
 			}
 		} finally {
-			if (toolMod != null) {
-				// even after a Stop; one that cannot go back is named, never left unsaid
-				try {
-					control.Close(null, CancellationToken.None);
-					profile.SetMods([], [toolMod], a_log);
-					Files.Delete(SwitchRecord(a_setup));
-				} catch (Exception e) when (e is Mo2BusyException or IOException or UnauthorizedAccessException or InvalidOperationException or KeyNotFoundException) {
-					a_log.Warn($"the mod \"{toolMod}\" could not be switched off again ({e.Message}) - untick it in Mod Organizer");
+			try {
+				if (toolMod != null) {
+					// even after a Stop; one that cannot go back is named, never left unsaid
+					try {
+						control.Close(null, CancellationToken.None);
+						profile.SetMods([], [toolMod], a_log);
+						Files.Delete(SwitchRecord(a_setup));
+					} catch (Exception e) when (e is Mo2BusyException or StepFailedException or IOException or UnauthorizedAccessException or InvalidOperationException or KeyNotFoundException) {
+						// (StepFailedException: Mod Organizer would not close - a box of its own nobody answered. Left to
+						// fly, it hid that the mod is still on, and the settings the tool had just saved were not kept)
+						a_log.Warn($"the mod \"{toolMod}\" could not be switched off again ({e.Message}) - untick it in Mod Organizer");
+						a_stillOn?.Invoke(toolMod);
+					}
 				}
+			} finally {
+				// the tool and the Mod Organizer it was opened through are no longer held open
+				control.ReleaseOwned();
 			}
 		}
 		var changed = Changed(before, Scan(roots, skip)).Where(f => !f.EndsWith("_Debug_log.txt", StringComparison.OrdinalIgnoreCase)).ToList();
 		// a tool that keeps its window's values in no file (TexGen, DynDOLOD) still writes them into its debug log when it runs
 		var values = VarsLog(exe, a_step) is { } vl && File.GetLastWriteTimeUtc(vl) >= opened ? ReadVars(vl) : [];
 		if (changed.Count == 0 && values.Count == 0) {
-			throw new StepFailedException($"{tool} saved no settings file while it was open - change a setting (or change one and back), save, close it, and learn again");
+			throw new StepFailedException($"{tool} {SavedNothing} - change a setting (or change one and back), save, close it, and learn again");
 		}
 		var l = Keep(a_setup, a_step, tool, changed, values);
 		a_log.Say($"{tool}: {changed.Count} settings file(s) kept{(values.Count > 0 ? $", {values.Count} values of its window read off its log" : "")}");

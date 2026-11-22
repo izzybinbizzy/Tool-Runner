@@ -18,17 +18,29 @@ public static class QueueDialog
 	public static Picked? Run(Window a_owner, List<string> a_setups)
 	{
 		Picked? picked = null;
+		// its least size too is held to the screen: a least height above the screen's would win over the height it is given
+		var room = SystemParameters.WorkArea;
 		var w = new Window {
-			Owner = a_owner, Title = "Queue of setups", Width = 560, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner,
-			Background = Brushes2.Get("Panel"), Foreground = Brushes2.Get("Text"), ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false,
+			Owner = a_owner, Title = "Queue of setups", Width = UiState.Fit(UiState.Number("queue.width"), 560, 420, room.Width),
+			Height = UiState.Fit(UiState.Number("queue.height"), 560, 380, room.Height), MinWidth = UiState.Least(420, room.Width), MinHeight = UiState.Least(380, room.Height),
+			WindowStartupLocation = WindowStartupLocation.CenterOwner,
+			Background = Brushes2.Get("Panel"), Foreground = Brushes2.Get("Text"), ResizeMode = ResizeMode.CanResize, ShowInTaskbar = false,
 		};
-		var stack = new StackPanel { Margin = new Thickness(22) };
+		w.Closed += (_, _) => {
+			UiState.Set("queue.width", w.ActualWidth);
+			UiState.Set("queue.height", w.ActualHeight);
+		};
+		// the list takes whatever room the box is given; what stands under it is docked to the bottom
+		var dock = new DockPanel { Margin = new Thickness(22) };
+		var stack = new StackPanel();
+		DockPanel.SetDock(stack, Dock.Top);
+		dock.Children.Add(stack);
 		stack.Children.Add(new TextBlock { Text = "QUEUE OF SETUPS", Style = (Style)a_owner.FindResource("H1"), Margin = new Thickness(0, 0, 0, 6), FontSize = 18 });
 		stack.Children.Add(new TextBlock { Text = "Tick the setups to run and put them in order. Each one runs whole - its check, its tools, your profile put back - before the next starts.",
 			Style = (Style)a_owner.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 14) });
 
 		var rows = a_setups.Select(f => new Row { File = f, Box = new CheckBox { Content = Path.GetFileNameWithoutExtension(f), Foreground = Brushes2.Get("Text") } }).ToList();
-		var list = new ListBox { MinHeight = 120, MaxHeight = 320 };
+		var list = new ListBox { MinHeight = 120 };
 		// a click on a tick box is the box's own, so its row would stay unselected: the row follows the box's focus
 		foreach (var r in rows) {
 			r.Box.GotKeyboardFocus += (_, _) => list.SelectedItem = r.Box;
@@ -43,7 +55,11 @@ public static class QueueDialog
 			list.SelectedIndex = a_select;
 		}
 		Fill(rows.Count > 0 ? 0 : -1);
-		stack.Children.Add(list);
+		// from here on `stack` is the part under the list
+		stack = new StackPanel();
+		DockPanel.SetDock(stack, Dock.Bottom);
+		dock.Children.Add(stack);
+		dock.Children.Add(list);
 
 		void Move(int a_by)
 		{
@@ -85,7 +101,7 @@ public static class QueueDialog
 		bar.Children.Add(start);
 		bar.Children.Add(cancel);
 		stack.Children.Add(bar);
-		w.Content = stack;
+		w.Content = dock;
 		w.ShowDialog();
 		return picked;
 	}

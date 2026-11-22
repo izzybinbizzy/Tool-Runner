@@ -54,11 +54,12 @@ public sealed class Setup
 		(Root["placement"] as JsonArray)?.OfType<JsonArray>().Where(a => a.Count >= 2)
 			.Select(a => new Profile.PlaceRule(a[0]!.ToString(), a[1]!.ToString(), a.Count > 2 && a[2]?.ToString() == "active")).ToList() ?? [];
 
-	public sealed record StepEntry(string Key, bool On, JsonObject Settings);
+	// UseOld: the step is not run and the output it made before is used (OldOutput) - it counts only for a step that is on
+	public sealed record StepEntry(string Key, bool On, JsonObject Settings, bool UseOld = false);
 
 	public List<StepEntry> Steps =>
 		(Root["steps"] as JsonArray)?.OfType<JsonObject>().Select(o => new StepEntry(Str(o, "step") ?? "", Bool(o, "on") ?? true,
-			o["settings"] as JsonObject ?? new JsonObject())).Where(s => s.Key != "").ToList() ?? [];
+			o["settings"] as JsonObject ?? new JsonObject(), Bool(o, OldOutput.Key) ?? false)).Where(s => s.Key != "").ToList() ?? [];
 
 	// a new game (the player starts a new character after the run): there is no save of theirs to keep clean or to bring
 	// back, so the clean save and the save to play are left out of every run while it is on (dyndolod.info/Help/Clean-Save)
@@ -68,7 +69,17 @@ public sealed class Setup
 
 	public bool LeftOutForNewGame(string a_key) => NewGame && SaveSteps.Contains(a_key);
 
-	public List<StepEntry> EnabledSteps => Steps.Where(s => s.On && !LeftOutForNewGame(s.Key)).ToList();
+	// a step that is on, is not left out, and is set to use the output it made before: its tool does not run (OldOutput)
+	public bool UsesOld(StepEntry a_s) => a_s.On && a_s.UseOld && !LeftOutForNewGame(a_s.Key) && OldOutput.CanKeep(a_s.Key, new StepSettings(a_s.Settings));
+
+	// the steps that are switched on (and not left out for a new game), whether a run runs them or uses their old output
+	public List<StepEntry> OnSteps => Steps.Where(s => s.On && !LeftOutForNewGame(s.Key)).ToList();
+
+	// the steps a run runs
+	public List<StepEntry> EnabledSteps => OnSteps.Where(s => !UsesOld(s)).ToList();
+
+	// the steps a run does not run, because the output each made before is used
+	public List<StepEntry> KeptSteps => Steps.Where(UsesOld).ToList();
 
 	public const string PgLiteMod = "PGLite";
 
@@ -171,7 +182,8 @@ public sealed class Setup
 			}
 		}
 		if (Steps.Count == 0) p.Add("the setup has no steps");
-		if (EnabledSteps.Count == 0) p.Add(Steps.Any(s => s.On) ? "only the save steps are switched on, and they are left out for a new game" : "every step is switched off");
+		if (EnabledSteps.Count == 0) p.Add(KeptSteps.Count > 0 ? "every step that is switched on uses its old output - nothing would run" :
+			Steps.Any(s => s.On) ? "only the save steps are switched on, and they are left out for a new game" : "every step is switched off");
 		var dup = Steps.GroupBy(s => s.Key).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
 		if (dup.Count > 0) p.Add("a step is listed twice: " + string.Join(", ", dup));
 		// SnowFixer and AutoBlend are no longer supported: Landscape Fixer, by the same author, replaced both
@@ -245,8 +257,54 @@ public sealed class Setup
 	public void Save(string? a_file = null)
 	{
 		File = a_file ?? File;
+		Files.WriteAtomic(File, Text());
+	}
+
+	// the setup as its file holds it
+	public string Text()
+	{
 		Root["schema"] = Schema;
-		Files.WriteAtomic(File, Root.ToJsonString(WriteOptions));
+		return Root.ToJsonString(WriteOptions);
+	}
+
+	// how many copies of a setup's earlier files are kept beside the data (the newest ones)
+	public const int CopiesKept = 20;
+
+	// A setup's text written to its file, with the file as it stood copied into a_copies first (under the setup's name and
+	// the time; only the newest CopiesKept of that setup stay). Disk work alone, on text made beforehand: the window calls
+	// it away from its own thread, where a slow disk held up every click. Returns why it was not written, or null when it was
+	// a_now: the time the copy is named after (the offline tests name one; else now)
+	public static string? WriteKeepingACopy(string a_file, string a_text, string a_copies, DateTime? a_now = null)
+	{
+		try {
+			Directory.CreateDirectory(a_copies);
+			if (System.IO.File.Exists(a_file)) {
+				var name = Path.GetFileNameWithoutExtension(a_file);
+				var stamp = (a_now ?? DateTime.Now).ToString("yyyy-MM-dd HH-mm-ss", InvariantCulture);
+				// this setup's own copies: its name, the time, and for the later ones of one second a number
+				var own = new System.Text.RegularExpressions.Regex("^" + System.Text.RegularExpressions.Regex.Escape(name) + @" (\d{4}-\d\d-\d\d \d\d-\d\d-\d\d)(?: (\d{1,9}))?\.json$");
+				List<(FileInfo File, string Stamp, int Number)> Own() => [.. new DirectoryInfo(a_copies).GetFiles("*.json").Select(f => (File: f, Is: own.Match(f.Name))).Where(c => c.Is.Success)
+					.Select(c => (c.File, c.Is.Groups[1].Value, c.Is.Groups[2].Success ? int.Parse(c.Is.Groups[2].Value, InvariantCulture) : 1))];
+				// A copy is never written over: two saves within one second each keep the file as it stood before them (the
+				// later ones carry a number after the time - written over, the first save's copy was lost to the second's).
+				// The number is one above the highest of that second that is still there, never a free one below it: once the
+				// tidy below has taken the oldest of that second away, its name read as the oldest again and the copy just
+				// made under it was the next one tidied away
+				var number = Own().Where(c => c.Stamp == stamp).Select(c => c.Number).DefaultIfEmpty(0).Max() + 1;
+				var made = Path.Combine(a_copies, $"{name} {stamp}{(number == 1 ? "" : " " + number.ToString(InvariantCulture))}.json");
+				System.IO.File.Copy(a_file, made, false);
+				// The copy just made always stays, and the newest of the others with it: by their time, then by the number of
+				// those made in one second. (With the PC's clock set back, the others all read newer than it - tidied by time
+				// alone, the copy of the version this save replaces was the one that went)
+				foreach (var old in Own().Where(c => !Files.SamePath(c.File.FullName, made)).OrderByDescending(c => c.Stamp, StringComparer.Ordinal).ThenByDescending(c => c.Number).Skip(CopiesKept - 1)) {
+					old.File.Delete();
+				}
+			}
+			Files.WriteAtomic(a_file, a_text);
+			return null;
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			return e.Message;
+		}
 	}
 
 	public Setup Clone() => FromJson((JsonObject)Root.DeepClone(), File);

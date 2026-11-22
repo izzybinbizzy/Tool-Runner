@@ -65,7 +65,7 @@ public static class DryRun
 		var notes = new List<(string, string)>();
 		if (gate is { Setup: { } setup, Mo2: { } mo2, Todo.Count: > 0 }) {
 			try {
-				preview = RunPreview.Build(setup, mo2, gate.Todo);
+				preview = RunPreview.Build(setup, mo2, gate.Todo, LastOf(setup, mo2, a_req.DataDir));
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or InvalidOperationException) {
 				notes.Add(("", "what the run would change could not be worked out: " + e.Message));
 			}
@@ -75,5 +75,19 @@ public static class DryRun
 		report.Notes.AddRange(gate.Check.Where(i => !i.Blocking).Select(i => (i.Step, i.Text)));
 		report.Notes.AddRange(notes);
 		return report;
+	}
+
+	// each step's last runs, read only when the setup uses an old output (the preview then says when it was made and what
+	// changed since); null when there is nothing to date, or the records do not read - the preview stands without it
+	public static IReadOnlyList<LastRuns.Section>? LastOf(Setup a_setup, Mo2Instance a_mo2, string a_dataDir)
+	{
+		if (a_setup.KeptSteps.Count == 0) {
+			return null;
+		}
+		try {
+			return LastRuns.Build(a_setup, a_mo2, Journal.All(Runner.RunsDir(a_dataDir)), a_dataDir);
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or InvalidOperationException or System.Text.Json.JsonException) {
+			return null;
+		}
 	}
 }

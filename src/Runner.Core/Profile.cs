@@ -34,12 +34,17 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 	// the mods in modlist.txt's own order: the FIRST is the lowest in Mod Organizer's left pane, the one whose files win
 	public List<string> ModOrder() => ReadLines(ModList).Lines.Where(l => l.Length > 1 && l[0] is '+' or '-' or '*').Select(l => l[1..]).ToList();
 
-	static (List<string> Lines, string Nl) ReadLines(string a_path)
+	// How: what the file is written in, its mark included (a mod list that begins with a UTF-8 mark keeps it, one in the PC's
+	// own code page stays in it) - every write below goes back the same way, so a line taken out again leaves the file's
+	// bytes as they were before the run
+	static (List<string> Lines, string Nl, Encoding How) ReadLines(string a_path)
 	{
-		var text = Files.ReadSharedText(a_path);
+		var text = Files.DecodeText(Files.ReadShared(a_path), out var how);
 		var nl = text.Contains("\r\n") ? "\r\n" : "\n";
-		return (text.Split(nl).ToList(), nl);
+		return (text.Split(nl).ToList(), nl, how);
 	}
+
+	static void WriteLines(string a_path, List<string> a_lines, string a_nl, Encoding a_how) => Files.WriteAtomic(a_path, Files.EncodeText(string.Join(a_nl, a_lines), a_how));
 
 	// mod names as Windows sees folders: "PG patch" and "PG Patch" are one mod (the list's own spelling is kept when written)
 	public Dictionary<string, char> States()
@@ -165,7 +170,7 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 			throw new ArgumentException("asked to switch on and off at once: " + string.Join(", ", both));
 		}
 		MustBeClosed("the mod list");
-		var (lines, nl) = ReadLines(ModList);
+		var (lines, nl, how) = ReadLines(ModList);
 		var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var changed = new Dictionary<string, char>(StringComparer.OrdinalIgnoreCase);
 		for (int i = 0; i < lines.Count; ++i) {
@@ -189,7 +194,7 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 			throw new KeyNotFoundException("not in the mod list: " + string.Join(", ", missing));
 		}
 		if (changed.Count > 0) {
-			Files.WriteAtomic(ModList, string.Join(nl, lines));
+			WriteLines(ModList, lines, nl, how);
 			foreach (var n in changed.Keys.Order(StringComparer.OrdinalIgnoreCase)) {
 				a_log?.Detail($"{(en.Contains(n) ? "ON " : "OFF")} {n}");
 				Ours(n, en.Contains(n) ? '+' : '-');
@@ -209,17 +214,56 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 			Files.WriteAtomic(Path.Combine(d, "meta.ini"), $"[General]\r\nmodid=0\r\nversion=\r\ncomments={MadeBy}{Brand.Name}\r\n");
 			a_log?.Detail($"made the output mod {a_mod}");
 		}
-		if (!States().ContainsKey(a_mod)) {
-			MustBeClosed("the mod list");
-			var (lines, nl) = ReadLines(ModList);
-			var at = lines.FindIndex(l => l.Length > 1 && l[0] is '+' or '-' or '*');
-			lines.Insert(at < 0 ? lines.Count : at, "-" + a_mod);
-			Files.WriteAtomic(ModList, string.Join(nl, lines));
-			a_log?.Detail($"{a_mod} added to the mod list (unticked)");
-			Ours(a_mod, '-');
-			SaveOurs();
-		}
+		ListMod(a_mod, a_log);
 		Added.Add(a_mod);
+	}
+
+	// A mod with no line in the mod list gets one, unticked and FIRST in the file (the bottom of MO2's left pane, where MO2
+	// itself puts a mod it finds): nothing can be switched that the list does not name. Its folder is not touched, and it
+	// is not counted among the mods this run made (Added). False: the list named it already.
+	public bool ListMod(string a_mod, RunLog? a_log = null)
+	{
+		if (States().ContainsKey(a_mod)) {
+			return false;
+		}
+		MustBeClosed("the mod list");
+		var (lines, nl, how) = ReadLines(ModList);
+		// A list in the PC's own code page cannot hold every name: written there, a letter it lacks becomes "?" and the line
+		// no longer names the mod (nothing could find it again, and each try added a line). Such a name is refused, nothing written
+		if (how.GetString(how.GetBytes(a_mod)) != a_mod) {
+			throw new IOException($"the mod list is written in this PC's own code page ({how.WebName}), which cannot hold the name \"{a_mod}\" - " +
+				"rename that mod with letters it can hold, or let Mod Organizer write its mod list again (it writes UTF-8)");
+		}
+		var at = lines.FindIndex(l => l.Length > 1 && l[0] is '+' or '-' or '*');
+		lines.Insert(at < 0 ? lines.Count : at, "-" + a_mod);
+		WriteLines(ModList, lines, nl, how);
+		a_log?.Detail($"{a_mod} added to the mod list (unticked)");
+		Ours(a_mod, '-');
+		SaveOurs();
+		AfterListMod?.Invoke(a_mod);
+		return true;
+	}
+
+	// The offline tests only: told right after a mod got its line in the mod list. A test that must show what a run has on
+	// record at that very moment - a crash there is put back from that record alone - takes its copy of the run's files here
+	public static Action<string>? AfterListMod { get; set; }
+
+	// A mod's line taken out of the mod list again: the line a run had given a mod that had none (ListMod), when the run then
+	// left that mod as it was. Its folder is not touched. False: the list does not name it.
+	public bool UnlistMod(string a_mod, RunLog? a_log = null)
+	{
+		if (!States().ContainsKey(a_mod)) {
+			return false;
+		}
+		MustBeClosed("the mod list");
+		var (lines, nl, how) = ReadLines(ModList);
+		lines.RemoveAll(l => l.Length > 1 && l[0] is '+' or '-' or '*' && l[1..].Equals(a_mod, StringComparison.OrdinalIgnoreCase));
+		WriteLines(ModList, lines, nl, how);
+		Added.Remove(a_mod);
+		_ours?.Remove(a_mod);
+		SaveOurs();
+		a_log?.Detail($"{a_mod}: it had no line in the mod list before this run, and the run neither built nor used it - the line is taken out again (its folder is as it was)");
+		return true;
 	}
 
 	// an output mod this tool made that holds nothing but its meta.ini (a step that failed, was stopped or wrote nothing): its
@@ -251,10 +295,10 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 			Directory.CreateDirectory(Path.GetDirectoryName(to)!);
 			Files.MoveDirectory(d, to);
 		}
-		var (lines, nl) = ReadLines(ModList);
+		var (lines, nl, how) = ReadLines(ModList);
 		var n = lines.RemoveAll(l => l.Length > 1 && l[0] is '+' or '-' or '*' && l[1..].Equals(a_mod, StringComparison.OrdinalIgnoreCase));
 		if (n > 0) {
-			Files.WriteAtomic(ModList, string.Join(nl, lines));
+			WriteLines(ModList, lines, nl, how);
 		}
 		Added.Remove(a_mod);
 		_ours?.Remove(a_mod);
@@ -298,9 +342,10 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 	}
 
 	// a saved modlist with a line for every name in a_added it lacks (its state now; '-' when unknown), first in the file
+	// (written back the way the saved file was: its mark, its code page)
 	public static byte[] KeepAdded(byte[] a_modlist, IReadOnlyDictionary<string, char> a_states, IEnumerable<string> a_added)
 	{
-		var text = Files.DecodeText(a_modlist);
+		var text = Files.DecodeText(a_modlist, out var how);
 		var nl = text.Contains("\r\n") ? "\r\n" : "\n";
 		var lines = text.Split(nl).ToList();
 		var have = lines.Where(l => l.Length > 1 && l[0] is '+' or '-' or '*').Select(l => l[1..]).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -312,7 +357,7 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 			var flag = a_states.TryGetValue(name, out var c) && c is '+' or '-' ? c : '-';
 			lines.Insert(at, flag + name);
 		}
-		return new UTF8Encoding(false).GetBytes(string.Join(nl, lines));
+		return Files.EncodeText(string.Join(nl, lines), how);
 	}
 
 	// ---- plugins ----
@@ -506,7 +551,7 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 	// moves a neighbour
 	public List<string> ActivatePlugins(IEnumerable<string> a_mods, IReadOnlyDictionary<string, string>? a_placeAfter = null)
 	{
-		var news = a_mods.SelectMany(m => Plugins.InMod(Mo2.ModDir(m)).Select(pl => (pl, Path.Combine(Mo2.ModDir(m), pl)))).ToList();
+		var news = InPluginMasterOrder(a_mods.SelectMany(m => Plugins.InMod(Mo2.ModDir(m)).Select(pl => (pl, Path.Combine(Mo2.ModDir(m), pl)))).ToList());
 		var changed = new List<string>();
 		if (news.Count == 0) {
 			return changed;
@@ -520,6 +565,9 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 			}
 			var (lines, nl, how) = ReadPluginFile(p);
 			var before = lines.ToList();
+			// the plugin last placed after each anchor in this call: several new plugins at one anchor keep their master order,
+			// each going after the one placed there before it (each at the anchor itself put the later one first)
+			var lastAt = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 			foreach (var (pl, path) in news) {
 				var i = lines.FindIndex(l => string.Equals(Bare(l), pl, StringComparison.OrdinalIgnoreCase));
 				if (i >= 0) {
@@ -533,7 +581,9 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 				var anchor = a_placeAfter != null && a_placeAfter.TryGetValue(pl, out var an) ? an.ToLowerInvariant() : "";
 				var ai = anchor == "" ? -1 : lines.FindIndex(l => Bare(l) == anchor);
 				if (ai >= 0) {
-					pos = ai + 1;
+					var prev = lastAt.TryGetValue(anchor, out var placed) ? lines.FindIndex(l => string.Equals(Bare(l), placed, StringComparison.OrdinalIgnoreCase)) : -1;
+					pos = (prev >= 0 ? prev : ai) + 1;
+					lastAt[anchor] = pl;
 				} else if (Plugins.IsMaster(path)) {
 					paths ??= PluginPaths();
 					var last = -1;
@@ -554,6 +604,37 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 			}
 		}
 		return changed.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+	}
+
+	// The plugins in the order they are given, except that each one another of them names as a master comes before it -
+	// plugin by plugin, whichever mods hold them: two mods can each hold a plugin the other's plugin needs, and taken mod by
+	// mod one of the two orders always put a plugin before its master. A plugin whose masters cannot be read, plugins that
+	// need each other, and plugins that need none of the others keep the order they were given in
+	public static List<(string Plugin, string Path)> InPluginMasterOrder(List<(string Plugin, string Path)> a_plugins)
+	{
+		if (a_plugins.Count < 2) {
+			return a_plugins;
+		}
+		var names = a_plugins.Select(p => p.Plugin).ToHashSet(StringComparer.OrdinalIgnoreCase);
+		var needs = a_plugins.Select(p => {
+			try {
+				return Plugins.Masters(p.Path).Where(m => names.Contains(m) && !m.Equals(p.Plugin, StringComparison.OrdinalIgnoreCase)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+				return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			}
+		}).ToList();
+		var left = Enumerable.Range(0, a_plugins.Count).ToList();
+		var placed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var order = new List<(string, string)>(a_plugins.Count);
+		while (left.Count > 0) {
+			// the first one given whose masters among them are all placed; none such (they need each other): the first one left
+			var free = left.FirstOrDefault(i => needs[i].All(placed.Contains), -1);
+			var next = free >= 0 ? free : left[0];
+			order.Add(a_plugins[next]);
+			placed.Add(a_plugins[next].Plugin);
+			left.Remove(next);
+		}
+		return order;
 	}
 
 	// plugins.txt's ticks as the file is now (name -> ticked)
@@ -633,18 +714,23 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 	}
 
 	// mods that must also go off because a ticked plugin of theirs masters a plugin of a mod going off (repeats until stable)
-	public Dictionary<string, string> Dependents(IEnumerable<string> a_turningOff)
+	public Dictionary<string, string> Dependents(IEnumerable<string> a_turningOff) => DependentsOf(Mo2, States(), a_turningOff);
+
+	// the same for mod states read earlier (the look at an old output that is used works out what a run would switch off)
+	public static Dictionary<string, string> DependentsOf(Mo2Instance a_mo2, IReadOnlyDictionary<string, char> a_states, IEnumerable<string> a_turningOff)
 	{
-		var st = States();
+		var st = a_states;
 		var off = new HashSet<string>(a_turningOff, StringComparer.OrdinalIgnoreCase);
 		// every ticked mod that ships each plugin, and the game's own Data folder: a master goes missing only when every copy of
 		// it goes off (a second mod's copy, or the game's, keeps it there)
 		var providers = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-		var data = Path.Combine(Mo2.GameDir, "Data");
+		var data = Path.Combine(a_mo2.GameDir, "Data");
 		var inData = Directory.Exists(data) ? Directory.GetFiles(data).Select(Path.GetFileName).OfType<string>().Where(Plugins.IsPlugin).ToHashSet(StringComparer.OrdinalIgnoreCase) : [];
+		// (Mod Organizer's overwrite folder is in the game's Data whatever is ticked: a copy there keeps a master there too)
+		inData.UnionWith(Plugins.InMod(a_mo2.OverwriteDir));
 		// each mod folder listed once (the loop below repeats until nothing more goes off)
 		var inModCache = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-		List<string> InMod(string a_mod) => inModCache.TryGetValue(a_mod, out var l) ? l : inModCache[a_mod] = Plugins.InMod(Mo2.ModDir(a_mod));
+		List<string> InMod(string a_mod) => inModCache.TryGetValue(a_mod, out var l) ? l : inModCache[a_mod] = Plugins.InMod(a_mo2.ModDir(a_mod));
 		foreach (var (name, flag) in st) {
 			if (flag == '+') {
 				foreach (var p in InMod(name)) {
@@ -668,7 +754,7 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 					continue;
 				}
 				foreach (var p in InMod(name)) {
-					var full = Path.Combine(Mo2.ModDir(name), p);
+					var full = Path.Combine(a_mo2.ModDir(name), p);
 					if (!mastersCache.TryGetValue(full, out var ms)) {
 						try {
 							ms = Plugins.Masters(full);

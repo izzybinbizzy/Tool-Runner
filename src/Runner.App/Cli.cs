@@ -354,7 +354,7 @@ public static class Cli
 		var setup = Setup.Load(SetupArg(a_args));
 		var mo2 = Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance);
 		var usual = Engine.UsualTimes(setup.File);
-		var p = RunPreview.Build(setup, mo2, Runner.Plan(setup, Opt(a_args, "--only"), Opt(a_args, "--from"), Opt(a_args, "--until")));
+		var p = RunPreview.Build(setup, mo2, Runner.Plan(setup, Opt(a_args, "--only"), Opt(a_args, "--from"), Opt(a_args, "--until")), DryRun.LastOf(setup, mo2, AppPaths.Data));
 		if (Json(a_args)) {
 			return Print(Reports.Preview(setup, p, k => usual.TryGetValue(k, out var t) ? t : null), 0);
 		}

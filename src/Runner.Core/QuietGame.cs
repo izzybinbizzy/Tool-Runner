@@ -118,11 +118,6 @@ public static class QuietGame
 				a_ctx.Log.Warn($"{Path.GetFileName(path)} could not be changed for the small window ({e.Message}) - the game may start as it usually does");
 			}
 		}
-		// the save to play runs after the run's record says finished: a crash there must still leave something to put back
-		if (a_ctx.Journal.InGameAfter) {
-			a_ctx.Journal.NeedsRestore = true;
-			a_ctx.Journal.Save();
-		}
 		a_ctx.Log.Detail($"the game starts in a small, muted window ({Width} x {Height})");
 	}
 

@@ -99,6 +99,15 @@ public sealed class RunLog : IDisposable
 				// run that ends that way never puts the profile back
 				try {
 					_to(line);
+				} catch (OutOfMemoryException) {
+					// no memory left for the live copy: it ends here and gives back what it held. The run goes on without it
+					// (the log file has every line) and still reaches its put-back
+					lock (_gate) {
+						_closing = true;
+						// (nothing here may ask for memory: Clear lets the lines go and allocates nothing)
+						_lines.Clear();
+					}
+					return;
 				} catch (Exception e) when (e is not OutOfMemoryException) {
 				}
 			}

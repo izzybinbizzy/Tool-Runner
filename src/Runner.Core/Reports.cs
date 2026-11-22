@@ -54,6 +54,11 @@ public static class Reports
 				["key"] = s.Key, ["name"] = s.Name, ["output"] = s.Output, ["outputIsNew"] = s.OutputIsNew,
 				["usualSeconds"] = a_usual(s.Key) is { } t ? (double?)Math.Round(t.TotalSeconds) : null,
 			})]),
+			["usesOldOutput"] = new JsonArray([.. a_p.UsesOld.Select(u => (JsonNode?)new JsonObject {
+				["key"] = u.Step, ["name"] = u.Name, ["output"] = u.Mod, ["usable"] = u.Usable, ["made"] = u.Made is { } made ? Iso(made) : null,
+				["changesSince"] = u.ChangedSince?.Count, ["builtAgainBefore"] = List(u.BuiltAgainBefore), ["builtOnIt"] = List(u.BuiltOnIt), ["missingMaster"] = u.MissingMaster,
+				["masterOffInRun"] = u.OffInRun,
+			})]),
 			["offForTheRun"] = new JsonArray([.. a_p.OffForTheRun.Select(m => (JsonNode?)new JsonObject { ["mod"] = m.Mod, ["why"] = m.Why })]),
 			["replacedForGood"] = List(a_p.ReplacedForGood),
 			["startsTheGame"] = List(a_p.StartsTheGame),

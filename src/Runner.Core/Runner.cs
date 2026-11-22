@@ -30,6 +30,9 @@ public static class Runner
 			if (a_setup.LeftOutForNewGame(k) && a_setup.Steps.Any(s => s.Key == k && s.On)) {
 				throw new ArgumentException($"{StepCatalog.Name(k)} is left out: this setup is set to a new game (untick \"New game\" to run it)");
 			}
+			if (a_setup.KeptSteps.Any(s => s.Key == k)) {
+				throw new ArgumentException($"{StepCatalog.Name(k)} is set to use its old output in this setup, so it does not run (switch \"Use old output\" off for it to run it)");
+			}
 			if (order.All(s => s.Key != k)) {
 				throw new ArgumentException($"\"{k}\" is not a step of this setup - its steps: {string.Join(", ", order.Select(s => s.Key))}");
 			}
@@ -267,10 +270,19 @@ public static class Runner
 		// every box of every process the run starts, from its first step to its last (BoxWatch)
 		var family = new RunWindows.Family();
 		var reader = new RunWindows.Reader();
+		// (set once the run's context stands: the watch looks into the run's own game with it)
+		RunContext? watched = null;
 		using var boxes = new BoxWatch(() => {
 				// the same beat keeps the record of what the run's processes started themselves (StartedSet.Sweep)
 				control.Started.Sweep();
-				return reader.Boxes(family.Now(control.RunProcesses(), control.Started.Contains, control.Started.Owned()));
+				var open = reader.Boxes(family.Now(control.RunProcesses(), control.Started.Contains, control.Started.Owned()));
+				// and the game's own message boxes, which are no windows of Windows': answered or closed at this beat, whatever
+				// the step in hand is doing (a notice once stood on the game's main menu for the five minutes a step spent
+				// watching for a shader compile) - one that is left to the player joins the boxes the watch names
+				if (watched is { } inRun && InGame.WatchGameBox(inRun) is { } left) {
+					open.Add(left);
+				}
+				return open;
 			}, log,
 			a_open => {
 				journal.Box = a_open;
@@ -285,16 +297,19 @@ public static class Runner
 				}
 			},
 			() => {
-				foreach (var pid in control.Started.Live().Where(p => Procs.Image(p).Equals(InGame.GameImage, StringComparison.OrdinalIgnoreCase))) {
+				// (each by its number AND the start time on its record: this can still be at work when the run lets its
+				// processes go, and a number that changed hands by then is never taken for the game)
+				foreach (var (pid, at) in control.Started.LiveAt().Where(p => Procs.Image(p.Key).Equals(InGame.GameImage, StringComparison.OrdinalIgnoreCase))) {
 					log.Warn($"ending the game (process {pid}): nobody here can answer its box");
-					Procs.KillTree(pid);
+					EndGameAlone(control, pid, at, log);
 				}
-			}) { Wait = TimeSpan.FromSeconds(Setup.Int(setup.Root, "boxWaitSeconds") ?? 60) };
+			}) { Wait = TimeSpan.FromSeconds(Setup.Int(setup.Root, "boxWaitSeconds") ?? 60), CloseUnknown = InGame.ClosesUnknown(setup) };
 		var ctx = new RunContext {
 			Setup = setup, Mo2 = mo2, Profile = profile, Control = control, Log = log, Journal = journal, Cancel = cts.Token,
 			BackupFolder = journal.BackupDir, Guide = a_guide?.Invoke(journal) ?? new FileGuide(journal, commands.TakeContinue, commands.ClearContinue),
 			Boxes = boxes,
 		};
+		watched = ctx;
 		log.Say($"Tool Runner - {setup.Name} (profile {setup.Profile}), steps: {string.Join(", ", todo.Select(s => StepCatalog.Name(s.Key)))}");
 		log.Simple($"{setup.Name} started: {todo.Count} step(s) - {string.Join(", ", todo.Select(s => StepCatalog.Name(s.Key)))}");
 		foreach (var w in check) {
@@ -362,10 +377,15 @@ public static class Runner
 			var outputs = todo.Select(s => new StepSettings(s.Settings).OutputMod).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 			var listed = profile.States();
 			journal.Added = outputs.Where(m => !listed.ContainsKey(m)).ToList();
+			// (the ones that are there as folders already and only lack their line: the player's, with whatever they hold)
+			journal.Listed = journal.Added.Where(m => Directory.Exists(mo2.ModDir(m))).ToList();
 			journal.Save();
 			foreach (var om in outputs) {
 				profile.EnsureMod(om, log);
 			}
+			// (an old output that is used and has no line in the mod list gets its line where it is switched on, at its step's
+			// place and after the run's record names it - UseOldOutput: nothing is written here that no record knows of)
+			var usedOld = OldOutput.Places(setup, todo);
 			journal.Added = [.. profile.Added];
 			snap0 = profile.Snapshot();
 			profile.OursFile = Path.Combine(journal.Folder, Profile.WatchFileName);
@@ -377,7 +397,28 @@ public static class Runner
 			var lead = keys.TakeWhile(k => k == "shaders").ToList();
 			var playsave = keys.Contains("playsave");
 			var outputsOff = false;
-			foreach (var s in todo) {
+			// Each old output that is used comes back on at its own step's place, once the outputs have gone off: before the
+			// first step of this run that stands after it (a_before), the rest after the last tool. Never while the outputs
+			// are still on - it would only be switched off again a moment later, for good
+			void UseOldDue(int a_before)
+			{
+				// the ones due at this place come on together, each one that another of them needs first: no tool works
+				// between them, so a master that the next one brings is there before the next tool reads the plugin that needs it
+				var due = OldOutput.InMasterOrder(mo2, usedOld.Where(u => u.At <= a_before).Select(u => u.Step).ToList());
+				usedOld.RemoveAll(u => u.At <= a_before);
+				if (due.Count == 0) {
+					return;
+				}
+				// the profile the run's end leaves: what the run found, with what the player switched in Mod Organizer since
+				// laid over it (the put-back keeps that: a master's mod they unticked meanwhile is off at the end)
+				var before = new Dictionary<string, char>(Profile.StatesOf(snap0), StringComparer.OrdinalIgnoreCase);
+				foreach (var (m, state) in profile.ChangedByOthers()) {
+					before[m] = state;
+				}
+				UseOldOutputs(ctx, due, todo, a_before, before);
+			}
+			for (var n = 0; n < todo.Count; ++n) {
+				var s = todo[n];
 				if (s.Key == "playsave") {
 					continue;
 				}
@@ -388,6 +429,9 @@ public static class Runner
 					}
 					OutputsOff(ctx);
 					outputsOff = true;
+				}
+				if (outputsOff) {
+					UseOldDue(n);
 				}
 				if (!RunStep(ctx, s)) {
 					return Finish(ctx, snap0, commands.Stopped ? RunState.Stopped : RunState.Failed);
@@ -401,6 +445,9 @@ public static class Runner
 					}
 					return Finish(ctx, snap0, RunState.Stopped, $"stopped after {StepCatalog.Name(s.Key)}, as asked - carry on from {next.Name}");
 				}
+			}
+			if (outputsOff) {
+				UseOldDue(todo.Count);
 			}
 			var outcome = Finish(ctx, snap0, RunState.Finished);
 			if (outcome.State != RunState.Finished) {
@@ -461,8 +508,14 @@ public static class Runner
 			afterRan = true;
 			// each one runs, whatever the one before it did and whether or not Stop is pressed: they give back what the before-run
 			// commands took. A Stop only shortens how long each is waited for
+			// the game's own list of its files as of the run's last game start: current when nothing changed since
+			var listCurrent = journal.FilesChanged == 0;
 			foreach (var cmd in setup.AfterRun) {
 				journal.Doing = "the setup's command after the run";
+				// A command of the setup may add, move or take away game files, also when it then fails, and nobody can tell
+				// from here: it counts as a change BEFORE it runs, so the note below never calls the game's list current
+				// after it (CodeRabbit on pull request #35)
+				++journal.FilesChanged;
 				journal.TrySave();
 				Chore("the command after the run", () => Hook(ctx, cmd, "after the run", CancellationToken.None, cts.Token));
 			}
@@ -478,7 +531,8 @@ public static class Runner
 			});
 			// a mod that keeps its own list of the game's files must make it again after what this run built (GameMods.cs)
 			Chore("the note for Cached Recursive Directory Walk", () => {
-				if (Crdw.AfterRun(setup, Crdw.Read(profile), journal.Built.Count > 0, playsave) is { } note) {
+				if (Crdw.AfterRun(Crdw.Read(profile), journal.Built.Count > 0 || journal.SwitchedOff || !listCurrent, journal.FilesChanged == 0, playsave,
+					    listCurrent && setup.AfterRun.Count > 0) is { } note) {
 					journal.Notes.Add(note);
 					log.Warn(note);
 					log.Simple("Note: " + note);
@@ -503,12 +557,17 @@ public static class Runner
 			// nothing was switched yet: the run stops with the profile untouched (a Stop pressed this early reads as stopped)
 			var state = commands.Stopped ? RunState.Stopped : RunState.Failed;
 			journal.State = state;
-			journal.Verdict = "stopped before anything was changed: " + (commands.Stopped ? "Stop was pressed" : Plain(e));
-			// an output mod made a moment ago is still empty: out of the mod list again (Mod Organizer is closed by now)
+			var why = commands.Stopped ? "Stop was pressed" : Plain(e);
+			journal.Verdict = "stopped before anything was changed: " + why;
+			// an output mod made a moment ago is still empty: out of the mod list again (Mod Organizer is closed by now) - and
+			// one that was there already, and only got its line, loses that line again
+			// (a line that could not be taken out is still in the list: named with the rest below, and kept on offer there)
+			_ = UnlistWhatTheRunOnlyListed(profile, journal, log);
 			var left = new List<string>();
 			foreach (var a in journal.Added.ToList()) {
 				try {
-					if (profile.TakeOutEmptyOutput(a, journal.BackupDir, log)) {
+					// (a folder that was there before the run is never moved away, empty or not: only its new line goes - above)
+					if (!WasThere(journal, a) && profile.TakeOutEmptyOutput(a, journal.BackupDir, log)) {
 						journal.Added.Remove(a);
 					} else if (profile.States().ContainsKey(a)) {
 						left.Add(a);
@@ -517,11 +576,17 @@ public static class Runner
 					left.Add(a);
 				}
 			}
+			// A line the run wrote that could not be taken out again (the mod list held by another program a moment after the
+			// run wrote it) is not "nothing changed": the put-back stays on offer - "Put my profile back" takes it out once the
+			// list is free (the record names it: Added, Listed), and nothing new starts over it meanwhile
+			if (left.Count > 0) {
+				journal.NeedsRestore = true;
+				journal.Verdict = $"stopped at the start ({why}) - the profile is back except {string.Join(", ", LinesLeftWords(left))} - press \"Put my profile back\" once the files are free";
+			}
 			journal.Ended = DateTime.Now;
 			journal.TrySave();
 			log.Error(journal.Verdict);
-			log.Simple("The run " + journal.Verdict + (left.Count == 0 ? ". Nothing in Mod Organizer was changed." :
-				". Your mods are as they were; the new, empty output mod(s) it had just added are still in the list: " + string.Join(", ", left) + "."));
+			log.Simple("The run " + journal.Verdict + (left.Count == 0 ? ". Nothing in Mod Organizer was changed." : ". Your mods are as they were."));
 			return new RunOutcome(state, journal.Verdict, journal.Folder);
 		} catch (Exception e) when (finished) {
 			// after the put-back of a finished run (the save to play's own ending, a record the disk refused): the run stays finished
@@ -537,29 +602,60 @@ public static class Runner
 			log.Error("the run stopped: " + Plain(e));
 			return Finish(ctx, snap0, commands.Stopped ? RunState.Stopped : RunState.Failed, Plain(e));
 		} finally {
-			commands.Dispose();
-			boxes.Dispose();
-			Native.KeepAwake(false);
-			// the run is over: it no longer has an owner (a run that still needs its profile put back is then offered at once)
-			journal.Pid = 0;
-			journal.FinishingUp = false;
-			journal.Doing = "";
-			journal.Box = "";
-			journal.TrySave();
-			// after a run that did not finish (or whose ending never reached them) the setup's after-run commands still run, once:
-			// they give back what the before-run commands took. No Stop can cut them short here - the run is already over
-			if (!afterRan) {
-				foreach (var cmd in setup.AfterRun) {
-					// whatever one of them throws (a command Windows cannot even start): the next one still runs, and the run's
-					// own outcome is what the caller gets
-					try {
-						Hook(ctx, cmd, "after the run", CancellationToken.None);
-					} catch (Exception e) when (e is not OutOfMemoryException) {
-						log.Warn("the command after the run did not work: " + Plain(e));
+			try {
+				commands.Dispose();
+				boxes.Dispose();
+				Native.KeepAwake(false);
+				// the run is over: it no longer has an owner (a run that still needs its profile put back is then offered at once)
+				journal.Pid = 0;
+				journal.FinishingUp = false;
+				journal.Doing = "";
+				journal.Box = "";
+				journal.TrySave();
+				// after a run that did not finish (or whose ending never reached them) the setup's after-run commands still run, once:
+				// they give back what the before-run commands took. No Stop can cut them short here - the run is already over
+				if (!afterRan) {
+					foreach (var cmd in setup.AfterRun) {
+						// whatever one of them throws (a command Windows cannot even start): the next one still runs, and the run's
+						// own outcome is what the caller gets
+						try {
+							Hook(ctx, cmd, "after the run", CancellationToken.None);
+						} catch (Exception e) when (e is not OutOfMemoryException) {
+							log.Warn("the command after the run did not work: " + Plain(e));
+						}
 					}
 				}
+				NoteChanges(mo2, a_req.DataDir, RunWho(journal), log);
+			} finally {
+				// Nothing of this run looks for its processes' children any more: the processes it held open are let go - the
+				// tools' and the game's, and the Mod Organizers it started. After everything above, which still asks whose a
+				// process is, and whatever any of it threw (an after-run command that ran out of memory left them held)
+				control.ReleaseOwned();
 			}
-			NoteChanges(mo2, a_req.DataDir, RunWho(journal), log);
+		}
+	}
+
+	// The run's own game ended because a box of it stands that nobody here can answer: the game process alone, and of what runs
+	// under it only what is on the run's record (number AND start time) as a program the run started itself - the rule a Stop
+	// keeps. Never Faster Archives' own program (the step waits on it), never what the game merely opened, and never a
+	// process under it that the run has no record of: ended with the whole tree, those went too
+	static void EndGameAlone(Mo2Control a_control, int a_pid, DateTime a_at, RunLog a_log)
+	{
+		// (what stands under it, read while it still runs: once it has ended its children no longer name it)
+		var under = Procs.Tree(a_pid).Where(p => p != a_pid).ToList();
+		if (!Procs.KillOnly(a_pid, a_at)) {
+			return;
+		}
+		var owned = a_control.Started.OwnedAt();
+		foreach (var c in under) {
+			var image = Procs.Image(c);
+			if (!owned.TryGetValue(c, out var cat) || !a_control.Started.StartedImage(image) || FasterArchives.IsTool(image) ||
+			    image.Equals("ModOrganizer.exe", StringComparison.OrdinalIgnoreCase)) {
+				continue;
+			}
+			if (Procs.KillOnly(c, cat)) {
+				a_log.Warn($"ended {image} (process {c}) with the game: started by this run");
+			}
 		}
 	}
 
@@ -577,7 +673,7 @@ public static class Runner
 		try {
 			var rows = Mo2Changes.Record(a_mo2, a_dataDir, a_who);
 			if (rows.Count > 0) {
-				a_log.Detail($"{rows.Count} change(s) in Mod Organizer {(a_who == Mo2Changes.Outside ? "made outside the runner since its last look" : "by this run")} - History > What MO2 changed");
+				a_log.Detail($"{rows.Count} change(s) in Mod Organizer {(a_who == Mo2Changes.Outside ? "made outside the runner since its last look" : "by this run")} - History > MO2 Changelog");
 			}
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) {
 			a_log.Warn("could not note what Mod Organizer changed: " + e.Message);
@@ -641,6 +737,137 @@ public static class Runner
 		}
 		a_ctx.Control.Close(null, a_ctx.Cancel);
 		a_ctx.Profile.SetMods([], off.Concat(deps.Keys), a_ctx.Log);
+		// the game now finds other files than a list made before the run names
+		if (off.Count + deps.Count > 0) {
+			++a_ctx.Journal.FilesChanged;
+			a_ctx.Journal.SwitchedOff = true;
+		}
+	}
+
+	// The steps the setup does not run because their old outputs are used, at their place in the order (a_at: before that
+	// step of a_todo; a_due: the ones due there, each that another of them needs first): the old outputs come back on - what
+	// fresh ones would do there - with every line of what that means in the run's log and one in its notes.
+	// The ones due at one place are taken as ONE. Each is looked at first; then all go on the run's record as about to be
+	// used; then all are switched on in one go; and only then is any of them marked as carried out, all in one write. A
+	// check that fails, a Stop or a crash on the way leaves none of them carried out, and the put-back leaves every one as
+	// the profile had it - never one switched on whose master another of them was still to bring.
+	// a_before: the mod states the run's end leaves (what the run found, and what the player switched since)
+	static void UseOldOutputs(RunContext a_ctx, List<Setup.StepEntry> a_due, List<Setup.StepEntry> a_todo, int a_at, Dictionary<string, char> a_before)
+	{
+		a_ctx.Cancel.ThrowIfCancellationRequested();
+		var st = a_ctx.Profile.States();
+		var mods = a_due.Select(d => new StepSettings(d.Settings).OutputMod!).ToList();
+		foreach (var s in a_due) {
+			LookAtOldOutput(a_ctx, s, a_todo, a_at, mods, a_before, st);
+		}
+		// On record before anything is switched for them, as what the run is about to do (not Done yet): a Stop or a crash
+		// in the seconds Mod Organizer takes to close finds them there, and the put-back then leaves each old output as the
+		// profile had it before the run - never switched on by a record of something that did not happen
+		// (by its step: two steps that share an output mod are two uses, and the run's summary names both)
+		var uses = new List<OldUse>();
+		var named = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		for (var i = 0; i < a_due.Count; ++i) {
+			var use = a_ctx.Journal.UsedOld.FirstOrDefault(u => u.Step == a_due[i].Key);
+			if (use == null) {
+				// (Listed: the run gives this mod its line - said once, for the first step that uses it)
+				use = new OldUse { Step = a_due[i].Key, Name = StepCatalog.Name(a_due[i].Key), Mod = mods[i], Listed = !st.ContainsKey(mods[i]) && named.Add(mods[i]) };
+				a_ctx.Journal.UsedOld.Add(use);
+			}
+			uses.Add(use);
+		}
+		a_ctx.Journal.Save();
+		// (in master order: a_due is)
+		var each = mods.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+		var unlisted = each.Where(m => !st.ContainsKey(m)).ToList();
+		var wereOff = each.Count(m => !st.TryGetValue(m, out var f) || f != '+');
+		// one wait for Mod Organizer to close, then the mod list read again: what is switched below is what the list holds now
+		a_ctx.Control.Close(null, a_ctx.Cancel);
+		// a mod the list does not name cannot be switched: it gets its line now, with the record above already written
+		foreach (var m in unlisted) {
+			a_ctx.Profile.ListMod(m, a_ctx.Log);
+		}
+		var now = a_ctx.Profile.States();
+		var off = each.Where(m => now.TryGetValue(m, out var f) && f != '+').ToList();
+		if (off.Count > 0) {
+			a_ctx.Log.Detail("old outputs switched on:");
+			a_ctx.Profile.SetMods(off, [], a_ctx.Log);
+		}
+		// Carried out only when every one of them is on now. One whose line is gone from the mod list (taken out by hand while
+		// Mod Organizer closed) is not: the run stops here, none of the group is on record as carried out, and the put-back
+		// leaves the whole group as the profile had it - the tools after this place never run without an output they need
+		var after = a_ctx.Profile.States();
+		if (each.Where(m => !after.TryGetValue(m, out var f) || f != '+').ToList() is { Count: > 0 } notOn) {
+			throw new StepFailedException($"{string.Join(", ", notOn.Select(m => $"the old output \"{m}\""))} could not be switched on: {(notOn.Count == 1 ? "its line is" : "their lines are")} no longer in the mod list " +
+				"(taken out while the run went on?) - the tools after this place would run without it");
+		}
+		// Their masters looked at again, as the profile stands after the wait for Mod Organizer to close: a master the player
+		// unticked in that wait (or while Mod Organizer stayed open) would leave the next tool a plugin with its master off. The
+		// run stops before anything of the group is ticked or carried out
+		if (a_todo.Skip(a_at).Any(s => s.Key != "playsave")) {
+			var ticked = a_ctx.Profile.ActivePlugins();
+			for (var i = 0; i < a_due.Count; ++i) {
+				if (OldOutput.MasterOffNow(a_ctx.Mo2, after, ticked, mods[i], mods) is { } needs) {
+					throw new StepFailedException($"{StepCatalog.Name(a_due[i].Key)}: its old output cannot be used in this run: {needs} - the tools after it would find that plugin with a master missing");
+				}
+			}
+		}
+		// Every plugin of each of them ticked, in master order - also of one whose mod was on already (switched on in Mod
+		// Organizer during an earlier tool, its plugin left unticked): the next tool finds each plugin it was promised
+		a_ctx.Profile.ActivatePlugins(each, a_ctx.Setup.PlaceAfter);
+		// (the setup's own plugin places)
+		ApplyAfter(a_ctx, a_ctx.Cancel);
+		// they are on: from here the put-back keeps them on, like what the run built. All marked in one change of the record,
+		// which a save on the box watch's thread never writes half of
+		a_ctx.Journal.SaveWith(() => {
+			foreach (var use in uses) {
+				use.Done = true;
+			}
+			// the game finds their files again: a list of the game's files made while they were off is old
+			a_ctx.Journal.FilesChanged += wereOff;
+			foreach (var use in uses) {
+				var note = $"{use.Name} was not run: its old output \"{use.Mod}\" is used, as this setup says. What changed in your mods since it was made is not in it.";
+				if (!a_ctx.Journal.Notes.Contains(note)) {
+					a_ctx.Journal.Notes.Add(note);
+				}
+			}
+		});
+	}
+
+	// one of them, looked at right before the group is switched on: said in the log, and refused - before anything is put
+	// on record or switched for any of the group - when it cannot be used. a_mods: the output mods of the whole group
+	static void LookAtOldOutput(RunContext a_ctx, Setup.StepEntry a_s, List<Setup.StepEntry> a_todo, int a_at, List<string> a_mods,
+		Dictionary<string, char> a_before, Dictionary<string, char> a_states)
+	{
+		var name = StepCatalog.Name(a_s.Key);
+		var mod = new StepSettings(a_s.Settings).OutputMod!;
+		a_ctx.Log.Say("");
+		a_ctx.Log.Say($"=== {name}: not run - its old output \"{mod}\" is used, as this setup says ===");
+		a_ctx.Log.Simple($"{name} is not run: its old output \"{mod}\" is used, as this setup says");
+		var st = a_states;
+		// (its masters are judged below, by what is switched on at this very moment - not worked out ahead, as the check did)
+		foreach (var l in OldOutput.LookAt(a_ctx.Setup, a_ctx.Mo2, st, a_todo, null, [a_s], false)) {
+			// The check before the run saw an output it could use. What ran since (a command of the setup, the tools before
+			// this place) may have moved it away or taken a master of it out: the tools after this place are then not run on
+			// an output that is not there, or that they would refuse - the run stops here, before anything is switched for it
+			if (!l.There) {
+				throw new StepFailedException($"{name}: it is set to use its old output, and there is none to use any more - \"{mod}\" is missing or holds nothing now (it was there when the run was checked)");
+			}
+			// (the others due at this place are on, their plugins ticked, before the next tool runs: their plugins count. Any
+			// other master counts only while its plugin is ticked)
+			if (a_todo.Skip(a_at).Any(s => s.Key != "playsave") && OldOutput.MasterOffNow(a_ctx.Mo2, st, a_ctx.Profile.ActivePlugins(), mod, a_mods) is { } needs) {
+				throw new StepFailedException($"{name}: its old output cannot be used in this run: {needs} - the tools after it would find that plugin with a master missing");
+			}
+			// ... and against the profile the run's end leaves: a master in a mod that a command of the setup switched off
+			// after the check (or that a tool of the run replaces) is not there for the game, whether or not a tool still
+			// runs - the old output would stay on with its master off, also for the save to play's game start
+			if (OldOutput.MasterGoneAfterRun(a_ctx.Setup, a_ctx.Mo2, a_before, a_todo, mod) is { } gone) {
+				throw new StepFailedException($"{name}: its old output cannot be used: {gone} - the game would not start with it");
+			}
+			// (it is off at this moment only because the run switched it off a while ago: no news for the log)
+			foreach (var line in OldOutput.Warning(l with { On = true }, a_ctx.Setup.Profile)) {
+				a_ctx.Log.Warn(line);
+			}
+		}
 	}
 
 	// the ticked mods a run switches off before its first tool, each with why (the run itself and its preview use this one list)
@@ -663,6 +890,10 @@ public static class Runner
 			foreach (var m in s.List("replaces")) {
 				Add(m, "replaced by " + name);
 			}
+		}
+		// an old output that is used goes off with the rest - no tool before its step's place reads it - and comes back on there
+		foreach (var k in a_setup.KeptSteps) {
+			Add(new StepSettings(k.Settings).OutputMod!, $"the old output of {StepCatalog.Name(k.Key)}, used again: back on at that step's place in the order");
 		}
 		foreach (var m in a_setup.LodOutputs) {
 			Add(m, "a LOD output of this setup");
@@ -821,6 +1052,8 @@ public static class Runner
 			r.Note = Plain(e);
 			r.Ended = DateTime.Now;
 			r.Activity = "";
+			Crdw.StepEnded(a_ctx, false, Crdw.Writes(a_s.Key));
+			a_ctx.AddWatchNotes();
 			a_ctx.Journal.TrySave();
 			a_ctx.Log.Error($"{StepCatalog.Name(a_s.Key)} {(stopped ? "STOPPED" : "FAILED")}: {r.Note}");
 			var why = stopped ? null : ToolErrors.Explain(a_s.Key, r.Note);
@@ -861,6 +1094,9 @@ public static class Runner
 		r.Ended = DateTime.Now;
 		r.Activity = "";
 		r.Progress = null;
+		Crdw.StepEnded(a_ctx, true, Crdw.Writes(a_s.Key));
+		// what the run's watch has to say about this step's game (a message it closed that the run does not know)
+		a_ctx.AddWatchNotes();
 		a_ctx.Journal.Save();
 		Measure(a_ctx, r);
 		a_ctx.Log.Say($"=== {StepCatalog.Name(a_s.Key)} done in {sw.Elapsed.TotalMinutes:0.0} min ===");
@@ -901,9 +1137,14 @@ public static class Runner
 	// just asked for and must still tick what was built
 	static void ApplyAfter(RunContext a_ctx, CancellationToken a_ct)
 	{
-		var st = a_ctx.Profile.States();
-		var en = a_ctx.PendingEnable.Distinct().Where(m => st.TryGetValue(m, out var f) && f != '+').ToList();
+		// What was asked is taken off the list before anything can fail (the read of the mod list just below can): a name
+		// left on it was switched on by the put-back's own pass, past its checks - an output whose files were still in the
+		// backup, or an old output whose use was never carried out. What a step built is on record as built by now, and the
+		// put-back asks for it again from that record
+		var asked = a_ctx.PendingEnable.Distinct().ToList();
 		a_ctx.PendingEnable.Clear();
+		var st = a_ctx.Profile.States();
+		var en = asked.Where(m => st.TryGetValue(m, out var f) && f != '+').ToList();
 		if (en.Count > 0 || a_ctx.Setup.Placement.Count > 0) {
 			a_ctx.Control.Close(null, a_ct);
 		}
@@ -1034,12 +1275,14 @@ public static class Runner
 			a_ctx.Log.Simple("Stopped: " + j.Verdict);
 			return new RunOutcome(j.State, j.Verdict, j.Folder);
 		}
-		if (notBack.Count > 0 || filesNotBack.Count > 0) {
-			// the run did not end cleanly, whatever its steps did: said so, never "finished" or "back as it was"
+		if (notBack.Count > 0 || filesNotBack.Count > 0 || a_ctx.LinesLeft.Count > 0) {
+			// the run did not end cleanly, whatever its steps did: said so, never "finished" or "back as it was" - also when
+			// only a line the run wrote into the mod list could not be taken out again (the put-back tries that again)
 			j.State = RunState.Failed;
+			j.NeedsRestore = true;
 			j.Ended = DateTime.Now;
-			j.Verdict = "the profile is back except " + string.Join(", ", notBack.Concat(filesNotBack.Select(Path.GetFileName)).OfType<string>()) +
-				" (kept off / in the backup) - press \"Put my profile back\" once the files are free";
+			j.Verdict = "the profile is back except " + string.Join(", ", notBack.Concat(filesNotBack.Select(Path.GetFileName)).OfType<string>().Concat(LinesLeftWords(a_ctx.LinesLeft))) +
+				(notBack.Count > 0 || filesNotBack.Count > 0 ? " (kept off / in the backup)" : "") + " - press \"Put my profile back\" once the files are free";
 			Keep();
 			a_ctx.Log.Error(j.Verdict);
 			a_ctx.Log.Simple("Stopped: " + j.Verdict);
@@ -1101,12 +1344,23 @@ public static class Runner
 		// what the player changed in Mod Organizer while the run went on (a mod ticked, unticked or installed) is kept, never
 		// undone by the put-back - except on the mods this run owns (its outputs and the mods it replaces), which it decides
 		var own = a_ctx.Journal.Added.Concat(a_ctx.Journal.Built).Concat(a_ctx.Journal.Retire).Concat(a_ctx.Journal.ParkedMods)
-			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+			.Concat(a_ctx.Journal.UsedOld.Select(u => u.Mod)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 		var theirs = a_ctx.Profile.ChangedByOthers().Where(p => !own.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase);
 		if (a_snap != null && a_snap.Count > 0) {
 			a_ctx.Log.Say("the profile as it was before the run, with this run's finished outputs on:");
+			// The mods the run had switched off come back on, and what it built with them: the game now finds other files than
+			// at its last start in this run. A list of them made before this is old again (the save to play, which starts the
+			// game after this, makes it anew).
+			if (a_ctx.Journal.SwitchedOff || a_ctx.Journal.Built.Count > 0) {
+				++a_ctx.Journal.FilesChanged;
+			}
 			foreach (var a in a_ctx.Journal.Added) {
 				a_ctx.Profile.Added.Add(a);
+			}
+			// an old output the run gave its line in the mod list and switched on keeps that line; one whose use was never
+			// carried out loses it with the order files going back - the list is then as it was before the run
+			foreach (var u in a_ctx.Journal.UsedOld.Where(u => u.Done && u.Listed)) {
+				a_ctx.Profile.Added.Add(u.Mod);
 			}
 			var before = Profile.StatesOf(a_snap);
 			// a mod the player installed during the run keeps its line (its state is set again below)
@@ -1125,8 +1379,9 @@ public static class Runner
 				ReapplyTheirs(a_ctx, theirs, marks);
 			}
 		}
-		// an output left empty (its step failed, was stopped, or never ran) never stays in the mod list
-		foreach (var a in a_ctx.Journal.Added.ToList()) {
+		// an output left empty (its step failed, was stopped, or never ran) never stays in the mod list - one the run made:
+		// a folder that was there before the run stays where it is, empty or not, and only loses its new line (below)
+		foreach (var a in a_ctx.Journal.Added.Where(a => !WasThere(a_ctx.Journal, a)).ToList()) {
 			try {
 				if (a_ctx.Profile.TakeOutEmptyOutput(a, a_ctx.BackupFolder, a_ctx.Log)) {
 					a_ctx.Journal.Added.Remove(a);
@@ -1135,6 +1390,8 @@ public static class Runner
 				a_ctx.Log.Warn($"{a}: is empty but could not be taken out ({e.Message})");
 			}
 		}
+		a_ctx.LinesLeft.Clear();
+		a_ctx.LinesLeft.AddRange(UnlistWhatTheRunOnlyListed(a_ctx.Profile, a_ctx.Journal, a_ctx.Log));
 		// the order files are back: a record the disk refuses right now must not be what stops the outputs being ticked
 		if (!a_ctx.Journal.TrySave()) {
 			a_ctx.Log.Warn("the run's record could not be written just now (is the disk full?) - the put-back goes on");
@@ -1153,10 +1410,111 @@ public static class Runner
 		// a mod whose old output is not back in it is not switched on again a line later because an earlier step of this run had
 		// built it once
 		var stillOut = a_ctx.Journal.Parked.Where(p => !p.Replaced && !p.PutBack && !p.IsFolder).Select(p => p.Mod).ToHashSet(StringComparer.OrdinalIgnoreCase);
-		a_ctx.PendingEnable.AddRange(a_ctx.Journal.Built.Where(m => st.ContainsKey(m) && !stillOut.Contains(m)));
-		// a Stop is often why this put-back runs: it never ends the wait for Mod Organizer here
+		// only what passes the checks here is switched on by the put-back: whatever a step had asked for and never got is
+		// either on record as built (asked for again below) or was never the run's to switch on
+		a_ctx.PendingEnable.Clear();
+		var byName = StringComparer.OrdinalIgnoreCase;
+		// (and never a mod kept off just above: one a later step replaced for good stays off, also when the run had built it
+		// or switched it on as an old output before that step - switched on again here, the replaced mod was back for the game)
+		var built = a_ctx.Journal.Built.Where(m => st.ContainsKey(m) && !stillOut.Contains(m) && !retire.Contains(m, byName)).Distinct(byName).ToList();
+		// An old output the run had switched back on at its step's place is the player's choice for this setup: on, like what
+		// was built. Not one the run was only about to switch on (a Stop while Mod Organizer closed for it): that one stays
+		// as the order files of before the run have it. And not one whose files a later step moved into the backup and could
+		// not bring back (two steps can share an output mod): a mod never goes on holding nothing - a later put-back
+		// switches it on once its files are back
+		var used = a_ctx.Journal.UsedOld.Where(u => u.Done).Select(u => u.Mod).Where(m => st.ContainsKey(m) && !stillOut.Contains(m) && !retire.Contains(m, byName) && !built.Contains(m, byName))
+			.Distinct(byName).ToList();
+		// ... and only one whose plugins find every master in the profile this put-back leaves. What the player switched in
+		// Mod Organizer during the run is kept (above): a master's mod they unticked meanwhile stays off, and the old output
+		// that needs it is then left off too and named - left on, the game would not start, not for the save to play either.
+		// The profile as it stands once the mods kept off above are off (read again: a master in one of them is not there),
+		// with the plugins ticked as they are now. A master counts when its plugin is ticked now, or when it is one of those
+		// this put-back ticks below (what it switches on, and an old output whose line the run itself had put into the list).
+		// (One that goes may be what another one needs: looked at until nothing more goes)
+		var listedByRun = a_ctx.Journal.UsedOld.Where(u => u.Done && u.Listed).Select(u => u.Mod).ToHashSet(byName);
+		var final = a_ctx.Profile.States();
+		var active = a_ctx.Profile.ActivePlugins();
+		for (var again = true; again;) {
+			again = false;
+			foreach (var m in used.ToList()) {
+				var ticks = built.Concat(used).Where(o => !final.TryGetValue(o, out var f) || f != '+' || listedByRun.Contains(o)).ToList();
+				// (a mod that came back switched on keeps its ticks as they were: a master of its own counts only while ticked)
+				if (OldOutput.MasterNotOn(a_ctx.Mo2, final, active, m, ticks, ticks.Contains(m, byName)) is not { } miss) {
+					continue;
+				}
+				used.Remove(m);
+				again = true;
+				if (final.TryGetValue(m, out var f) && f == '+') {
+					// (its line came back switched on: one the run itself had put into the mod list)
+					a_ctx.Profile.SetMods([], [m], a_ctx.Log);
+					active = [.. active.Except(a_ctx.Profile.DeactivatePlugins([m]), byName)];
+				}
+				final[m] = '-';
+				var left = $"the old output \"{m}\" is left switched off: its {miss.Plugin} needs {miss.Master}, and no mod that is switched on holds it now (one switched off in Mod Organizer during the run?) - " +
+					$"switch that mod on again and then \"{m}\", or build it again";
+				a_ctx.Log.Warn(left);
+				if (!a_ctx.Journal.Notes.Contains(left)) {
+					a_ctx.Journal.Notes.Add(left);
+				}
+			}
+		}
+		// What comes on, in ONE pass and in master order - a plugin that another of them needs gets its place in the plugin
+		// lists first, whichever way its mod's line came back: switched on already (an old output whose line the run itself
+		// had put into the mod list - the lists of before the run hold none of its plugins), or still off (what was built,
+		// and an old output that was listed and off). In two passes a master could end up listed after the plugin that
+		// needs it. (A mod that came back on with its plugins in the lists keeps them as the player had them.)
+		var on = OldOutput.ModsInMasterOrder(a_ctx.Mo2, [.. built, .. used]);
+		var switchOn = on.Where(m => final[m] != '+').ToList();
+		var tick = on.Where(m => final[m] != '+' || listedByRun.Contains(m)).ToList();
+		if (switchOn.Count > 0 || tick.Count > 0) {
+			// a Mod Organizer that came up since this put-back began is closed first. A Stop is often why the put-back
+			// runs: it never ends this wait
+			a_ctx.Control.Close(null, CancellationToken.None);
+		}
+		if (switchOn.Count > 0) {
+			a_ctx.Log.Detail("new outputs switched on:");
+			a_ctx.Profile.SetMods(switchOn, [], a_ctx.Log);
+		}
+		if (tick.Count > 0) {
+			a_ctx.Profile.ActivatePlugins(tick, a_ctx.Setup.PlaceAfter);
+		}
+		// (the setup's own plugin places; a Stop is often why this put-back runs: it never ends the wait for Mod Organizer here)
 		ApplyAfter(a_ctx, CancellationToken.None);
 	}
+
+	// A mod that stood in the mods folder with no line in the mod list got one from the run before its first step (EnsureMod,
+	// for a step's output - the order files of "before the run" were read after that, so they hold the line). Where the run
+	// then left that mod as it was - not built by it, not switched on as an old output - the line goes again: the mod list
+	// is as it was before the run, byte for byte. The folder is the player's and stays as it is. Not while what the mod
+	// held is still in the run's backup (a later put-back brings that back first, and takes the line out then).
+	// a_undone: the run was undone - nothing it built or used stands any more.
+	// Returns the mods whose line could not be taken out (the mod list held by another program): for the caller to say,
+	// and to keep the put-back on offer - the next one tries again
+	static List<string> UnlistWhatTheRunOnlyListed(Profile a_profile, Journal a_j, RunLog a_log, bool a_undone = false)
+	{
+		var left = new List<string>();
+		foreach (var m in a_j.Listed) {
+			if (!a_undone && (a_j.Built.Contains(m, StringComparer.OrdinalIgnoreCase) || a_j.UsedOld.Any(u => u.Done && u.Mod.Equals(m, StringComparison.OrdinalIgnoreCase)))) {
+				continue;
+			}
+			if (a_j.Parked.Any(p => !p.IsFolder && p.Mod.Equals(m, StringComparison.OrdinalIgnoreCase) && !p.PutBack && (a_undone || !p.Replaced))) {
+				continue;
+			}
+			try {
+				a_profile.UnlistMod(m, a_log);
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) {
+				a_log.Warn($"{m}: the line this run gave it in the mod list could not be taken out again ({e.Message})");
+				left.Add(m);
+			}
+		}
+		return left;
+	}
+
+	// the mod's folder stood in the mods folder before the run (it only lacked its line): the player's, never moved away
+	static bool WasThere(Journal a_j, string a_mod) => a_j.Listed.Contains(a_mod, StringComparer.OrdinalIgnoreCase);
+
+	// those lines, in a verdict's words
+	static IEnumerable<string> LinesLeftWords(IEnumerable<string> a_mods) => a_mods.Select(m => $"the line this run gave \"{m}\" in the mod list");
 
 	// an interrupted run (a crash, Stop now, a power cut): every unfinished output back, the profile as before + the finished
 	// outputs on - the window's Restore button and the command line's --restore
@@ -1229,11 +1587,12 @@ public static class Runner
 		if (data != null) {
 			NoteChanges(mo2, data, "putting back " + RunWho(a_j), log);
 		}
-		if (notBack.Count > 0 || filesNotBack.Count > 0) {
-			// something is still out: Restore stays on offer (the window keeps its button) and says what
+		if (notBack.Count > 0 || filesNotBack.Count > 0 || ctx.LinesLeft.Count > 0) {
+			// something is still out - or a line the run wrote into the mod list could not be taken out again: Restore stays
+			// on offer (the window keeps its button) and says what
 			a_j.NeedsRestore = true;
-			a_j.Verdict = "put back except " + string.Join(", ", notBack.Concat(filesNotBack.Select(Path.GetFileName)).OfType<string>()) +
-				" (kept off / in the backup) - press \"Put my profile back\" again once the files are free";
+			a_j.Verdict = "put back except " + string.Join(", ", notBack.Concat(filesNotBack.Select(Path.GetFileName)).OfType<string>().Concat(LinesLeftWords(ctx.LinesLeft))) +
+				(notBack.Count > 0 || filesNotBack.Count > 0 ? " (kept off / in the backup)" : "") + " - press \"Put my profile back\" again once the files are free";
 			a_j.Save();
 			log.Error(a_j.Verdict);
 			return new RunOutcome(RunState.Failed, a_j.Verdict, a_j.Folder);
@@ -1361,8 +1720,12 @@ public static class Runner
 					string.Join(", ", theirs.Select(p => (p.Value == '+' ? "on " : "off ") + p.Key)));
 				ReapplyTheirs(ctx, theirs, marks);
 			}
-			foreach (var a in a_j.Added.ToList()) {
+			foreach (var a in a_j.Added.Where(a => !WasThere(a_j, a)).ToList()) {
 				ctx.Profile.TakeOutEmptyOutput(a, a_j.BackupDir, log);
+			}
+			// (one that cannot be taken out stops the undo here, as any file it cannot put back does: undone again, it is tried again)
+			if (UnlistWhatTheRunOnlyListed(ctx.Profile, a_j, log, true) is { Count: > 0 } linesLeft) {
+				throw new IOException(string.Join(", ", LinesLeftWords(linesLeft)) + " could not be taken out again");
 			}
 		} catch (Exception e) {
 			log.Error("undo failed: " + Plain(e));

@@ -58,9 +58,10 @@
                   IsEnabled="{Binding IsRunning, Converter={StaticResource Not}}" AutomationProperties.AcceleratorKey="Ctrl+N"/>
         </Grid>
         <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-          <Button Content="_Check" Style="{StaticResource Nav}" Command="{Binding CheckCommand}" ToolTip="Check every tool and setting before a run (F5)"
+          <Button Content="_Check" Style="{StaticResource Nav}" Command="{Binding CheckCommand}" ToolTip="Checks every tool and setting before a run, and looks for updates (F5)"
                   AutomationProperties.AcceleratorKey="F5"/>
-          <Button Content="_History" Style="{StaticResource Nav}" Click="History_Click" ToolTip="Past runs (Ctrl+H)" AutomationProperties.AcceleratorKey="Ctrl+H"/>
+          <Button Content="T_ools" Style="{StaticResource Nav}" Click="Tools_Click" ToolTip="Set up each tool of this setup in its own window - its settings are kept for every run"/>
+          <Button Content="_History" Style="{StaticResource Nav}" Click="History_Click" ToolTip="Every past run, and the MO2 Changelog (Ctrl+H)" AutomationProperties.AcceleratorKey="Ctrl+H"/>
           <Button Content="_Queue" Style="{StaticResource Nav}" Click="Queue_Click" ToolTip="Run several setups one after another"/>
           <Button Content="_Themes" Style="{StaticResource Nav}" Click="Themes_Click" ToolTip="The window's look (Ctrl+T)" AutomationProperties.AcceleratorKey="Ctrl+T"/>
           <Button Content="_Settings" Style="{StaticResource Nav}" Click="Settings_Click" ToolTip="This setup's settings (Ctrl+,)" AutomationProperties.AcceleratorKey="Ctrl+Comma"/>
@@ -68,7 +69,7 @@
       </Grid>
     </Border>
 
-    <!-- banners: the PC about to sleep or shut down; an interrupted run; a message -->
+    <!-- banners: the PC about to sleep or shut down; an interrupted run; a new version (the message line is at the bottom) -->
     <StackPanel Grid.Row="1">
       <Border Background="{DynamicResource BannerBad}" BorderBrush="{DynamicResource Warn}" BorderThickness="0,0,0,1" Padding="20,10"
               Visibility="{Binding PowerText, Converter={StaticResource NotEmpty}}">
@@ -94,9 +95,6 @@
           <TextBlock Text="{Binding NewVersion}" Foreground="{DynamicResource Text}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,16,0"/>
         </DockPanel>
       </Border>
-      <Border Padding="20,6" Visibility="{Binding Message, Converter={StaticResource NotEmpty}}" Background="{DynamicResource Panel2}">
-        <TextBlock Text="{Binding Message}" Foreground="{Binding MessageKind, Converter={StaticResource KindBrush}}" TextWrapping="Wrap"/>
-      </Border>
     </StackPanel>
 
     <!-- body: the steps on the left, the live run on the right -->
@@ -111,13 +109,17 @@
       <DockPanel>
         <DockPanel DockPanel.Dock="Top" Margin="18,16,18,8">
           <TextBlock DockPanel.Dock="Right" Text="{Binding EstimateText}" Style="{StaticResource MutedText}" VerticalAlignment="Bottom"/>
-          <TextBlock Text="STEPS, IN RUN ORDER" Style="{StaticResource H2}" Margin="0"/>
+          <TextBlock Text="STEPS" Style="{StaticResource H2}" Margin="0"/>
         </DockPanel>
         <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Padding="14,10">
-          <StackPanel Orientation="Horizontal">
-            <Button Content="Move _up" Style="{StaticResource Ghost}" Click="Up_Click" ToolTip="Alt+Up" Margin="0,0,8,0"/>
-            <Button Content="Move _down" Style="{StaticResource Ghost}" Click="Down_Click" ToolTip="Alt+Down" Margin="0,0,10,0"/>
-            <TextBlock Text="Right-click a step to run only it, from it, or up to it." Style="{StaticResource MutedText}" VerticalAlignment="Center" Width="178"/>
+          <StackPanel>
+            <WrapPanel>
+              <Button Content="Move _up" Style="{StaticResource Ghost}" Click="Up_Click" ToolTip="Alt+Up" Margin="0,0,8,0"/>
+              <Button Content="Move _down" Style="{StaticResource Ghost}" Click="Down_Click" ToolTip="Alt+Down" Margin="0,0,8,0"/>
+              <Button x:Name="UseOldButton" Content="{Binding UseOldLabel}" Style="{StaticResource Ghost}" Click="UseOld_Click"
+                      ToolTip="The selected step is not run and the output its tool made before stays in your game. A box says first exactly what that means for this tool. Pressed again, the step is built anew."/>
+            </WrapPanel>
+            <TextBlock Text="Drag a step to move it. Right-click for more." Style="{StaticResource MutedText}" Margin="0,6,0,0" TextWrapping="Wrap"/>
           </StackPanel>
         </Border>
         <Grid Margin="6,0">
@@ -126,13 +128,18 @@
                    Visibility="{Binding Steps.Count, Converter={StaticResource ZeroVis}}"/>
         <ListBox x:Name="StepList" ItemsSource="{Binding Steps}" SelectedItem="{Binding SelectedStep}" Background="Transparent"
                  BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                 AutomationProperties.Name="Steps" KeyDown="StepList_KeyDown" CheckBox.Click="StepOn_Click">
+                 AutomationProperties.Name="Steps" KeyDown="StepList_KeyDown" CheckBox.Click="StepOn_Click"
+                 AllowDrop="True" PreviewMouseLeftButtonDown="StepList_Press" PreviewMouseMove="StepList_Drag" PreviewMouseLeftButtonUp="StepList_Release"
+                 DragOver="StepList_DragOver" DragLeave="StepList_DragLeave" Drop="StepList_Drop">
           <!-- no event handler inside a template or a style: WPF numbers them wrongly there (it crashed at start) -->
+          <!-- a step is dragged by its row to any place (the handlers above, on the list itself); the line a row shows says where it would land -->
           <ListBox.ContextMenu>
             <ContextMenu>
               <MenuItem Header="Run _only this step" Click="RunOnly_Click"/>
               <MenuItem Header="Run _from this step" Click="RunFrom_Click"/>
               <MenuItem Header="Run _until this step" Click="RunUntil_Click"/>
+              <Separator/>
+              <MenuItem Header="{Binding UseOldLabel}" Click="UseOld_Click"/>
               <Separator/>
               <MenuItem Header="Move _up" Click="Up_Click"/>
               <MenuItem Header="Move _down" Click="Down_Click"/>
@@ -166,6 +173,9 @@
                   <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
                   <TextBlock Text="left out: a new game has no save to keep clean" Style="{StaticResource MutedText}" TextWrapping="Wrap"
                              Visibility="{Binding LeftOut, Converter={StaticResource Vis}}"/>
+                  <TextBlock x:Name="old" Text="not run: its old output is used" Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                             Foreground="{DynamicResource Warn}"
+                             Visibility="{Binding UsesOld, Converter={StaticResource Vis}}"/>
                   <TextBlock x:Name="note" Text="{Binding Note}" Style="{StaticResource MutedText}" TextWrapping="Wrap"
                              Foreground="{Binding State, Converter={StaticResource StateBrush}}"
                              Visibility="{Binding Note, Converter={StaticResource NotEmpty}}"/>
@@ -179,6 +189,10 @@
                 </StackPanel>
                 <TextBlock x:Name="glyph" Grid.Column="4" Text="{Binding Glyph}" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="{DynamicResource SizeBody}"
                            Foreground="{Binding State, Converter={StaticResource StateBrush}}"/>
+                <Border Grid.ColumnSpan="5" Height="2" VerticalAlignment="Top" Margin="0,-4,0,0" Background="{DynamicResource Accent}" IsHitTestVisible="False"
+                        Visibility="{Binding DropAbove, Converter={StaticResource Vis}}"/>
+                <Border Grid.ColumnSpan="5" Height="2" VerticalAlignment="Bottom" Margin="0,0,0,-4" Background="{DynamicResource Accent}" IsHitTestVisible="False"
+                        Visibility="{Binding DropBelow, Converter={StaticResource Vis}}"/>
               </Grid>
               <!-- high contrast: a selected row is Windows' highlight, so its colored texts take the highlight text color (else
                    black on black on a white-background palette) -->
@@ -189,6 +203,7 @@
                     <Condition Binding="{Binding Source={x:Static SystemParameters.HighContrast}}" Value="True"/>
                   </MultiDataTrigger.Conditions>
                   <Setter TargetName="num" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"/>
+                  <Setter TargetName="old" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"/>
                   <Setter TargetName="note" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"/>
                   <Setter TargetName="last" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"/>
                   <Setter TargetName="elapsed" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"/>
@@ -203,12 +218,27 @@
       </DockPanel>
       </Border>
 
-      <DockPanel Grid.Column="2">
+      <!-- top to bottom: the cards (the run now, the first start's guide, the check's findings, the picked step's last run),
+           then the log. The log's row takes the room that is left; with the log hidden (or in its own window) the cards take
+           it, and the run's card grows into what the others leave.
+           The cards scroll as ONE: however much the findings and the last run hold, the run's own card with Start, Stop and
+           Done is never squeezed out - it is in view, or one scroll away. CardsOverLog lays the three out: the log's heading
+           is as tall as it needs and never the part that gives way -->
+      <local:CardsOverLog Grid.Column="2" x:Name="RightColumn">
+        <ScrollViewer x:Name="CardsScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False"
+                      AutomationProperties.Name="The run and what was found">
+        <Grid x:Name="Cards">
+        <Grid.RowDefinitions>
+          <RowDefinition x:Name="NowRow" Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
         <!-- now -->
-        <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Margin="0,0,0,12">
+        <Border Grid.Row="0" x:Name="NowCard" Style="{StaticResource Card}" Margin="0,0,0,12">
           <StackPanel>
             <DockPanel>
-              <StackPanel DockPanel.Dock="Right" HorizontalAlignment="Right">
+              <StackPanel DockPanel.Dock="Right" HorizontalAlignment="Right" Margin="14,0,0,0">
                 <TextBlock Text="{Binding Clock}" FontFamily="{DynamicResource HeadFont}" FontSize="{DynamicResource SizeClock}" Foreground="{DynamicResource AccentLight}" HorizontalAlignment="Right"/>
                 <TextBlock Text="{Binding Left}" Style="{StaticResource MutedText}" HorizontalAlignment="Right" Visibility="{Binding Left, Converter={StaticResource NotEmpty}}"/>
                 <TextBlock Text="{Binding StepOf}" Style="{StaticResource MutedText}" HorizontalAlignment="Right" Visibility="{Binding StepOf, Converter={StaticResource NotEmpty}}"/>
@@ -241,7 +271,7 @@
                        Foreground="{Binding VerdictKind, Converter={StaticResource KindBrush}}"
                        Visibility="{Binding VerdictLine, Converter={StaticResource NotEmpty}}"/>
             <!-- the run that ended, in a few rows: what finished, what it built, what to do next (held to a few lines so the log keeps its room) -->
-            <ScrollViewer MaxHeight="172" Margin="0,10,0,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+            <ScrollViewer x:Name="SummaryScroll" MaxHeight="172" Margin="0,10,0,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                           Visibility="{Binding HasSummary, Converter={StaticResource Vis}}" Focusable="True" IsTabStop="True" AutomationProperties.Name="What the run did">
               <ItemsControl ItemsSource="{Binding SummaryRows}" Focusable="False" AutomationProperties.Name="What the run did">
                 <ItemsControl.ItemTemplate>
@@ -261,7 +291,7 @@
             <!-- wraps: in the smallest window the New game tick goes under the buttons instead of being cut off -->
             <!-- the space sits right of and under each item, so a row that wraps starts flush left -->
             <WrapPanel Orientation="Horizontal" Margin="0,16,0,-8">
-              <Button Style="{StaticResource Primary}" Command="{Binding StartCommand}" IsEnabled="{Binding CanStart}" Margin="0,0,12,8"
+              <Button x:Name="StartButton" Style="{StaticResource Primary}" Command="{Binding StartCommand}" IsEnabled="{Binding CanStart}" Margin="0,0,12,8"
                       ToolTip="Run every ticked step (Ctrl+Enter)" AutomationProperties.Name="Start" AutomationProperties.AcceleratorKey="Ctrl+Enter">
                 <TextBlock Text="START" Foreground="{DynamicResource OnAccent}"/>
               </Button>
@@ -284,7 +314,7 @@
           </StackPanel>
         </Border>
         <!-- the first start, step by step: until this setup has run once -->
-        <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Margin="0,0,0,12" Visibility="{Binding HasGuide, Converter={StaticResource Vis}}">
+        <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,0,0,12" Visibility="{Binding HasGuide, Converter={StaticResource Vis}}">
           <StackPanel>
             <TextBlock Text="GETTING STARTED" Style="{StaticResource H2}" Margin="0,0,0,6"/>
             <ItemsControl ItemsSource="{Binding Guide}" Focusable="False" AutomationProperties.Name="Getting started">
@@ -308,8 +338,8 @@
         </Border>
         <!-- the check's findings -->
         <!-- a list the keyboard and a screen reader can walk line by line (arrow keys), held to a few lines so the log keeps its room -->
-        <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Margin="0,0,0,12" Visibility="{Binding Issues.Count, Converter={StaticResource NotEmpty}}">
-          <ListBox ItemsSource="{Binding Issues}" MaxHeight="220" Background="Transparent" BorderThickness="0" AutomationProperties.Name="What the check found"
+        <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,0,0,12" Visibility="{Binding Issues.Count, Converter={StaticResource NotEmpty}}">
+          <ListBox x:Name="IssuesList" ItemsSource="{Binding Issues}" MaxHeight="220" Background="Transparent" BorderThickness="0" AutomationProperties.Name="What the check found"
                    ScrollViewer.HorizontalScrollBarVisibility="Disabled">
             <ListBox.ItemContainerStyle>
               <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
@@ -324,33 +354,45 @@
           </ListBox>
         </Border>
         <!-- the picked step's last run and what it did, and the steps whose output is out of date -->
-        <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Margin="0,0,0,12" Visibility="{Binding LastCardText, Converter={StaticResource NotEmpty}}">
+        <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,0,0,12" Visibility="{Binding LastCardText, Converter={StaticResource NotEmpty}}">
           <StackPanel>
             <TextBlock Text="{Binding LastCardTitle}" Style="{StaticResource H2}" Margin="0,0,0,6"/>
             <!-- held to a few lines so the log keeps its room in the smallest window -->
-            <ScrollViewer MaxHeight="200" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <ScrollViewer x:Name="LastScroll" MaxHeight="200" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Last run">
               <TextBlock Text="{Binding LastCardText}" TextWrapping="Wrap" AutomationProperties.Name="Last run"/>
             </ScrollViewer>
           </StackPanel>
         </Border>
-        <!-- the log -->
-        <DockPanel>
-          <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
-            <CheckBox DockPanel.Dock="Right" x:Name="Follow" Content="Follow" IsChecked="True" Foreground="{DynamicResource Muted}"/>
-            <CheckBox DockPanel.Dock="Right" Content="Detailed" IsChecked="{Binding DetailedLog}" Margin="0,0,14,0" Foreground="{DynamicResource Muted}"
+        </Grid>
+        </ScrollViewer>
+        <!-- the log: its heading stays; the box can be hidden (the cards above then take its room) or opened in a window of
+             its own that can be sized and put on another screen -->
+          <DockPanel x:Name="LogHead" Margin="0,0,0,6">
+            <Button DockPanel.Dock="Right" x:Name="LogPop" Content="_Pop out" Style="{StaticResource Ghost}" Click="LogPop_Click" Margin="8,0,0,0"
+                    ToolTip="The log in a window of its own: size it, move it to another screen (Ctrl+L)" AutomationProperties.AcceleratorKey="Ctrl+L"/>
+            <Button DockPanel.Dock="Right" x:Name="LogHide" Content="Hide" Style="{StaticResource Ghost}" Click="LogHide_Click" Margin="14,0,0,0"
+                    ToolTip="Hides the log here; the card above takes its room"/>
+            <CheckBox DockPanel.Dock="Right" x:Name="Follow" Content="Follow" IsChecked="True" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"
+                      ToolTip="Keeps the newest line in view"/>
+            <CheckBox DockPanel.Dock="Right" Content="Detailed" IsChecked="{Binding DetailedLog}" Margin="0,0,14,0" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"
                       ToolTip="Every line of the run, for finding a fault. Unticked: the run step by step in plain words."/>
-            <TextBlock Text="LOG" Style="{StaticResource H2}" Margin="0"/>
+            <TextBlock Text="LOG" Style="{StaticResource H2}" Margin="0" VerticalAlignment="Center"/>
           </DockPanel>
           <TextBox x:Name="LogBox" IsReadOnly="True" IsUndoEnabled="False" FontFamily="{DynamicResource MonoFont}" FontSize="{DynamicResource SizeLog}"
                    Background="{DynamicResource Panel}" Foreground="{DynamicResource Text}" BorderBrush="{DynamicResource Line}"
                    VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap"
                    AutomationProperties.Name="Run log"/>
-        </DockPanel>
-      </DockPanel>
+      </local:CardsOverLog>
     </Grid>
 
-    <!-- status bar: MO2 and the game on the left, the version and the keys on the right -->
-    <Border Grid.Row="3" Background="{DynamicResource Panel}" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Padding="20,6">
+    <!-- the bottom: the message line (what the program last said), then the status bar - MO2, the game and "safe to close" on
+         the left, the version and the keys on the right -->
+    <StackPanel Grid.Row="3">
+    <Border Padding="20,6" Visibility="{Binding Message, Converter={StaticResource NotEmpty}}" Background="{DynamicResource Panel2}"
+            BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0">
+      <TextBlock Text="{Binding Message}" Foreground="{Binding MessageKind, Converter={StaticResource KindBrush}}" TextWrapping="Wrap" AutomationProperties.Name="Message"/>
+    </Border>
+    <Border Background="{DynamicResource Panel}" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Padding="20,6">
       <DockPanel>
         <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" Margin="0,0,24,0">
           <TextBlock Margin="0,0,18,0" AutomationProperties.Name="{Binding Mo2Text}">
@@ -370,20 +412,7 @@
         <TextBlock x:Name="Footer" Style="{StaticResource MutedText}" HorizontalAlignment="Right" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
       </DockPanel>
     </Border>
-
-    <!-- side panels over the right part: history, settings -->
-    <Border x:Name="Shade" Grid.Row="0" Grid.RowSpan="4" Background="{DynamicResource Shade}" Visibility="Collapsed" MouseDown="Shade_MouseDown"/>
-    <!-- Tab stays inside an open drawer (its own cycle) until Esc or Close - the window behind it is shaded and out of reach -->
-    <Border x:Name="Drawer" Grid.Row="1" Grid.RowSpan="3" HorizontalAlignment="Right" Width="640" Background="{DynamicResource Panel}"
-            BorderBrush="{DynamicResource AccentDim}" BorderThickness="1,0,0,0" Visibility="Collapsed"
-            KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle" KeyboardNavigation.DirectionalNavigation="Contained">
-      <DockPanel Margin="20">
-        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
-          <Button DockPanel.Dock="Right" Content="Close" Style="{StaticResource Ghost}" Click="CloseDrawer_Click" ToolTip="Esc"/>
-          <TextBlock x:Name="DrawerTitle" Style="{StaticResource H1}"/>
-        </DockPanel>
-        <ContentControl x:Name="DrawerBody" Focusable="False"/>
-      </DockPanel>
-    </Border>
+    </StackPanel>
+    <!-- History, Settings and Themes open in windows of their own (PanelWindow): nothing is docked over this one -->
   </Grid>
 </Window>

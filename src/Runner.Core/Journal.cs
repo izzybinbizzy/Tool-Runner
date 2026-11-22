@@ -38,6 +38,20 @@ public sealed class StepRecord
 	public long? OutputBytes { get; set; }
 }
 
+// a step a run left alone because its old output is used: the step, its name, and the mod that holds that output
+public sealed class OldUse
+{
+	public string Step { get; set; } = "";
+	public string Name { get; set; } = "";
+	public string Mod { get; set; } = "";
+	// the mod had no line in the mod list and the run gave it one, to switch it on: a put-back keeps that line only for a
+	// use that was carried out (the folder and what it holds are the player's either way)
+	public bool Listed { get; set; }
+	// the old output is switched on at its step's place. Until then the record says only what the run was about to do: a
+	// run cut off in between is put back to the profile as it was, the old output as the player had it
+	public bool Done { get; set; }
+}
+
 // an output moved into the run's backup before a tool rewrote it; put back when its step did not finish
 public sealed class ParkRecord
 {
@@ -103,12 +117,20 @@ public sealed class Journal
 	public bool StopAfterStep { get; set; }
 	public List<StepRecord> Steps { get; set; } = [];
 	public List<string> Built { get; set; } = [];
+	// the steps this run did not run because the setup uses their old output, each with that output's mod - on record before
+	// the run switches it back on at the step's place (OldOutput), and Done once it has; a put-back switches the ones that
+	// were carried out on like what the run built, and leaves the others as the profile had them before the run
+	public List<OldUse> UsedOld { get; set; } = [];
 	// LOOT's sort finished: its list is in this run's folder (LootStep.SortedFile) and every put-back of this run keeps it
 	public bool Sorted { get; set; }
 	// that sort left the plugin files other than they were before the run: Undo has an order to take back
 	public bool OrderChanged { get; set; }
 	public List<string> Retire { get; set; } = [];
 	public List<string> Added { get; set; } = [];
+	// Output mods that stood in the mods folder with no line in the mod list: the run gave each one its line before its
+	// first step. One it then neither built nor switched on as an old output loses that line again when the profile is put
+	// back - the list as it was before the run. Its folder is the player's and is never touched for it
+	public List<string> Listed { get; set; } = [];
 	public List<ParkRecord> Parked { get; set; } = [];
 	[JsonIgnore]
 	public IEnumerable<string> ParkedMods => Parked.Where(p => !p.IsFolder).Select(p => p.Mod);
@@ -120,6 +142,11 @@ public sealed class Journal
 
 	// the marker left where the player stood before the clean save's teleport (the save to play takes them back to it)
 	public string? ReturnMarker { get; set; }
+	// How often the run changed the files the game lists (outputs switched off, a step that ended) since the game last made
+	// that list anew in this run; 0 = nothing changed since. Read by the step that starts the game next (Crdw)
+	public int FilesChanged { get; set; }
+	// the run switched mods off before its first tool: its put-back switches them on again, which changes those files once more
+	public bool SwitchedOff { get; set; }
 	public List<string> Notes { get; set; } = [];
 
 	[JsonIgnore]
@@ -139,6 +166,16 @@ public sealed class Journal
 	public void Save()
 	{
 		lock (_gate) {
+			Files.WriteAtomic(File, JsonSerializer.SerializeToUtf8Bytes(this, Options));
+		}
+	}
+
+	// Several fields changed as ONE, then written: a save on another thread (the run's box watch saves the record too) waits
+	// for the whole change, so the record on disk never holds half of it - a crash right after such a save put back half a group
+	public void SaveWith(Action a_change)
+	{
+		lock (_gate) {
+			a_change();
 			Files.WriteAtomic(File, JsonSerializer.SerializeToUtf8Bytes(this, Options));
 		}
 	}
