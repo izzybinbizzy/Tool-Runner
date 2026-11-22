@@ -6990,6 +6990,148 @@ public static class Program
 		}
 	}
 
+	// His list of 2026-11-16, point 1: a new version is taken from the program's own GitHub release and put in place of the one
+	// that runs. The download is checked before anything is replaced (GitHub's check sum of it, plain file names only, the
+	// program inside it at the version asked for), each new file is read back, the old ones are set aside and removed at the
+	// next start, a step that fails takes every step before it back, and the data folder beside the program is no part of it.
+	static void T_ANewVersionIsDownloadedCheckedAndPutInPlace()
+	{
+		var top = Path.Combine(Path.GetTempPath(), "SUP install " + Guid.NewGuid().ToString("N"));
+		var program = Path.Combine(top, "program");
+		var data = Path.Combine(program, "Tool Runner Data");
+		var web = Path.Combine(top, "web");
+		Directory.CreateDirectory(Path.Combine(data, "Setups"));
+		Directory.CreateDirectory(web);
+		string MakeZip(string a_name, params (string Name, string Text)[] a_files)
+		{
+			var zip = Path.Combine(web, a_name);
+			File.Delete(zip);
+			using var z = System.IO.Compression.ZipFile.Open(zip, System.IO.Compression.ZipArchiveMode.Create);
+			foreach (var (name, text) in a_files) {
+				using var w = new StreamWriter(z.CreateEntry(name).Open());
+				w.Write(text);
+			}
+			return zip;
+		}
+		static string Sha(string a_file)
+		{
+			using var f = File.OpenRead(a_file);
+			return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(f)).ToLowerInvariant();
+		}
+		var exeName = ProgramUpdate.ProgramFile;
+		var good = MakeZip("good.zip", (exeName, "the program, version 1.1"), ("README.txt", "readme 1.1"), ("CHANGELOG.txt", "changes 1.1"));
+		static JsonObject Answer(string a_zip, string? a_sha = null, string? a_url = null, string? a_name = null) => new() {
+			["tag_name"] = "v1.1",
+			["assets"] = new JsonArray(
+				new JsonObject { ["name"] = "Source code.zip", ["browser_download_url"] = $"https://github.com/{ProgramUpdate.GitHubRepo}/archive/v1.1.zip", ["size"] = 5 },
+				new JsonObject { ["name"] = a_name ?? $"{Brand.Name} 1.1.zip", ["browser_download_url"] = a_url ?? $"https://github.com/{ProgramUpdate.GitHubRepo}/releases/download/v1.1/Tool.Runner.1.1.zip",
+					["size"] = new FileInfo(a_zip).Length, ["digest"] = "sha256:" + (a_sha ?? Sha(a_zip)) }),
+		};
+		var serve = good;
+		ProgramUpdate.AssetProbe = (_, _) => Task.FromResult<Stream>(File.OpenRead(serve));
+		ProgramUpdate.VersionOf = f => File.ReadAllText(f).Contains("version 1.1", StringComparison.Ordinal) ? "1.1.0.0" : "1.0.0.0";
+		try {
+			static ProgramUpdate.Release Latest(JsonObject a_answer)
+			{
+				ProgramUpdate.ReleaseProbe = _ => Task.FromResult<JsonObject?>(a_answer);
+				return ProgramUpdate.Latest(CancellationToken.None).GetAwaiter().GetResult();
+			}
+			string Download(ProgramUpdate.Release a_r) => ProgramUpdate.Download(a_r, data, null, CancellationToken.None).GetAwaiter().GetResult();
+			bool NothingLeft() => !Directory.Exists(ProgramUpdate.UpdatesDir(data)) || !Directory.EnumerateFileSystemEntries(ProgramUpdate.UpdatesDir(data)).Any();
+
+			// what is not taken at all
+			Throws<InvalidOperationException>(() => Latest(Answer(good, a_url: "https://example.com/Tool.Runner.1.1.zip")), "a download from anywhere but the program's own repository");
+			Throws<InvalidOperationException>(() => Latest(Answer(good, a_name: "Something else.zip")), "a release without the program's own zip");
+			Throws<InvalidOperationException>(() => Latest([]), "an answer with no release");
+			// what is fetched and then refused: nothing of it stays
+			Throws<InvalidOperationException>(() => Download(Latest(Answer(good, a_sha: new string('0', 64)))), "a download whose check sum is not GitHub's");
+			Check(NothingLeft(), "and nothing of it is kept");
+			serve = MakeZip("folder.zip", (exeName, "the program, version 1.1"), ("sub/evil.txt", "x"));
+			Throws<InvalidOperationException>(() => Download(Latest(Answer(serve))), "a zip with a file in a folder");
+			serve = MakeZip("up.zip", (exeName, "the program, version 1.1"), ("..\\evil.txt", "x"));
+			Throws<InvalidOperationException>(() => Download(Latest(Answer(serve))), "a zip with a file that points out of its folder");
+			serve = MakeZip("noexe.zip", ("README.txt", "readme"));
+			Throws<InvalidOperationException>(() => Download(Latest(Answer(serve))), "a zip without the program");
+			serve = MakeZip("other.zip", (exeName, "the program, version 1.0"));
+			Throws<InvalidOperationException>(() => Download(Latest(Answer(serve))), "a program that says it is another version");
+			serve = Path.Combine(web, "nozip.zip");
+			File.WriteAllText(serve, "this is no zip");
+			Throws<InvalidOperationException>(() => Download(Latest(Answer(serve))), "a download that is no zip");
+			Check(NothingLeft(), "none of the refused downloads is kept");
+
+			// the real thing
+			serve = good;
+			var release = Latest(Answer(good));
+			Equal("v1.1", release.Version, "the release's version");
+			var zip = Download(release);
+			Check(File.Exists(zip) && Path.GetDirectoryName(zip) == ProgramUpdate.UpdatesDir(data) && !File.Exists(zip + ".part"), "the checked download is in the data folder's Updates, whole");
+			File.WriteAllText(Path.Combine(program, exeName), "the program, version 1.0");
+			File.WriteAllText(Path.Combine(program, "README.txt"), "readme 1.0");
+			File.WriteAllText(Path.Combine(data, "Setups", "mine.json"), "{ \"name\": \"mine\" }");
+
+			// a file of the program that cannot be replaced: every step is taken back
+			using (File.Open(Path.Combine(program, "README.txt"), FileMode.Open, FileAccess.Read, FileShare.None)) {
+				Throws<IOException>(() => ProgramUpdate.Install(zip, program, data), "a file held by another program stops the install");
+			}
+			Equal("the program, version 1.0", File.ReadAllText(Path.Combine(program, exeName)), "after a failed install the program is the old one, under its own name");
+			Equal("readme 1.0", File.ReadAllText(Path.Combine(program, "README.txt")), "and so is every other file");
+			Equal("README.txt," + exeName, string.Join(",", Directory.GetFiles(program).Select(Path.GetFileName).OrderBy(n => n, StringComparer.Ordinal)), "nothing new and nothing set aside is left beside it");
+
+			// never while a run or a put-back goes
+			using (var held = new ManualResetEventSlim(false))
+			using (var done = new ManualResetEventSlim(false)) {
+				var other = new Thread(() => {
+					using var hold = Runner.HoldIfFree();
+					held.Set();
+					done.Wait();
+				});
+				other.Start();
+				held.Wait();
+				try {
+					Throws<InvalidOperationException>(() => ProgramUpdate.Install(zip, program, data), "an install beside a run");
+				} finally {
+					done.Set();
+					other.Join();
+				}
+			}
+			Equal("the program, version 1.0", File.ReadAllText(Path.Combine(program, exeName)), "and nothing was touched");
+
+			var started = ProgramUpdate.Install(zip, program, data);
+			Equal(Path.Combine(program, exeName), started, "the program to start again");
+			Equal("the program, version 1.1", File.ReadAllText(started), "the new program is in place");
+			Equal("readme 1.1", File.ReadAllText(Path.Combine(program, "README.txt")), "with its other files");
+			Equal("changes 1.1", File.ReadAllText(Path.Combine(program, "CHANGELOG.txt")), "a file the old version did not have too");
+			var oldExe = Path.Combine(program, Path.GetFileNameWithoutExtension(exeName) + " (old).exe");
+			Equal("the program, version 1.0", File.ReadAllText(oldExe), "the old program is set aside, not written over");
+			Check(File.Exists(Path.Combine(program, "README (old).txt")) && Directory.GetFiles(program, "*.new").Length == 0, "and so is each file it replaced; nothing half written is left");
+			Equal("{ \"name\": \"mine\" }", File.ReadAllText(Path.Combine(data, "Setups", "mine.json")), "the data folder beside the program was not touched");
+
+			// the next start clears what the install set aside - one that will not go yet stays on record for the start after
+			using (File.Open(oldExe, FileMode.Open, FileAccess.Read, FileShare.None)) {
+				ProgramUpdate.CleanUp(data);
+			}
+			Check(File.Exists(oldExe) && !File.Exists(Path.Combine(program, "README (old).txt")) && !File.Exists(zip), "the first clean-up takes what it can (the old program is still ending)");
+			ProgramUpdate.CleanUp(data);
+			Check(!File.Exists(oldExe) && NothingLeft(), "the next takes the rest, and its own record");
+			Equal("the program, version 1.1", File.ReadAllText(started), "the program in place stays");
+
+			// what is new, said once: this version's own lines, and the setup keys read differently since the version before
+			var log = "Tool Runner - changelog\n\n1.1\n- A new thing.\n  It goes on here.\n\n1.0 (not released yet)\n- First version.\n";
+			Equal("- A new thing.|  It goes on here.", string.Join("|", ProgramUpdate.WhatsNew(log, "1.0", "1.1")), "this version's lines of the changelog, and nothing a player on 1.0 already had");
+			var fromBefore = ProgramUpdate.WhatsNew(log, "0.9", "1.1");
+			Check(fromBefore.Any(l => l.Contains("directoryCache", StringComparison.Ordinal)) && fromBefore[0] == "- A new thing.", "coming from before 1.0, the setup key 1.0 reads differently is named too");
+			Check(ProgramUpdate.SameVersion("v1.1", "1.1.0.0") && !ProgramUpdate.SameVersion("1.1", "1.2") && !ProgramUpdate.SameVersion("", "1.1"), "a version is the same however it is written");
+		} finally {
+			ProgramUpdate.ReleaseProbe = null;
+			ProgramUpdate.AssetProbe = null;
+			ProgramUpdate.VersionOf = ToolVersions.Version;
+			try {
+				Directory.Delete(top, true);
+			} catch (IOException) {
+			}
+		}
+	}
+
 	// his checklist 466: a shared setup keeps its steps and options and loses everything of this PC - its Mod Organizer, backup
 	// folder, every value holding a path, and the commands it runs before and after a run; it names what the other player sets
 	static void T_ASharedSetupCarriesNothingOfThisPc()

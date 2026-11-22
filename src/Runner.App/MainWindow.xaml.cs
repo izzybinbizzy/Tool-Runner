@@ -111,6 +111,9 @@ public partial class MainWindow : Window
 		// (never for the off-screen pictures: no web question, no file written into that data folder, no banner in a picture)
 		Loaded += async (_, _) => {
 			if (!App.Headless) {
+				// what an install of a new version set aside is removed now, and what that version brings is said once
+				_ = Task.Run(() => ProgramUpdate.CleanUp(AppPaths.Data));
+				SayWhatIsNew();
 				await _vm.LookForNewVersion(AppVersion);
 			}
 		};
@@ -1130,6 +1133,95 @@ public partial class MainWindow : Window
 	public Window DemoToolsBox() => ToolsDialog.Make(this, _vm, _vm.Setup ?? Setup.FromJson([], "My Profile.json"), [
 		new("xlodgen", "xLODGen", null), new("texgen", "TexGen", new ToolSettings.Learned { At = new DateTime(2026, 10, 27, 20, 14, 0, DateTimeKind.Local), Files = [new()] }),
 		new("dyndolod", "DynDOLOD", null), new("pandora", "Pandora", null)], true, out _);
+
+	// ---------------------------------------------------------------- a new version of the program itself
+	// The first start of another version than the last one started here: its own lines of the changelog, and every setup key it
+	// reads differently, in one box - once. A first start ever shows nothing (there is no version before to compare with).
+	void SayWhatIsNew()
+	{
+		var before = UiState.Text("version.seen");
+		if (before == AppVersion) {
+			return;
+		}
+		UiState.Set("version.seen", AppVersion);
+		if (before == "") {
+			return;
+		}
+		List<string> lines;
+		try {
+			lines = ProgramUpdate.WhatsNew(File.ReadAllText(Path.Combine(Path.GetDirectoryName(AppPaths.Exe) ?? "", "CHANGELOG.txt")), before, AppVersion);
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			return;
+		}
+		if (lines.Count > 0) {
+			Ask.Tell(this, $"New in {Brand.Name} {AppVersion}", $"You had version {before} before.\n\n" + string.Join("\n", lines), "Close");
+		}
+	}
+
+	// what the box before an install says: where the new version comes from, where it goes, and what is never touched
+	static string InstallText(ProgramUpdate.Release a_release, string a_folder) =>
+		$"{Brand.Name} {a_release.Version} is taken from its GitHub release{(a_release.Size > 0 ? $" ({a_release.Size / 1024.0 / 1024:0.0} MB)" : "")}, checked, " +
+		$"and put in place of this version in:\n{a_folder}\n\n" +
+		"Your setups, run records and backups are not touched - they stay in the data folder.\n\n" +
+		"This version's files are set aside beside the new ones until the next start, and every step is taken back if one fails. " +
+		"The program then closes and starts again by itself.";
+
+	// the off-screen pictures: the banner of a made-up newer version, and the box before its install
+	public void DemoNewVersion(bool a_show) => _vm.DemoNewVersion(a_show ? "1.1" : "");
+
+	public Window DemoInstallBox() => Ask.Make(this, $"Install {Brand.Name} 1.1?",
+		InstallText(new ProgramUpdate.Release("1.1", $"{Brand.Name} 1.1.zip", "", 1_290_000, null), Path.Combine("D:", "Modding", "Tools", Brand.Name)), "Download and install", "Not now", _ => { });
+
+	// His list of 2026-11-16, point 1: a new version taken and installed from inside the program. Only from the program's own
+	// GitHub release, checked before anything is replaced, and never while a run goes. The data folder is no part of it.
+	bool _installing;
+
+	async void InstallNew_Click(object a_s, RoutedEventArgs a_e)
+	{
+		if (_installing) {
+			return;
+		}
+		if (_vm.IsRunning || _vm.Starting) {
+			_vm.Say("A run is going: install the new version when it is done.", "bad");
+			return;
+		}
+		_installing = true;
+		try {
+			ProgramUpdate.Release release;
+			try {
+				release = await Task.Run(() => ProgramUpdate.Latest(CancellationToken.None));
+			} catch (Exception e) when (e is System.Net.Http.HttpRequestException or TaskCanceledException or InvalidOperationException or JsonException or NotSupportedException) {
+				_vm.Say($"The new version could not be looked up ({e.Message}) - its download page has it.", "bad");
+				return;
+			}
+			var folder = Path.GetDirectoryName(AppPaths.Exe) ?? AppContext.BaseDirectory;
+			if (!Ask.Show(this, $"Install {Brand.Name} {release.Version}?", InstallText(release, folder), "Download and install", "Not now")) {
+				return;
+			}
+			string exe;
+			// the window stays until the new files are in place (WorkInHand): closed half way, the program would stand half replaced
+			using (Working($"{Brand.Name} {release.Version} is being installed")) {
+				try {
+					var progress = new Progress<long>(n => _vm.Say($"Downloading {Brand.Name} {release.Version}: {n / 1024.0 / 1024:0.0} MB ...", ""));
+					var zip = await Task.Run(() => ProgramUpdate.Download(release, AppPaths.Data, progress, CancellationToken.None));
+					_vm.Say("Putting the new version in place ...", "");
+					exe = await Task.Run(() => ProgramUpdate.Install(zip, folder, AppPaths.Data));
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or System.Net.Http.HttpRequestException or TaskCanceledException) {
+					_vm.Say($"Not installed: {e.Message}. Nothing of this version was changed - its download page has the new one.", "bad");
+					return;
+				}
+			}
+			try {
+				System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe) { UseShellExecute = true })?.Dispose();
+			} catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) {
+				_vm.Say($"{Brand.Name} {release.Version} is installed, but it did not start by itself ({e.Message}) - close this window and start it again.", "warn");
+				return;
+			}
+			Close();
+		} finally {
+			_installing = false;
+		}
+	}
 
 	// ---------------------------------------------------------------- a new setup
 	void Queue_Click(object a_s, RoutedEventArgs a_e)

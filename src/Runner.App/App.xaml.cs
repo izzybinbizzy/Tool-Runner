@@ -379,6 +379,21 @@ public partial class App : Application
 		Save("7e a step that uses its old output");
 		w.DemoUsesOld("dyndolod", false);
 		Pump(w, 200);
+		// a newer version of the program: the banner with "Download and install", and the box before the install
+		w.DemoNewVersion(true);
+		Pump(w, 300);
+		Save("7f a new version is out");
+		var installBox = w.DemoInstallBox();
+		installBox.ShowActivated = false;
+		installBox.WindowStartupLocation = WindowStartupLocation.Manual;
+		installBox.Left = -30000;
+		installBox.Top = -30000;
+		installBox.Show();
+		Pump(installBox, 600);
+		Save("7g install a new version", installBox);
+		installBox.Close();
+		w.DemoNewVersion(false);
+		Pump(w, 200);
 		// the smallest window the program allows: nothing may be cut off there
 		w.Width = w.MinWidth;
 		w.Height = w.MinHeight;

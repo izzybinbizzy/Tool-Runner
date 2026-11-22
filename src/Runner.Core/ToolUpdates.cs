@@ -205,4 +205,36 @@ public static partial class ToolUpdates
 		var o = await a_http.GetFromJsonAsync<JsonObject>($"https://api.github.com/repos/{a_repo}/releases/latest", a_ct).ConfigureAwait(false);
 		return o?["tag_name"]?.ToString() ?? throw new InvalidOperationException("GitHub gave no release");
 	}
+
+	// a repository's latest release as GitHub describes it: its tag and its files (the program's own download reads it)
+	public static Task<JsonObject?> GitHubRelease(string a_repo, CancellationToken a_ct) =>
+		Http.GetFromJsonAsync<JsonObject>($"https://api.github.com/repos/{a_repo}/releases/latest", a_ct);
+
+	// A file fetched into a_to as it comes: never held in memory (the client's 1 MB limit is for answers it reads whole), and
+	// never more than a_max bytes of it. a_progress hears how many bytes have come so far.
+	public static async Task Fetch(string a_url, Stream a_to, long a_max, IProgress<long>? a_progress, CancellationToken a_ct)
+	{
+		using var r = await Http.GetAsync(a_url, HttpCompletionOption.ResponseHeadersRead, a_ct).ConfigureAwait(false);
+		r.EnsureSuccessStatusCode();
+		var from = await r.Content.ReadAsStreamAsync(a_ct).ConfigureAwait(false);
+		await using (from.ConfigureAwait(false)) {
+			await Copy(from, a_to, a_max, a_progress, a_ct).ConfigureAwait(false);
+		}
+	}
+
+	// the same for any stream (the offline tests hand in a file's)
+	public static async Task Copy(Stream a_from, Stream a_to, long a_max, IProgress<long>? a_progress, CancellationToken a_ct)
+	{
+		var buffer = new byte[81920];
+		long total = 0;
+		int n;
+		while ((n = await a_from.ReadAsync(buffer, a_ct).ConfigureAwait(false)) > 0) {
+			total += n;
+			if (total > a_max) {
+				throw new InvalidOperationException($"the download is bigger than {a_max / (1024 * 1024)} MB - more than it can be");
+			}
+			await a_to.WriteAsync(buffer.AsMemory(0, n), a_ct).ConfigureAwait(false);
+			a_progress?.Report(total);
+		}
+	}
 }
