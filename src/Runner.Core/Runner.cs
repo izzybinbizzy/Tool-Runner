@@ -267,10 +267,19 @@ public static class Runner
 		// every box of every process the run starts, from its first step to its last (BoxWatch)
 		var family = new RunWindows.Family();
 		var reader = new RunWindows.Reader();
+		// (set once the run's context stands: the watch looks into the run's own game with it)
+		RunContext? watched = null;
 		using var boxes = new BoxWatch(() => {
 				// the same beat keeps the record of what the run's processes started themselves (StartedSet.Sweep)
 				control.Started.Sweep();
-				return reader.Boxes(family.Now(control.RunProcesses(), control.Started.Contains, control.Started.Owned()));
+				var open = reader.Boxes(family.Now(control.RunProcesses(), control.Started.Contains, control.Started.Owned()));
+				// and the game's own message boxes, which are no windows of Windows': answered or closed at this beat, whatever
+				// the step in hand is doing (a notice once stood on the game's main menu for the five minutes a step spent
+				// watching for a shader compile) - one that is left to the player joins the boxes the watch names
+				if (watched is { } inRun && InGame.WatchGameBox(inRun) is { } left) {
+					open.Add(left);
+				}
+				return open;
 			}, log,
 			a_open => {
 				journal.Box = a_open;
@@ -289,12 +298,13 @@ public static class Runner
 					log.Warn($"ending the game (process {pid}): nobody here can answer its box");
 					Procs.KillTree(pid);
 				}
-			}) { Wait = TimeSpan.FromSeconds(Setup.Int(setup.Root, "boxWaitSeconds") ?? 60) };
+			}) { Wait = TimeSpan.FromSeconds(Setup.Int(setup.Root, "boxWaitSeconds") ?? 60), CloseUnknown = InGame.ClosesUnknown(setup) };
 		var ctx = new RunContext {
 			Setup = setup, Mo2 = mo2, Profile = profile, Control = control, Log = log, Journal = journal, Cancel = cts.Token,
 			BackupFolder = journal.BackupDir, Guide = a_guide?.Invoke(journal) ?? new FileGuide(journal, commands.TakeContinue, commands.ClearContinue),
 			Boxes = boxes,
 		};
+		watched = ctx;
 		log.Say($"Tool Runner - {setup.Name} (profile {setup.Profile}), steps: {string.Join(", ", todo.Select(s => StepCatalog.Name(s.Key)))}");
 		log.Simple($"{setup.Name} started: {todo.Count} step(s) - {string.Join(", ", todo.Select(s => StepCatalog.Name(s.Key)))}");
 		foreach (var w in check) {
@@ -461,8 +471,14 @@ public static class Runner
 			afterRan = true;
 			// each one runs, whatever the one before it did and whether or not Stop is pressed: they give back what the before-run
 			// commands took. A Stop only shortens how long each is waited for
+			// the game's own list of its files as of the run's last game start: current when nothing changed since
+			var listCurrent = journal.FilesChanged == 0;
 			foreach (var cmd in setup.AfterRun) {
 				journal.Doing = "the setup's command after the run";
+				// A command of the setup may add, move or take away game files, also when it then fails, and nobody can tell
+				// from here: it counts as a change BEFORE it runs, so the note below never calls the game's list current
+				// after it (CodeRabbit on pull request #35)
+				++journal.FilesChanged;
 				journal.TrySave();
 				Chore("the command after the run", () => Hook(ctx, cmd, "after the run", CancellationToken.None, cts.Token));
 			}
@@ -478,7 +494,8 @@ public static class Runner
 			});
 			// a mod that keeps its own list of the game's files must make it again after what this run built (GameMods.cs)
 			Chore("the note for Cached Recursive Directory Walk", () => {
-				if (Crdw.AfterRun(Crdw.Read(profile), journal.Built.Count > 0 || journal.SwitchedOff, journal.FilesChanged == 0, playsave) is { } note) {
+				if (Crdw.AfterRun(Crdw.Read(profile), journal.Built.Count > 0 || journal.SwitchedOff || !listCurrent, journal.FilesChanged == 0, playsave,
+					    listCurrent && setup.AfterRun.Count > 0) is { } note) {
 					journal.Notes.Add(note);
 					log.Warn(note);
 					log.Simple("Note: " + note);
@@ -560,6 +577,8 @@ public static class Runner
 				}
 			}
 			NoteChanges(mo2, a_req.DataDir, RunWho(journal), log);
+			// nothing of this run looks for its processes' children any more: the processes it held open are let go
+			control.Started.Release();
 		}
 	}
 
@@ -827,6 +846,7 @@ public static class Runner
 			r.Ended = DateTime.Now;
 			r.Activity = "";
 			Crdw.StepEnded(a_ctx, false, Crdw.Writes(a_s.Key));
+			a_ctx.AddWatchNotes();
 			a_ctx.Journal.TrySave();
 			a_ctx.Log.Error($"{StepCatalog.Name(a_s.Key)} {(stopped ? "STOPPED" : "FAILED")}: {r.Note}");
 			var why = stopped ? null : ToolErrors.Explain(a_s.Key, r.Note);
@@ -868,6 +888,8 @@ public static class Runner
 		r.Activity = "";
 		r.Progress = null;
 		Crdw.StepEnded(a_ctx, true, Crdw.Writes(a_s.Key));
+		// what the run's watch has to say about this step's game (a message it closed that the run does not know)
+		a_ctx.AddWatchNotes();
 		a_ctx.Journal.Save();
 		Measure(a_ctx, r);
 		a_ctx.Log.Say($"=== {StepCatalog.Name(a_s.Key)} done in {sw.Elapsed.TotalMinutes:0.0} min ===");

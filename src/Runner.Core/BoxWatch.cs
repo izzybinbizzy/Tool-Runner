@@ -50,6 +50,9 @@ public sealed class BoxWatch : IDisposable
 	// how long a box of the game that the runner cannot answer may stay open (a player at the PC answers it) before its step stops
 	public TimeSpan Wait { get; init; } = TimeSpan.FromSeconds(60);
 
+	// a box of the game the runner does not know is closed, by the button that takes nothing on (the setup's default in a run)
+	public bool CloseUnknown { get; init; }
+
 	// the box that stopped the step in hand, in words; null while none did
 	public string? Blocked => _blocked;
 
@@ -147,7 +150,7 @@ public sealed class BoxWatch : IDisposable
 			if (Gone) {
 				return;
 			}
-			var v = KnownBoxes.Judge(b.Box);
+			var v = KnownBoxes.Judge(b.Box, CloseUnknown);
 			if (!_open.TryGetValue(b.Id, out var k)) {
 				k = _open[b.Id] = new Known { First = a_now };
 				// the game's among the log's warnings; a tool's or Mod Organizer's as a plain line (their steps show boxes as a matter of course)

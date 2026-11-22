@@ -60,6 +60,7 @@
         <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
           <Button Content="_Check" Style="{StaticResource Nav}" Command="{Binding CheckCommand}" ToolTip="Checks every tool and setting before a run, and looks for updates (F5)"
                   AutomationProperties.AcceleratorKey="F5"/>
+          <Button Content="T_ools" Style="{StaticResource Nav}" Click="Tools_Click" ToolTip="Set up each tool of this setup in its own window - its settings are kept for every run"/>
           <Button Content="_History" Style="{StaticResource Nav}" Click="History_Click" ToolTip="Every past run, and the MO2 Changelog (Ctrl+H)" AutomationProperties.AcceleratorKey="Ctrl+H"/>
           <Button Content="_Queue" Style="{StaticResource Nav}" Click="Queue_Click" ToolTip="Run several setups one after another"/>
           <Button Content="_Themes" Style="{StaticResource Nav}" Click="Themes_Click" ToolTip="The window's look (Ctrl+T)" AutomationProperties.AcceleratorKey="Ctrl+T"/>
@@ -207,23 +208,26 @@
       </DockPanel>
       </Border>
 
-      <!-- rows, top to bottom: the run now, the first start's guide, the check's findings, the picked step's last run, the log.
-           The log's row takes the room that is left; with the log hidden (or in its own window) the first row takes it -->
-      <Grid Grid.Column="2">
+      <!-- top to bottom: the cards (the run now, the first start's guide, the check's findings, the picked step's last run),
+           then the log. The log's row takes the room that is left; with the log hidden (or in its own window) the cards take
+           it, and the run's card grows into what the others leave.
+           The cards scroll as ONE: however much the findings and the last run hold, the run's own card with Start, Stop and
+           Done is never squeezed out - it is in view, or one scroll away. CardsOverLog lays the three out: the log's heading
+           is as tall as it needs and never the part that gives way -->
+      <local:CardsOverLog Grid.Column="2" x:Name="RightColumn">
+        <ScrollViewer x:Name="CardsScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+        <Grid x:Name="Cards">
         <Grid.RowDefinitions>
           <RowDefinition x:Name="NowRow" Height="Auto"/>
           <RowDefinition Height="Auto"/>
           <RowDefinition Height="Auto"/>
           <RowDefinition Height="Auto"/>
-          <RowDefinition x:Name="LogRow" Height="*"/>
         </Grid.RowDefinitions>
         <!-- now -->
         <Border Grid.Row="0" x:Name="NowCard" Style="{StaticResource Card}" Margin="0,0,0,12">
-          <!-- it scrolls as a whole only when it has the log's room and still holds more than fits (a long summary) -->
-          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
           <StackPanel>
             <DockPanel>
-              <StackPanel DockPanel.Dock="Right" HorizontalAlignment="Right">
+              <StackPanel DockPanel.Dock="Right" HorizontalAlignment="Right" Margin="14,0,0,0">
                 <TextBlock Text="{Binding Clock}" FontFamily="{DynamicResource HeadFont}" FontSize="{DynamicResource SizeClock}" Foreground="{DynamicResource AccentLight}" HorizontalAlignment="Right"/>
                 <TextBlock Text="{Binding Left}" Style="{StaticResource MutedText}" HorizontalAlignment="Right" Visibility="{Binding Left, Converter={StaticResource NotEmpty}}"/>
                 <TextBlock Text="{Binding StepOf}" Style="{StaticResource MutedText}" HorizontalAlignment="Right" Visibility="{Binding StepOf, Converter={StaticResource NotEmpty}}"/>
@@ -276,7 +280,7 @@
             <!-- wraps: in the smallest window the New game tick goes under the buttons instead of being cut off -->
             <!-- the space sits right of and under each item, so a row that wraps starts flush left -->
             <WrapPanel Orientation="Horizontal" Margin="0,16,0,-8">
-              <Button Style="{StaticResource Primary}" Command="{Binding StartCommand}" IsEnabled="{Binding CanStart}" Margin="0,0,12,8"
+              <Button x:Name="StartButton" Style="{StaticResource Primary}" Command="{Binding StartCommand}" IsEnabled="{Binding CanStart}" Margin="0,0,12,8"
                       ToolTip="Run every ticked step (Ctrl+Enter)" AutomationProperties.Name="Start" AutomationProperties.AcceleratorKey="Ctrl+Enter">
                 <TextBlock Text="START" Foreground="{DynamicResource OnAccent}"/>
               </Button>
@@ -297,7 +301,6 @@
                         ToolTip="Tick this when you will start a new character after the run: there is no save to keep clean, so the clean save and the save to play are left out. Untick it once you play on an existing save."/>
             </WrapPanel>
           </StackPanel>
-          </ScrollViewer>
         </Border>
         <!-- the first start, step by step: until this setup has run once -->
         <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,0,0,12" Visibility="{Binding HasGuide, Converter={StaticResource Vis}}">
@@ -349,10 +352,11 @@
             </ScrollViewer>
           </StackPanel>
         </Border>
-        <!-- the log: its heading stays; the box can be hidden (the card above then takes its room) or opened in a window of
+        </Grid>
+        </ScrollViewer>
+        <!-- the log: its heading stays; the box can be hidden (the cards above then take its room) or opened in a window of
              its own that can be sized and put on another screen -->
-        <DockPanel Grid.Row="4">
-          <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+          <DockPanel x:Name="LogHead" Margin="0,0,0,6">
             <Button DockPanel.Dock="Right" x:Name="LogPop" Content="_Pop out" Style="{StaticResource Ghost}" Click="LogPop_Click" Margin="8,0,0,0"
                     ToolTip="The log in a window of its own: size it, move it to another screen (Ctrl+L)" AutomationProperties.AcceleratorKey="Ctrl+L"/>
             <Button DockPanel.Dock="Right" x:Name="LogHide" Content="Hide" Style="{StaticResource Ghost}" Click="LogHide_Click" Margin="14,0,0,0"
@@ -367,8 +371,7 @@
                    Background="{DynamicResource Panel}" Foreground="{DynamicResource Text}" BorderBrush="{DynamicResource Line}"
                    VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap"
                    AutomationProperties.Name="Run log"/>
-        </DockPanel>
-      </Grid>
+      </local:CardsOverLog>
     </Grid>
 
     <!-- the bottom: the message line (what the program last said), then the status bar - MO2, the game and "safe to close" on

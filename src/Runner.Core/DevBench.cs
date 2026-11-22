@@ -106,4 +106,32 @@ public sealed class DevBench(string a_baseUrl = "http://127.0.0.1:8920/api/tool/
 		}
 		return a_labels.Count == 0 ? ("answered " + want.ToUpperInvariant(), want == "yes" ? 0 : 1) : (null, -1);
 	}
+
+	// the words by which a button declines, puts off or leaves - the most telling first
+	static readonly string[] Declines = ["cancel", "no", "close", "not now", "later", "skip", "back", "exit", "ignore", "dismiss", "decline", "never", "no thanks", "don't", "do not"];
+
+	// Which button closes a box the run does not know (his word of 2026-11-21: whatever the box is, it is closed at once).
+	// The one that takes nothing on: the button the game itself marks as the box's cancel; else one whose words decline or
+	// leave; else the game's own word for No (a game in another language); else its only button; else its last - where the
+	// game's own boxes and Windows' put the way out (Yes / No, OK / Cancel, Abort / Retry / Ignore).
+	// a_labels: the buttons' words (none given: a_buttonCount says how many there are).
+	public static int CloseIndex(IReadOnlyList<string> a_labels, int a_cancelIndex, int? a_buttonCount, GameWords? a_words = null)
+	{
+		var count = a_labels.Count > 0 ? a_labels.Count : Math.Max(1, a_buttonCount ?? 1);
+		if (a_cancelIndex >= 0 && a_cancelIndex < count) {
+			return a_cancelIndex;
+		}
+		var low = a_labels.Select(l => l.Replace("&", "", StringComparison.Ordinal).Trim().TrimEnd('.', '!').ToLowerInvariant()).ToList();
+		foreach (var word in Declines) {
+			if (low.IndexOf(word) is >= 0 and var said) {
+				return said;
+			}
+		}
+		if (a_words != null && a_labels.Count > 0 && a_words.Button(false, a_labels) is >= 0 and var no) {
+			return no;
+		}
+		var begins = low.FindIndex(l => l.StartsWith("no ", StringComparison.Ordinal) || l.StartsWith("no,", StringComparison.Ordinal) || l.StartsWith("not ", StringComparison.Ordinal) ||
+			l.StartsWith("don't", StringComparison.Ordinal) || l.StartsWith("do not", StringComparison.Ordinal) || l.StartsWith("cancel", StringComparison.Ordinal));
+		return begins >= 0 ? begins : count - 1;
+	}
 }

@@ -10,9 +10,12 @@ public static class NewSetupDialog
 	public static string? Run(Window a_owner)
 	{
 		string? made = null;
+		// its sizes held to the screen (a least size above the screen's would win over the size it is given)
+		var room = SystemParameters.WorkArea;
 		var w = new Window {
-			Owner = a_owner, Title = "New setup", Width = 640, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner,
-			Background = Brushes2.Get("Panel"), Foreground = Brushes2.Get("Text"), ResizeMode = ResizeMode.CanResize, MinWidth = 480, MinHeight = 320, ShowInTaskbar = false,
+			Owner = a_owner, Title = "New setup", Width = Math.Min(640, room.Width), SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+			Background = Brushes2.Get("Panel"), Foreground = Brushes2.Get("Text"), ResizeMode = ResizeMode.CanResize, MinWidth = UiState.Least(480, room.Width),
+			MinHeight = UiState.Least(320, room.Height), ShowInTaskbar = false,
 		};
 		var stack = new StackPanel { Margin = new Thickness(22) };
 		stack.Children.Add(new TextBlock { Text = "NEW SETUP", Style = (Style)a_owner.FindResource("H1"), Margin = new Thickness(0, 0, 0, 6), FontSize = (double)a_owner.FindResource("SizeHeading1") });

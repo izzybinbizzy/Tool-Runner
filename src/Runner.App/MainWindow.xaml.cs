@@ -54,6 +54,7 @@ public partial class MainWindow : Window
 			Ask.Tell(this, a_title, a_text, "Close");
 			return false;
 		};
+		_vm.OfferTools = (a_setup, a_tools) => ToolsDialog.Run(this, _vm, a_setup, a_tools, true);
 		// the header drops the word "Setup" where the window is narrow
 		SizeChanged += (_, e) => _vm.Roomy = e.NewSize.Width >= 1100;
 		_vm.Freed += () => {
@@ -80,6 +81,7 @@ public partial class MainWindow : Window
 		Closed += (_, _) => SystemParameters.StaticPropertyChanged -= MotionChanged;
 		IsVisibleChanged += (_, _) => SeenOrNot();
 		_vm.WantsLook += Wake;
+		_vm.SetupShown += SettingsFollow;
 		// the off-screen pictures show a made-up run: nothing is watched for them
 		if (!App.Headless) {
 			_watch = new RunsWatch(AppPaths.Runs, Wake);
@@ -508,19 +510,64 @@ public partial class MainWindow : Window
 	bool LogHere => LogBox.Visibility == Visibility.Visible;
 
 	// The log shown in the main window, or hidden there (his list of 2026-11-16: "the progress box above should fill the
-	// space if the log box is minimized"). Hidden, its row gives its room to the card above, and that card's lists lose the
-	// heights they were held to so the log kept its room.
+	// space if the log box is minimized"). Hidden, its row gives its room to the cards above: the run's card grows into
+	// what the other cards leave, and its lists lose the heights they were held to so the log kept its room.
 	void ShowLogHere(bool a_show)
 	{
 		LogBox.Visibility = a_show ? Visibility.Visible : Visibility.Collapsed;
 		Follow.Visibility = a_show ? Visibility.Visible : Visibility.Collapsed;
 		LogHide.Content = a_show ? "Hide" : "Show";
-		LogHide.ToolTip = a_show ? "Hides the log here; the card above takes its room" : "Shows the log here again";
-		LogRow.Height = a_show ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
+		LogHide.ToolTip = a_show ? "Hides the log here; the cards above take its room" : "Shows the log here again";
 		NowRow.Height = a_show ? GridLength.Auto : new GridLength(1, GridUnitType.Star);
+		// With the cards' room theirs to fill, they are at least as tall as that room (the run's card takes what is over);
+		// holding more than fits, they scroll as one. With the log shown they are as tall as they need
+		if (a_show) {
+			System.Windows.Data.BindingOperations.ClearBinding(Cards, MinHeightProperty);
+			Cards.MinHeight = 0;
+		} else {
+			Cards.SetBinding(MinHeightProperty, new System.Windows.Data.Binding(nameof(ScrollViewer.ViewportHeight)) { Source = CardsScroll });
+		}
 		SummaryScroll.MaxHeight = a_show ? 172 : double.PositiveInfinity;
 		IssuesList.MaxHeight = a_show ? 220 : 420;
 		LastScroll.MaxHeight = a_show ? 200 : 400;
+	}
+
+	// The off-screen pictures' check of the right column (CardsOverLog lays it out): null when the log's heading is whole and
+	// inside the column and the run's START is in the cards' view or can be scrolled into it, else what is wrong (a card that
+	// was squeezed to nothing has no height to show it in).
+	public string? RunControlsProblem()
+	{
+		if (LogHeadProblem() is { } head) {
+			return head;
+		}
+		if (StartButton.ActualHeight <= 0 || NowCard.ActualHeight < StartButton.ActualHeight) {
+			return $"the run's card has no room for START (card {NowCard.ActualHeight:0}, button {StartButton.ActualHeight:0})";
+		}
+		if (CardsScroll.ViewportHeight < StartButton.ActualHeight) {
+			return $"the cards' view is too low to show START ({CardsScroll.ViewportHeight:0})";
+		}
+		var top = StartButton.TransformToAncestor(Cards).Transform(new Point(0, 0)).Y;
+		return top + StartButton.ActualHeight <= CardsScroll.ExtentHeight + 0.5 ? null : $"START lies outside the cards ({top:0} of {CardsScroll.ExtentHeight:0})";
+	}
+
+	// the heading's part of that check, on its own (asked in any state of the window)
+	public string? LogHeadProblem()
+	{
+		UpdateLayout();
+		var top = LogHead.TransformToAncestor(RightColumn).Transform(new Point(0, 0)).Y;
+		return LogHead.ActualHeight >= LogHide.ActualHeight && top >= -0.5 && top + LogHead.ActualHeight <= RightColumn.ActualHeight + 0.5 ? null :
+			$"the log's heading is cut off (at {top:0}, {LogHead.ActualHeight:0} high, its buttons {LogHide.ActualHeight:0}, in a column of {RightColumn.ActualHeight:0})";
+	}
+
+	// the off-screen pictures only: the log hidden or shown in the main window, and a long list of made-up findings
+	public void DemoLogHidden(bool a_hidden) => ShowLogHere(!a_hidden);
+
+	public void DemoFindings(int a_count)
+	{
+		_vm.Issues.Clear();
+		for (var i = 1; i <= a_count; ++i) {
+			_vm.Issues.Add($"{Theme.Glyph(i % 4 == 0 ? "IssueBlocks" : "IssueNote")}  A made-up finding, number {i}: long enough to wrap in a narrow window, as a real one about a tool or a setting would");
+		}
 	}
 
 	void LogHide_Click(object a_s, RoutedEventArgs a_e)
@@ -686,7 +733,8 @@ public partial class MainWindow : Window
 	// instead of stuck to the right of the app", resizable). The History window has two views, the runs and the MO2
 	// Changelog. Pressing a panel's button again brings its window forward as it is; a_fresh builds its content anew (Save,
 	// Undo changes). The main window stays usable beside them.
-	public PanelWindow ShowPanel(string a_which, bool a_fresh = false)
+	// a_quiet: an open panel's content is made anew where it stands - it is not brought forward and does not take the keyboard
+	public PanelWindow ShowPanel(string a_which, bool a_fresh = false, bool a_quiet = false)
 	{
 		var group = a_which == "changes" ? "history" : a_which;
 		var isNew = !_panels.TryGetValue(group, out var w);
@@ -727,11 +775,22 @@ public partial class MainWindow : Window
 		if (isNew) {
 			w.Show();
 			A11y.Say(w, "Opened: " + w.Title + ". Escape closes it.");
-		} else {
+		} else if (!a_quiet) {
 			Front(w);
 		}
-		w.TakeKeyboard(a_which == "settings" ? SettingsPanel.FocusFind : null);
+		if (!a_quiet || isNew) {
+			w.TakeKeyboard(a_which == "settings" ? SettingsPanel.FocusFind : null);
+		}
 		return w;
+	}
+
+	// Another setup was picked while Settings stands open: it shows that setup's settings from here - unless something typed
+	// there is not saved yet. That stays, and its Save says whose settings these are and writes them to no other setup.
+	void SettingsFollow()
+	{
+		if (_panels.ContainsKey("settings") && !SettingsPanel.HasChanges && !SettingsPanel.IsFor(_vm.Setup)) {
+			ShowPanel("settings", true, true);
+		}
 	}
 
 	// the off-screen pictures only: the changelog view filled with made-up rows (nothing read or written)
@@ -967,6 +1026,34 @@ public partial class MainWindow : Window
 
 	static void AutomationPropertiesName(DependencyObject a_o, string a_name) => System.Windows.Automation.AutomationProperties.SetName(a_o, a_name);
 
+	// his word of 2026-11-21: each tool of the setup set up by hand in its own window, whenever wanted
+	bool _toolsAsked;
+
+	async void Tools_Click(object a_s, RoutedEventArgs a_e)
+	{
+		if (_vm.Setup is not { } setup) {
+			_vm.Say("Make or pick a setup first.", "bad");
+			return;
+		}
+		if (_toolsAsked) {
+			return;
+		}
+		_toolsAsked = true;
+		try {
+			var tools = await Task.Run(() => ToolSettings.ToSetUp(setup));
+			ToolsDialog.Run(this, _vm, setup, tools, false);
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			_vm.Say("This setup's tools could not be read: " + e.Message, "bad");
+		} finally {
+			_toolsAsked = false;
+		}
+	}
+
+	// the off-screen pictures: that box as it shows before a first run, with made-up tools, one of them set up already
+	public Window DemoToolsBox() => ToolsDialog.Make(this, _vm, _vm.Setup ?? Setup.FromJson([], "My Profile.json"), [
+		new("xlodgen", "xLODGen", null), new("texgen", "TexGen", new ToolSettings.Learned { At = new DateTime(2026, 10, 27, 20, 14, 0, DateTimeKind.Local), Files = [new()] }),
+		new("dyndolod", "DynDOLOD", null), new("pandora", "Pandora", null)], true, out _);
+
 	// ---------------------------------------------------------------- a new setup
 	void Queue_Click(object a_s, RoutedEventArgs a_e)
 	{
@@ -1109,9 +1196,11 @@ public static class Ask
 	// the box itself (the off-screen pictures draw it without waiting on it)
 	public static Window Make(Window a_owner, string a_title, string a_text, string a_yes, string? a_no, Action<bool> a_done)
 	{
+		// its sizes held to the screen (a least width above the screen's would win over the width it is given)
+		var room = SystemParameters.WorkArea;
 		var w = new Window {
-			Owner = a_owner, Title = a_title, Width = 560, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner,
-			Background = Brushes2.Get("Panel"), Foreground = Brushes2.Get("Text"), ResizeMode = ResizeMode.CanResize, ShowInTaskbar = false, MinWidth = 380,
+			Owner = a_owner, Title = a_title, Width = Math.Min(560, room.Width), SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+			Background = Brushes2.Get("Panel"), Foreground = Brushes2.Get("Text"), ResizeMode = ResizeMode.CanResize, ShowInTaskbar = false, MinWidth = UiState.Least(380, room.Width),
 			FontFamily = (System.Windows.Media.FontFamily)a_owner.FindResource("UiFont"), FontSize = (double)a_owner.FindResource("SizeBody"),
 		};
 		var yes = new Button { Content = a_yes, Style = (Style)a_owner.FindResource("Primary"), Margin = new Thickness(0, 0, a_no == null ? 0 : 10, 0) };

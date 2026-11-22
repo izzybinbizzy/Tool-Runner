@@ -101,8 +101,8 @@ public static class Uia
 		var buttons = All(a_root, ControlType.Button).Where(b => !InTitleBar(b)).ToList();
 		foreach (var n in a_names) {
 			var hit = buttons.FirstOrDefault(b => string.Equals(Name(b).Trim(), n, StringComparison.OrdinalIgnoreCase)) ??
-				// a Windows message box in another language ("Ja", "Nein"): its standard buttons by their control id
-				buttons.FirstOrDefault(b => string.Equals(StandardName(AutomationId(b)), n, StringComparison.OrdinalIgnoreCase));
+				// a Windows message box in another language ("Ja", "Nein"): its standard buttons by their control id and Windows' own words
+				buttons.FirstOrDefault(b => string.Equals(StandardName(AutomationId(b), Name(b)), n, StringComparison.OrdinalIgnoreCase));
 			if (hit != null) {
 				return hit;
 			}
@@ -113,15 +113,33 @@ public static class Uia
 	static readonly string[] StandardNames = ["OK", "Cancel", "Abort", "Retry", "Ignore", "Yes", "No", "Close"];
 	const string TaskDialogButton = "CommandButton_";
 
-	// what a standard Windows button is, whatever Windows' language calls it, from its control id (a task dialog's carries a prefix)
+	// which standard Windows button a control id belongs to (a task dialog's carries a prefix) - the id alone, which a program's
+	// own button can carry too: what a button IS takes its words as well (the overload below)
 	public static string? StandardName(string a_id)
 	{
 		var id = a_id.StartsWith(TaskDialogButton, StringComparison.Ordinal) ? a_id[TaskDialogButton.Length..] : a_id;
 		return int.TryParse(id, System.Globalization.NumberStyles.None, InvariantCulture, out var n) && n >= 1 && n <= StandardNames.Length ? StandardNames[n - 1] : null;
 	}
 
+	// What a standard Windows button is, whatever Windows' language calls it: its control id names it, and its words must be the
+	// ones Windows itself puts on that button, here or in English. A program gives buttons of its own the same ids under words
+	// of its own - TexGen's last question keeps "Restart" and "Zip and Exit" under the ids of No and OK. By the id alone that
+	// box read as a question with a No, and the step stopped on a TexGen that had finished; one of its buttons could as well
+	// have been pressed for a notice's OK.
+	// a_windowsWord: Windows' own word for a standard button, by its English name (the offline tests answer for it)
+	public static string? StandardName(string a_id, string a_words, Func<string, string>? a_windowsWord = null) =>
+		StandardName(a_id) is { } standard && SaysSo(standard, a_words.Replace("&", "", StringComparison.Ordinal).Trim(), a_windowsWord ?? WindowsWord) ? standard : null;
+
+	static bool SaysSo(string a_standard, string a_words, Func<string, string> a_windowsWord) =>
+		a_words.Equals(a_standard, StringComparison.OrdinalIgnoreCase) ||
+		(a_windowsWord(a_standard) is { Length: > 0 } here && a_words.Equals(here, StringComparison.OrdinalIgnoreCase));
+
+	// Windows' own word for a standard button in this Windows' language ("" when it does not say): its message-box words go in
+	// the order of the control ids
+	static string WindowsWord(string a_standard) => Array.IndexOf(StandardNames, a_standard) is >= 0 and var i ? Native.ButtonWord((uint)i) : "";
+
 	// a button as our checks know it: its standard name, else its own words
-	public static string RoleName(AutomationElement a_b) => StandardName(AutomationId(a_b)) ?? OwnWords(a_b);
+	public static string RoleName(AutomationElement a_b) => StandardName(AutomationId(a_b), Name(a_b)) ?? OwnWords(a_b);
 
 	static string OwnWords(AutomationElement a_b) => Name(a_b).Replace("&", "", StringComparison.Ordinal).Trim();
 
@@ -129,16 +147,21 @@ public static class Uia
 	// lone OK of a plain notice that id (so that Esc closes the box), and the lone Cancel of a progress window has it too -
 	// only the words tell a notice to acknowledge from a button that must not be pressed
 	public static List<string> BoxNames(IReadOnlyList<AutomationElement> a_buttons) =>
-		BoxNames([.. a_buttons.Select(b => (StandardName(AutomationId(b)), OwnWords(b)))], Native.ButtonWord(Native.CancelButton), Native.AcknowledgeWords());
+		BoxNames([.. a_buttons.Select(b => (StandardName(AutomationId(b)), OwnWords(b)))], Native.ButtonWord(Native.CancelButton), Native.AcknowledgeWords(), WindowsWord);
 
 	// what a notice's one button reads when all it does is acknowledge
 	static readonly string[] Acknowledges = ["OK", "Okay", "Close", "Continue"];
 
 	// a_cancelWord: what Windows' own Cancel button reads in this Windows' language ("" when it would not say);
-	// a_acknowledge: what its own OK, Close and Continue read there
-	public static List<string> BoxNames(IReadOnlyList<(string? Standard, string Own)> a_buttons, string a_cancelWord, IReadOnlyCollection<string>? a_acknowledge = null)
+	// a_acknowledge: what its own OK, Close and Continue read there;
+	// a_windowsWord: Windows' own word for a standard button, by its English name (not given: only its Cancel word is known)
+	public static List<string> BoxNames(IReadOnlyList<(string? Standard, string Own)> a_buttons, string a_cancelWord, IReadOnlyCollection<string>? a_acknowledge = null,
+		Func<string, string>? a_windowsWord = null)
 	{
 		static bool Is(string a_words, string a_word) => a_word != "" && a_words.Equals(a_word, StringComparison.OrdinalIgnoreCase);
+		var word = a_windowsWord ?? (s => s == "Cancel" ? a_cancelWord : "");
+		// a button is the standard one its id names only when its words say so too (StandardName): else it goes by its own words
+		string Named((string? Standard, string Own) a_b) => a_b.Standard != null && SaysSo(a_b.Standard, a_b.Own, word) ? a_b.Standard : a_b.Own;
 		if (a_buttons is [var (standard, own)]) {
 			// its words first: a Cancel in English or in Windows' own language, whatever its control id
 			if (Is(own, "Cancel") || Is(own, a_cancelWord)) {
@@ -150,9 +173,9 @@ public static class Uia
 				// its progress window's Cancel must never be pressed for a notice's OK (the step then stops, naming the box)
 				return [Acknowledges.Any(a => Is(own, a)) || (a_acknowledge ?? []).Any(a => Is(own, a)) ? own : "Cancel"];
 			}
-			return [standard ?? own];
+			return [Named((standard, own))];
 		}
-		return [.. a_buttons.Select(b => b.Standard ?? b.Own)];
+		return [.. a_buttons.Select(Named)];
 	}
 
 	// the order a box lays its buttons out in: top to bottom, left to right

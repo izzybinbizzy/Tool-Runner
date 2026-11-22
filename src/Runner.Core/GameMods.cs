@@ -19,17 +19,13 @@ public static class GameStart
 		return a_profile.ModOrder().Where(m => states.TryGetValue(m, out var f) && f == '+').Select(m => Path.Combine(a_profile.Mo2.ModDir(m), a_rel)).FirstOrDefault(File.Exists);
 	}
 
+	// (a file changed for the save to play, which runs after the run's record says finished, is on record as "to put back"
+	// before it is changed: StepKit.KeepFile)
 	public static void Prepare(RunContext a_ctx)
 	{
 		QuietGame.Apply(a_ctx);
-		var kept = a_ctx.Journal.Kept.Count;
 		FasterArchives.Apply(a_ctx);
 		Crdw.Apply(a_ctx);
-		// the save to play runs after the run's record says finished: a crash there must still leave something to put back
-		if (a_ctx.Journal.Kept.Count > kept && a_ctx.Journal.InGameAfter) {
-			a_ctx.Journal.NeedsRestore = true;
-			a_ctx.Journal.Save();
-		}
 	}
 
 	// one setting of a mod's own file changed for this step's game starts; the file goes back when the step ends (StepKit.KeepFile)
@@ -369,6 +365,11 @@ public static partial class Crdw
 		return set == "" && (Setup.Str(a_setup.Root, OldSettingName) ?? "").Trim().Equals("refresh", StringComparison.OrdinalIgnoreCase) ? Renew.Always : Renew.Changed;
 	}
 
+	// The same as the word the setting holds for it: what the settings window shows, whatever the setup itself says - under
+	// the old key, with an empty value, or in a word it does not know. Shown any other way, the window's list fell back to
+	// its first choice and the next save wrote that as if the player had picked it.
+	public static string Word(Setup a_setup) => When(a_setup) switch { Renew.Always => "always", Renew.Never => "never", _ => "changed" };
+
 	public const string Answered = Name + " asked whether to make its cache again - answered Yes: a run changes the game's files, and its old cache would hide the new ones from the game";
 
 	public sealed record State(string? Ini, bool PopUp, string Mode);
@@ -435,16 +436,18 @@ public static partial class Crdw
 
 	// A step ended. a_done: it finished. a_writes: it is a step that changes the files the game lists (every step but the
 	// ones that only start the game and save). A step that finished after game starts with a new list leaves the list
-	// current - as of those starts: what the step itself wrote afterwards counts as changed again.
+	// current - as of those starts: what the step itself wrote afterwards counts as changed again, and so do the mods it
+	// had switched for those starts and has put back since (the list was made with them switched).
 	public static void StepEnded(RunContext a_ctx, bool a_done, bool a_writes)
 	{
 		if (a_ctx.FreshList && a_done) {
 			a_ctx.Journal.FilesChanged = 0;
 		}
 		a_ctx.FreshList = false;
-		if (a_writes) {
+		if (a_writes || a_ctx.SwitchedBack) {
 			++a_ctx.Journal.FilesChanged;
 		}
+		a_ctx.SwitchedBack = false;
 	}
 
 	// all but the steps that only start the game and save, compile shaders (a shader cache is no file the mod lists), or
@@ -452,17 +455,25 @@ public static partial class Crdw
 	public static bool Writes(string a_step) => a_step is not ("cleansave" or "playsave" or "shaders" or Steps.LootStep.StepKey);
 
 	// What the player still has to do for it once the run is over, or null. a_changed: the run built something or switched
-	// mods off and on again. a_current: the game made its list anew in this run after the last thing the run changed (the
-	// put-back's switching counts). a_lastWasGame: the run's last step that finished started the game with everything the
-	// run built switched on (the save to play).
-	public static string? AfterRun(State? a_state, bool a_changed, bool a_current, bool a_lastWasGame)
+	// mods off and on again. a_current: the game made its list anew in this run after the last thing that may have changed
+	// the game's files (the put-back's switching counts, and so does each command of the setup after the run).
+	// a_lastWasGame: the run's last step that finished started the game with everything the run built switched on (the save
+	// to play). a_commandOnly: the list was current until the setup's own commands after the run ran - whether those
+	// changed a game file nobody can tell from here, so the player is told what to do if they do.
+	public static string? AfterRun(State? a_state, bool a_changed, bool a_current, bool a_lastWasGame, bool a_commandOnly = false)
 	{
-		if (a_state is not { } s || !a_changed) {
+		if (a_state is not { } s || !(a_changed || a_commandOnly)) {
 			return null;
 		}
 		if (LoadsBlind(s)) {
-			return a_current ? null : Name + ": its cache is older than what this run changed, and it loads it without asking - set its Mode to CACHE for one game start before you play";
+			if (a_current) {
+				return null;
+			}
+			return a_commandOnly
+				? Name + ": this setup's command after the run ran after the game last made its cache, and the mod loads that cache without asking - if that command adds, moves or removes game files, set its Mode to CACHE for one game start before you play"
+				: Name + ": its cache is older than what this run changed, and it loads it without asking - set its Mode to CACHE for one game start before you play";
 		}
-		return s.PopUp && !a_lastWasGame ? Name + ": answer Yes to its question at your next game start - this run changed the game's files after the game last ran" : null;
+		// with its question on, the mod itself asks at the next game start: after a command of the player's own, the answer is theirs
+		return a_changed && s.PopUp && !a_lastWasGame ? Name + ": answer Yes to its question at your next game start - this run changed the game's files after the game last ran" : null;
 	}
 }

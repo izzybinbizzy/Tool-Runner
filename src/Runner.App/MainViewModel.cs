@@ -219,7 +219,7 @@ public sealed partial class MainViewModel : Observable
 			("Make a setup", "Press New setup and pick your Mod Organizer and the profile you play. Its steps are found from Mod Organizer's Executables list, and Find my tools names any tool that is missing."),
 			("Check it", "Press Check (F5). Every tool and setting is looked at, and whatever would stop a run is named with what to do about it."),
 			("Try a dry run", "Press Dry run to see what a run would switch off, what it would build and the room it needs on disk. Nothing is started and nothing is changed."),
-			("Start", "Press START and leave the PC to it: the tools run in order, each output is switched on as it is built, and your profile is put back when the run ends - after a Stop or a failure too."),
+			("Start", "Press START. Before a setup's first run it lists your tools, each to set up once in its own window (Tools, at the top, any time later). Then leave the PC to it: the tools run in order, each output is switched on as it is built, and your profile is put back when the run ends - after a Stop or a failure too."),
 		];
 		return steps.Select((s, i) => new GuideRow(i < next ? Theme.Glyph("Done") : (i + 1).ToString(InvariantCulture), s.Title, s.Text, i < next ? "good" : i == next ? "" : "muted")).ToList();
 	}
@@ -348,7 +348,16 @@ public sealed partial class MainViewModel : Observable
 		return false;
 	}
 
+	// the setup the window shows was read (again, or another one): what stands open for one setup can follow
+	public event Action? SetupShown;
+
 	public void LoadSteps()
+	{
+		ReadSteps();
+		SetupShown?.Invoke();
+	}
+
+	void ReadSteps()
 	{
 		Steps.Clear();
 		Setup = null;
@@ -772,6 +781,48 @@ public sealed partial class MainViewModel : Observable
 	public Func<string, string, string?, bool>? ConfirmRun { get; set; }
 	bool _previewing;
 
+	// His word of 2026-11-21: before a setup's first run the player is shown its tools, each to set up by hand in its own
+	// window. The window answers it (true = go on to the run, false = not now).
+	public Func<Setup, IReadOnlyList<ToolSettings.ToSet>, bool>? OfferTools { get; set; }
+
+	// "went on from that box" is kept per setup, with the window's own state
+	public static string ToolsOfferedKey(string a_setupFile) => "tools.offered." + Path.GetFileNameWithoutExtension(a_setupFile).ToLowerInvariant();
+
+	// True: go on with the start. Shown once, for a setup that has never run and has a tool to set up; what does not read here
+	// is the start's own first finding. a_cannot: what stops the start, asked again once the box has closed (a tool may have
+	// been open for minutes).
+	async Task<bool> ToolsFirst(string a_file, Func<Setup> a_read, Func<string?> a_cannot)
+	{
+		var key = ToolsOfferedKey(a_file);
+		if (OfferTools == null || UiState.Flag(key)) {
+			return true;
+		}
+		Setup setup;
+		List<ToolSettings.ToSet> tools;
+		bool ran;
+		try {
+			(setup, tools, ran) = await Task.Run(() => {
+				var s = a_read();
+				return (s, ToolSettings.ToSetUp(s), Engine.Latest(a_file) != null);
+			});
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException) {
+			return true;
+		}
+		if (!ToolSettings.OfferFirst(ran, false, tools.Count)) {
+			return true;
+		}
+		if (!OfferTools(setup, tools)) {
+			Say("Not started. Your tools can be set up any time: Tools, at the top of the window.", "");
+			return false;
+		}
+		UiState.Set(key, true);
+		if (a_cannot() is { } now) {
+			Say(now, "bad");
+			return false;
+		}
+		return true;
+	}
+
 	string? CannotStart() =>
 		SelectedSetup == null || Setup == null ? "Make or pick a setup first." : CannotStartAny();
 
@@ -800,6 +851,22 @@ public sealed partial class MainViewModel : Observable
 		if ((a_dryOnly ? (SelectedSetup == null || Setup == null ? "Make or pick a setup first." : null) : CannotStart()) is { } why) {
 			Say(why, "bad");
 			return;
+		}
+		if (!a_dryOnly) {
+			var mine = Setup!;
+			var picked = SelectedSetup!.File;
+			_previewing = true;
+			try {
+				if (!await ToolsFirst(mine.File, () => mine, CannotStart)) {
+					return;
+				}
+			} finally {
+				_previewing = false;
+			}
+			if (!string.Equals(SelectedSetup?.File, picked, StringComparison.OrdinalIgnoreCase)) {
+				Say("Not started: another setup was picked meanwhile - press Start again.", "warn");
+				return;
+			}
 		}
 		if ((a_dryOnly || Setup.Bool(Setup!.Root, "previewBeforeRun") != false) && ConfirmRun != null) {
 			_previewing = true;
@@ -948,6 +1015,17 @@ public sealed partial class MainViewModel : Observable
 		if (CannotStartAny() is { } why) {
 			Say(why, "bad");
 			return;
+		}
+		// each setup of the queue that has never run: its tools first, as before a single run
+		_previewing = true;
+		try {
+			foreach (var f in a_files) {
+				if (!await ToolsFirst(f, () => Setup.Parse(Files.ReadShared(f), f), CannotStartAny)) {
+					return;
+				}
+			}
+		} finally {
+			_previewing = false;
 		}
 		// the queue is always asked about: its order and its rule, and each setup's preview unless that setup has it switched off;
 		// what was shown is stamped (each setup file's bytes, each profile's lists) and started only if nothing changed meanwhile
@@ -1137,14 +1215,20 @@ public sealed partial class MainViewModel : Observable
 	// program on its own), and its settings are learned again after. A look that fails is one plain line, never an error.
 	async Task LookForUpdates(Setup a_setup)
 	{
-		List<ToolUpdates.Result> res;
+		List<ToolUpdates.Result>? res = null;
+		var failed = "";
 		try {
 			res = await Task.Run(async () => await ToolUpdates.Check(a_setup, Mo2Instance.Load(a_setup.Mo2Exe, a_setup.Mo2Instance), CancellationToken.None)).ConfigureAwait(true);
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or System.Net.Http.HttpRequestException or TaskCanceledException) {
-			Issues.Add($"{Theme.Glyph("IssueNote")}  Updates: the tools' pages could not be asked ({e.Message})");
+			failed = e.Message;
+		}
+		// another setup was picked while this one's pages were asked: neither what they said nor that they could not be asked
+		// belongs among the new setup's findings
+		if (!StillShown(a_setup.File, Setup?.File)) {
 			return;
 		}
-		if (!string.Equals(a_setup.File, Setup?.File, StringComparison.OrdinalIgnoreCase)) {
+		if (res == null) {
+			Issues.Add($"{Theme.Glyph("IssueNote")}  Updates: the tools' pages could not be asked ({failed})");
 			return;
 		}
 		foreach (var line in UpdateLines(res)) {
@@ -1152,6 +1236,10 @@ public sealed partial class MainViewModel : Observable
 		}
 		await LookForNewVersion(MainWindow.AppVersion).ConfigureAwait(true);
 	}
+
+	// Is the setup something was asked or edited for still the one the window shows? (by its file: the same setup read
+	// again is the same setup)
+	public static bool StillShown(string a_askedFor, string? a_shownNow) => string.Equals(a_askedFor, a_shownNow, StringComparison.OrdinalIgnoreCase);
 
 	// what the check says about the tools' versions: one line per tool with a newer version, else one line for all
 	public static List<string> UpdateLines(IReadOnlyCollection<ToolUpdates.Result> a_res)

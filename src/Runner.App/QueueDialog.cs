@@ -18,9 +18,11 @@ public static class QueueDialog
 	public static Picked? Run(Window a_owner, List<string> a_setups)
 	{
 		Picked? picked = null;
+		// its least size too is held to the screen: a least height above the screen's would win over the height it is given
+		var room = SystemParameters.WorkArea;
 		var w = new Window {
-			Owner = a_owner, Title = "Queue of setups", Width = UiState.Fit(UiState.Number("queue.width"), 560, 420, SystemParameters.WorkArea.Width),
-			Height = UiState.Fit(UiState.Number("queue.height"), 560, 380, SystemParameters.WorkArea.Height), MinWidth = 420, MinHeight = 380,
+			Owner = a_owner, Title = "Queue of setups", Width = UiState.Fit(UiState.Number("queue.width"), 560, 420, room.Width),
+			Height = UiState.Fit(UiState.Number("queue.height"), 560, 380, room.Height), MinWidth = UiState.Least(420, room.Width), MinHeight = UiState.Least(380, room.Height),
 			WindowStartupLocation = WindowStartupLocation.CenterOwner,
 			Background = Brushes2.Get("Panel"), Foreground = Brushes2.Get("Text"), ResizeMode = ResizeMode.CanResize, ShowInTaskbar = false,
 		};

@@ -22,20 +22,66 @@ public sealed class StartedSet : IEnumerable<int>
 	readonly HashSet<string> _images = new(StringComparer.OrdinalIgnoreCase);
 	// when the process under a number started (null: gone, or closed to this user)
 	readonly Func<int, DateTime?> _startOf;
+	// Every process on record whose children are still looked for is held open (Procs.Pin): Windows gives its number to
+	// nobody else while it is held, so a row that names that number as its parent names that very process - also after it
+	// has ended. Without the hold, a number that changed hands after its process ended, and whose new holder had ended
+	// again by the next look, made that stranger's children read as the run's own (the new holder leaves no trace).
+	readonly Dictionary<int, IDisposable> _pins = [];
+	// One that could not be held: the last reading of the clock by which it was seen alive. Only a child that had started
+	// by then is certainly its own; a later one may be the child of whoever had the number next.
+	readonly Dictionary<int, DateTime> _seen = [];
+	readonly Func<int, DateTime, IDisposable?>? _pin;
 
-	// (the offline tests hand in start times of their own)
-	public StartedSet(Func<int, DateTime?>? a_startOf = null) => _startOf = a_startOf ?? Procs.StartTime;
+	// (the offline tests hand in start times of their own - and then a hold of their own, or none)
+	public StartedSet(Func<int, DateTime?>? a_startOf = null, Func<int, DateTime, IDisposable?>? a_pin = null)
+	{
+		_startOf = a_startOf ?? Procs.StartTime;
+		_pin = a_pin ?? (a_startOf == null ? Procs.Pin : null);
+	}
 
 	public void Add(int a_pid)
 	{
 		var at = _startOf(a_pid);
 		var image = Procs.Image(a_pid);
+		var pin = at is { } started ? _pin?.Invoke(a_pid, started) : null;
+		IDisposable? old;
 		lock (_gate) {
 			_pids[a_pid] = at;
 			_ended.Remove(a_pid);
 			_kin.Remove(a_pid);
+			_pins.Remove(a_pid, out old);
+			_seen.Remove(a_pid);
+			if (pin != null) {
+				_pins[a_pid] = pin;
+			} else if (at is { } began) {
+				// not held: it was alive when it started, and no more is known yet
+				_seen[a_pid] = began;
+			}
 			if (image != "") {
 				_images.Add(image);
+			}
+		}
+		old?.Dispose();
+	}
+
+	// Every hold given up, when the run this set belongs to is over. What is on record stays on record; from here a number
+	// may change hands again, so nothing more is put on record under a process that has ended.
+	public void Release()
+	{
+		List<IDisposable> all;
+		lock (_gate) {
+			all = [.. _pins.Values];
+			_pins.Clear();
+		}
+		all.ForEach(p => p.Dispose());
+	}
+
+	// how many processes are held open now (the offline tests: a hold is given up with its record)
+	public int Held
+	{
+		get {
+			lock (_gate) {
+				return _pins.Count;
 			}
 		}
 	}
@@ -128,15 +174,22 @@ public sealed class StartedSet : IEnumerable<int>
 	public void Sweep(Func<IReadOnlyCollection<(int Pid, int Parent)>?> a_list, Func<DateTime> a_clock)
 	{
 		Dictionary<int, DateTime> parents;
+		Dictionary<int, DateTime> seen;
+		HashSet<int> held;
 		lock (_gate) {
 			parents = _pids.Where(p => p.Value != null && !_ended.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value!.Value);
 			foreach (var k in _kin) {
 				parents.TryAdd(k.Key, k.Value);
 			}
+			seen = new Dictionary<int, DateTime>(_seen);
+			held = [.. _pins.Keys];
 		}
 		if (parents.Count == 0) {
 			return;
 		}
+		// until when a parent's number was certainly its own: for good while it is held open, else up to the last reading of
+		// the clock by which it was seen alive
+		DateTime Sure(int a_pid) => held.Contains(a_pid) ? DateTime.MaxValue : seen.GetValueOrDefault(a_pid, DateTime.MinValue);
 		var starts = new Dictionary<int, DateTime?>();
 		DateTime? StartOf(int a_pid) => starts.TryGetValue(a_pid, out var t) ? t : starts[a_pid] = _startOf(a_pid);
 		// The clock is read BEFORE each list is taken, and a row counts only for a process that had started before that
@@ -149,8 +202,13 @@ public sealed class StartedSet : IEnumerable<int>
 		if (rows == null) {
 			return;
 		}
-		var found = Children(parents, rows, StartOf, before);
+		var found = Children(parents, rows, StartOf, before, Sure);
 		var ended = parents.Where(p => StartOf(p.Key) != p.Value).ToList();
+		// one that is not held and is alive at this look was alive at this look's reading (its start time is read after it)
+		var alive = parents.Where(p => !held.Contains(p.Key) && StartOf(p.Key) == p.Value).Select(p => p.Key).ToList();
+		foreach (var pid in alive) {
+			seen[pid] = before;
+		}
 		if (ended.Count > 0) {
 			// One that has ended may have started a child after the list above was taken (it was still alive then). It starts
 			// nothing more now, so one more list - read fresh - holds everything it ever started: only then is it retired.
@@ -166,32 +224,72 @@ public sealed class StartedSet : IEnumerable<int>
 				foreach (var (pid, at) in found) {
 					all.TryAdd(pid, at);
 				}
-				foreach (var (pid, at) in Children(all, last, StartOf, beforeLast)) {
+				// one found a moment ago is not held yet: it was alive when its start time was read, after the first reading
+				DateTime SureNow(int a_pid) => parents.ContainsKey(a_pid) ? Sure(a_pid) : before;
+				foreach (var (pid, at) in Children(all, last, StartOf, beforeLast, SureNow)) {
 					found.TryAdd(pid, at);
 				}
 				// A row under an ended parent whose process started at or after this reading was not taken (it may be a real
 				// child that young - the clock has ticks, and both readings can fall in one). Its parent is kept for the
-				// next look, whose later reading can take it; retired now, that child would never be found again.
-				if (last.Any(r => ended.Any(e => e.Key == r.Parent) && StartOf(r.Pid) is { } began && began >= beforeLast)) {
+				// next look, whose later reading can take it; retired now, that child would never be found again. Only for a
+				// child that a later look can still take: one that started after the parent's number stopped being certainly
+				// the parent's never is.
+				if (last.Any(r => ended.Any(e => e.Key == r.Parent) && StartOf(r.Pid) is { } began && began >= beforeLast && began <= Sure(r.Parent))) {
 					ended.Clear();
 				}
 			}
 		}
+		// each one found is held open before it goes on record (asked of Windows outside the lock); one that cannot be held
+		// - it has ended since, or its number is another's already - is on record all the same, with no child of its own
+		// taken past this look's first reading
+		var pins = found.ToDictionary(c => c.Key, c => _pin?.Invoke(c.Key, c.Value));
+		var spare = new List<IDisposable?>();
 		lock (_gate) {
 			foreach (var (pid, at) in found) {
-				// one the run recorded itself meanwhile stays that
-				if (!(_pids.TryGetValue(pid, out var own) && own == at)) {
-					_kin[pid] = at;
+				// one the run recorded itself meanwhile stays that, with the hold it took itself
+				if (_pids.TryGetValue(pid, out var own) && own == at) {
+					spare.Add(pins[pid]);
+					continue;
+				}
+				_kin[pid] = at;
+				if (_pins.Remove(pid, out var earlier)) {
+					spare.Add(earlier);
+				}
+				if (pins[pid] is { } pin) {
+					_pins[pid] = pin;
+					_seen.Remove(pid);
+				} else {
+					_seen[pid] = before;
 				}
 			}
 			foreach (var (pid, at) in ended) {
+				var retired = false;
 				if (_kin.TryGetValue(pid, out var kin) && kin == at) {
 					_kin.Remove(pid);
+					retired = true;
 				}
 				if (_pids.TryGetValue(pid, out var own) && own == at) {
 					_ended.Add(pid);
+					retired = true;
+				}
+				// its children were looked for one last time: the hold has done its work
+				if (retired) {
+					if (_pins.Remove(pid, out var done)) {
+						spare.Add(done);
+					}
+					_seen.Remove(pid);
 				}
 			}
+			foreach (var pid in alive) {
+				// still the record this look read, and still not held
+				var same = (_pids.TryGetValue(pid, out var own) && own == parents[pid]) || (_kin.TryGetValue(pid, out var kin) && kin == parents[pid]);
+				if (same && !_pins.ContainsKey(pid) && _seen.TryGetValue(pid, out var was) && was < before) {
+					_seen[pid] = before;
+				}
+			}
+		}
+		foreach (var p in spare) {
+			p?.Dispose();
 		}
 	}
 
@@ -201,11 +299,14 @@ public sealed class StartedSet : IEnumerable<int>
 	//   out again: one that started before is a child of whoever had the number before), and
 	// - the parent's number is not another process's by now, or it started before that one did (a child started since the
 	//   number changed hands is the new owner's - a program of the player's, never the run's), and
+	// - when the parent has ended: it started no later than a_sureUntil says the number was certainly the parent's (for
+	//   good while the parent is held open; else the last time it was seen alive). Past that the number may have been
+	//   another process's in between, and one that has ended again leaves nothing to tell it by, and
 	// - it had started before a_beforeListUtc, a reading of the clock made BEFORE the list was taken: a row names the process
 	//   that had the number when the list was taken. One that started at or after the reading may only have the number of a
 	//   child that has ended since, and is taken for nobody's child (a real child that young is found by the next look).
 	public static Dictionary<int, DateTime> Children(IReadOnlyDictionary<int, DateTime> a_parents, IReadOnlyCollection<(int Pid, int Parent)> a_rows, Func<int, DateTime?> a_startOf,
-		DateTime a_beforeListUtc)
+		DateTime a_beforeListUtc, Func<int, DateTime> a_sureUntil)
 	{
 		var found = new Dictionary<int, DateTime>();
 		var grew = true;
@@ -225,7 +326,9 @@ public sealed class StartedSet : IEnumerable<int>
 				if (a_parents.TryGetValue(pid, out var self) && self == at) {
 					continue;
 				}
-				if (a_startOf(parent) is { } now && now != pat && at >= now) {
+				// (a parent found in this very pass was read alive in it: it never comes to the second question)
+				var now = a_startOf(parent);
+				if (now != pat && ((now is { } other && at >= other) || at > a_sureUntil(parent))) {
 					continue;
 				}
 				found[pid] = at;

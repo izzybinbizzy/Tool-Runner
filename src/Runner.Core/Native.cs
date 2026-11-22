@@ -471,6 +471,25 @@ public static partial class Procs
 		return null;
 	}
 
+	[LibraryImport("kernel32.dll", SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	private static partial bool GetProcessTimes(nint a_process, out long a_created, out long a_ended, out long a_kernel, out long a_user);
+
+	// The process under a_pid held open - when it is the very process that started at a_startedUtc, else null. Windows
+	// frees a process's number only together with the process object, and that object lives for as long as anyone holds a
+	// handle to it: while this one is held the number is nobody else's, also after the process has ended (it then reads as
+	// gone to StartTime, Alive and the process list). The handle can ask when the process started and whether it has
+	// ended, nothing more.
+	public static IDisposable? Pin(int a_pid, DateTime a_startedUtc)
+	{
+		var pin = new Microsoft.Win32.SafeHandles.SafeProcessHandle(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, false, (uint)a_pid), true);
+		if (!pin.IsInvalid && GetProcessTimes(pin.DangerousGetHandle(), out var created, out _, out _, out _) && DateTime.FromFileTimeUtc(created) == a_startedUtc) {
+			return pin;
+		}
+		pin.Dispose();
+		return null;
+	}
+
 	[LibraryImport("kernel32.dll")]
 	private static partial void GetSystemTimeAsFileTime(out long a_time);
 

@@ -148,8 +148,8 @@ public static class RunnerErrors
 			"While you are at the PC you can also answer it during the run: the window names the box and waits a minute before the step stops."),
 		E("TR-416", "Faster Archives closed the game to ask", "Faster Archives closes the game at its start when it finds archives it can repack, and asks in a window of its own. That is no crash.",
 			"Choose in its window (Repack now, or Don't offer these again) and run again from this step - or set Settings > Faster Archives' offer during a run to pass it over, and it asks the next time you start the game yourself."),
-		E("TR-413", "its learned settings name a file outside their folder|saved no settings file while it was open", "The settings kept from the tool's own window are missing or damaged.",
-			"Learn them again: Settings > A step > Learn its settings, change something in the tool's window, save, and close it."),
+		E("TR-413", "its learned settings name a file outside their folder|" + ToolSettings.SavedNothing, "The settings kept from the tool's own window are missing or damaged.",
+			"Set the tool up again: Tools (at the top of the window) > Set up again - or Settings > A step > Learn its settings -, change something in the tool's window, save, and close it."),
 
 		// ---- putting back and undoing
 		E("TR-501", "that run is still going|a run or another put-back is going|a run or a put-back is going", "A run or a put-back is still at work.",

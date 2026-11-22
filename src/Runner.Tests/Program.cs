@@ -494,6 +494,15 @@ public static class Program
 		}
 		Equal(BoxMove.Press, KnownBoxes.Judge(new BoxSeen("SkyrimSE.exe", true, "Cache Recursive Directory Walk", "Do you want to generate CRDW cache files?", ["Yes", "No"])).Move, "the run's own game's is answered");
 		Equal(BoxMove.Name, KnownBoxes.Judge(new BoxSeen("SkyrimSE.exe", false, "Cache Recursive Directory Walk", "Do you want to generate CRDW cache files?", ["Yes", "No"])).Move, "the player's game's is only named");
+		// a box of the run's game that nothing here knows: closed by the button that takes nothing on (his word of 2026-11-21),
+		// unless the setup leaves such boxes to the player
+		var notKnown = new BoxSeen("SkyrimSE.exe", true, "Some Mod", "Reset all of its settings?", ["Yes", "No"]);
+		Equal(BoxMove.Stop, KnownBoxes.Judge(notKnown).Move, "left to the player where the setup says so: never guessed at");
+		var closedBox = KnownBoxes.Judge(notKnown, true);
+		Check(closedBox.Move == BoxMove.Press && closedBox.Button == "No" && closedBox.Note.Contains("does not know", StringComparison.Ordinal), "closed with its declining button, and named: " + closedBox.Note);
+		Equal("Ignore", KnownBoxes.Judge(new BoxSeen("SkyrimSE.exe", true, "Error", "Something failed", ["Abort", "Retry", "Ignore"]), true).Button, "Windows' own three: Ignore");
+		Equal(BoxMove.Stop, KnownBoxes.Judge(new BoxSeen("SkyrimSE.exe", true, "Working", "Packing the archives ...", ["Cancel"]), true).Move, "a box whose one button is Cancel shows something at work: never pressed");
+		Equal(BoxMove.Name, KnownBoxes.Judge(new BoxSeen("TexGenx64.exe", false, "TexGen", "Exit TexGen?", ["Yes", "No"]), true).Move, "a tool's own box is only named, whatever the setup says about the game's");
 
 		pressed.Clear();
 		shown.Clear();
@@ -655,6 +664,12 @@ public static class Program
 		Equal(null, Crdw.AfterRun(blind, true, true, true), "the game made its list anew after the last thing the run changed: nothing left to do");
 		Equal(null, Crdw.AfterRun(asks, true, false, true), "its question was answered Yes at the run's last game start");
 		Check(Crdw.AfterRun(asks, true, false, false)?.Contains("answer Yes", StringComparison.Ordinal) == true, "no game start after the last tool: answer Yes next time");
+		// a command of the setup ran after the game last made its list: whether it changed a game file nobody can tell from
+		// here, so the list is never called current after it - the player is told what to do if it does
+		Check(Crdw.AfterRun(blind, true, false, true, true)?.Contains("command after the run", StringComparison.Ordinal) == true, "a command after the run, after the game's last list: said, with what to do if it changes game files");
+		Check(Crdw.AfterRun(blind, false, false, false, true)?.Contains("command after the run", StringComparison.Ordinal) == true, "also after a run that changed nothing itself");
+		Check(Crdw.AfterRun(blind, true, false, false, false)?.Contains("older than what this run changed", StringComparison.Ordinal) == true, "a list the run itself left old is said as that, command or no command");
+		Equal(null, Crdw.AfterRun(asks, true, false, true, true), "with its question on, the mod asks at the next game start itself");
 		// when the run has it make a new list: his answer ("mod makes a new list when files are changed during the run") is
 		// the rule for a setup that says nothing
 		Equal(Crdw.Renew.Changed, Crdw.When(Setup.FromJson(new JsonObject())), "a setup that says nothing: a new list when the run changed files");
@@ -663,6 +678,13 @@ public static class Program
 		Equal(Crdw.Renew.Changed, Crdw.When(Setup.FromJson(new JsonObject { ["crdwCache"] = "leave" })), "the first builds' \"leave\" was written by every save of the settings, chosen or not: it says nothing");
 		Equal(Crdw.Renew.Always, Crdw.When(Setup.FromJson(new JsonObject { ["crdwCache"] = "refresh" })), "their \"refresh\" had to be picked: it still counts");
 		Equal(Crdw.Renew.Never, Crdw.When(Setup.FromJson(new JsonObject { ["crdwCache"] = "refresh", [Crdw.SettingName] = "never" })), "and what is picked now outranks it");
+		// what the settings window shows (and so what a save writes) is what the run does today - never the list's first
+		// choice for a key that is empty or holds a word the list does not have
+		Equal("always", Crdw.Word(Setup.FromJson(new JsonObject { [Crdw.SettingName] = "", ["crdwCache"] = "refresh" })), "an empty value under the new key says nothing: the old key's \"refresh\" is shown, and a save keeps it");
+		Equal("always", Crdw.Word(Setup.FromJson(new JsonObject { [Crdw.SettingName] = "  ", ["crdwCache"] = "refresh" })), "nor does one of blanks");
+		Equal("never", Crdw.Word(Setup.FromJson(new JsonObject { [Crdw.SettingName] = "Never" })), "what was picked is shown in the list's own word");
+		Equal("changed", Crdw.Word(Setup.FromJson(new JsonObject { [Crdw.SettingName] = "sometimes" })), "a word it does not know is shown as what the run does with it");
+		Equal("changed", Crdw.Word(Setup.FromJson(new JsonObject())), "and a setup that says nothing as the rule for it");
 		Check(Crdw.Writes("landscapefixer") && Crdw.Writes("grass") && !Crdw.Writes("cleansave") && !Crdw.Writes("playsave") && !Crdw.Writes("shaders"), "a step that only starts the game and saves changes no file the mod lists");
 
 		using var f = new FakeMo2();
@@ -734,6 +756,48 @@ public static class Program
 			Crdw.StepEnded(ctx, true, true);
 			Equal(1, ctx.Journal.FilesChanged, "what a step wrote after its own game start counts as changed again");
 			Equal(0, StepKit.PutFilesBack(ctx).Count, "and its file goes back as well");
+			// A game step that switches a mod off for its game start (CodeRabbit on pull request #35): the list the game makes
+			// then is of the mods as they are switched. With the mod back, that list is old again - also when the step itself
+			// writes nothing, where it once stayed "current" and no later game start made a new one
+			ctx.Journal.FilesChanged = 0;
+			using (new Toggle(ctx, [], ["Faster Archives"], "the test")) {
+				Equal(1, ctx.Journal.FilesChanged, "mods switched for a step: the game would find other files than its list names");
+				GameStart.Prepare(ctx);
+				Equal((false, "CACHE"), Crdw.Parse(File.ReadAllText(crdwOwn)), "so this step's game start makes the list anew");
+			}
+			Crdw.StepEnded(ctx, true, false);
+			Equal(1, ctx.Journal.FilesChanged, "the list was made with the mod switched off: with the mod back it is old again, though the step wrote nothing");
+			Equal(0, StepKit.PutFilesBack(ctx).Count, "(the mod's own file back)");
+			GameStart.Prepare(ctx);
+			Equal((false, "CACHE"), Crdw.Parse(File.ReadAllText(crdwOwn)), "and the next game start makes a new one");
+			Crdw.StepEnded(ctx, true, false);
+			Equal(0, ctx.Journal.FilesChanged, "which is current: nothing was switched for that start");
+			Equal(0, StepKit.PutFilesBack(ctx).Count, "(and back again)");
+			// mods switched for a tool and put back, with no game start in between, change nothing for the game's list
+			using (new Toggle(ctx, [], ["Faster Archives"], "the test")) {
+			}
+			Equal(0, ctx.Journal.FilesChanged, "switched and put back with no list made meanwhile: as it was");
+			// a step that asks for a mod as it already stands switches nothing: the game's files are what its list names
+			using (new Toggle(ctx, ["Faster Archives"], [], "the test")) {
+				Equal(0, ctx.Journal.FilesChanged, "a mod asked on that is on already: nothing switched, nothing changed for the game's list");
+				ctx.FreshList = true;
+			}
+			Check(!ctx.SwitchedBack, "and with nothing switched there is nothing to put back after the list was made");
+			ctx.FreshList = false;
+			// The save to play runs after the run's record says finished. A file kept for it is on record as "to put back" in
+			// the very write that records the file - before the file is changed (said only after the change, a crash in
+			// between left a changed file that nothing offered to put back)
+			var forPlay = Path.Combine(f.Root, "changed for the save to play.ini");
+			File.WriteAllText(forPlay, "as it was");
+			ctx.Journal.InGameAfter = true;
+			ctx.Journal.NeedsRestore = false;
+			StepKit.KeepFile(ctx, forPlay);
+			var onDisk = Journal.Load(ctx.Journal.Folder);
+			Check(onDisk.NeedsRestore && onDisk.Unfinished && onDisk.Kept.Any(k => k.Path == forPlay && !k.Done), "the record on disk says there is something to put back, with the file named");
+			Equal("as it was", File.ReadAllText(forPlay), "before the file itself is touched");
+			Equal(0, StepKit.PutFilesBack(ctx).Count, "(put back)");
+			ctx.Journal.InGameAfter = false;
+			ctx.Journal.NeedsRestore = false;
 		}
 		setup.Root[Crdw.SettingName] = "never";
 		setup.Save();
@@ -1113,6 +1177,27 @@ public static class Program
 		Equal(("answered YES", 0), DevBench.DecideBox("Some content is missing. Continue loading?", ["Yes", "No"], 2), "continue -> Yes");
 		Equal(("acknowledged", 0), DevBench.DecideBox("Perks reset", ["Ok"], 1), "one button");
 		Equal<string?>(null, DevBench.DecideBox("Delete your save?", ["Yes", "No"], 2).Answer, "an unknown question is not answered");
+		// ... it is CLOSED (his word of 2026-11-21: whatever the box is, it is closed at once) - by the button that takes nothing on
+		Equal(1, DevBench.CloseIndex(["Yes", "No"], -1, 2), "a box the run does not know: the button that declines");
+		Equal(2, DevBench.CloseIndex(["Enable", "Disable", "Ask me later"], 2, 3), "the button the game itself marks as the box's cancel comes first");
+		Equal(0, DevBench.CloseIndex(["Cancel", "Delete everything"], -1, 2), "a declining button wherever it stands");
+		Equal(1, DevBench.CloseIndex(["Install now", "Not now"], -1, 2), "one that puts it off");
+		Equal(1, DevBench.CloseIndex(["Yes, reset", "No, keep them"], -1, 2), "one whose words begin by declining");
+		Equal(2, DevBench.CloseIndex(["Abort", "Retry", "Ignore"], -1, 3), "Windows' own: Ignore");
+		Equal(2, DevBench.CloseIndex(["Warrior", "Mage", "Thief"], -1, 3), "none declines: the last, where the way out stands");
+		Equal(0, DevBench.CloseIndex(["Ok"], -1, 1), "its only button");
+		Equal(1, DevBench.CloseIndex([], -1, 2), "buttons without words: the last of them");
+		Equal(1, DevBench.CloseIndex(["Yes", "No"], 7, 2), "a cancel place the box does not have says nothing");
+		// the shader mod's own word about its start-up pass (Open Shaders, through DevBench): over or not, and how much it compiled
+		var whole = InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":false,"totalTasks":3201,"completedTasks":3201,"diskHitTasks":3201,"failedTasks":0}""")!.AsObject())!;
+		Check(whole.Over && whole.Compiled == 0 && InGame.ShaderPassSaid(whole).Contains("all 3201 taken from its cache, none compiled", StringComparison.Ordinal),
+			"every shader from the cache: over, and nothing compiled - " + InGame.ShaderPassSaid(whole));
+		var rebuilt = InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":false,"totalTasks":3201,"completedTasks":3201,"diskHitTasks":1589}""")!.AsObject())!;
+		Check(rebuilt.Over && rebuilt.Compiled == 1612 && InGame.ShaderPassSaid(rebuilt).Contains("1612 of 3201 compiled", StringComparison.Ordinal), "what did not come from the cache was compiled at this start");
+		Check(!InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":true,"totalTasks":3201,"completedTasks":40,"diskHitTasks":40}""")!.AsObject())!.Over, "still at it: not over");
+		Check(!InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":false,"totalTasks":0,"completedTasks":0}""")!.AsObject())!.Over, "nothing queued yet (the game has only just come up): not over");
+		Equal<long?>(null, InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":false,"totalTasks":12,"completedTasks":12}""")!.AsObject())!.Compiled, "a shader mod that does not say what came from its cache");
+		Equal<InGame.ShaderPass?>(null, InGame.ReadShaderPass(JsonNode.Parse("""{"cacheFiles":3201}""")!.AsObject()), "an answer that says nothing about a pass");
 	}
 
 	static void T_FollowersAreLivingTeammates()
@@ -1211,6 +1296,155 @@ public static class Program
 		serve.Wait(TimeSpan.FromSeconds(5));
 		lock (order) {
 			return (string.Join(",", order), string.Join(";", moved));
+		}
+	}
+
+	// His word of 2026-11-21: "the tool is not catching pop up boxes in game ... it needs to be externally found no matter
+	// what the box could potentially be and immediately closed." Against a local stand-in for DevBench that shows one box
+	// after another: the ones the run knows get their answer, one it does not know is closed by the button that takes
+	// nothing on and goes into the run's notes, a setup may leave such a box to the player, and one that will not close is
+	// not answered for ever.
+	static void T_AGameBoxIsClosedWhateverItIs()
+	{
+		using var f = new FakeMo2();
+		var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+		probe.Start();
+		var port = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port;
+		probe.Stop();
+		using var http = new System.Net.HttpListener();
+		http.Prefixes.Add($"http://localhost:{port}/");
+		http.Start();
+		// the boxes the made-up game shows, first to last; closes: false = its answer never takes
+		var boxes = new Queue<(string Body, string[] Buttons, int Cancel)>();
+		var accepted = new List<int>();
+		var closes = true;
+		// the game's own tutorial pop-up (no message box): shown or not, and the menus the run closed by name
+		var tutorial = false;
+		var closedMenus = new List<string>();
+		var serve = Task.Run(() => {
+			while (http.IsListening) {
+				System.Net.HttpListenerContext c;
+				try {
+					c = http.GetContext();
+				} catch (Exception e) when (e is System.Net.HttpListenerException or ObjectDisposedException or InvalidOperationException) {
+					return;
+				}
+				using var reader = new StreamReader(c.Request.InputStream);
+				var asked = JsonNode.Parse(reader.ReadToEnd()) as JsonObject ?? [];
+				var reply = new JsonObject();
+				lock (boxes) {
+					switch (asked["action"]?.ToString()) {
+					case "list":
+						reply["messageBoxOpen"] = boxes.Count > 0;
+						reply["openMenus"] = tutorial ? new JsonArray("Main Menu", "Tutorial Menu") : new JsonArray("Main Menu");
+						break;
+					case "close":
+						closedMenus.Add(asked["name"]?.ToString() ?? "");
+						tutorial = false;
+						break;
+					case "describe" when boxes.Count > 0:
+						var (body, buttons, cancel) = boxes.Peek();
+						reply["messageBoxOpen"] = true;
+						reply["bodyText"] = body;
+						reply["buttons"] = new JsonArray(buttons.Select(b => (JsonNode?)b).ToArray());
+						reply["cancelIndex"] = cancel;
+						break;
+					case "describe":
+						reply["messageBoxOpen"] = false;
+						break;
+					case "call":
+						// (the game's own words for its boxes, asked for a box that is not in English: this game has none to give)
+						reply["called"] = true;
+						reply["returned"] = "";
+						break;
+					case "accept":
+						accepted.Add(asked["index"]?.GetValue<int>() ?? -1);
+						if (closes && boxes.Count > 0) {
+							boxes.Dequeue();
+						}
+						break;
+					}
+				}
+				var bytes = Encoding.UTF8.GetBytes(new JsonObject { ["result"] = reply }.ToJsonString());
+				c.Response.ContentType = "application/json";
+				c.Response.OutputStream.Write(bytes);
+				c.Response.Close();
+			}
+		});
+		try {
+			var setup = f.WriteSetup(("cleansave", new JsonObject()));
+			var ctx = StepContext(f, "cleansave", new DevBench($"http://localhost:{port}/api/tool/"), CancellationToken.None);
+			using (ctx.Log) {
+				Equal(null, InGame.LookAtGameBox(ctx, out var none, true), "no box open: nothing to do");
+				Check(none == null && accepted.Count == 0, "and nothing pressed");
+				// the game's tutorial pop-up is no message box, and stops the game under it all the same: closed by its name
+				tutorial = true;
+				Equal(null, InGame.LookAtGameBox(ctx, out _, true), "a tutorial pop-up is no message box");
+				Equal("Tutorial Menu", string.Join(",", closedMenus), "and it is closed at the look that finds it");
+				InGame.LookAtGameBox(ctx, out _, true);
+				Equal(1, closedMenus.Count, "once: nothing is closed that is not there");
+				lock (boxes) {
+					boxes.Enqueue(("Grass cache files are missing. You will see no grass unless you generate a cache.", ["Ok"], -1));
+					boxes.Enqueue(("This save relies on missing content. Would you like to search for your unidentified content in the Creations menu?", ["Yes", "No"], -1));
+					boxes.Enqueue(("The following content is not present. Continue loading?", ["Yes", "No"], -1));
+					boxes.Enqueue(("Some Mod: a new version changed its settings. Reset them now?", ["Reset", "Keep mine", "Ask me later"], 2));
+					boxes.Enqueue(("Another Mod: delete its old data?", ["Yes", "No"], -1));
+					boxes.Enqueue(("Choose your path", ["Warrior", "Mage", "Thief"], -1));
+				}
+				for (var look = 0; look < 6; ++look) {
+					Check(InGame.LookAtGameBox(ctx, out var left, true) != null && left == null, $"box {look + 1} is answered or closed at the look that finds it");
+				}
+				Equal("0,1,0,2,1,2", string.Join(",", accepted), "a notice acknowledged; the missing-content questions No then Yes; a box the run does not know by the game's own cancel button, " +
+					"by its declining button, and - with no button that declines - by its last");
+				Equal(null, InGame.LookAtGameBox(ctx, out _, true), "and the game shows nothing more");
+				// what the watch answered is there for the step in hand, and what it closed without knowing it is in the run's notes
+				var told = 0;
+				while (ctx.TakeAnsweredBox() != null) {
+					++told;
+				}
+				Equal(6, told, "each box the watch answered is handed to the step in hand, once");
+				ctx.AddWatchNotes();
+				Equal(3, ctx.Journal.Notes.Count(n => n.Contains("this run does not know", StringComparison.Ordinal)), "the three it did not know are in the run's notes: " + string.Join(" | ", ctx.Journal.Notes));
+				Check(ctx.Journal.Notes.Any(n => n.Contains("\"Ask me later\"", StringComparison.Ordinal) && n.Contains("Some Mod", StringComparison.Ordinal)), "each with what it was closed with");
+				Check(!ctx.Journal.Notes.Any(n => n.Contains("Grass cache", StringComparison.Ordinal)), "a box the run knows is no note");
+				// a box that will not close is not answered for ever: after its tries it is left, for the watch to name and stop on
+				accepted.Clear();
+				closes = false;
+				lock (boxes) {
+					boxes.Enqueue(("A notice that stays", ["Ok"], -1));
+				}
+				InGame.GameBox? stuck = null;
+				for (var look = 0; look < 8 && stuck == null; ++look) {
+					InGame.LookAtGameBox(ctx, out stuck, true);
+				}
+				Check(stuck is { Body: "A notice that stays" } && accepted.Count == 5, $"answered five times, then left as a box that does not close ({accepted.Count} answers)");
+				lock (boxes) {
+					boxes.Clear();
+				}
+				closes = true;
+				Equal(null, InGame.LookAtGameBox(ctx, out _, true), "(gone)");
+			}
+			// a setup that leaves a box the run does not know to the player: never pressed, and handed on unanswered
+			setup.Root[InGame.UnknownBoxSetting] = "stop";
+			setup.Save();
+			Check(!InGame.ClosesUnknown(Setup.Load(f.SetupFile)) && InGame.ClosesUnknown(Setup.FromJson(new JsonObject())), "close is the rule for a setup that says nothing; \"stop\" leaves such boxes to the player");
+			ctx = StepContext(f, "cleansave", new DevBench($"http://localhost:{port}/api/tool/"), CancellationToken.None);
+			using (ctx.Log) {
+				accepted.Clear();
+				lock (boxes) {
+					boxes.Enqueue(("Another Mod: delete its old data?", ["Yes", "No"], -1));
+				}
+				Equal(null, InGame.LookAtGameBox(ctx, out var theirs, true), "left to the player: not answered");
+				Check(theirs is { Body: "Another Mod: delete its old data?" } && accepted.Count == 0, "handed on as it is, nothing pressed");
+				lock (boxes) {
+					boxes.Clear();
+					boxes.Enqueue(("Grass cache files are missing.", ["Ok"], -1));
+				}
+				Check(InGame.LookAtGameBox(ctx, out var known, true) != null && known == null && accepted.Count == 1, "a box the run knows is answered all the same");
+			}
+		} finally {
+			http.Stop();
+			serve.Wait(TimeSpan.FromSeconds(5));
 		}
 	}
 
@@ -1396,6 +1630,50 @@ public static class Program
 		FakeMo2.Plugin(Path.Combine(a_ctx.Mo2.ModDir(a_mod), a_plugin), false);
 		File.WriteAllText(Path.Combine(a_ctx.Mo2.ModDir(a_mod), "new.txt"), "fresh");
 		a_ctx.SetAfter(a_mod);
+	}
+
+	// A whole run with the directory cache mod loading its cache blind: the save to play makes the game's list anew after
+	// everything the run changed, so nothing is left to say - and a command of the setup that runs after it counts as a
+	// change again, said with what to do if it changes game files (CodeRabbit on pull request #35)
+	static void T_ACommandAfterTheRunCountsAsAChange()
+	{
+		using var f = new FakeMo2();
+		f.Mod("CRDW");
+		var modlist = Path.Combine(f.ProfileDir, "modlist.txt");
+		File.WriteAllText(modlist, File.ReadAllText(modlist).Replace("+Base Mod", "+CRDW\r\n+Base Mod", StringComparison.Ordinal));
+		var own = Path.Combine(f.Mods, "CRDW", Crdw.IniRel);
+		Directory.CreateDirectory(Path.GetDirectoryName(own)!);
+		File.WriteAllText(Path.Combine(Path.GetDirectoryName(own)!, "CRDW.dll"), "x");
+		var asThePlayerHasIt = "[General]\r\nShowPopUp=b:false\r\nMode=s:LOAD\r\n";
+		File.WriteAllText(own, asThePlayerHasIt);
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp")));
+		// the save to play's game start, as far as the game's list goes
+		var modeAtTheStart = "";
+		StepRegistry.Replace(new FakeStep("playsave", (ctx, s) => {
+			GameStart.Prepare(ctx);
+			modeAtTheStart = Crdw.Parse(File.ReadAllText(own)).Mode;
+		}));
+		var setup = f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("playsave", []));
+		setup.Root["skseLogs"] = Path.Combine(f.Root, "no logs here");
+		setup.Save();
+		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+		Equal(RunState.Finished, r.State, r.Verdict);
+		Equal("CACHE", modeAtTheStart, "the save to play's game start makes the list anew: the run changed the game's files before it");
+		var j = Journal.Load(r.Folder!);
+		Equal(0, j.FilesChanged, "and nothing changed after that list was made");
+		Check(!j.Notes.Any(n => n.Contains("Cached Recursive Directory Walk", StringComparison.Ordinal)), "so nothing is left to say about it: " + string.Join(" | ", j.Notes));
+		Equal(asThePlayerHasIt, File.ReadAllText(own), "the mod's own file is back as the player had it");
+		Check(!j.NeedsRestore, "and nothing is left to put back");
+		var cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+		setup = Setup.Load(f.SetupFile);
+		setup.Root["afterRun"] = new JsonArray($"\"{cmd}\" /c exit 0");
+		setup.Save();
+		r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+		Equal(RunState.Finished, r.State, r.Verdict);
+		j = Journal.Load(r.Folder!);
+		Equal(1, j.FilesChanged, "a command of the setup ran after that list was made: counted as a change, whatever the command did");
+		Check(j.Notes.Any(n => n.Contains("Cached Recursive Directory Walk", StringComparison.Ordinal) && n.Contains("command after the run", StringComparison.Ordinal)),
+			"and said, with what to do if the command changes game files: " + string.Join(" | ", j.Notes));
 	}
 
 	static void T_RunSwitchesOutputsOffAndBuiltOnesBackOn()
@@ -1769,6 +2047,14 @@ public static class Program
 		Equal(1, RunUndo.FirstStates([new KeptFile { Path = @"X:\mods\Other\a.esp", Settled = true, Seq = 2 }], [new ParkRecord { Mod = "M", From = @"X:\mods\M", To = "y", Replaced = true, Seq = 1 }]).Count, "another mod's park says nothing about it");
 	}
 
+	// a made-up hold on a process (StartedSet): it says when it was given up
+	sealed class Hold : IDisposable
+	{
+		public bool GivenUp { get; private set; }
+
+		public void Dispose() => GivenUp = true;
+	}
+
 	// what the run's processes start themselves stays the run's own after the one that started it has ended
 	static void T_AChildOfWhatTheRunStartedIsTheRunsToo()
 	{
@@ -1776,29 +2062,44 @@ public static class Program
 		var starts = new Dictionary<int, DateTime?> { [10] = t, [11] = t.AddSeconds(5), [12] = t.AddSeconds(6), [13] = t.AddSeconds(-60), [14] = t.AddSeconds(7) };
 		DateTime? StartOf(int a_pid) => starts.GetValueOrDefault(a_pid);
 		var launcher = new Dictionary<int, DateTime> { [10] = t };
+		// a parent that is held open: its number is certainly its own for good
+		static DateTime Held(int a_pid) => DateTime.MaxValue;
 		// 11 the launcher's child, 12 that one's child, 13 older than the launcher under the same parent number, 14 somebody else's
 		var listed = t.AddMinutes(5);
-		var kids = StartedSet.Children(launcher, [(10, 1), (11, 10), (12, 11), (13, 10), (14, 99)], StartOf, listed);
+		var kids = StartedSet.Children(launcher, [(10, 1), (11, 10), (12, 11), (13, 10), (14, 99)], StartOf, listed, Held);
 		Equal("11,12", string.Join(",", kids.Keys.Order()), "a child and its child are the run's; one older than its \"parent\" and a stranger are not");
 		// the launcher has ended and nothing has its number
 		starts.Remove(10);
-		Equal("11,12", string.Join(",", StartedSet.Children(launcher, [(11, 10), (12, 11)], StartOf, listed).Keys.Order()), "found all the same once the launcher has ended");
+		Equal("11,12", string.Join(",", StartedSet.Children(launcher, [(11, 10), (12, 11)], StartOf, listed, Held).Keys.Order()), "found all the same once the launcher has ended");
+		// The launcher was NOT held open: its number may have been another program's since it was last seen alive, and a holder
+		// that has ended again leaves nothing to tell it by. Only a child that had started by then is certainly its own
+		Equal("11,12", string.Join(",", StartedSet.Children(launcher, [(11, 10), (12, 11)], StartOf, listed, _ => t.AddSeconds(5)).Keys.Order()),
+			"a child that had started while the launcher was last seen alive is its own, and that child's child with it");
+		Equal("", string.Join(",", StartedSet.Children(launcher, [(11, 10), (12, 11)], StartOf, listed, _ => t.AddSeconds(4)).Keys.Order()),
+			"one that started after that is taken for nobody's: the number may have changed hands in between");
 		// the launcher's number is another program's by now: what that one started is never the run's
 		starts[10] = t.AddSeconds(30);
 		starts[15] = t.AddSeconds(40);
-		Equal("11", string.Join(",", StartedSet.Children(launcher, [(10, 1), (11, 10), (15, 10)], StartOf, listed).Keys.Order()), "a child started after the number changed hands is the new owner's");
+		Equal("11", string.Join(",", StartedSet.Children(launcher, [(10, 1), (11, 10), (15, 10)], StartOf, listed, Held).Keys.Order()), "a child started after the number changed hands is the new owner's");
 		// a child's own number changed hands after the list was taken: the row named the child that has ended, not the newcomer
 		starts.Remove(10);
 		starts[11] = listed.AddSeconds(2);
-		Equal("", string.Join(",", StartedSet.Children(launcher, [(11, 10)], StartOf, listed).Keys.Order()), "a process that started after the list was taken is nobody's child by that list");
+		Equal("", string.Join(",", StartedSet.Children(launcher, [(11, 10)], StartOf, listed, Held).Keys.Order()), "a process that started after the list was taken is nobody's child by that list");
 		starts[11] = listed;
-		Equal("", string.Join(",", StartedSet.Children(launcher, [(11, 10)], StartOf, listed).Keys.Order()), "nor one that started at the very reading of the clock: only before it is certain");
+		Equal("", string.Join(",", StartedSet.Children(launcher, [(11, 10)], StartOf, listed, Held).Keys.Order()), "nor one that started at the very reading of the clock: only before it is certain");
 
 		// A number that changes hands between the list and the clock. The look reads its clock BEFORE each list, so a
 		// newcomer that took an ended child's number right after the list never passes for that child - at the first list
 		// and at the second one (made when a parent has ended) alike.
 		var world = new Dictionary<int, DateTime?> { [10] = t, [13] = t.AddSeconds(1) };
-		var set = new StartedSet(p => world.GetValueOrDefault(p));
+		// what is on record is held open (in these made-up worlds: a marker that counts when it is given up)
+		var holds = new List<Hold>();
+		Hold Keep(int a_pid, DateTime a_at)
+		{
+			holds.Add(new Hold());
+			return holds[^1];
+		}
+		var set = new StartedSet(p => world.GetValueOrDefault(p), Keep);
 		set.Add(10);
 		var tick = 0;
 		DateTime Clock() => t.AddSeconds(10 + ++tick);
@@ -1826,14 +2127,75 @@ public static class Program
 		// The clock has ticks: both readings of one look can fall in the tick a child started in. That child is not taken
 		// at that look - and its ended parent is NOT retired over it, so the next look, with a later reading, finds it.
 		var tickWorld = new Dictionary<int, DateTime?> { [20] = t, [21] = t.AddSeconds(30) };
-		var tickSet = new StartedSet(p => tickWorld.GetValueOrDefault(p));
+		var tickSet = new StartedSet(p => tickWorld.GetValueOrDefault(p), Keep);
 		tickSet.Add(20);
 		tickWorld.Remove(20);
 		var sameTick = t.AddSeconds(30);
 		tickSet.Sweep(() => [(21, 20)], () => sameTick);
 		Equal("", string.Join(",", tickSet.Owned().Order()), "a child that started in the very tick of the reading is not taken yet");
+		Equal(1, tickSet.Held, "and its ended parent is still held open for it");
 		tickSet.Sweep(() => [(21, 20)], () => sameTick.AddSeconds(3));
 		Equal("21", string.Join(",", tickSet.Owned().Order()), "its parent was kept for it: the next look, a tick later, puts it on record");
+		Equal(1, tickSet.Held, "the parent's hold is given up once its children were looked for the last time; the child is held in its place");
+		tickWorld.Remove(21);
+		tickSet.Sweep(() => [], () => sameTick.AddSeconds(6));
+		Equal(0, tickSet.Held, "and the child's when it has ended too: nothing is held for a record that is done");
+		Check(holds.Count > 0 && holds.Count(h => !h.GivenUp) == set.Held, "every hold that is no longer on record was given up");
+		set.Release();
+		Check(set.Held == 0 && holds.All(h => h.GivenUp), "and the rest when the run is over");
+
+		// The number that changes hands twice between two looks (CodeRabbit on pull request #35): parent 30 starts child 31 in
+		// the very tick of a look and ends, so it is kept for the next look; before that look a stranger gets the number 30,
+		// starts 32 and ends. Nothing is left of the stranger - only 32, with "30" as its parent.
+		void TwiceBetweenLooks(StartedSet a_set, Dictionary<int, DateTime?> a_world)
+		{
+			a_set.Add(30);
+			a_set.Sweep(() => [(30, 1)], () => t.AddSeconds(28));
+			a_world[31] = t.AddSeconds(30);
+			a_world.Remove(30);
+			a_set.Sweep(() => [(31, 30)], () => t.AddSeconds(30));
+			a_world[32] = t.AddSeconds(32);
+			a_set.Sweep(() => [(31, 30), (32, 30)], () => t.AddSeconds(35));
+		}
+		// not held open (its hold could not be taken): a child that started after it was last seen alive is nobody's - the
+		// stranger's 32 is never the run's, and 31 is given up with it rather than guessed at
+		var loose = new Dictionary<int, DateTime?> { [30] = t };
+		var looseSet = new StartedSet(p => loose.GetValueOrDefault(p), (_, _) => null);
+		TwiceBetweenLooks(looseSet, loose);
+		Equal("", string.Join(",", looseSet.Owned().Order()), "a number that may have changed hands since its process was last seen alive brings no child onto the record");
+		// seen alive at a look whose own tick its child started in: that child was not taken then, and is certainly its own
+		// at the next look, held or not (it had started by the time its parent was last seen alive)
+		var late = new Dictionary<int, DateTime?> { [40] = t, [41] = t.AddSeconds(10) };
+		var lateSet = new StartedSet(p => late.GetValueOrDefault(p), (_, _) => null);
+		lateSet.Add(40);
+		lateSet.Sweep(() => [(40, 1), (41, 40)], () => t.AddSeconds(10));
+		Equal("40", string.Join(",", lateSet.Owned().Order()), "(at the look whose tick the child started in, only the parent itself is on record)");
+		late.Remove(40);
+		lateSet.Sweep(() => [(41, 40)], () => t.AddSeconds(13));
+		Equal("41", string.Join(",", lateSet.Owned().Order()), "a child that had started by the time its parent was last seen alive is the run's, hold or no hold");
+		// held open: Windows gives the number 30 to nobody else, so the stranger cannot have had it - and the child that
+		// started in the tick of the look is found at the next one, as before
+		var tight = new Dictionary<int, DateTime?> { [30] = t };
+		var tightSet = new StartedSet(p => tight.GetValueOrDefault(p), Keep);
+		tightSet.Add(30);
+		tightSet.Sweep(() => [(30, 1)], () => t.AddSeconds(28));
+		tight[31] = t.AddSeconds(30);
+		tight.Remove(30);
+		tightSet.Sweep(() => [(31, 30)], () => t.AddSeconds(30));
+		tightSet.Sweep(() => [(31, 30)], () => t.AddSeconds(35));
+		Equal("31", string.Join(",", tightSet.Owned().Order()), "held open, the ended parent's late child is still found");
+		// for real: a process held open keeps its number after it has ended, and reads as gone all the same
+		using (var held = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "PING.EXE"), "-n 30 127.0.0.1") { UseShellExecute = false, CreateNoWindow = true })!) {
+			using var endHeld = new StandIn(held);
+			var heldAt = Procs.StartTime(held.Id) ?? throw new InvalidOperationException("the stand-in's start time could not be read");
+			Check(Procs.Pin(held.Id, heldAt.AddSeconds(-90)) == null, "a process that started at another time is not the one to hold");
+			using var pin = Procs.Pin(held.Id, heldAt);
+			Check(pin != null, "the very process is held open");
+			held.Kill();
+			Check(held.WaitForExit(10000), "the held process has ended");
+			Check(Procs.StartTime(held.Id) == null && !Procs.Alive(held.Id) && Procs.Image(held.Id) == "", "ended and still held, it reads as gone - never as a program that still runs");
+			Check(!Procs.Snapshot().Any(r => r.Pid == held.Id), "and Windows lists nobody under its number while it is held");
+		}
 		Check(Procs.StartClock() <= DateTime.UtcNow.AddSeconds(1) && Procs.StartClock() > DateTime.UtcNow.AddMinutes(-1), "the clock process starts are stamped with is the PC's own");
 		using (var self = Process.GetCurrentProcess()) {
 			Check(self.StartTime.ToUniversalTime() < Procs.StartClock(), "and a process that runs started before a reading of it");
@@ -2561,6 +2923,49 @@ public static class Program
 		Check(seen.Contains("by its window", StringComparison.Ordinal), "the run used the learned settings: " + seen);
 		Equal("{\"a\": 3}", File.ReadAllText(settings), "the player's own settings are back after the run");
 		Equal(l.Files.Count, 2, "(learned set)");
+	}
+
+	// his word of 2026-11-21: each patcher set up by hand before a setup's first run, and again whenever wanted - the box
+	// lists the setup's tools that have a window of their own, and shows by itself once, before the first run only
+	static void T_TheToolsOfASetupAreOfferedBeforeItsFirstRun()
+	{
+		using var f = new FakeMo2();
+		var setup = f.WriteSetup(("xlodgen", new JsonObject { ["executable"] = "xLODGen", ["output_mod"] = "Output A" }),
+			("synthesis", new JsonObject { ["output_mod"] = "Output B" }),
+			("texgen", new JsonObject { ["executable"] = "TexGen", ["output_mod"] = "Output A" }),
+			("xlodgen", new JsonObject { ["executable"] = "xLODGen", ["output_mod"] = "Output A" }));
+		// one more with a window of its own, switched off
+		var root = (JsonObject)setup.Root.DeepClone();
+		((JsonArray)root["steps"]!).Add(new JsonObject { ["step"] = "dyndolod", ["on"] = false, ["settings"] = new JsonObject { ["executable"] = "DynDOLOD" } });
+		setup = Setup.FromJson(root, f.SetupFile);
+		var tools = ToolSettings.ToSetUp(setup);
+		Equal("xlodgen, texgen", string.Join(", ", tools.Select(t => t.Step)),
+			"the switched-on steps with a window of their own, in the setup's order, each once (not the command-line one, not the switched-off one)");
+		Equal(StepCatalog.Name("texgen"), tools[1].Name, "each under its tool's name");
+		Check(tools.All(t => t.Learned == null), "none set up yet");
+		var kept = Path.Combine(f.Root, "TexGen settings.ini");
+		File.WriteAllText(kept, "a=1");
+		ToolSettings.Keep(setup, "texgen", "TexGen", [kept]);
+		tools = ToolSettings.ToSetUp(setup);
+		Check(tools[0].Learned == null && tools[1].Learned is { Files.Count: 1 }, "a tool set up since is listed with what is kept of it, the other still without");
+
+		// the box shows by itself once: before a first run, with something to set up, and not after the player went on from it
+		Check(ToolSettings.OfferFirst(false, false, 2), "a setup that never ran and has tools to set up: offered");
+		Check(!ToolSettings.OfferFirst(true, false, 2), "a setup that has run: not offered again");
+		Check(!ToolSettings.OfferFirst(false, true, 2), "the player went on from the box before: not offered again");
+		Check(!ToolSettings.OfferFirst(false, false, 0), "no tool with a window of its own: no box");
+		Equal("tools.offered.my lumina", ToolRunner.App.MainViewModel.ToolsOfferedKey(@"C:\Setups\My Lumina.json"), "kept per setup, by its file's name");
+
+		// what a row of the box says
+		Check(ToolRunner.App.ToolsDialog.StateOf(null).StartsWith("not set up yet", StringComparison.Ordinal), "a tool not set up says so: " + ToolRunner.App.ToolsDialog.StateOf(null));
+		Check(ToolRunner.App.ToolsDialog.StateOf(tools[1].Learned).StartsWith("set up ", StringComparison.Ordinal), "one set up says when: " + ToolRunner.App.ToolsDialog.StateOf(tools[1].Learned));
+		Check(ToolRunner.App.ToolsDialog.AfterItsWindow("TexGen", tools[1].Learned, null).Contains("1 settings file(s) kept", StringComparison.Ordinal), "after its window: what was kept");
+		// a tool closed with nothing changed is no fault: it is left as it is (the words are Learn's own, and the catalog's)
+		var nothing = $"TexGen {ToolSettings.SavedNothing} - change a setting (or change one and back), save, close it, and learn again";
+		Check(ToolRunner.App.ToolsDialog.AfterItsWindow("TexGen", null, nothing).StartsWith("left as it is", StringComparison.Ordinal), "a window closed with nothing saved leaves the tool as it is");
+		Check(RunnerErrors.Find(nothing) != null, "and those words are still in the catalog");
+		Equal("not set up: Mod Organizer has no executable called \"TexGen\"", ToolRunner.App.ToolsDialog.AfterItsWindow("TexGen", null, "Mod Organizer has no executable called \"TexGen\""),
+			"any other reason is said as it is");
 	}
 
 	sealed class CrashForTest : Exception;
@@ -3614,12 +4019,20 @@ public static class Program
 		Equal("Close", string.Join(",", Uia.BoxNames([("Cancel", "Close")], "Abbrechen")), "a lone Close under Cancel's id acknowledges");
 		Equal("Cancel", string.Join(",", Uia.BoxNames([("Cancel", "Cancel")], "")), "a lone Cancel is a Cancel");
 		Equal("Cancel", string.Join(",", Uia.BoxNames([("Cancel", "abbrechen")], "Abbrechen")), "in Windows' own language too");
-		Equal("Yes,No", string.Join(",", Uia.BoxNames([("Yes", "Ja"), ("No", "Nein")], "Abbrechen")), "two buttons: each by what it is");
+		// Windows' own words for its buttons on a German Windows
+		static string German(string a_standard) => a_standard switch { "Yes" => "Ja", "No" => "Nein", "Cancel" => "Abbrechen", "Close" => "Schliessen", "OK" => "OK", _ => "" };
+		Equal("Yes,No", string.Join(",", Uia.BoxNames([("Yes", "Ja"), ("No", "Nein")], "Abbrechen", null, German)), "two buttons: each by what it is, in Windows' own words");
 		Equal("OK,Cancel", string.Join(",", Uia.BoxNames([("OK", "OK"), ("Cancel", "Abbrechen")], "Abbrechen")), "a Cancel beside an OK keeps its name");
 		Equal("Repack now", string.Join(",", Uia.BoxNames([(null, "Repack now")], "")), "a button of the program's own by its words");
 		Equal("Cancel", string.Join(",", Uia.BoxNames([(null, "Abbrechen")], "Abbrechen")), "a lone Cancel by its words alone, whatever its id");
 		Equal("OK", string.Join(",", Uia.BoxNames([("OK", "OK")], "Abbrechen")), "a lone OK under its own id");
-		Equal("Close", string.Join(",", Uia.BoxNames([("Close", "Schliessen")], "Abbrechen")), "a lone Close stays a notice's button");
+		Equal("Close", string.Join(",", Uia.BoxNames([("Close", "Schliessen")], "Abbrechen", null, German)), "a lone Close stays a notice's button");
+		// A program's own buttons under the ids of standard ones keep their own words (TexGen's last question, as a real run met it: read
+		// by the ids alone it was a question with a No, and the run stopped on a TexGen that had finished)
+		Equal("Exit TexGen,Zip and Exit,Check log,Restart", string.Join(",", Uia.BoxNames([("OK", "Exit TexGen"), ("Cancel", "Zip and Exit"), ("Yes", "Check log"), ("No", "Restart")], "Cancel", null, German)),
+			"a program's own words under standard ids are never a Yes, a No or an OK");
+		Equal("Zip and Exit", string.Join(",", Uia.BoxNames([("OK", "Zip and Exit")], "Cancel")), "nor is a lone button of its own an OK to acknowledge");
+		Equal("Ja,Nein", string.Join(",", Uia.BoxNames([("Yes", "Ja"), ("No", "Nein")], "Cancel")), "words Windows does not use here stay the program's own");
 	}
 
 	// a mod's box that promises a second one (perks being reset) keeps the settle going; an ordinary notice does not
@@ -5690,6 +6103,42 @@ public static class Program
 		Equal(1280.0, ToolRunner.App.UiState.Fit(2400, 780, 420, 1280), "kept on a bigger screen: held to this one");
 		Equal(420.0, ToolRunner.App.UiState.Fit(100, 780, 420, 1920), "never under the least it needs");
 		Equal(300.0, ToolRunner.App.UiState.Fit(100, 780, 420, 300), "unless the screen itself is smaller");
+		// a window's least size is held to the screen too: a least height the screen does not have won over the height given
+		Equal(300.0, ToolRunner.App.UiState.Least(380, 300), "a least size above the screen's room is the room");
+		Equal(380.0, ToolRunner.App.UiState.Least(380, 1040), "and stays what it is where there is room");
+
+		// what was asked or opened for one setup is no other setup's: the check's findings, and the settings window's Save
+		Check(ToolRunner.App.MainViewModel.StillShown(@"C:\Setups\A.json", @"c:\setups\a.JSON"), "the same setup's file, however it is spelled, is still the one shown");
+		Check(!ToolRunner.App.MainViewModel.StillShown(@"C:\Setups\A.json", @"C:\Setups\B.json") && !ToolRunner.App.MainViewModel.StillShown(@"C:\Setups\A.json", null),
+			"another setup picked, or none: what was asked for the first is not shown under it");
+		var picked = Setup.FromJson(new JsonObject(), @"C:\Setups\B.json");
+		Equal(null, ToolRunner.App.SettingsPanel.NotThisSetup(@"c:\setups\b.json", "B", picked), "settings opened for the setup that is picked are saved to it");
+		var why = ToolRunner.App.SettingsPanel.NotThisSetup(@"C:\Setups\A.json", "Lumina", picked) ?? "";
+		Check(why.StartsWith("Not saved", StringComparison.Ordinal) && why.Contains("\"Lumina\"", StringComparison.Ordinal) && why.Contains($"\"{picked.Name}\"", StringComparison.Ordinal),
+			"settings opened for one setup are not saved while another is picked - both are named: " + why);
+		Check((ToolRunner.App.SettingsPanel.NotThisSetup(@"C:\Setups\A.json", "Lumina", null) ?? "").Contains("no setup", StringComparison.Ordinal), "nor while none is picked");
+
+		// The window's own sizes: kept at once, written a moment later and never on the window's thread - and whatever is kept
+		// is in the file once the program asks for it as it closes, the newest of each
+		using var f = new FakeMo2();
+		var kept = Path.Combine(f.Root, "window.json");
+		ToolRunner.App.UiState.FileForTests = kept;
+		try {
+			ToolRunner.App.UiState.Set("test.width", 640);
+			ToolRunner.App.UiState.Set("test.height", 480);
+			Equal(640.0, ToolRunner.App.UiState.Number("test.width") ?? 0, "a size is kept the moment it is set");
+			ToolRunner.App.UiState.Save();
+			var first = JsonNode.Parse(File.ReadAllText(kept))!;
+			Check(first["test.width"]?.GetValue<double>() == 640 && first["test.height"]?.GetValue<double>() == 480, "both sizes are in the file once it is written: " + first.ToJsonString());
+			ToolRunner.App.UiState.Set("test.width", 800);
+			ToolRunner.App.UiState.Save();
+			Equal(800.0, JsonNode.Parse(File.ReadAllText(kept))!["test.width"]!.GetValue<double>(), "a later size replaces the earlier one in the file");
+			var stamp = File.GetLastWriteTimeUtc(kept);
+			ToolRunner.App.UiState.Save();
+			Equal(stamp, File.GetLastWriteTimeUtc(kept), "with nothing new kept, nothing is written");
+		} finally {
+			ToolRunner.App.UiState.FileForTests = null;
+		}
 	}
 
 	// a tool that never appeared keeps Mod Organizer's whole log since the request: every line after the place the request was made,
@@ -6027,6 +6476,14 @@ public static class Program
 		Equal<string?>(null, Uia.StandardName("0"), "nor this");
 		Equal<string?>(null, Uia.StandardName("mainWindow.closeButton"), "a Qt name is no id");
 		Equal<string?>(null, Uia.StandardName(""), "no id at all");
+		// the id names a standard button only when the button's words are Windows' own for it, here or in English
+		static string Spanish(string a_standard) => a_standard switch { "Yes" => "Sí", "No" => "No", "OK" => "Aceptar", _ => "" };
+		Equal("No", Uia.StandardName("CommandButton_7", "&No", Spanish), "its English word, the access mark left out");
+		Equal("Yes", Uia.StandardName("6", "Sí", Spanish), "Windows' own word for it");
+		Equal<string?>(null, Uia.StandardName("CommandButton_7", "Restart", Spanish), "a program's own button under No's id is no No");
+		Equal<string?>(null, Uia.StandardName("1", "Zip and Exit", Spanish), "nor one under OK's id an OK");
+		Equal<string?>(null, Uia.StandardName("6", "Ja", Spanish), "a word of another language than Windows' is the program's own");
+		Equal<string?>(null, Uia.StandardName("9", "OK", Spanish), "no standard id, whatever it reads");
 		Equal("1|0", string.Join("|", Uia.ReadingOrder([(100.0, 50.0), (10.0, 50.0)])), "a row is read left to right");
 		Equal("0|1", string.Join("|", Uia.ReadingOrder([(10.0, 50.0), (10.0, 90.0)])), "a column top to bottom");
 		Check(!Mo2Control.SpeaksOther("en", "de-DE") && !Mo2Control.SpeaksOther("", "en-US"), "English by its setting, or by Windows when it has none");
@@ -8827,9 +9284,17 @@ public static class Program
 				run();
 			}
 		}
+		// Explorer's own dialogs that stand open on this PC right now (a Properties window, a copy in progress). Each look
+		// makes UI Automation elements for those - that is what the look is for - and .NET's client keeps a little of every
+		// element it makes (measured 2026-11-21: about 10 KB a look for one Properties window, 6 MB over this soak, where the
+		// same code kept nothing an hour earlier with no dialog open). They are the PC's state, not the program's: the
+		// path's allowance grows with them, so the test judges the same thing on every PC - and still fails when elements
+		// are made for windows that are no boxes (that keeps tens of megabytes over the soak).
+		int BoxWindows() => Native.TopWindowsOf(explorer).Count(h => Uia.BoxClass(Native.ClassName(h)) || Native.ClassName(h).StartsWith("Qt", StringComparison.Ordinal));
 		var grew = new List<string>();
 		var before = Held();
 		foreach (var (name, every, run) in parts) {
+			var dialogs = name == "UI Automation boxes" ? BoxWindows() : 0;
 			var p0 = Held();
 			var marks = new List<string>();
 			for (var i = 1; i <= rounds; i += every) {
@@ -8841,8 +9306,14 @@ public static class Program
 			}
 			var p1 = Held();
 			Console.WriteLine($"      {name}: {rounds / every} calls, managed {p0.Managed / 1024} -> {p1.Managed / 1024} KB, handles {p0.Handles} -> {p1.Handles}  ({string.Join(", ", marks)})");
+			if (name == "UI Automation boxes") {
+				dialogs = Math.Max(dialogs, BoxWindows());
+				if (dialogs > 0) {
+					Console.WriteLine($"      ({dialogs} dialog(s) of Explorer's own stood open during this part: its allowance grows by 16 KB a look for each)");
+				}
+			}
 			// a growth is a leak when it goes on to the end: a cache fills and stops, so the last third must not grow like the first
-			if (p1.Managed - p0.Managed > 1024 * 1024 || p1.Handles - p0.Handles > 20) {
+			if (p1.Managed - p0.Managed > 1024 * 1024 + 16L * 1024 * dialogs * (rounds / every) || p1.Handles - p0.Handles > 20) {
 				grew.Add($"{name} grew {(p1.Managed - p0.Managed) / 1024} KB and {p1.Handles - p0.Handles} handles");
 			}
 		}

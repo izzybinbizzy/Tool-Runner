@@ -60,6 +60,19 @@ public static class SettingsPanel
 
 	static void Changed() => HasChanges = true;
 
+	// The setup's file the settings shown were opened for (null: none). The window stays open while another setup is picked
+	// in the main window: what it shows is then another setup's than the one picked.
+	static string? s_openedFor;
+
+	public static bool IsFor(Setup? a_setup) => string.Equals(s_openedFor, a_setup?.File, StringComparison.OrdinalIgnoreCase);
+
+	// Why settings opened for one setup are not saved while another is picked (null: they were opened for the picked one).
+	// Saved all the same, they were written over the picked setup's own (CodeRabbit on pull request #35).
+	public static string? NotThisSetup(string a_openedFor, string a_openedName, Setup? a_picked) =>
+		MainViewModel.StillShown(a_openedFor, a_picked?.File) ? null
+			: $"Not saved: these are the settings of \"{a_openedName}\", and {(a_picked == null ? "no setup" : $"\"{a_picked.Name}\"")} is picked in the main window now. " +
+			  $"Pick \"{a_openedName}\" again to save them (what you typed stays here), or press Undo changes to see the picked setup's.";
+
 	// settings a step reads that its file may not list yet (shown empty, with the default the step uses)
 	static readonly Dictionary<string, (string Key, JsonValueKind Kind, string Default)[]> Known = new(StringComparer.Ordinal) {
 		["shaders"] = [("build_for_off", JsonValueKind.False, "off"), ("on_crash", JsonValueKind.String, "ask"), ("crash_wait_min", JsonValueKind.Number, "30"),
@@ -219,6 +232,7 @@ public static class SettingsPanel
 
 	public static FrameworkElement Build(MainWindow a_w, MainViewModel a_vm)
 	{
+		s_openedFor = a_vm.Setup?.File;
 		if (a_vm.Setup == null) {
 			// the program's own new-version look happens with no setup too, so its switch is here as well
 			var none = new StackPanel();
@@ -226,6 +240,8 @@ public static class SettingsPanel
 			NewVersions(a_w, none);
 			return none;
 		}
+		// whose settings these are, for as long as this panel stands (Save writes to no other setup)
+		var (openedFor, openedName) = (a_vm.Setup.File, a_vm.Setup.Name);
 		var work = (JsonObject)a_vm.Setup.Root.DeepClone();
 		// the setup's steps, and which of them is open under A STEP (-1 = none) - the search names the other steps that hold its word
 		var steps = (work["steps"] as JsonArray)?.OfType<JsonObject>().ToList() ?? [];
@@ -355,15 +371,20 @@ public static class SettingsPanel
 		Field(gamePage, apply, "Force the save when a mod blocks saving (the run's game only)", work, "forceSave", JsonValueKind.True);
 		work["guidedReminderMin"] ??= 0;
 		Field(gamePage, apply, "Remind me when a game step waits for me, every (minutes; 0 = off)", work, "guidedReminderMin", JsonValueKind.Number);
+		// his word of 2026-11-21: a pop-up of the game is closed at once, whatever it is - a setup may leave the ones the run
+		// does not know to the player instead
+		Choice(gamePage, apply, "A game pop-up the run does not know", work, InGame.UnknownBoxSetting,
+			[("close", "close it at once and go on - it is named in the log and the run's notes"), ("stop", "leave it to me, and stop the step when I do not answer")]);
 		work["boxWaitSeconds"] ??= 60;
-		Field(gamePage, apply, "Wait for you to answer an unknown game pop-up (seconds)", work, "boxWaitSeconds", JsonValueKind.Number);
+		Field(gamePage, apply, "Wait for your answer to a game pop-up that is left to you (seconds)", work, "boxWaitSeconds", JsonValueKind.Number);
 		Choice(gamePage, apply, "Rebuild shader caches", work, "shaderRebuild", [("whenChanged", "when the shader mod changed"), ("always", "every run"), ("never", "never")]);
 		Field(gamePage, apply, "Allow writing into the game folder (only NGIO's grass cache needs it)", work, "gameFolderWrites", JsonValueKind.True);
 		// two mods that put a window of their own in front of a game start (GameMods.cs); each line matters only with that mod ticked
 		Choice(gamePage, apply, "Faster Archives' repack offer", work, FasterArchives.SettingName,
 			[("ask", "wait for my choice in its window"), ("skip", "skip it during the run - it asks again when I start the game")]);
-		// shown as the run reads it (a setup of the first builds may still say it under their old key), so a save keeps it
-		work[Crdw.SettingName] ??= Crdw.When(a_vm.Setup!) switch { Crdw.Renew.Always => "always", Crdw.Renew.Never => "never", _ => "changed" };
+		// shown as the run reads it (a setup of the first builds may still say it under their old key, and an empty value says
+		// nothing), so a save keeps what the run does today
+		work[Crdw.SettingName] = Crdw.Word(a_vm.Setup!);
 		Choice(gamePage, apply, "Cached Recursive Directory Walk (its pop-up off)", work, Crdw.SettingName,
 			[("changed", "new cache when the run changed files"), ("always", "new cache at every game start"), ("never", "leave it alone - warn me only")]);
 
@@ -779,6 +800,10 @@ public static class SettingsPanel
 		var undo = new Button { Content = "_Undo changes", Style = (Style)a_w.FindResource("Ghost") };
 		var folders = new Button { Content = "Open the data folder", Style = (Style)a_w.FindResource("Ghost"), Margin = new Thickness(10, 0, 0, 0) };
 		save.Click += (_, _) => {
+			if (NotThisSetup(openedFor, openedName, a_vm.Setup) is { } another) {
+				errors.Text = another;
+				return;
+			}
 			if (a_vm.SetupInUse) {
 				errors.Text = "Not saved: a run is using this setup right now - save when it is done (what you typed stays here).";
 				return;
@@ -860,6 +885,7 @@ public static class SettingsPanel
 	public static void Closed()
 	{
 		HasChanges = false;
+		s_openedFor = null;
 		s_find = null;
 		s_cats = null;
 	}

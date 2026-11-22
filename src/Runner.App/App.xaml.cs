@@ -133,6 +133,13 @@ public partial class App : Application
 		});
 	}
 
+	// the window's sizes kept a moment ago are written before the process ends (UiState writes them off the window's thread)
+	protected override void OnExit(ExitEventArgs a_e)
+	{
+		UiState.Save();
+		base.OnExit(a_e);
+	}
+
 	static void Pump(Window a_w, int a_ms)
 	{
 		var until = DateTime.Now.AddMilliseconds(a_ms);
@@ -273,6 +280,8 @@ public partial class App : Application
 	static int Snapshot(string a_dir)
 	{
 		Directory.CreateDirectory(a_dir);
+		// (an earlier drawing's verdict on the layout is not this one's)
+		File.Delete(Path.Combine(a_dir, "layout problems.txt"));
 		// the built-in look exactly as a start with no theme picked lays it out (its accent brushes last, over the Fluent theme's)
 		Theme.Apply(Theme.Default, false);
 		var w = new MainWindow { ShowActivated = false, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.Manual, Left = -30000, Top = -30000 };
@@ -331,11 +340,38 @@ public partial class App : Application
 		Pump(box, 600);
 		Save("7 preview before a run", box);
 		box.Close();
+		// the tools of a setup that has not run yet, each to set up in its own window (his word of 2026-11-21)
+		var toolsBox = w.DemoToolsBox();
+		toolsBox.ShowActivated = false;
+		toolsBox.WindowStartupLocation = WindowStartupLocation.Manual;
+		toolsBox.Left = -30000;
+		toolsBox.Top = -30000;
+		toolsBox.Show();
+		Pump(toolsBox, 600);
+		Save("7c set up your tools", toolsBox);
+		toolsBox.Close();
 		// the smallest window the program allows: nothing may be cut off there
 		w.Width = w.MinWidth;
 		w.Height = w.MinHeight;
 		Pump(w, 600);
 		Save("4 smallest window");
+		// The smallest window with more findings than fit, its log hidden and shown: the run's own card keeps its room - START
+		// in view, or one scroll away. Checked by measure too, not only by eye: a START squeezed out fails the whole job
+		var squeezed = new List<string>();
+		w.DemoFindings(16);
+		w.DemoLogHidden(true);
+		Pump(w, 600);
+		Save("4b smallest window, the log hidden, many findings");
+		if (w.RunControlsProblem() is { } hidden) {
+			squeezed.Add("the smallest window, the log hidden, many findings: " + hidden);
+		}
+		w.DemoLogHidden(false);
+		Pump(w, 600);
+		Save("4c smallest window, many findings");
+		if (w.RunControlsProblem() is { } shown) {
+			squeezed.Add("the smallest window, many findings: " + shown);
+		}
+		w.DemoFindings(0);
 		w.Width = 1240;
 		w.Height = 800;
 		w.Demo(false);
@@ -359,6 +395,9 @@ public partial class App : Application
 		w.Height = w.MinHeight;
 		Pump(w, 600);
 		Save("9d a run stopped, smallest window");
+		if (w.LogHeadProblem() is { } ended) {
+			squeezed.Add("a run stopped, the smallest window: " + ended);
+		}
 		// the first start, step by step, in the smallest window and at its usual size
 		w.DemoFirstStart();
 		Pump(w, 600);
@@ -391,6 +430,15 @@ public partial class App : Application
 		}
 		Theme.Apply(Theme.Default, false);
 		w.Close();
+		if (squeezed.Count > 0) {
+			File.WriteAllLines(Path.Combine(a_dir, "layout problems.txt"), squeezed);
+			ConsoleAttach.ToParent();
+			try {
+				Console.Error.WriteLine("The window's layout: " + string.Join("; ", squeezed));
+			} catch (IOException) {
+			}
+			return 1;
+		}
 		return 0;
 	}
 }

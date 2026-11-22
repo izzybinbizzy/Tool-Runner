@@ -159,6 +159,12 @@ public static class StepKit
 			Files.Copy(a_path, backup);
 		}
 		a_ctx.Journal.Kept.Add(new KeptFile { Path = a_path, Backup = backup, Seq = seq });
+		// The save to play runs after the run's record says finished: from this file on there is something to put back
+		// again, and the record says so in the same write as the file's own entry - BEFORE the file is changed. Said only
+		// after the change, a crash in between left a changed file that nothing offered to put back.
+		if (a_ctx.Journal.InGameAfter) {
+			a_ctx.Journal.NeedsRestore = true;
+		}
 		a_ctx.Journal.Save();
 	}
 

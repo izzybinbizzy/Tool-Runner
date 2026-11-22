@@ -130,6 +130,21 @@ public static partial class ToolSettings
 	// a step whose tool has a window of its own (it runs through MO2's Executables list)
 	public static bool CanLearn(StepSettings a_s) => a_s.Str("executable") != null;
 
+	// what Learn says of a tool whose window closed with nothing new written
+	public const string SavedNothing = "saved no settings file while it was open";
+
+	// a tool of the setup the player can set up in its own window: its step, its name, what is kept of it so far
+	public sealed record ToSet(string Step, string Name, Learned? Learned);
+
+	// Every switched-on step of the setup whose tool has a window of its own, in the setup's order (his word of 2026-11-21: each
+	// patcher set up by hand before the first run, and again whenever wanted). A step listed twice is one tool.
+	public static List<ToSet> ToSetUp(Setup a_setup) =>
+		[.. a_setup.EnabledSteps.Where(s => CanLearn(new StepSettings(s.Settings))).DistinctBy(s => s.Key).Select(s => new ToSet(s.Key, StepCatalog.Name(s.Key), Load(a_setup, s.Key)))];
+
+	// The box that lists them shows by itself once, before a setup's first run: not for a setup that has run, not again once
+	// the player went on from it, and not with nothing to set up.
+	public static bool OfferFirst(bool a_everRan, bool a_offered, int a_tools) => !a_everRan && !a_offered && a_tools > 0;
+
 	// every settings-like file under these folders (4 levels), with its time and size
 	public static Dictionary<string, (DateTime Time, long Size)> Scan(IEnumerable<string> a_roots, IReadOnlyCollection<string> a_skip)
 	{
@@ -324,7 +339,7 @@ public static partial class ToolSettings
 		// a tool that keeps its window's values in no file (TexGen, DynDOLOD) still writes them into its debug log when it runs
 		var values = VarsLog(exe, a_step) is { } vl && File.GetLastWriteTimeUtc(vl) >= opened ? ReadVars(vl) : [];
 		if (changed.Count == 0 && values.Count == 0) {
-			throw new StepFailedException($"{tool} saved no settings file while it was open - change a setting (or change one and back), save, close it, and learn again");
+			throw new StepFailedException($"{tool} {SavedNothing} - change a setting (or change one and back), save, close it, and learn again");
 		}
 		var l = Keep(a_setup, a_step, tool, changed, values);
 		a_log.Say($"{tool}: {changed.Count} settings file(s) kept{(values.Count > 0 ? $", {values.Count} values of its window read off its log" : "")}");
