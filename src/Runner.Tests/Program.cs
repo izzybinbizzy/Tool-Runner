@@ -2714,18 +2714,26 @@ public static class Program
 		var ansi = Files.AnsiEncoding;
 		// a line with a letter in that code page that is no valid UTF-8 makes the list read as written in it
 		var accent = "Mod été";
-		if (ansi.GetString(ansi.GetBytes(accent)) != accent || ansi.CodePage == 65001) {
-			Console.WriteLine("  (skipped: this PC's code page cannot hold the test's own accented name)");
+		// (a code page that holds the name this test expects refused - CP936 on Simplified Chinese Windows - writes it rightly)
+		var refused = "漢字 Output";
+		if (ansi.GetString(ansi.GetBytes(accent)) != accent || ansi.GetString(ansi.GetBytes(refused)) == refused || ansi.CodePage == 65001) {
+			Console.WriteLine("  (skipped: this PC's code page cannot hold the accented name, or can hold the refused one)");
 			return;
 		}
 		File.WriteAllBytes(list, ansi.GetBytes(File.ReadAllText(list).Replace("+Base Mod", "+" + accent + "\r\n+Base Mod", StringComparison.Ordinal)));
 		var before = File.ReadAllBytes(list);
 		var p = ProfileOf(f);
-		Throws<IOException>(() => p.ListMod("漢字 Output"), "a name the list's code page cannot hold is refused");
+		Throws<IOException>(() => p.ListMod(refused), "a name the list's code page cannot hold is refused");
 		Check(File.ReadAllBytes(list).SequenceEqual(before), "and nothing was written");
 		Check(p.ListMod("Café Output") && p.States().ContainsKey("Café Output"), "a name it can hold goes in and is found again");
 		Check(p.States().ContainsKey(accent), "the line that was there is read as before");
+	}
 
+	// ... and several new plugins placed after one anchor keep their master order in both plugin files (a test of its own:
+	// nothing of a PC's code page may skip it)
+	static void T_OneAnchorKeepsTheMasterOrder()
+	{
+		using var f = new FakeMo2();
 		// two new plugins after one anchor, the master given first: both files keep master, then the plugin that needs it
 		f.Mod("Pair", ("PairBase.esp", false, []), ("PairPatch.esp", false, ["PairBase.esp"]));
 		var anchor = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["PairBase.esp"] = "BaseMod.esp", ["PairPatch.esp"] = "BaseMod.esp" };
