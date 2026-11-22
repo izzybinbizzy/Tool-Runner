@@ -775,7 +775,7 @@ public sealed class ShaderStep : IStep
 								if (!logFresh && !toldNoLog) {
 									toldNoLog = true;
 									a_ctx.Log.Detail($"no shader log of this start in {string.Join(" or ", logs)} - the compile's end is judged by the game itself (new shaders, its processor use); " +
-										"if your SKSE logs are written elsewhere, name that folder in Settings > SKSE log folder");
+										"if your SKSE logs are written elsewhere, name that folder in Settings > Setup > SKSE log folder");
 								}
 							} else if (sw.Elapsed > TimeSpan.FromMinutes(a_s.Int("sanity_min", 3))) {
 								// never blamed on the shader mod while something else holds the game: what is on screen is named

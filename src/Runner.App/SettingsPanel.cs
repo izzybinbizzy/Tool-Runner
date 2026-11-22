@@ -243,7 +243,7 @@ public static class SettingsPanel
 		// whose settings these are, for as long as this panel stands (Save writes to no other setup)
 		var (openedFor, openedName) = (a_vm.Setup.File, a_vm.Setup.Name);
 		var work = (JsonObject)a_vm.Setup.Root.DeepClone();
-		// the setup's steps, and which of them is open under A STEP (-1 = none) - the search names the other steps that hold its word
+		// the setup's steps, and which of them is open on the Steps page (-1 = none) - the search names the other steps that hold its word
 		var steps = (work["steps"] as JsonArray)?.OfType<JsonObject>().ToList() ?? [];
 		var shown = -1;
 		HasChanges = false;
@@ -381,14 +381,14 @@ public static class SettingsPanel
 		// his word of 2026-11-21: a pop-up of the game is closed at once, whatever it is - a setup may leave the ones the run
 		// does not know to the player instead
 		Choice(gamePage, apply, "A game pop-up the run does not know", work, InGame.UnknownBoxSetting,
-			[("close", "close it at once and go on - it is named in the log and the run's notes"), ("stop", "leave it to me, and stop the step when I do not answer")]);
+			[("close", "close it at once (named in the log and the notes)"), ("stop", "leave it to me (unanswered, the step stops)")]);
 		work["boxWaitSeconds"] ??= 60;
 		Field(gamePage, apply, "Wait for your answer to a game pop-up that is left to you (seconds)", work, "boxWaitSeconds", JsonValueKind.Number);
 		Choice(gamePage, apply, "Rebuild shader caches", work, "shaderRebuild", [("whenChanged", "when the shader mod changed"), ("always", "every run"), ("never", "never")]);
 		Field(gamePage, apply, "Allow writing into the game folder (only NGIO's grass cache needs it)", work, "gameFolderWrites", JsonValueKind.True);
 		// two mods that put a window of their own in front of a game start (GameMods.cs); each line matters only with that mod ticked
 		Choice(gamePage, apply, "Faster Archives' repack offer", work, FasterArchives.SettingName,
-			[("ask", "wait for my choice in its window"), ("skip", "skip it during the run - it asks again when I start the game")]);
+			[("ask", "wait for my choice in its window"), ("skip", "skip it during the run (it asks in my own game)")]);
 		// shown as the run reads it (a setup of the first builds may still say it under their old key, and an empty value says
 		// nothing), so a save keeps what the run does today
 		work[Crdw.SettingName] = Crdw.Word(a_vm.Setup!);
@@ -426,7 +426,7 @@ public static class SettingsPanel
 		Field(alertPage, apply, "Sound", alerts, "sound", JsonValueKind.True);
 		Field(alertPage, apply, "Flash the taskbar button", alerts, "flash", JsonValueKind.True);
 		// his checklist 461 / 463: both optional, off unless set
-		Choice(alertPage, apply, "After the run, the PC", work, "afterRunPower", [("none", "stays on"), ("sleep", "sleeps or hibernates, as Windows is set (one minute's notice)"),
+		Choice(alertPage, apply, "After the run, the PC", work, "afterRunPower", [("none", "stays on"), ("sleep", "sleeps, as Windows is set (one minute's notice)"),
 			("shutdown", "shuts down (one minute's notice)")]);
 		work["afterRunPowerOnlyFinished"] ??= true;
 		Field(alertPage, apply, "Only after a finished run (a failed run keeps the PC on)", work, "afterRunPowerOnlyFinished", JsonValueKind.True);
@@ -477,8 +477,8 @@ public static class SettingsPanel
 		openThemes.Click += (_, _) => a_w.ShowPanel("themes");
 		stack.Children.Add(openThemes);
 		// drawn without the graphics card unless asked: less memory and a faster start for a window of text and bars (Drawing)
-		var card = new CheckBox { IsChecked = Drawing.Hardware, Margin = new Thickness(0, 12, 0, 0),
-			Content = new TextBlock { TextWrapping = TextWrapping.Wrap, Text = "Draw this window with the graphics card (it then holds about 25 MB more memory; applies the next time the program starts)" } };
+		// (a tick's own words do not wrap - the long form ran past the window's edge: the tick says what, a line under it the rest)
+		var card = new CheckBox { IsChecked = Drawing.Hardware, Margin = new Thickness(0, 12, 0, 4), Content = "Draw this window with the graphics card" };
 		card.Click += (_, _) => {
 			try {
 				Drawing.Pick(card.IsChecked == true);
@@ -487,6 +487,8 @@ public static class SettingsPanel
 			}
 		};
 		stack.Children.Add(card);
+		stack.Children.Add(new TextBlock { Text = "It then holds about 25 MB more memory. Applies the next time the program starts.", Style = (Style)a_w.FindResource("MutedText"),
+			TextWrapping = TextWrapping.Wrap });
 
 		NewVersions(a_w, stack);
 
@@ -946,7 +948,7 @@ public static class SettingsPanel
 	}
 
 	// the search's line under its box: how many settings on screen hold the word, and the other steps whose settings hold it (a
-	// step's own settings are on screen only while it is open under A STEP)
+	// step's own settings are on screen only while it is open on the Steps page)
 	static string FindHint(int a_hits, string a_q, IReadOnlyList<JsonObject> a_steps, int a_open)
 	{
 		if (a_q == "") {
@@ -1181,7 +1183,12 @@ public static class SettingsPanel
 		var box = new ComboBox { ItemsSource = a_options.Select(o => o.Text).ToList() };
 		var cur = Setup.Str(a_obj, a_key);
 		box.SelectedIndex = Math.Max(0, Array.FindIndex(a_options, o => string.Equals(o.Value, cur, StringComparison.OrdinalIgnoreCase)));
-		box.SelectionChanged += (_, _) => Changed();
+		// (the choice in whole words on hover: a box made narrow cuts a long one off)
+		box.ToolTip = box.SelectedItem as string;
+		box.SelectionChanged += (_, _) => {
+			box.ToolTip = box.SelectedItem as string;
+			Changed();
+		};
 		System.Windows.Automation.AutomationProperties.SetName(box, a_label);
 		a_apply.Add(() => {
 			a_obj[a_key] = a_options[Math.Max(0, box.SelectedIndex)].Value;

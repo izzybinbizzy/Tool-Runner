@@ -1248,7 +1248,7 @@ public static partial class InGame
 	public static string SaveNotMade(string a_name, bool a_forced) =>
 		$"the save \"{a_name}\" was not made" + (a_forced
 			? " - not even with the game's saving switched back on, so a mod blocks it some other way: switch that mod off for this run, or save by hand with the guided route"
-			: " - a mod may be blocking saves (some survival or hardcore mods do). Settings > \"Force the save\" tries once more with the game's saving switched back on");
+			: " - a mod may be blocking saves (some survival or hardcore mods do). Settings > Game steps > \"Force the save\" tries once more with the game's saving switched back on");
 
 	// true = the save is whole on disk; false = it never appeared within SaveWait
 	static bool WaitForSave(RunContext a_ctx, string a_path, DateTime a_since)

@@ -123,7 +123,7 @@ public sealed class RunPreview
 		}
 		if (CommandsBefore.Count + CommandsAfter.Count > 0) {
 			l.Add("");
-			l.Add("This setup runs its own commands on this PC (Settings > commands before and after a run):");
+			l.Add("This setup runs its own commands on this PC (Settings > Run):");
 			l.AddRange(CommandsBefore.Select(c => "  - before the first step: " + c));
 			l.AddRange(CommandsAfter.Select(c => "  - after the run: " + c));
 		}

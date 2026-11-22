@@ -24,9 +24,9 @@ public static class OldOutput
 
 	// why a step has no old output to use, for the window (null = it has)
 	public static string? WhyNot(string a_step, StepSettings a_s) => a_step switch {
-		"shaders" => "The shader caches have their own setting for this: Settings > Rebuild shader caches (when the shader mod changed, every run, never).",
+		"shaders" => "The shader caches have their own setting for this: Settings > Game steps > Rebuild shader caches (when the shader mod changed, every run, never).",
 		_ when s_never.Contains(a_step) => $"{StepCatalog.Name(a_step)} makes no output of its own, so there is nothing old to use.",
-		_ when a_s.OutputMod == null => $"{StepCatalog.Name(a_step)} has no output mod set (Settings > A step), so there is nothing old to use.",
+		_ when a_s.OutputMod == null => $"{StepCatalog.Name(a_step)} has no output mod set (Settings > Steps), so there is nothing old to use.",
 		_ => null,
 	};
 

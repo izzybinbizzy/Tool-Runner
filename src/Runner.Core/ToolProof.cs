@@ -24,7 +24,7 @@ public static class ToolProof
 
 	public static Issue? Newer(string a_step, string a_yours) =>
 		a_yours != "" && ProvenWith.TryGetValue(a_step, out var proven) && ToolUpdates.IsNewer(proven, a_yours) ?
-			new Issue(a_step, false, $"yours is {a_yours}, newer than the {proven} this version was proven with: if it stops at a window, Settings > Test my tools shows what changed") : null;
+			new Issue(a_step, false, $"yours is {a_yours}, newer than the {proven} this version was proven with: if it stops at a window, Settings > Tools > Test my tools shows what changed") : null;
 
 	// how long a tool may take to reach the window a run presses (the LOD tools read the whole load order first)
 	static readonly TimeSpan LongLoad = TimeSpan.FromMinutes(20), ShortLoad = TimeSpan.FromMinutes(3);

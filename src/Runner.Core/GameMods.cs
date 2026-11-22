@@ -63,7 +63,7 @@ public static partial class FasterArchives
 	public const string Asks = "Faster Archives asks what to do with the archives it can repack - choose in its own window (Cancel there puts it off); the run goes on by itself when that window has closed";
 	public const string LeftAtStop = "Faster Archives' window is left open (a repack is never cut off) - choose Cancel in it, or let it finish; Mod Organizer closes once that window has";
 	const string What = "Faster Archives closed the game to ask what to do with the archives it can repack (this is no crash)";
-	const string HowToPass = "set this setup to pass its offer over during a run (Settings > Faster Archives' offer)";
+	const string HowToPass = "set this setup to pass its offer over during a run (Settings > Game steps > Faster Archives' repack offer)";
 
 	public static bool IsTool(string a_image) => Path.GetFileNameWithoutExtension(a_image).Equals("FasterArchivesTool", StringComparison.OrdinalIgnoreCase);
 
@@ -414,7 +414,7 @@ public static partial class Crdw
 		return new Issue("", false, Name + " loads its cache without asking (its question is switched off and its Mode is LOAD): the game then sees the files as they were when that cache was made, not what this run builds. " +
 			When(a_setup) switch {
 				Renew.Always => "This setup has it make a new cache at every game start of the run and puts its setting back after each step.",
-				Renew.Never => "This setup leaves it alone: make its cache again after the run (its Mode set to CACHE for one game start), or let the run do it (Settings > " + Name + ").",
+				Renew.Never => "This setup leaves it alone: make its cache again after the run (its Mode set to CACHE for one game start), or let the run do it (Settings > Game steps > " + Name + ").",
 				_ => "The run has it make a new cache at its own game starts after it changed the game's files, and puts its setting back after each step.",
 			});
 	}
