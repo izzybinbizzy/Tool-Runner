@@ -232,7 +232,7 @@ public sealed class XEditCleanStep : IStep
 	// Found by name, never by date: xEdit gives a cleaned file its plugin's old time, and an original it renamed away keeps the
 	// date it had. What stood in overwrite before the step and was not written since is the player's and stays. A file that
 	// cannot be moved is said and left - this runs on the way out of a failure too, and never hides it behind one of its own.
-	static void Collect(RunContext a_ctx, IReadOnlyList<(string Plugin, string At)> a_plan, IReadOnlyDictionary<string, DateTime> a_before)
+	static void Collect(RunContext a_ctx, IReadOnlyList<(string Plugin, string At)> a_plan, Dictionary<string, DateTime> a_before)
 	{
 		var overwrite = a_ctx.Mo2.OverwriteDir;
 		if (!Directory.Exists(overwrite)) {

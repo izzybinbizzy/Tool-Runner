@@ -784,7 +784,7 @@ public static class SettingsPanel
 			// his ask 2026-10-27: the tool's settings from its OWN window, kept for every run (never a copy of its window here).
 			// Only while the setup picked in the main window is the one these settings were opened for: with another one
 			// picked, the button stood among this setup's steps and opened - and learned for - the other setup's tool
-			if (ToolSettings.CanLearn(new StepSettings(o)) && a_vm.Setup is { } setupNow && IsFor(setupNow)) {
+			if (ToolSettings.CanLearn(stepKey, new StepSettings(o)) && a_vm.Setup is { } setupNow && IsFor(setupNow)) {
 				var learned = ToolSettings.Load(setupNow, stepKey);
 				var name = StepCatalog.Name(stepKey);
 				var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Style = (Style)a_w.FindResource("MutedText"), Margin = new Thickness(0, 4, 0, 6),

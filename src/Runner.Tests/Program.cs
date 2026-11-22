@@ -4126,6 +4126,12 @@ public static class Program
 		ToolSettings.Keep(setup, "texgen", "TexGen", [kept]);
 		tools = ToolSettings.ToSetUp(setup);
 		Check(tools[0].Learned == null && tools[1].Learned is { Files.Count: 1 }, "a tool set up since is listed with what is kept of it, the other still without");
+		// xEdit's Quick Auto Clean runs through Mod Organizer too, but its window holds nothing to set up: it is not offered
+		var withClean = (JsonObject)setup.Root.DeepClone();
+		((JsonArray)withClean["steps"]!).Add(new JsonObject { ["step"] = "xeditclean", ["on"] = true, ["settings"] = new JsonObject { ["executable"] = "SSEEditQuickAutoClean" } });
+		Equal("xlodgen, texgen", string.Join(", ", ToolSettings.ToSetUp(Setup.FromJson(withClean, f.SetupFile)).Select(t => t.Step)), "a tool with nothing to set up in its window is left out");
+		Check(ToolSettings.CanLearn(new StepSettings(new JsonObject { ["executable"] = "SSEEditQuickAutoClean" })) && !ToolSettings.CanLearn("xeditclean", new StepSettings(new JsonObject { ["executable"] = "SSEEditQuickAutoClean" })),
+			"(it has a window, and nothing in it to keep)");
 
 		// the box shows by itself once: before a first run, with something to set up, and not after the player went on from it
 		Check(ToolSettings.OfferFirst(false, false, 2), "a setup that never ran and has tools to set up: offered");

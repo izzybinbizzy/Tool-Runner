@@ -130,6 +130,12 @@ public static partial class ToolSettings
 	// a step whose tool has a window of its own (it runs through MO2's Executables list)
 	public static bool CanLearn(StepSettings a_s) => a_s.Str("executable") != null;
 
+	// ... and that window holds something to set up: xEdit's Quick Auto Clean asks only which plugin to clean, and the step
+	// names that itself
+	static readonly HashSet<string> NothingToSetUp = ["xeditclean"];
+
+	public static bool CanLearn(string a_step, StepSettings a_s) => CanLearn(a_s) && !NothingToSetUp.Contains(a_step);
+
 	// what Learn says of a tool whose window closed with nothing new written
 	public const string SavedNothing = "saved no settings file while it was open";
 
@@ -140,7 +146,7 @@ public static partial class ToolSettings
 	// patcher set up by hand before the first run, and again whenever wanted). A step listed twice is one tool. One that
 	// uses its old output for now is switched on all the same: its tool is set up here for the run that builds it again
 	public static List<ToSet> ToSetUp(Setup a_setup) =>
-		[.. a_setup.OnSteps.Where(s => CanLearn(new StepSettings(s.Settings))).DistinctBy(s => s.Key).Select(s => new ToSet(s.Key, StepCatalog.Name(s.Key), Load(a_setup, s.Key)))];
+		[.. a_setup.OnSteps.Where(s => CanLearn(s.Key, new StepSettings(s.Settings))).DistinctBy(s => s.Key).Select(s => new ToSet(s.Key, StepCatalog.Name(s.Key), Load(a_setup, s.Key)))];
 
 	// The box that lists them shows by itself once, before a setup's first run: not for a setup that has run, not again once
 	// the player went on from it, and not with nothing to set up.
