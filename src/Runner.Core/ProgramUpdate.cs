@@ -121,8 +121,18 @@ public static class ProgramUpdate
 
 	// the same version, however each is written ("v1.1", "1.1.0.0")
 	// - and never for a value with no version number in it ("unknown", "")
-	public static bool SameVersion(string a_a, string a_b) =>
-		ToolUpdates.HasVersion(a_a) && ToolUpdates.HasVersion(a_b) && !ToolUpdates.IsNewer(a_a, a_b) && !ToolUpdates.IsNewer(a_b, a_a);
+	// The program's own versions are compared number by number with trailing zeros dropped - never with the tools' rules, which
+	// read a short version as the end of a long one ("0.1.1.0" against "1.1" was taken as the same; CodeRabbit on pull request #37)
+	public static bool SameVersion(string a_a, string a_b) => Numbers(a_a) is { Count: > 0 } a && a.SequenceEqual(Numbers(a_b));
+
+	static List<int> Numbers(string a_v)
+	{
+		var parts = System.Text.RegularExpressions.Regex.Matches(a_v, @"\d+").Select(m => int.TryParse(m.Value, out var n) ? n : -1).ToList();
+		while (parts.Count > 1 && parts[^1] == 0) {
+			parts.RemoveAt(parts.Count - 1);
+		}
+		return parts;
+	}
 
 	// GitHub renames an uploaded file whose name holds anything but letters, digits and a few marks ("Tool Runner 1.1.zip" is
 	// listed as "Tool.Runner.1.1.zip"), and its list of a release's files gives the renamed name: two names match when they

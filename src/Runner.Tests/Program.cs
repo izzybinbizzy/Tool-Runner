@@ -7157,6 +7157,7 @@ public static class Program
 			Check(fromBefore.Any(l => l.Contains("directoryCache", StringComparison.Ordinal)) && fromBefore[0] == "- A new thing.", "coming from before 1.0, the setup key 1.0 reads differently is named too");
 			Check(ProgramUpdate.SameVersion("v1.1", "1.1.0.0") && !ProgramUpdate.SameVersion("1.1", "1.2") && !ProgramUpdate.SameVersion("", "1.1"), "a version is the same however it is written");
 			Check(!ProgramUpdate.SameVersion("unknown", "v1.1") && !ProgramUpdate.SameVersion("v1.1", "unknown"), "and a value with no version in it is never the same as one");
+			Check(!ProgramUpdate.SameVersion("0.1.1.0", "1.1") && !ProgramUpdate.SameVersion("1.1", "0.1.1.0") && !ProgramUpdate.SameVersion("1.1.1", "1.1"), "a short version is never taken as the end of a long one");
 			serve = MakeZip("unknown.zip", (exeName, "the program, no version"));
 			ProgramUpdate.VersionOf = f => File.ReadAllText(f).Contains("version 1.1", StringComparison.Ordinal) ? "1.1.0.0" : "unknown";
 			Throws<InvalidOperationException>(() => Download(Latest(Answer(serve))), "a program that says no version at all");

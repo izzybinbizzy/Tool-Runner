@@ -1273,6 +1273,19 @@ public partial class MainWindow : Window
 		KeepSize();
 		ClosePanels();
 		await Task.Run(UiState.Save);
+		// a write that failed is tried once more; still not written, the new version is not started from here: this window's
+		// own write as it closed would put the old values back over the new version's (CodeRabbit on pull request #37)
+		if (UiState.Unsaved) {
+			await Task.Run(UiState.Save);
+		}
+		if (UiState.Unsaved) {
+			_closingAll = false;
+			if (logWasOut) {
+				ShowLogHere(_logWasHere);
+			}
+			_vm.Say($"{Brand.Name} {a_version} is installed, but this window's own settings could not be written just now - close this window and start the new version yourself.", "warn");
+			return false;
+		}
 		try {
 			System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(a_exe) { UseShellExecute = true })?.Dispose();
 		} catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) {
