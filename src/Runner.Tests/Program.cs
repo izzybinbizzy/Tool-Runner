@@ -1157,7 +1157,13 @@ public static class Program
 	{
 		var s = Setup.FromJson(new JsonObject { ["steps"] = new JsonArray(new JsonObject { ["step"] = "nonsense" }) });
 		var p = s.Problems();
-		Check(p.Any(x => x.Contains("Mod Organizer", StringComparison.Ordinal)) && p.Any(x => x.Contains("unknown step", StringComparison.Ordinal)), string.Join("; ", p));
+		Check(p.Any(x => x.Contains("Mod Organizer", StringComparison.Ordinal)), string.Join("; ", p));
+		// a step this version does not have (an older version's, or a name never known) is left out, never a refusal: an older
+		// setup file still loads and runs its other steps
+		Equal("nonsense", string.Join(",", s.NotKnown), "named as not known");
+		Check(s.OnSteps.Count == 0 && p.Any(x => x.StartsWith("none of the steps it has switched on is one this version has: nonsense", StringComparison.Ordinal)), "and left out of the run, which then has nothing to run: " + string.Join("; ", p));
+		var mixed = Setup.FromJson(new JsonObject { ["steps"] = new JsonArray(new JsonObject { ["step"] = "nonsense" }, new JsonObject { ["step"] = "synthesis" }) });
+		Equal("synthesis", string.Join(",", mixed.EnabledSteps.Select(x => x.Key)), "the steps it knows still run");
 	}
 
 	static void T_SetupSaveKeepsUnknownKeys()
@@ -2006,22 +2012,22 @@ public static class Program
 		// Two old outputs that come on before the same tool, the one listed first needing the other's plugin: no tool works
 		// between them, so the run takes them as one - the one that is needed is switched on first - and the tool finds both
 		using var g = new FakeMo2();
-		g.Mod("Bashed", ("Bashed Patch, 0.esp", false, []));
-		g.Mod("Patch On Bashed", ("PatchOnBashed.esp", false, ["Bashed Patch, 0.esp"]));
+		g.Mod("Base Out", ("BaseOut.esp", false, []));
+		g.Mod("Patch On Base", ("PatchOnBase.esp", false, ["BaseOut.esp"]));
 		bool? bothOnForTheTool = null, masterFirstForTheTool = null;
 		StepRegistry.Replace(new FakeStep("texgen", (ctx, s) => {
-			bothOnForTheTool = ctx.Profile.IsOn("Bashed") && ctx.Profile.IsOn("Patch On Bashed");
+			bothOnForTheTool = ctx.Profile.IsOn("Base Out") && ctx.Profile.IsOn("Patch On Base");
 			var inOrder = File.ReadAllLines(ctx.Profile.LoadOrderTxt).ToList();
-			masterFirstForTheTool = inOrder.IndexOf("Bashed Patch, 0.esp") >= 0 && inOrder.IndexOf("Bashed Patch, 0.esp") < inOrder.IndexOf("PatchOnBashed.esp");
+			masterFirstForTheTool = inOrder.IndexOf("BaseOut.esp") >= 0 && inOrder.IndexOf("BaseOut.esp") < inOrder.IndexOf("PatchOnBase.esp");
 			WriteOutput(ctx, "texgen", "Output C", "OutC.esp");
 		}));
-		var pair = g.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Patch On Bashed" }), ("wryebash", new JsonObject { ["output_mod"] = "Bashed" }),
+		var pair = g.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Patch On Base" }), ("pandora", new JsonObject { ["output_mod"] = "Base Out" }),
 			("texgen", new JsonObject { ["output_mod"] = "Output C" }));
 		((JsonArray)pair.Root["steps"]!)[0]![OldOutput.Key] = true;
 		((JsonArray)pair.Root["steps"]!)[1]![OldOutput.Key] = true;
 		pair.Save();
 		Equal("0,0", string.Join(",", OldOutput.Places(pair, pair.EnabledSteps).Select(x => x.At)), "(both come on before the same tool)");
-		Equal("wryebash,synthesis", string.Join(",", OldOutput.InMasterOrder(Mo2Instance.Load(g.Exe, g.Instance), pair.KeptSteps).Select(x => x.Key)), "the one whose plugin the other needs comes on first");
+		Equal("pandora,synthesis", string.Join(",", OldOutput.InMasterOrder(Mo2Instance.Load(g.Exe, g.Instance), pair.KeptSteps).Select(x => x.Key)), "the one whose plugin the other needs comes on first");
 		gate = Runner.CheckStart(new RunRequest(g.SetupFile, g.Data));
 		Check(gate.Starts, "two old outputs due before the same tool are judged together: " + gate.Why);
 		var ran = Runner.Run(new RunRequest(g.SetupFile, g.Data));
@@ -2031,12 +2037,12 @@ public static class Program
 		// ... and after the run: both were in no order file before it, so the put-back gives their plugins their ticks and
 		// places again (the order files of before the run hold neither)
 		var order = g.Text("loadorder.txt").Replace("\r\n", "\n").Split('\n').ToList();
-		Check(order.IndexOf("Bashed Patch, 0.esp") >= 0 && order.IndexOf("Bashed Patch, 0.esp") < order.IndexOf("PatchOnBashed.esp"), "after the run the master still stands before the plugin that needs it: " + string.Join(" | ", order));
+		Check(order.IndexOf("BaseOut.esp") >= 0 && order.IndexOf("BaseOut.esp") < order.IndexOf("PatchOnBase.esp"), "after the run the master still stands before the plugin that needs it: " + string.Join(" | ", order));
 		var ticked = ProfileOf(g).ActivePlugins();
-		Check(ticked.Contains("Bashed Patch, 0.esp", StringComparer.OrdinalIgnoreCase) && ticked.Contains("PatchOnBashed.esp", StringComparer.OrdinalIgnoreCase) && ticked.Contains("OutC.esp", StringComparer.OrdinalIgnoreCase),
+		Check(ticked.Contains("BaseOut.esp", StringComparer.OrdinalIgnoreCase) && ticked.Contains("PatchOnBase.esp", StringComparer.OrdinalIgnoreCase) && ticked.Contains("OutC.esp", StringComparer.OrdinalIgnoreCase),
 			"and their plugins, and the new output's, are ticked: " + string.Join(" | ", ticked));
 		// two steps that share one output mod are two uses: the run's record and its summary name both
-		var shared = g.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Bashed" }), ("wryebash", new JsonObject { ["output_mod"] = "Bashed" }),
+		var shared = g.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Base Out" }), ("pandora", new JsonObject { ["output_mod"] = "Base Out" }),
 			("texgen", new JsonObject { ["output_mod"] = "Output C" }));
 		((JsonArray)shared.Root["steps"]!)[0]![OldOutput.Key] = true;
 		((JsonArray)shared.Root["steps"]!)[1]![OldOutput.Key] = true;
@@ -2044,18 +2050,18 @@ public static class Program
 		ran = Runner.Run(new RunRequest(g.SetupFile, g.Data));
 		Equal(RunState.Finished, ran.State, ran.Verdict);
 		var sharedRun = Journal.Load(ran.Folder!);
-		Equal("synthesis:Bashed,wryebash:Bashed", string.Join(",", sharedRun.UsedOld.Where(u => u.Done).Select(u => $"{u.Step}:{u.Mod}").Order()), "each step that used the shared output is on record");
-		Check(RunSummary.Of(sharedRun).Lines().Any(l => l.Contains("Synthesis (Bashed)", StringComparison.Ordinal) && l.Contains("(Bashed)", StringComparison.Ordinal) && l.Split("(Bashed)").Length == 3),
+		Equal("pandora:Base Out,synthesis:Base Out", string.Join(",", sharedRun.UsedOld.Where(u => u.Done).Select(u => $"{u.Step}:{u.Mod}").Order()), "each step that used the shared output is on record");
+		Check(RunSummary.Of(sharedRun).Lines().Any(l => l.Contains("Synthesis (Base Out)", StringComparison.Ordinal) && l.Contains("(Base Out)", StringComparison.Ordinal) && l.Split("(Base Out)").Length == 3),
 			"and the summary names both: " + string.Join(" | ", RunSummary.Of(sharedRun).Lines()));
 
 		// ... and when the one that is needed was in the mod list, switched off, and the other had no line at all: the put-back
 		// brings one back still off and the other switched on - their plugins get their places in master order all the same,
 		// in one pass (CodeRabbit on pull request #35: in two, the master was listed after the plugin that needs it)
 		using var g2 = new FakeMo2();
-		g2.Mod("Bashed", ("Bashed Patch, 0.esp", false, []));
-		g2.Mod("Patch On Bashed", ("PatchOnBashed.esp", false, ["Bashed Patch, 0.esp"]));
-		ProfileOf(g2).EnsureMod("Bashed");
-		var mixed = g2.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Patch On Bashed" }), ("wryebash", new JsonObject { ["output_mod"] = "Bashed" }),
+		g2.Mod("Base Out", ("BaseOut.esp", false, []));
+		g2.Mod("Patch On Base", ("PatchOnBase.esp", false, ["BaseOut.esp"]));
+		ProfileOf(g2).EnsureMod("Base Out");
+		var mixed = g2.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Patch On Base" }), ("pandora", new JsonObject { ["output_mod"] = "Base Out" }),
 			("texgen", new JsonObject { ["output_mod"] = "Output C" }));
 		((JsonArray)mixed.Root["steps"]!)[0]![OldOutput.Key] = true;
 		((JsonArray)mixed.Root["steps"]!)[1]![OldOutput.Key] = true;
@@ -2063,24 +2069,24 @@ public static class Program
 		ran = Runner.Run(new RunRequest(g2.SetupFile, g2.Data));
 		Equal(RunState.Finished, ran.State, ran.Verdict);
 		order = g2.Text("loadorder.txt").Replace("\r\n", "\n").Split('\n').ToList();
-		Check(order.IndexOf("Bashed Patch, 0.esp") >= 0 && order.IndexOf("Bashed Patch, 0.esp") < order.IndexOf("PatchOnBashed.esp"),
+		Check(order.IndexOf("BaseOut.esp") >= 0 && order.IndexOf("BaseOut.esp") < order.IndexOf("PatchOnBase.esp"),
 			"one listed and off, the other not listed: after the run the master stands before the plugin that needs it: " + string.Join(" | ", order));
-		Check(ProfileOf(g2).IsOn("Bashed") && ProfileOf(g2).IsOn("Patch On Bashed"), "and both are switched on");
+		Check(ProfileOf(g2).IsOn("Base Out") && ProfileOf(g2).IsOn("Patch On Base"), "and both are switched on");
 
 		// The old outputs due at one place are taken as one: when one of them cannot be used after all, none of that place is
 		// put on the run's record or switched on. (Taken one by one, the first was carried out before the second was found
 		// gone - and stayed switched on after the run.)
 		using var g3 = new FakeMo2();
-		g3.Mod("Bashed", ("Bashed Patch, 0.esp", false, []));
-		g3.Mod("Patch On Bashed", ("PatchOnBashed.esp", false, ["Bashed Patch, 0.esp"]));
+		g3.Mod("Base Out", ("BaseOut.esp", false, []));
+		g3.Mod("Patch On Base", ("PatchOnBase.esp", false, ["BaseOut.esp"]));
 		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
 			WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp");
-			File.Delete(Path.Combine(ctx.Mo2.ModDir("Patch On Bashed"), "PatchOnBashed.esp"));
+			File.Delete(Path.Combine(ctx.Mo2.ModDir("Patch On Base"), "PatchOnBase.esp"));
 		}));
 		var texGenRan = false;
 		StepRegistry.Replace(new FakeStep("texgen", (ctx, s) => texGenRan = true));
-		var half = g3.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("wryebash", new JsonObject { ["output_mod"] = "Bashed" }),
-			("synthesis", new JsonObject { ["output_mod"] = "Patch On Bashed" }), ("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		var half = g3.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("pandora", new JsonObject { ["output_mod"] = "Base Out" }),
+			("synthesis", new JsonObject { ["output_mod"] = "Patch On Base" }), ("texgen", new JsonObject { ["output_mod"] = "Output C" }));
 		((JsonArray)half.Root["steps"]!)[1]![OldOutput.Key] = true;
 		((JsonArray)half.Root["steps"]!)[2]![OldOutput.Key] = true;
 		half.Save();
@@ -2088,30 +2094,30 @@ public static class Program
 		Equal(RunState.Failed, ran.State, ran.Verdict);
 		// (stopped by that very look, and nothing else: the verdict names the old output that is gone, and the tool after the
 		// place never ran)
-		Check(ran.Verdict.Contains("there is none to use any more - \"Patch On Bashed\" is missing or holds nothing now", StringComparison.Ordinal), "the run stopped on the old output that is gone: " + ran.Verdict);
+		Check(ran.Verdict.Contains("there is none to use any more - \"Patch On Base\" is missing or holds nothing now", StringComparison.Ordinal), "the run stopped on the old output that is gone: " + ran.Verdict);
 		Check(!texGenRan, "and the tool after that place did not run");
 		Equal(0, Journal.Load(ran.Folder!).UsedOld.Count, "when one old output of a place cannot be used, none of that place is put on the run's record");
-		Check(!ProfileOf(g3).States().ContainsKey("Bashed") && !ProfileOf(g3).States().ContainsKey("Patch On Bashed"), "and none of them is in the mod list or switched on after the run");
+		Check(!ProfileOf(g3).States().ContainsKey("Base Out") && !ProfileOf(g3).States().ContainsKey("Patch On Base"), "and none of them is in the mod list or switched on after the run");
 
 		// ... and when one of them cannot be switched on at its place after all (its line taken out of the mod list while the
 		// run gave the other its line), none is carried out: the run stops there, and the put-back leaves both as the profile
 		// had them (CodeRabbit on pull request #35)
 		using var g4 = new FakeMo2();
-		g4.Mod("Bashed", ("Bashed Patch, 0.esp", false, []));
-		g4.Mod("Patch On Bashed", ("PatchOnBashed.esp", false, ["Bashed Patch, 0.esp"]));
-		ProfileOf(g4).EnsureMod("Bashed");
+		g4.Mod("Base Out", ("BaseOut.esp", false, []));
+		g4.Mod("Patch On Base", ("PatchOnBase.esp", false, ["BaseOut.esp"]));
+		ProfileOf(g4).EnsureMod("Base Out");
 		var g4Before = g4.Text("modlist.txt");
 		var g4List = Path.Combine(g4.ProfileDir, "modlist.txt");
 		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp")));
 		texGenRan = false;
-		var lineGone = g4.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("wryebash", new JsonObject { ["output_mod"] = "Bashed" }),
-			("synthesis", new JsonObject { ["output_mod"] = "Patch On Bashed" }), ("texgen", new JsonObject { ["output_mod"] = "Output C" }));
+		var lineGone = g4.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("pandora", new JsonObject { ["output_mod"] = "Base Out" }),
+			("synthesis", new JsonObject { ["output_mod"] = "Patch On Base" }), ("texgen", new JsonObject { ["output_mod"] = "Output C" }));
 		((JsonArray)lineGone.Root["steps"]!)[1]![OldOutput.Key] = true;
 		((JsonArray)lineGone.Root["steps"]!)[2]![OldOutput.Key] = true;
 		lineGone.Save();
 		Profile.AfterListMod = m => {
-			if (m == "Patch On Bashed") {
-				File.WriteAllText(g4List, File.ReadAllText(g4List).Replace("-Bashed\r\n", "", StringComparison.Ordinal));
+			if (m == "Patch On Base") {
+				File.WriteAllText(g4List, File.ReadAllText(g4List).Replace("-Base Out\r\n", "", StringComparison.Ordinal));
 			}
 		};
 		try {
@@ -2120,13 +2126,13 @@ public static class Program
 			Profile.AfterListMod = null;
 		}
 		Equal(RunState.Failed, ran.State, ran.Verdict);
-		Check(ran.Verdict.Contains("the old output \"Bashed\" could not be switched on: its line is no longer in the mod list", StringComparison.Ordinal), "the run stops on the old output it could not switch on: " + ran.Verdict);
+		Check(ran.Verdict.Contains("the old output \"Base Out\" could not be switched on: its line is no longer in the mod list", StringComparison.Ordinal), "the run stops on the old output it could not switch on: " + ran.Verdict);
 		Equal("TR-322", RunnerErrors.Find(ran.Verdict)?.Code ?? "", "with what to do about it");
 		Check(!texGenRan, "the tool after that place did not run");
 		Check(Journal.Load(ran.Folder!).UsedOld.All(u => !u.Done), "none of the group is on record as carried out");
-		Check(!ProfileOf(g4).IsOn("Patch On Bashed") && !ProfileOf(g4).ActivePlugins().Contains("PatchOnBashed.esp", StringComparer.OrdinalIgnoreCase),
+		Check(!ProfileOf(g4).IsOn("Patch On Base") && !ProfileOf(g4).ActivePlugins().Contains("PatchOnBase.esp", StringComparer.OrdinalIgnoreCase),
 			"and the one that was switched on is not on after the run, its plugin not ticked");
-		Check(ProfileOf(g4).States().TryGetValue("Bashed", out var bashedFlag) && bashedFlag == '-', "the other has its line back, off, as the profile had it: " + g4.Text("modlist.txt"));
+		Check(ProfileOf(g4).States().TryGetValue("Base Out", out var baseFlag) && baseFlag == '-', "the other has its line back, off, as the profile had it: " + g4.Text("modlist.txt"));
 		Equal(g4Before, g4.Text("modlist.txt"), "the mod list is as it was before the run");
 
 		// What the player switches in Mod Organizer during the run counts for the profile the run's end leaves. A master's
@@ -2660,7 +2666,7 @@ public static class Program
 		Thread? other = null;
 		Exception? failed = null;
 		try {
-			var j = new Journal { Folder = dir, UsedOld = [new OldUse { Step = "wryebash", Mod = "Bashed" }, new OldUse { Step = "synthesis", Mod = "Patch On Bashed" }] };
+			var j = new Journal { Folder = dir, UsedOld = [new OldUse { Step = "pandora", Mod = "Base Out" }, new OldUse { Step = "synthesis", Mod = "Patch On Base" }] };
 			j.Save();
 			// A thread of its own (a pool task may not have started yet) that says when it is about to save; the change goes on
 			// only once Windows has put that thread to sleep on the record's lock - so the save it races is really under way
@@ -4211,289 +4217,40 @@ public static class Program
 		Equal(RunState.Finished, r.State, "the guided step went on after Done: " + r.Verdict);
 	}
 
-	// Wrye Bash's patch lands in overwrite (its output mod is off during the run): it and its log go into the mod, nothing stays
-	static void T_WryeBashPatchLeavesOverwrite()
+	// His checklist 650 ("user choice."): a run that starts at a later step leaves the earlier steps' outputs on - the setup's
+	// "keepEarlierOutputs", on unless it says off - and the whole run, its preview and its checks use the same list
+	static void T_ARunFromALaterStepKeepsTheEarlierOutputs()
 	{
 		using var f = new FakeMo2();
-		StepRegistry.Replace(new FakeStep("wryebash", (ctx, s) => {
-			var t0 = DateTime.UtcNow.AddSeconds(-1);
-			FakeMo2.Plugin(Path.Combine(f.Overwrite, "Bashed Patch, 0.esp"), false);
-			Directory.CreateDirectory(Path.Combine(f.Overwrite, "Docs"));
-			File.WriteAllText(Path.Combine(f.Overwrite, "Docs", "Bashed Patch, 0.txt"), "log");
-			File.WriteAllText(Path.Combine(f.Overwrite, "unrelated.ini"), "not Wrye Bash's");
-			WryeBashStep.Collect(ctx, "wryebash", s.OutputMod!, "Bashed Patch, 0.esp", t0);
-			ctx.SetAfter(s.OutputMod!);
+		var setup = f.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Output A" }), ("xlodgen", new JsonObject { ["output_mod"] = "Output B" }));
+		var st = ProfileOf(f).States();
+		string Off(Setup a_setup, IReadOnlyList<Setup.StepEntry>? a_todo) =>
+			string.Join("|", Runner.OutputsToTurnOff(a_setup, st, a_todo).Select(o => o.Mod).OrderBy(m => m, StringComparer.Ordinal));
+		Equal("Output A|Output B", Off(setup, null), "a whole run: every output off");
+		Equal("Output A|Output B", Off(setup, Runner.Plan(setup, null, null, null)), "a run from the first step: the same");
+		var from = Runner.Plan(setup, null, "xlodgen", null);
+		Equal("Output B", Off(setup, from), "a run from the second step leaves the first step's output on");
+		Equal("Output A", Runner.EarlierOutputs(setup, from).Single(), "and names it");
+		Equal("Output B", Off(setup, Runner.Plan(setup, "xlodgen", null, null)), "so does a run of that one step only");
+		Equal("Output A|Output B", Off(setup, Runner.Plan(setup, null, null, "synthesis")), "a run that ends early still switches the later output off");
+		Check(Runner.KeepsEarlierOutputs(setup), "on unless the setup says off");
+		// the player's choice: off, every output goes off as in a whole run
+		var root = (JsonObject)setup.Root.DeepClone();
+		root[Runner.KeepEarlierSetting] = false;
+		var offSetup = Setup.FromJson(root, f.SetupFile);
+		Equal("Output A|Output B", Off(offSetup, Runner.Plan(offSetup, null, "xlodgen", null)), "set off: the earlier output goes off too");
+		// an output a step at or after the start makes again is that step's, and goes off for it
+		var shared = f.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Output A" }), ("xlodgen", new JsonObject { ["output_mod"] = "Output A" }));
+		Equal("Output A", Off(shared, Runner.Plan(shared, null, "xlodgen", null)), "an output the run makes again goes off for it");
+		// the run itself: the earlier output stays on through the run, and the log says why
+		StepRegistry.Replace(new FakeStep("xlodgen", (ctx, s) => {
+			Check(ctx.Profile.IsOn("Output A") && !ctx.Profile.IsOn("Output B"), "while the later tool runs, the earlier output is on and its own is off");
+			WriteOutput(ctx, "xlodgen", "Output B", "OutB.esp");
 		}));
-		f.WriteSetup(("wryebash", new JsonObject { ["output_mod"] = "Output A" }));
-		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
-		Equal(RunState.Finished, r.State, "finished: " + r.Verdict);
-		Check(File.Exists(Path.Combine(f.Mods, "Output A", "Bashed Patch, 0.esp")), "the patch is in the output mod");
-		Check(File.Exists(Path.Combine(f.Mods, "Output A", "Docs", "Bashed Patch, 0.txt")), "its log went with it, at its own place");
-		Check(!File.Exists(Path.Combine(f.Overwrite, "Bashed Patch, 0.esp")), "nothing of the patch left in overwrite");
-		Check(File.Exists(Path.Combine(f.Overwrite, "unrelated.ini")), "another file in overwrite is not taken");
-		using var packed = System.IO.Compression.ZipFile.OpenRead(Directory.GetFiles(f.Backups, RunUndo.OutputsZip, SearchOption.AllDirectories).Single());
-		Check(packed.Entries.Any(e => e.Name == "OutA.esp"), "the old output is in the backup");
-	}
-
-	// the player pressed Done without building: the step fails and the old output comes back
-	static void T_WryeBashWithoutAPatchFails()
-	{
-		using var f = new FakeMo2();
-		StepRegistry.Replace(new FakeStep("wryebash", (ctx, s) => WryeBashStep.Collect(ctx, "wryebash", s.OutputMod!, "Bashed Patch, 0.esp", DateTime.UtcNow)));
-		f.WriteSetup(("wryebash", new JsonObject { ["output_mod"] = "Output A" }));
-		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
-		Check(r.State != RunState.Finished, "the run does not call it finished: " + r.State);
-		Check(r.Verdict.Contains("no new Bashed Patch", StringComparison.Ordinal), "the reason is named: " + r.Verdict);
-		Check(File.Exists(Path.Combine(f.Mods, "Output A", "OutA.esp")), "the old output is still there");
-		Check(ProfileOf(f).IsOn("Output A"), "and switched back on");
-		Equal(1, StepCatalog.DefaultOrder.ToList().IndexOf("synthesis") - StepCatalog.DefaultOrder.ToList().IndexOf("wryebash"), "Wrye Bash sits right before Synthesis");
-		// his checklist 436: the patchers with no unattended route are guided the same way, and made only for what Mod Organizer's list holds, switched off
-		foreach (var key in new[] { "easynpc", "upf", "smash", "reqtificator" }) {
-			Check(StepRegistry.For(key) is GuidedToolStep, key + " is a step");
-			Check(StepCatalog.DefaultOrder.ToList().IndexOf(key) < StepCatalog.DefaultOrder.ToList().IndexOf("dyndolod"), key + " comes before the LOD tools");
-		}
-		var iniFile = Path.Combine(f.Instance, "ModOrganizer.ini");
-		var smash = Path.Combine(f.Root, "tools", "MatorSmash.exe");
-		Directory.CreateDirectory(Path.GetDirectoryName(smash)!);
-		File.WriteAllText(smash, "");
-		File.WriteAllText(iniFile, ToolFinder.WithExecutable(ToolFinder.WithExecutable(File.ReadAllText(iniFile), "Smash", smash, ""), "Run Reqtificator", Path.Combine(f.Root, "tools", "javaw.exe"), "-jar x.jar"));
-		var made = SetupMaker.Make(f.Exe, f.Instance, "Test", "made", f.Data);
-		var smashStep = made.Steps.Single(s => s.Key == "smash");
-		Check(!smashStep.On && Setup.Str(smashStep.Settings, "image") == "MatorSmash.exe", "Smash: its program, switched off");
-		var req = made.Steps.Single(s => s.Key == "reqtificator");
-		Check(!req.On && Setup.Str(req.Settings, "executable") == "Run Reqtificator" && Setup.Str(req.Settings, "image") == "javaw.exe", "ReqTificator by its title: " + req.Settings.ToJsonString());
-		Check(!made.Steps.Any(s => s.Key is "easynpc" or "upf"), "and none for what the list does not hold");
-	}
-
-	// his checklist 436: LOOT's list goes onto an order file; what LOOT did not see stays below the plugin it was below, and never above one of its masters
-	static void T_LootsListIsLaidOntoAnOrderFile()
-	{
-		IReadOnlyList<string> None(string a_) => [];
-		Equal("# made by it|C.esp|*B.esp|*A.esp|*Out.esp|*Patch.esp",
-			string.Join("|", Profile.InLootOrder(["# made by it", "*A.esp", "*Out.esp", "*B.esp", "C.esp", "*Patch.esp"], ["c.esp", "B.esp", "A.esp", "Patch.esp"], None)),
-			"sorted, the ticks kept, the plugin it did not see below the one it was below");
-		Equal("*Top.esp|*A.esp", string.Join("|", Profile.InLootOrder(["*Top.esp", "*A.esp"], ["A.esp"], None)), "one above everything stays on top");
-		Equal("*A.esp", string.Join("|", Profile.InLootOrder(["*A.esp"], ["A.esp", "NotInTheFile.esp"], None)), "a plugin the file does not list is not added");
-		IReadOnlyList<string> OutNeedsM(string a_p) => a_p == "out.esp" ? ["M.esp"] : [];
-		Equal("*K.esp|*M.esp|*Out.esp", string.Join("|", Profile.InLootOrder(["*M.esp", "*K.esp", "*Out.esp"], ["K.esp", "M.esp"], OutNeedsM)),
-			"it never lands above its master");
-		IReadOnlyList<string> Chain(string a_p) => a_p switch { "x.esp" => ["M.esp"], "y.esp" => ["X.esp"], _ => [] };
-		Equal("*K.esp|*M.esp|*X.esp|*Y.esp", string.Join("|", Profile.InLootOrder(["*M.esp", "*K.esp", "*X.esp", "*Y.esp"], ["K.esp", "M.esp"], Chain)),
-			"nor does one that needs it in turn");
-		IReadOnlyList<string> XNeedsM(string a_p) => a_p == "x.esp" ? ["M.esp"] : [];
-		Equal("*K.esp|*M.esp|*X.esp|*Y.esp", string.Join("|", Profile.InLootOrder(["*M.esp", "*K.esp", "*X.esp", "*Y.esp"], ["K.esp", "M.esp"], XNeedsM)),
-			"what sat right below it goes with it: two plugins LOOT did not see never swap places");
-		IReadOnlyList<string> XNeedsY(string a_p) => a_p == "x.esp" ? ["Y.esp"] : [];
-		Equal("*K.esp|*Y.esp|*X.esp|*A.esp", string.Join("|", Profile.InLootOrder(["*K.esp", "*X.esp", "*A.esp", "*Y.esp"], ["K.esp"], XNeedsY)),
-			"but never its own master, when that sat below it");
-	}
-
-	// the sort stays through the run's put-back, a failed run keeps it like a finished step, and only Undo takes it back
-	static void T_LootsSortStaysUntilUndo()
-	{
-		using var f = new FakeMo2();
-		var loadorder = f.Text("loadorder.txt");
-		var plugins = f.Text("plugins.txt");
-		StepRegistry.Replace(new FakeStep(LootStep.StepKey, (ctx, s) => {
-			var sorted = Path.Combine(ctx.Journal.Folder, LootStep.SortedFile);
-			File.WriteAllText(sorted, "# made by it\r\nSkyrim.esm\r\nMasterMod.esm\r\nOld.esp\r\nBaseMod.esp\r\n");
-			LootStep.Lay(ctx, sorted, Path.Combine(ctx.Journal.Folder, LootStep.ReportFile));
-		}));
-		var seen = "";
-		StepRegistry.Replace(new FakeStep("synthesis", (ctx, s) => {
-			seen = string.Join("|", File.ReadAllLines(Path.Combine(ctx.Mo2.ProfileDir("Test"), "loadorder.txt")).Take(4));
-			WriteOutput(ctx, "synthesis", "Output A", "OutA.esp");
-		}));
-		f.WriteSetup((LootStep.StepKey, []), ("synthesis", new JsonObject { ["output_mod"] = "Output A" }));
-		Equal(RunState.Finished, Runner.Run(new RunRequest(f.SetupFile, f.Data)).State, "the run finished");
-		Equal("Skyrim.esm|MasterMod.esm|Old.esp|OutA.esp", seen, "the next tool builds on LOOT's order");
-		const string Sorted = "Skyrim.esm|MasterMod.esm|Old.esp|OutA.esp|OutB.esp|NeedsB.esp|BaseMod.esp";
-		Equal(Sorted, string.Join("|", File.ReadAllLines(Path.Combine(f.ProfileDir, "loadorder.txt"))), "it stays after the put-back");
-		Equal("# comment|*MasterMod.esm|*Old.esp|*OutA.esp|*OutB.esp|*NeedsB.esp|*BaseMod.esp", string.Join("|", File.ReadAllLines(Path.Combine(f.ProfileDir, "plugins.txt"))), "in both files, every tick kept");
-		var j = Journal.All(Runner.RunsDir(f.Data)).First();
-		Check(j.Sorted && j.OrderChanged, "the run's record says the order changed");
-		Equal(RunState.Restored, Runner.Undo(Journal.Load(j.Folder)).State, "undone");
-		Equal(loadorder, f.Text("loadorder.txt"), "Undo brings the load order back");
-		Equal(plugins, f.Text("plugins.txt"), "and the plugin list");
-
-		StepRegistry.Replace(new FakeStep("synthesis", (ctx, s) => throw new StepFailedException("it broke")));
-		Check(Runner.Run(new RunRequest(f.SetupFile, f.Data)).State == RunState.Failed, "a tool fails after the sort");
-		Equal(Sorted, string.Join("|", File.ReadAllLines(Path.Combine(f.ProfileDir, "loadorder.txt"))), "the finished sort is kept, so running on from there builds on it");
-
-		f.WriteSetup((LootStep.StepKey, []));
-		StepRegistry.Replace(new FakeStep(LootStep.StepKey, (ctx, s) => {
-			var sorted = Path.Combine(ctx.Journal.Folder, LootStep.SortedFile);
-			File.WriteAllText(sorted, "Skyrim.esm\r\n");
-			LootStep.Lay(ctx, sorted, Path.Combine(ctx.Journal.Folder, LootStep.ReportFile));
-		}));
-		var blind = Runner.Run(new RunRequest(f.SetupFile, f.Data));
-		Check(blind.State == RunState.Failed && blind.Verdict.Contains("did not see", StringComparison.Ordinal), "a list that lacks ticked plugins is refused: " + blind.Verdict);
-		Equal(Sorted, string.Join("|", File.ReadAllLines(Path.Combine(f.ProfileDir, "loadorder.txt"))), "and changes nothing");
-	}
-
-	// the step's own tries with lootcli stood in for: the first list counts, a missing one gets one more try on the masterlist it has, and a run that only
-	// sorted is undone like any other - unless its sort changed nothing, which leaves nothing to undo and the run before it free to be undone
-	static void T_LootsTriesAndASortAlone()
-	{
-		using var f = new FakeMo2();
-		var loadorder = f.Text("loadorder.txt");
-		var plugins = f.Text("plugins.txt");
-		const string List = "Skyrim.esm\r\nMasterMod.esm\r\nOld.esp\r\nOutA.esp\r\nOutB.esp\r\nNeedsB.esp\r\nBaseMod.esp\r\n";
-		const string Sorted = "Skyrim.esm|MasterMod.esm|Old.esp|OutA.esp|OutB.esp|NeedsB.esp|BaseMod.esp";
-		string Order() => string.Join("|", File.ReadAllLines(Path.Combine(f.ProfileDir, "loadorder.txt")));
-		var skips = new List<bool>();
-		var writes = new Queue<string>();
-		StepRegistry.Replace(new FakeStep(LootStep.StepKey, (ctx, s) => LootStep.Run(ctx, (sorted, report, skipUpdate) => {
-			Check(!File.Exists(sorted), "no list of an earlier try is left for this one");
-			skips.Add(skipUpdate);
-			File.WriteAllText(sorted, writes.Dequeue());
-		})));
-		f.WriteSetup((LootStep.StepKey, []));
-		Journal Ran(RunState a_state, string a_what)
-		{
-			skips.Clear();
-			var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
-			Equal(a_state, r.State, a_what + ": " + r.Verdict);
-			return Journal.Load(r.Folder!);
-		}
-
-		writes.Enqueue(List);
-		var first = Ran(RunState.Finished, "a list on the first try");
-		Equal("False", string.Join("|", skips), "one start, its masterlist updated");
-		Equal(Sorted, Order(), "its order laid on");
-		Check(first.Built.Count == 0 && RunUndo.LeftSomething(first), "a run that only sorted has something to undo");
-		Equal<string?>(null, RunUndo.WhyNot(first, Journal.All(Runner.RunsDir(f.Data)).ToList()), "and can be");
-		Equal(RunState.Restored, Runner.Undo(first).State, "undone");
-		Equal(loadorder, f.Text("loadorder.txt"), "Undo brings the load order back");
-		Equal(plugins, f.Text("plugins.txt"), "and the plugin list");
-
-		writes.Enqueue("# nothing sorted\r\n");
-		writes.Enqueue(List);
-		var second = Ran(RunState.Finished, "a list only on the second try");
-		Equal("False|True", string.Join("|", skips), "the second start skips the masterlist update");
-		Equal(Sorted, Order(), "its order laid on");
-
-		writes.Enqueue("");
-		writes.Enqueue("");
-		var none = Ran(RunState.Failed, "no list on either try");
-		Check(none.Verdict.Contains("wrote no sorted list", StringComparison.Ordinal), none.Verdict);
-		Equal("False|True", string.Join("|", skips), "two starts and no third");
-		Equal(Sorted, Order(), "the order is left as it was");
-
-		writes.Enqueue(List);
-		var same = Ran(RunState.Finished, "a sort of an order that is sorted already");
-		Check(same.Sorted && !same.OrderChanged && !RunUndo.LeftSomething(same), "it changed nothing, so it left nothing to undo");
-		var all = Journal.All(Runner.RunsDir(f.Data)).ToList();
-		Check(RunUndo.WhyNot(same, all)?.Contains("nothing to undo", StringComparison.Ordinal) == true, "and says so");
-		Equal<string?>(null, RunUndo.WhyNot(second, all), "the run before it, whose sort did change the order, can still be undone");
-		Equal(RunState.Restored, Runner.Undo(second).State, "undone");
-		Equal(loadorder, f.Text("loadorder.txt"), "and the load order is the first one again");
-	}
-
-	// the put-back's own write of LOOT's order failing is the put-back's failure, never a note: one file may hold the new order and the other the old
-	static void T_ALootOrderThatCannotBeLaidBackFailsThePutBack()
-	{
-		using var f = new FakeMo2();
-		f.WriteSetup((LootStep.StepKey, []));
-		var ctx = StepContext(f, LootStep.StepKey);
-		using var log = ctx.Log;
-		File.WriteAllText(Path.Combine(ctx.Journal.Folder, LootStep.SortedFile), "Skyrim.esm\r\nMasterMod.esm\r\nOld.esp\r\nOutA.esp\r\nOutB.esp\r\nNeedsB.esp\r\nBaseMod.esp\r\n");
-		var loadorder = Path.Combine(f.ProfileDir, "loadorder.txt");
-		var before = File.ReadAllText(loadorder);
-		using (new FileStream(loadorder, FileMode.Open, FileAccess.Read, FileShare.Read)) {
-			var threw = false;
-			try {
-				LootStep.KeepIn(ctx);
-			} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
-				threw = true;
-			}
-			Check(threw, "a load order that cannot be written stops the put-back");
-		}
-		Equal(before, File.ReadAllText(loadorder), "(the load order held the old order, the plugin list the new one)");
-		Check(File.ReadAllLines(Path.Combine(f.ProfileDir, "plugins.txt")).Last() == "*BaseMod.esp", "(the plugin list was written)");
-		LootStep.KeepIn(ctx);
-		Equal("Skyrim.esm|MasterMod.esm|Old.esp|OutA.esp|OutB.esp|NeedsB.esp|BaseMod.esp", string.Join("|", File.ReadAllLines(loadorder)), "pressed again once the file is free, both hold LOOT's order");
-		Check(ctx.Journal.OrderChanged, "and the run's record says the order changed");
-		File.Delete(Path.Combine(ctx.Journal.Folder, LootStep.SortedFile));
-		LootStep.KeepIn(ctx);
-		Check(!ctx.Journal.OrderChanged, "a list that is gone changes nothing, and the record says that too");
-	}
-
-	// what lootcli is told, what its report is read for, and where the step comes from
-	static void T_LootIsToldWhatMo2TellsIt()
-	{
-		using var f = new FakeMo2();
-		var mo2 = Mo2Instance.Load(f.Exe, f.Instance);
-		var args = LootStep.Arguments(mo2, "Test", @"C:\a b\sorted.txt", @"C:\a b\report.json", false);
-		foreach (var part in new[] { "--game skyrimse ", $"--gamePath \"{mo2.GameDir}\"", $"--pluginListPath \"{Path.Combine(f.ProfileDir, "loadorder.txt")}\"", "--out \"C:\\a b\\report.json\"", "--pluginListOutputPath \"C:\\a b\\sorted.txt\"", "--language en" }) {
-			Check(args.Contains(part, StringComparison.Ordinal), part + " in: " + args);
-		}
-		Check(!args.Contains("--skipUpdateMasterlist", StringComparison.Ordinal), "the masterlist is updated on the first try");
-		Check(LootStep.Arguments(mo2, "Test", "s", "r", true).EndsWith(" --skipUpdateMasterlist", StringComparison.Ordinal), "and not on the second");
-
-		var report = Path.Combine(f.Root, "report.json");
-		File.WriteAllText(report, """
-			{ "messages": [ { "type": "error", "text": "general trouble" }, { "type": "info", "text": "a tip" } ],
-			  "plugins": [
-				{ "name": "A.esp", "missingMasters": [ "Gone.esm" ], "incompatibilities": [ { "name": "B.esp", "displayName": "B" } ], "messages": [ { "type": "error", "text": "bad" }, { "type": "warn", "text": "maybe" } ] },
-				{ "name": "C.esp", "isMaster": true } ] }
-			""");
-		Equal("LOOT: general trouble|LOOT: A.esp is missing Gone.esm|LOOT: A.esp does not go with B.esp|LOOT: A.esp: bad", string.Join("|", LootStep.ReportNotes(report)), "what is wrong, not its advice");
-		var many = new JsonArray();
-		for (var i = 0; i < 20; ++i) {
-			many.Add(new JsonObject { ["name"] = $"P{i}.esp", ["missingMasters"] = new JsonArray("Gone.esm") });
-		}
-		File.WriteAllText(report, new JsonObject { ["plugins"] = many }.ToJsonString());
-		var capped = LootStep.ReportNotes(report);
-		Equal(LootStep.NotesShown + 1, capped.Count, "a long report is capped");
-		Check(capped[^1].Contains("and 12 more", StringComparison.Ordinal), capped[^1]);
-		File.WriteAllText(report, "not json");
-		Equal(0, LootStep.ReportNotes(report).Count, "a report that does not read says nothing");
-		Equal(0, LootStep.ReportNotes(report + " gone").Count, "nor does one that is not there");
-
-		var sorted = Path.Combine(f.Root, "sorted.txt");
-		File.WriteAllText(sorted, "# made by it\r\nA.esp\r\n\r\n  B.esp  \nC.esp");
-		Equal("A.esp|B.esp|C.esp", string.Join("|", LootStep.ReadSorted(sorted)), "its list read, whatever its line ends");
-		Equal(0, LootStep.ReadSorted(sorted + " gone").Count, "no list, no lines");
-		Equal("OutA.esp", LootStep.NotSeen(ProfileOf(f), ["Skyrim.esm", "MasterMod.esm", "BaseMod.esp", "Old.esp", "OutB.esp", "NeedsB.esp"]).Single(), "a ticked plugin it did not list is named");
-		var pluginsTxt = Path.Combine(f.ProfileDir, "plugins.txt");
-		var pluginsWas = File.ReadAllText(pluginsTxt);
-		FakeMo2.Plugin(Path.Combine(f.Overwrite, "Loose.esp"), false);
-		File.AppendAllText(pluginsTxt, "*Loose.esp\r\n*NoFile.esp\r\n");
-		Equal("Loose.esp", LootStep.NotSeen(ProfileOf(f), ["Skyrim.esm", "MasterMod.esm", "BaseMod.esp", "Old.esp", "OutA.esp", "OutB.esp", "NeedsB.esp"]).Single(),
-			"so is one that lives only in overwrite; a line with no file behind it is not asked of LOOT");
-		File.Delete(Path.Combine(f.Overwrite, "Loose.esp"));
-		File.WriteAllText(pluginsTxt, pluginsWas);
-
-		var setup = f.WriteSetup((LootStep.StepKey, []));
-		var c = new CheckContext { Setup = setup, Mo2 = mo2, Profile = ProfileOf(f) };
-		Check(new LootStep().Check(c, new StepSettings([])).Single().Blocking, "Mod Organizer without its LOOT stops the pre-check");
-		Check(!SetupMaker.Make(f.Exe, f.Instance, "Test", "without", f.Data).Steps.Any(s => s.Key == LootStep.StepKey), "and a new setup has no such step");
-		Directory.CreateDirectory(Path.GetDirectoryName(LootStep.Program(mo2))!);
-		File.WriteAllText(LootStep.Program(mo2), "");
-		Check(!new LootStep().Check(c, new StepSettings([])).Any(), "with it, nothing stops");
-		Check(!SetupMaker.Make(f.Exe, f.Instance, "Test", "with", f.Data).Steps.Single(s => s.Key == LootStep.StepKey).On, "a new setup has it switched off: it changes the player's load order");
-
-		var order = StepCatalog.DefaultOrder.ToList();
-		Check(order.IndexOf("cleansave") < order.IndexOf(LootStep.StepKey) && order.IndexOf(LootStep.StepKey) < order.IndexOf("synthesis"), "after the clean save, before the first tool");
-		Check(StepCatalog.OrderWarnings(["dyndolod", LootStep.StepKey]).Count == 1, "a tool before the sort is warned about");
-		Check(StepCatalog.OrderWarnings(["addon:My Patcher", LootStep.StepKey, "addon:Later"]).Single().StartsWith("LOOT sort runs after My Patcher", StringComparison.Ordinal),
-			"so is an add-on before it, and none after it");
-		Check(RunPreview.Build(setup, mo2, setup.EnabledSteps).Lines(_ => null).Any(l => l.Contains("LOOT sorts your plugins", StringComparison.Ordinal)), "the preview says so");
-	}
-
-	// a guided tool that wrote elsewhere leaves its output mod out of the run: not rebuilt, not set aside by Undo
-	static void T_AnOutputNothingWroteStaysThePlayers()
-	{
-		using var f = new FakeMo2();
-		StepRegistry.Replace(new FakeStep("easynpc", (ctx, s) => ctx.OutputUntouched = true));
-		f.WriteSetup(("easynpc", new JsonObject { ["output_mod"] = "Output A" }));
-		Equal(RunState.Finished, Runner.Run(new RunRequest(f.SetupFile, f.Data)).State, "the run finished");
-		var j = Journal.All(Runner.RunsDir(f.Data)).First();
-		Check(!j.Built.Contains("Output A"), "not called built");
-		Check(ProfileOf(f).IsOn("Output A"), "as it was before the run");
-		Check(!RunUndo.LeftSomething(j), "and nothing for Undo to take");
-		Check(File.Exists(Path.Combine(f.Mods, "Output A", "OutA.esp")), "its files where they were");
+		f.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Output A" }), ("xlodgen", new JsonObject { ["output_mod"] = "Output B" }));
+		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data, null, "xlodgen"));
+		Equal(RunState.Finished, r.State, "the run from the second step finished: " + r.Verdict);
+		Check(File.ReadAllText(Path.Combine(r.Folder!, "log.txt")).Contains("left on, made by the steps before this run's first one", StringComparison.Ordinal), "and its log says what was left on");
 	}
 
 	// a file put back is as it was, its time too: in overwrite a new time would read as the step's own file
@@ -4516,7 +4273,7 @@ public static class Program
 	// a program anyone can be running counts as the tool only when it is Mod Organizer's; a script's own program is the command interpreter
 	static void T_ASharedProgramCountsOnlyWhenItIsMo2s()
 	{
-		Check(Mo2Control.IsShared("javaw.exe") && Mo2Control.IsShared("CMD.EXE") && !Mo2Control.IsShared("Reqtificator.exe"), "which programs are anyone's");
+		Check(Mo2Control.IsShared("javaw.exe") && Mo2Control.IsShared("CMD.EXE") && !Mo2Control.IsShared("TexGenx64.exe"), "which programs are anyone's");
 		using var ping = Process.Start(new ProcessStartInfo("ping", "-n 30 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true })!;
 		try {
 			Equal(0, Mo2Control.FreshPid("PING.EXE", [], _ => false), "somebody else's is not the tool");
@@ -4526,14 +4283,10 @@ public static class Program
 			ping.WaitForExit();
 		}
 		using var f = new FakeMo2();
-		var bat = Path.Combine(f.Root, "tools", "Reqtificator.bat");
-		Directory.CreateDirectory(Path.GetDirectoryName(bat)!);
-		File.WriteAllText(bat, "");
 		var ini = Path.Combine(f.Instance, "ModOrganizer.ini");
-		File.WriteAllText(ini, ToolFinder.WithExecutable(File.ReadAllText(ini), "Reqtificator", bat, ""));
-		Equal("cmd.exe", Setup.Str(SetupMaker.Make(f.Exe, f.Instance, "Test", "made", f.Data).Steps.Single(s => s.Key == "reqtificator").Settings, "image"), "a script is followed through its interpreter");
 		// a Java tool's version is Java's, not the tool's: not known, and never read as up to date
 		var java = Path.Combine(f.Root, "tools", "javaw.exe");
+		Directory.CreateDirectory(Path.GetDirectoryName(java)!);
 		File.WriteAllText(java, "");
 		File.WriteAllText(ini, ToolFinder.WithExecutable(File.ReadAllText(ini), "Java Tool", java, ""));
 		Equal("", ToolUpdates.Yours(Mo2Instance.Load(f.Exe, f.Instance), new StepSettings(new JsonObject { ["executable"] = "Java Tool" })).Version, "no version from Java");
@@ -6333,7 +6086,7 @@ public static class Program
 		var s = f.WriteSetup(("snowfixer", []), ("autoblend", []));
 		var p = s.Problems();
 		Check(p.Count(x => x.Contains("Landscape Fixer replaced it", StringComparison.Ordinal)) == 2, "both old steps named: " + string.Join(" | ", p));
-		Check(!p.Any(x => x.StartsWith("unknown step", StringComparison.Ordinal)), "not called unknown");
+		Check(s.NotKnown.Count == 0, "not left out as a step this version does not have: they are told about plainly");
 		Check(!StepCatalog.Known("snowfixer") && !StepCatalog.Known("autoblend") && StepCatalog.Known("landscapefixer"), "only Landscape Fixer is a step");
 		Equal("Testing MO2.json", LandscapeFixerStep.InstanceFile(@"C:\Modding\Testing MO2\ModOrganizer.ini"), "its settings file is named after the instance's folder");
 	}
@@ -7711,12 +7464,12 @@ public static class Program
 	}
 
 	// his checklist 456: only what each tool's own document says - DynDOLOD.esp and Occlusion.esp last, Occlusion.esp after DynDOLOD.esp,
-	// PG_1.esp last but for those, the Bashed Patch before them, DynDOLOD.esm the last master; Synthesis, PGPatcher.esp and Landscape
-	// Fixer have no documented place; always a warning
+	// PG_1.esp last but for those, DynDOLOD.esm the last master; Synthesis, PGPatcher.esp and Landscape Fixer have no documented place;
+	// always a warning
 	static void T_OutputPluginsAreCheckedAgainstTheirDocuments()
 	{
 		List<Issue> C(params string[] a_order) => PluginPlaces.Check(a_order);
-		Equal(0, C("Skyrim.esm", "DynDOLOD.esm", "Some.esp", "Bashed Patch, 0.esp", "Synthesis.esp", "PG_1.esp", "DynDOLOD.esp", "Occlusion.esp").Count, "LOOT's own order is clean");
+		Equal(0, C("Skyrim.esm", "DynDOLOD.esm", "Some.esp", "Merged Patch.esp", "Synthesis.esp", "PG_1.esp", "DynDOLOD.esp", "Occlusion.esp").Count, "an order by the documents is clean");
 		Equal(0, C("Some.esp", "Other.esp").Count, "none of them ticked: nothing to say");
 		Equal(0, C("PGPatcher.esp", "LandscapeFixer.esp", "Synthesis.esp", "Some.esp").Count, "no documented place: never warned");
 		Check(C("DynDOLOD.esp", "Occlusion.esp").Count == 0 && C("Occlusion.esp", "DynDOLOD.esp").Single().Text.Contains("right after", StringComparison.Ordinal), "Occlusion.esp after DynDOLOD.esp");
@@ -7724,8 +7477,7 @@ public static class Program
 		Check(late.Single().Text.Contains("Late Mod.esp", StringComparison.Ordinal) && !late[0].Blocking, "a plugin after DynDOLOD.esp is named, and only warned about");
 		Check(C("PG_1.esp", "Late Mod.esp").Single().Text.Contains("PGPatcher", StringComparison.Ordinal), "a plugin after PG_1.esp");
 		Equal(0, C("PG_1.esp", "PG_2.esp", "DynDOLOD.esp", "Occlusion.esp").Count, "PG plugins and the DynDOLOD outputs after them are fine");
-		Check(C("PG_1.esp", "PG_2.esp", "Bashed Patch, 1.esp").Single().Text.StartsWith("Bashed Patch, 1.esp", StringComparison.Ordinal), "the Bashed Patch, any number of it, after those that must load last: named once");
-		Equal(0, C("Bashed Patch, 0.esp", "Some.esp").Count, "a plugin after the Bashed Patch may say it must load last: not warned");
+		Check(C("PG_1.esp", "PG_2.esp", "Merged Patch.esp").Single().Text.StartsWith("Merged Patch.esp", StringComparison.Ordinal), "a plugin after every PG plugin that must load last: named once");
 		Check(C("DynDOLOD.esm", "Late.esm").Single().Text.Contains("Late.esm", StringComparison.Ordinal), "a master after DynDOLOD.esm");
 		Check(C("DynDOLOD.esm", "Late.esl").Single().Text.Contains("Late.esl", StringComparison.Ordinal), "a light master after it too");
 		Equal(0, C("Early.esm", "DynDOLOD.esm", "Some.esp").Count, "plugins after DynDOLOD.esm are fine");
@@ -9261,16 +9013,15 @@ public static class Program
 	static void T_AnOutputRewrittenInPlaceIsKeptFirst()
 	{
 		using var f = new FakeMo2();
-		var patch = Path.Combine(f.Mods, "Output A", "Bashed Patch, 0.esp");
+		var patch = Path.Combine(f.Mods, "Output A", "Synthesis.esp");
 		File.WriteAllText(patch, "the old patch");
-		StepRegistry.Replace(new FakeStep("wryebash", (ctx, s) => {
-			var t0 = DateTime.UtcNow.AddSeconds(-1);
-			StepKit.KeepInPlace(ctx, s.OutputMod!, "Bashed Patch, 0.esp");
+		StepRegistry.Replace(new FakeStep("synthesis", (ctx, s) => {
+			StepKit.KeepInPlace(ctx, s.OutputMod!, "Synthesis.esp");
 			File.WriteAllText(patch, "the new patch");
-			WryeBashStep.Collect(ctx, "wryebash", s.OutputMod!, "Bashed Patch, 0.esp", t0);
+			StepKit.Settled(ctx, s.OutputMod!, [patch]);
 			ctx.SetAfter(s.OutputMod!);
 		}));
-		var setup = f.WriteSetup(("wryebash", new JsonObject { ["output_mod"] = "Output A" }));
+		var setup = f.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Output A" }));
 		setup.Root["zipBackups"] = false;
 		setup.Save();
 		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
@@ -9281,8 +9032,8 @@ public static class Program
 		Equal("the old patch", File.ReadAllText(patch), "an undo puts the old patch back");
 		Check(File.Exists(Path.Combine(f.Mods, "Output A", "OutA.esp")), "and the rest of the mod stays where it is");
 
-		StepRegistry.Replace(new FakeStep("wryebash", (ctx, s) => {
-			StepKit.KeepInPlace(ctx, s.OutputMod!, "Bashed Patch, 0.esp");
+		StepRegistry.Replace(new FakeStep("synthesis", (ctx, s) => {
+			StepKit.KeepInPlace(ctx, s.OutputMod!, "Synthesis.esp");
 			File.WriteAllText(patch, "half writ");
 			throw new StepFailedException("the tool was closed half way");
 		}));

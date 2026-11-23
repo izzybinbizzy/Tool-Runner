@@ -13,9 +13,9 @@ public static class OldOutput
 {
 	public const string Key = "useOld";
 
-	// nothing of their own to keep: the save steps and the sort make no output mod, and the shader caches have their own
-	// setting for when they are built again (the setup's "shaderRebuild")
-	static readonly HashSet<string> s_never = ["shaders", "cleansave", "playsave", "loot"];
+	// nothing of their own to keep: the save steps make no output mod, and the shader caches have their own setting for when they
+	// are built again (the setup's "shaderRebuild")
+	static readonly HashSet<string> s_never = ["shaders", "cleansave", "playsave"];
 
 	// a step that builds into an output mod of its own (every one of these has its own words in the table below)
 	public static bool MakesOutput(string a_step) => !s_never.Contains(a_step);
@@ -35,18 +35,8 @@ public static class OldOutput
 	public sealed record Meaning(string Holds, string WhenOld);
 
 	static readonly Dictionary<string, Meaning> s_meaning = new(StringComparer.Ordinal) {
-		["easynpc"] = new("the NPC merge: the looks you picked then, with their face files",
-			"An NPC that a mod added or changed since then is not in the merge. Where another plugin now wins that NPC, its face files and its plugin record no longer agree, which shows as a dark or mismatched face."),
-		["upf"] = new("zEdit's patch (zPatch.esp), built from your plugins as they were then",
-			"Mods added or changed since then were never seen by its patchers and stay unpatched, and what the old patch carries can win over a mod updated since with the values that mod had before."),
-		["smash"] = new("the Smashed Patch, which settles the conflicts between your plugins as they were then",
-			"Conflicts that came with mods added since are not settled, and the old patch can win over a mod updated since with the values that mod had before."),
-		["wryebash"] = new("the Bashed Patch: the merged leveled lists and tweaks of your plugins as they were then",
-			"Items, enemies and tweaks of mods added since are missing from the merged lists, and the lists still hold every mod's entries as they were then."),
 		["synthesis"] = new("the Synthesis patch, built from your plugins as they were then",
 			"A mod added, updated or moved in the load order since then is not in the patch: its records stay unpatched, or the old patch still wins over them with what they held before. A patcher added to Synthesis since then has not run."),
-		["reqtificator"] = new("Requiem's own patch (Requiem for the Indifferent.esp), built from your plugins as they were then",
-			"Items, creatures and leveled lists of mods added or changed since then are not brought under Requiem's rules: they keep the values their mod ships, or the ones the old patch last saw."),
 		["landscapefixer"] = new("one plugin with the snow and blend fixes for the objects and land your mods had then",
 			"Objects and places a mod added or changed since then have no fix, and a fix made for an object as it was can win over what a mod changed on it since."),
 		["pgpatcher"] = new("the meshes (and its plugins) patched for parallax, complex material and PBR, made for the textures and meshes you had then",
@@ -246,7 +236,7 @@ public static class OldOutput
 				return _off;
 			}
 			var off = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-			foreach (var (m, why) in Runner.OutputsToTurnOff(_setup, _states)) {
+			foreach (var (m, why) in Runner.OutputsToTurnOff(_setup, _states, _todo)) {
 				off[m] = why;
 			}
 			foreach (var (m, why) in Profile.DependentsOf(_mo2, _states, [.. off.Keys])) {

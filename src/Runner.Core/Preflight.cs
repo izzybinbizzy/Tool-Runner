@@ -136,10 +136,6 @@ public static class Duplicates
 		["pgpatcher"] = ["PGPatcher.esp", "PG_1.esp"],
 		["synthesis"] = ["Synthesis.esp"],
 		["landscapefixer"] = ["LandscapeFixer.esp"],
-		["wryebash"] = ["Bashed Patch, 0.esp"],
-		["upf"] = ["zPatch.esp"],
-		["smash"] = ["Smashed Patch.esp"],
-		["reqtificator"] = ["Requiem for the Indifferent.esp"],
 	};
 
 	// what in a mod folder shows it holds a step's output: one of its own files, or (grass cache, terrain LOD) a file of its kind
