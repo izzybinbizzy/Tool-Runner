@@ -178,26 +178,26 @@ public partial class MainWindow
 	public List<CommandBox.Item> CommandList()
 	{
 		var items = new List<CommandBox.Item> {
-			new("Start", () => _vm.StartCommand.Execute(null)),
-			new("Check", () => _vm.CheckCommand.Execute(null)),
-			new("Dry run", () => _vm.DryRunCommand.Execute(null)),
+			new(WindowWords.Word("Start"), () => _vm.StartCommand.Execute(null)),
+			new(WindowWords.Word("Check"), () => _vm.CheckCommand.Execute(null)),
+			new(WindowWords.Word("Dry run"), () => _vm.DryRunCommand.Execute(null)),
 		};
 		if (_vm.IsRunning) {
-			items.Add(new("Stop now", () => _vm.StopNowCommand.Execute(null)));
-			items.Add(new("Stop after this step", () => _vm.StopAfterCommand.Execute(null)));
+			items.Add(new(WindowWords.Word("Stop now"), () => _vm.StopNowCommand.Execute(null)));
+			items.Add(new(WindowWords.Word("Stop after this step"), () => _vm.StopAfterCommand.Execute(null)));
 		}
 		items.AddRange([
-			new("History", () => ShowPanel("history")),
-			new("MO2 Changelog", () => ShowPanel("changes")),
-			new("Settings", () => ShowPanel("settings")),
-			new("Themes", () => ShowPanel("themes")),
-			new("Tools - set up each tool", () => Tools_Click(this, new RoutedEventArgs())),
-			new("Queue of setups", () => Queue_Click(this, new RoutedEventArgs())),
-			new("New setup", () => NewSetup_Click(this, new RoutedEventArgs())),
-			new("Copy this setup", () => DuplicateSetup_Click(this, new RoutedEventArgs())),
-			new("Rename this setup", () => RenameSetup_Click(this, new RoutedEventArgs())),
-			new(_logWindow == null ? "Log in its own window" : "Log back in the main window", () => LogPop_Click(this, new RoutedEventArgs())),
-			new("Compact view", () => ShowCompact()),
+			new(WindowWords.Word("History"), () => ShowPanel("history")),
+			new(WindowWords.Word("MO2 Changelog"), () => ShowPanel("changes")),
+			new(WindowWords.Word("Settings"), () => ShowPanel("settings")),
+			new(WindowWords.Word("Themes"), () => ShowPanel("themes")),
+			new(WindowWords.Word("Tools - set up each tool"), () => Tools_Click(this, new RoutedEventArgs())),
+			new(WindowWords.Word("Queue of setups"), () => Queue_Click(this, new RoutedEventArgs())),
+			new(WindowWords.Word("New setup"), () => NewSetup_Click(this, new RoutedEventArgs())),
+			new(WindowWords.Word("Copy this setup"), () => DuplicateSetup_Click(this, new RoutedEventArgs())),
+			new(WindowWords.Word("Rename this setup"), () => RenameSetup_Click(this, new RoutedEventArgs())),
+			new(WindowWords.Word(_logWindow == null ? "Log in its own window" : "Log back in the main window"), () => LogPop_Click(this, new RoutedEventArgs())),
+			new(WindowWords.Word("Compact view"), () => ShowCompact()),
 		]);
 		foreach (var s in _vm.Setups.Where(s => !ReferenceEquals(s, _vm.SelectedSetup))) {
 			items.Add(new($"Show setup: {s.Name}", () => {
