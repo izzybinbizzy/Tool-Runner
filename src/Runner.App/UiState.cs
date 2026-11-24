@@ -38,6 +38,26 @@ public static class UiState
 		}
 	}
 
+	// the program's data was removed (Settings > Remove program data): nothing is written from then on
+	static bool s_removed;
+
+	// The program's data removed by a_remove with no write of the window's in between. When it says all of it went, nothing
+	// the window remembers is written again: the window closes next, and its sizes written as it closes would make the data
+	// folder anew with this one file in it. Hands on what a_remove said
+	public static bool RemoveWith(Func<bool> a_remove)
+	{
+		lock (Disk) {
+			if (!a_remove()) {
+				return false;
+			}
+			lock (Gate) {
+				s_removed = true;
+				s_unsaved = false;
+			}
+			return true;
+		}
+	}
+
 	// the offline tests keep it in a file of their own (and start from nothing kept, before and after)
 	public static string? FileForTests
 	{
@@ -48,6 +68,7 @@ public static class UiState
 				s_state = null;
 				s_unsaved = false;
 				s_closed = false;
+				s_removed = false;
 			}
 		}
 	}
@@ -106,7 +127,7 @@ public static class UiState
 				return;
 			}
 			state[a_key] = a_value;
-			if (App.Headless) {
+			if (App.Headless || s_removed) {
 				return;
 			}
 			s_unsaved = true;

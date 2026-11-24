@@ -140,19 +140,42 @@ public static class DataFolder
 		}
 	}
 
+	// two files hold the same bytes
+	static bool SameBytes(string a_a, string a_b)
+	{
+		using var a = new FileStream(a_a, FileMode.Open, FileAccess.Read, FileShare.Read);
+		using var b = new FileStream(a_b, FileMode.Open, FileAccess.Read, FileShare.Read);
+		var x = new byte[1 << 16];
+		var y = new byte[1 << 16];
+		while (true) {
+			var n = a.ReadAtLeast(x, x.Length, false);
+			var m = b.ReadAtLeast(y, y.Length, false);
+			if (n != m || !x.AsSpan(0, n).SequenceEqual(y.AsSpan(0, m))) {
+				return false;
+			}
+			if (n == 0) {
+				return true;
+			}
+		}
+	}
+
 	// The data folder moved to a_to (Windows' own app-data folder, so a new version unzipped anywhere finds the run history,
-	// the setups and the learned settings). Copied whole first and read back by every file's size, then the paths inside its
+	// the setups and the learned settings). Copied whole first and every file read back byte for byte, then the paths inside its
 	// files repointed - all of them, or the copy is taken away again and the data stays where it was. Only then does the move
 	// count: the old folder gets its mark (MovedMark), the new one is chosen, and the old one is removed. Refused when a_to holds
-	// anything but an earlier copy of this same move that never counted. The caller holds the run lock, and the program starts
-	// again afterwards (it runs with the old folder until then). Returns what is left to do by hand (null: nothing) - the old
-	// folder that could not all be removed is then removed by the next start.
+	// anything but an earlier copy of this same move that never counted, or lies inside the data folder or holds it. The caller
+	// holds the run lock, and the program starts again afterwards (it runs with the old folder until then). Returns what is left
+	// to do by hand (null: nothing) - the old folder that could not all be removed is then removed by the next start.
 	public static string? MoveTo(string a_from, string a_to)
 	{
 		var from = Path.GetFullPath(a_from);
 		var to = Path.GetFullPath(a_to);
 		if (Files.SamePath(from, to)) {
 			throw new InvalidOperationException("the data is in that folder already");
+		}
+		// a folder inside the data, or one that holds it, would be copied into itself and then removed with it
+		if (Files.IsUnder(to, from) || Files.IsUnder(from, to)) {
+			throw new InvalidOperationException($"{to} is inside the data folder, or holds it - pick a folder apart from it");
 		}
 		// a copy of this very move that was cut off before it counted holds nothing of the player's: it is made again
 		if (HasData(to) && !Chosen(to) && File.Exists(Path.Combine(to, Pending)) && Files.SamePath(File.ReadAllText(Path.Combine(to, Pending)).Trim(), from)) {
@@ -184,9 +207,11 @@ public static class DataFolder
 			foreach (var rel in want.Keys) {
 				Files.Copy(Path.Combine(from, rel), Path.Combine(to, rel), false);
 			}
+			// each copy read back against its file, byte for byte, before anything of the old folder goes (its size alone says
+			// nothing of what was written)
 			foreach (var (rel, size) in want) {
 				var copy = new FileInfo(Path.Combine(to, rel));
-				if (!copy.Exists || copy.Length != size) {
+				if (!copy.Exists || copy.Length != size || !SameBytes(Path.Combine(from, rel), copy.FullName)) {
 					throw new IOException($"{rel} did not copy whole");
 				}
 			}
