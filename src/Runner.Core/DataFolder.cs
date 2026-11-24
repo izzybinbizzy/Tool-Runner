@@ -86,6 +86,68 @@ public static class DataFolder
 		return !Open(Runner.MutexName) && Brand.OldNames.Any(n => Open("Local\\" + n + " run"));
 	}
 
+	// a data folder under this name or an older one stands in a_parent (with a_suffix: " Data" beside the program)
+	public static bool StandsIn(string a_parent, string a_suffix) =>
+		Brand.AllNames.Any(n => Directory.Exists(Path.Combine(a_parent, n + a_suffix)));
+
+	// the folder holds something (a data folder that was only made, and never used, does not count)
+	public static bool HasData(string a_dir)
+	{
+		try {
+			return Directory.Exists(a_dir) && Directory.EnumerateFileSystemEntries(a_dir).Any();
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			return false;
+		}
+	}
+
+	// The data folder moved to a_to (Windows' own app-data folder, so a new version unzipped anywhere finds the run history,
+	// the setups and the learned settings). Copied whole first and read back by every file's size; only then are the paths
+	// inside its files repointed and the old folder removed. A copy that fails is taken away again and the old folder stays
+	// as it was. Refused when a_to holds anything. The caller holds the run lock, and the program starts again afterwards
+	// (what it runs with is the old folder until then).
+	public static void MoveTo(string a_from, string a_to)
+	{
+		var from = Path.GetFullPath(a_from);
+		var to = Path.GetFullPath(a_to);
+		if (Files.SamePath(from, to)) {
+			throw new InvalidOperationException("the data is in that folder already");
+		}
+		if (HasData(to)) {
+			throw new InvalidOperationException($"{to} holds files already - move them away, then try again");
+		}
+		var want = Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories)
+			.ToDictionary(f => Path.GetRelativePath(from, f), f => new FileInfo(f).Length, StringComparer.OrdinalIgnoreCase);
+		try {
+			foreach (var d in Directory.EnumerateDirectories(from, "*", SearchOption.AllDirectories)) {
+				Directory.CreateDirectory(Path.Combine(to, Path.GetRelativePath(from, d)));
+			}
+			Directory.CreateDirectory(to);
+			foreach (var rel in want.Keys) {
+				Files.Copy(Path.Combine(from, rel), Path.Combine(to, rel), false);
+			}
+			foreach (var (rel, size) in want) {
+				var copy = new FileInfo(Path.Combine(to, rel));
+				if (!copy.Exists || copy.Length != size) {
+					throw new IOException($"{rel} did not copy whole");
+				}
+			}
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			try {
+				Files.DeleteDir(to);
+			} catch (Exception e2) when (e2 is IOException or UnauthorizedAccessException) {
+				throw new IOException($"the data could not be copied ({e.Message}), and the part already copied could not be removed again ({to}) - delete that folder yourself; your data is still where it was", e);
+			}
+			throw new IOException($"the data could not be copied ({e.Message}) - it is still where it was", e);
+		}
+		Repoint(to, from);
+		// the copy is whole and in use from the next start: a part of the old folder that will not go only takes room
+		try {
+			Files.DeleteDir(from);
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			throw new IOException($"the data is now in {to}, but the old folder could not be removed ({e.Message}) - delete {from} yourself, or the next start uses it again", e);
+		}
+	}
+
 	static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
 	// every JSON file under the folder: a string value that is the old folder, or a path inside it, is written under the new one

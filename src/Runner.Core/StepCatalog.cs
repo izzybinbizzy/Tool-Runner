@@ -26,7 +26,7 @@ public static class StepCatalog
 		new("dyndolod", "DynDOLOD", "Object, tree and grass LOD."),
 		new("anvillod", "AnvilLOD", "Object, tree and grass LOD in place of DynDOLOD.", NeedsMo2: false),
 		new("pandora", "Pandora Behaviour Engine+", "Behaviour files for animation mods."),
-		new("playsave", "Save to play", "The clean save loaded with every new output on, you taken back to your place, DynDOLOD on again, saved.", InGame: true),
+		new("playsave", "Final save", "The clean save loaded with every new output on, you taken back to your place, DynDOLOD on again, saved.", InGame: true),
 	];
 
 	public static readonly IReadOnlyList<string> DefaultOrder = All.Select(s => s.Key).ToList();
@@ -65,7 +65,7 @@ public static class StepCatalog
 		("treelodgen", "texgen", "TexGen renders billboards from TreeLODGen's stand-ins"),
 		("texgen", "dyndolod", "TexGen's output is DynDOLOD's input"),
 		("texgen", "anvillod", "TexGen's output is AnvilLOD's input"),
-		("dyndolod", "playsave", "the save to play loads every new output"),
+		("dyndolod", "playsave", "the final save loads every new output"),
 	];
 
 	// the order rules a setup breaks (an empty list = the order is safe)

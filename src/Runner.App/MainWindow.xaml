@@ -69,23 +69,14 @@
           <Button Content="_Check" Style="{StaticResource Nav}" Command="{Binding CheckCommand}" ToolTip="Checks every tool and setting before a run, and looks for updates (F5)"
                   AutomationProperties.AcceleratorKey="F5"/>
           <Button Content="T_ools" Style="{StaticResource Nav}" Click="Tools_Click" ToolTip="Set up each tool of this setup in its own window - its settings are kept for every run"/>
-          <Button Content="_History" Style="{StaticResource Nav}" Click="History_Click" ToolTip="Every past run, and the MO2 Changelog (Ctrl+H)" AutomationProperties.AcceleratorKey="Ctrl+H"/>
           <Button Content="_Queue" Style="{StaticResource Nav}" Click="Queue_Click" ToolTip="Run several setups one after another"/>
-          <Button Content="_Themes" Style="{StaticResource Nav}" Click="Themes_Click" ToolTip="The window's look (Ctrl+T)" AutomationProperties.AcceleratorKey="Ctrl+T"/>
-          <Button Content="_Settings" Style="{StaticResource Nav}" Click="Settings_Click" ToolTip="This setup's settings (Ctrl+,)" AutomationProperties.AcceleratorKey="Ctrl+Comma"/>
+          <Button Content="_Settings" Style="{StaticResource Nav}" Click="Settings_Click" ToolTip="Settings, run history and themes (Ctrl+,)" AutomationProperties.AcceleratorKey="Ctrl+Comma"/>
         </StackPanel>
       </Grid>
     </Border>
 
-    <!-- banners: the PC about to sleep or shut down; an interrupted run; a new version (the message line is at the bottom) -->
+    <!-- banners: an interrupted run; a new version (the message line is at the bottom) -->
     <StackPanel Grid.Row="1">
-      <Border Background="{DynamicResource BannerBad}" BorderBrush="{DynamicResource Warn}" BorderThickness="0,0,0,1" Padding="20,10"
-              Visibility="{Binding PowerText, Converter={StaticResource NotEmpty}}">
-        <DockPanel>
-          <Button DockPanel.Dock="Right" Content="Keep the PC _on (cancel)" Style="{StaticResource Primary}" Command="{Binding CancelPowerCommand}"/>
-          <TextBlock Text="{Binding PowerText}" TextWrapping="Wrap" VerticalAlignment="Center"/>
-        </DockPanel>
-      </Border>
       <Border Background="{DynamicResource BannerBad}" BorderBrush="{DynamicResource Bad}" BorderThickness="0,0,0,1" Padding="20,10"
               Visibility="{Binding Interrupted, Converter={StaticResource NotEmpty}}">
         <DockPanel>
@@ -188,6 +179,8 @@
                   <TextBlock x:Name="old" Text="not run: its old output is used" Style="{StaticResource MutedText}" TextWrapping="Wrap"
                              Foreground="{DynamicResource Warn}"
                              Visibility="{Binding UsesOld, Converter={StaticResource Vis}}"/>
+                  <TextBlock Text="{Binding Needs}" Style="{StaticResource MutedText}" TextWrapping="Wrap" Foreground="{DynamicResource Warn}"
+                             Visibility="{Binding Needs, Converter={StaticResource NotEmpty}}"/>
                   <TextBlock x:Name="note" Text="{Binding Note}" Style="{StaticResource MutedText}" TextWrapping="Wrap"
                              Foreground="{Binding State, Converter={StaticResource StateBrush}}"
                              Visibility="{Binding Note, Converter={StaticResource NotEmpty}}"/>
@@ -321,10 +314,10 @@
               <Button Content="{Binding RetryText}" Style="{StaticResource Ghost}" Command="{Binding RetryCommand}" Margin="0,0,8,8"
                       Visibility="{Binding RetryFrom, Converter={StaticResource NotEmpty}}"
                       ToolTip="Starts the last run again at the step that did not finish; the steps before it are not run again"/>
-              <!-- a new game: no save to keep clean, so the clean save and the save to play are left out (kept in the setup) -->
+              <!-- a new game: no save to keep clean, so the clean save and the final save are left out (kept in the setup) -->
               <CheckBox Content="New game" IsChecked="{Binding NewGame}" IsEnabled="{Binding CanStart}" VerticalAlignment="Center" Margin="8,0,0,8"
                         Foreground="{DynamicResource Text}" AutomationProperties.Name="New game"
-                        ToolTip="Tick this when you will start a new character after the run: there is no save to keep clean, so the clean save and the save to play are left out. Untick it once you play on an existing save."/>
+                        ToolTip="Tick this when you will start a new character after the run: there is no save to keep clean, so the clean save and the final save are left out. Untick it once you play on an existing save."/>
             </WrapPanel>
           </StackPanel>
         </Border>
@@ -393,9 +386,8 @@
                       ToolTip="Every line of the run, for finding a fault. Unticked: the run step by step in plain words."/>
             <TextBlock Text="LOG" Style="{StaticResource H2}" Margin="0" VerticalAlignment="Center"/>
           </DockPanel>
-          <TextBox x:Name="LogBox" IsReadOnly="True" IsUndoEnabled="False" FontFamily="{DynamicResource MonoFont}" FontSize="{DynamicResource SizeLog}"
+          <local:LogView x:Name="LogBox" FontFamily="{DynamicResource MonoFont}" FontSize="{DynamicResource SizeLog}"
                    Background="{DynamicResource Panel}" Foreground="{DynamicResource Text}" BorderBrush="{DynamicResource Line}"
-                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap"
                    AutomationProperties.Name="Run log"/>
       </local:CardsOverLog>
     </Grid>

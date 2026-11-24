@@ -30,7 +30,7 @@ public sealed class PlaySaveStep : IStep
 	public IEnumerable<Issue> Check(CheckContext a_c, StepSettings a_s)
 	{
 		if (!DevBench.InProfile(a_c.Profile)) {
-			yield return new Issue(Key, false, "DevBench is not in this profile - the save to play will ask you to load and save by hand");
+			yield return new Issue(Key, false, "DevBench is not in this profile - the final save will ask you to load and save by hand");
 		}
 	}
 
@@ -681,7 +681,7 @@ public sealed class ShaderStep : IStep
 			: $"the game closed while it compiled the {a_c.ShaderMod} shaders (start {a_start}, {a_files} shader(s) written so far) - no crash report was written (a crash logger such as Crash Logger SSE names the cause of the next one)";
 		what += InGame.LastBox(a_ctx);
 		a_ctx.Log.Warn(what);
-		a_ctx.Log.Simple("Note: " + what);
+		a_ctx.Log.Simple("Note: " + what, Level.Warn);
 		a_ctx.Note("shaders: " + what);
 		var max = a_s.Int("max_restarts", 3);
 		if (a_start > max) {

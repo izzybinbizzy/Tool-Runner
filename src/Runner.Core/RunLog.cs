@@ -207,11 +207,12 @@ public sealed class RunLog : IDisposable
 		Line?.Invoke(a_text, a_level);
 	}
 
-	// a line of the simple log (the detailed log has its own wording of the same moment)
-	public void Simple(string a_text)
+	// a line of the simple log (the detailed log has its own wording of the same moment), marked as the detailed log marks a
+	// warning or a failure, so the window colors both the same way
+	public void Simple(string a_text, Level a_level = Level.Info)
 	{
 		lock (_gate) {
-			Write(true, $"{DateTime.Now.ToString("HH:mm", InvariantCulture)}  {a_text}");
+			Write(true, $"{DateTime.Now.ToString("HH:mm", InvariantCulture)}  {(a_level == Level.Warn ? "! " : a_level == Level.Error ? "!!! " : "")}{a_text}");
 		}
 	}
 

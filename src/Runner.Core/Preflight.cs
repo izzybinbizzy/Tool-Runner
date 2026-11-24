@@ -73,7 +73,7 @@ public static class Preflight
 		}
 		var c = new CheckContext { Setup = a_setup, Mo2 = a_mo2, Profile = profile, States = profile.States() };
 		// The steps that are not run because their old output is used: one that cannot be used stops the start. Only for a
-		// run that uses them - one of only the shader caches or the save to play switches no output off and none back on
+		// run that uses them - one of only the shader caches or the final save switches no output off and none back on
 		// (as the run itself and its preview have it), and was refused over a step it never touches
 		var selected = a_setup.EnabledSteps.Where(s => a_steps.Contains(s.Key)).ToList();
 		if (selected.Any(s => s.Key is not "shaders" and not "playsave")) {

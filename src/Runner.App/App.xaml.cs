@@ -277,11 +277,11 @@ public partial class App : Application
 		var demo = new RunPreview();
 		demo.Steps.AddRange([new("synthesis", "Synthesis", "Synthesis - " + name, false), new("xlodgen", "xLODGen", "xLODGen Output - " + name, false),
 			new("texgen", "TexGen", "TexGen Output - " + name, false), new("dyndolod", "DynDOLOD", "DynDOLOD Output - " + name, false),
-			new("playsave", "Save to play", null, false)]);
+			new("playsave", "Final save", null, false)]);
 		demo.OffForTheRun.AddRange([("Synthesis - " + name, "made by Synthesis"), ("xLODGen Output - " + name, "made by xLODGen"),
 			("TexGen Output - " + name, "made by TexGen"), ("DynDOLOD Output - " + name, "made by DynDOLOD"),
 			("Some Patch", "SomePatch.esp needs Synthesis.esp from Synthesis - " + name)]);
-		demo.StartsTheGame.Add("Save to play");
+		demo.StartsTheGame.Add("Final save");
 		var box = ShowBox(w, demo);
 		Picture(box, a_dir, "6 preview before a run");
 		box.Close();
@@ -339,10 +339,10 @@ public partial class App : Application
 		// the preview before a run (his checklist 270), for a made-up run
 		var demo = new RunPreview();
 		demo.Steps.AddRange([new("synthesis", "Synthesis", "Synthesis Output", false), new("xlodgen", "xLODGen", "xLODGen Output", false),
-			new("dyndolod", "DynDOLOD", "DynDOLOD Output", false), new("playsave", "Save to play", null, false)]);
+			new("dyndolod", "DynDOLOD", "DynDOLOD Output", false), new("playsave", "Final save", null, false)]);
 		demo.OffForTheRun.AddRange([("Synthesis Output", "made by Synthesis"), ("xLODGen Output", "made by xLODGen"), ("DynDOLOD Output", "made by DynDOLOD"),
 			("Some Patch", "SomePatch.esp needs Synthesis.esp from Synthesis Output")]);
-		demo.StartsTheGame.Add("Save to play");
+		demo.StartsTheGame.Add("Final save");
 		var box = Ask.Make(w, "What this run will do", string.Join("\n", demo.Lines(k => k == "dyndolod" ? TimeSpan.FromMinutes(24) : k == "synthesis" ? TimeSpan.FromMinutes(2) : null)),
 			"Start the run", "Not now", _ => { });
 		box.ShowActivated = false;

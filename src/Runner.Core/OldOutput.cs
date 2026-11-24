@@ -282,7 +282,7 @@ public static class OldOutput
 
 		// The first of a_masters that is off while a tool of this run works after the place of a_kept, in words: that tool
 		// would find the old output's plugin with a master missing. Null: each one is there by then - or no tool runs after
-		// that place (the save to play starts the game once everything is back on)
+		// that place (the final save starts the game once everything is back on)
 		public string? OffAt(string a_kept, IReadOnlyList<string> a_masters)
 		{
 			var at = _places.Where(p => p.Step.Key == a_kept).Select(p => (int?)p.At).FirstOrDefault() ?? _todo.Count;

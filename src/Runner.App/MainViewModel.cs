@@ -20,6 +20,8 @@ public sealed partial class StepRow : Observable
 	public bool LeftOut { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(Status)); } }
 	// ticked and not run: the output its tool made before is used (the setup's "useOld", for a step that makes one)
 	public bool UsesOld { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(Status)); } }
+	// what the step is missing to run on its own ("" = nothing): DevBench for the steps in the game
+	public string Needs { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(Status)); } } = "";
 	// its last run in one line: when, how it ended, and whether its output is still current ("" = it never ran)
 	public string LastRun { get; set => Set(ref field, value); } = "";
 	public string LastKind { get; set => Set(ref field, value); } = "";
@@ -270,7 +272,6 @@ public sealed partial class MainViewModel : Observable
 	public Cmd RestoreCommand => field ??= new(() => _ = RunRestore());
 	public Cmd CheckCommand => field ??= new(() => _ = RunCheck());
 	public Cmd RetryCommand => field ??= new(() => _ = RunRetry());
-	public Cmd CancelPowerCommand => field ??= new(CancelPower);
 
 	// "A new version is out" (his checklist 471): the banner's text ("" = nothing to tell), its download page and "Not now"
 	public string NewVersion { get; set => Set(ref field, value); } = "";
@@ -299,8 +300,6 @@ public sealed partial class MainViewModel : Observable
 			NewVersion = $"{Brand.Name} {newer} is out (you have {a_current}). Its download page has what changed.";
 		}
 	}
-	// the PC about to sleep or shut down after a run ("" = nothing pending): the banner with its Cancel button
-	public string PowerText { get; set => Set(ref field, value); } = "";
 	Task RunRestore() => Restore();
 	Task RunCheck() => Check();
 
@@ -418,6 +417,32 @@ public sealed partial class MainViewModel : Observable
 		_everRan = History.Count > 0;
 		ShowGuide();
 		_ = LoadLastRuns();
+		_ = LookForDevBench();
+	}
+
+	// The clean save and the final save are carried out by DevBench in the game; without it ticked in the profile each one is done
+	// by hand, guided step by step. Their rows say so (the profile's mods are read off the window's thread)
+	public static readonly IReadOnlyList<string> DevBenchSteps = ["cleansave", "playsave"];
+	public const string NoDevBench = "DevBench is not enabled in this profile: you will be guided through this step by hand.";
+
+	async Task LookForDevBench()
+	{
+		if (Setup is not { } setup) {
+			return;
+		}
+		bool on;
+		try {
+			on = await Task.Run(() => DevBench.InProfile(new Profile(Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance), setup.Profile, () => false)));
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) {
+			return;
+		}
+		// another setup shown meanwhile: its own look answers for it
+		if (!ReferenceEquals(Setup, setup)) {
+			return;
+		}
+		foreach (var row in Steps.Where(r => DevBenchSteps.Contains(r.Key))) {
+			row.Needs = on ? "" : NoDevBench;
+		}
 	}
 
 	// each step's last run, worked out off the window's thread (old run logs and the profile's mod list are read); a newer load
@@ -482,7 +507,7 @@ public sealed partial class MainViewModel : Observable
 	}
 
 	// a new game (the dashboard's tick beside START, kept in the setup): no save of the player's to keep clean, so the clean
-	// save and the save to play are left out of every run while it is on
+	// save and the final save are left out of every run while it is on
 	public bool NewGame { get => Setup?.NewGame ?? false; set => _ = SetNewGame(value); }
 
 	async Task SetNewGame(bool a_on)
@@ -671,11 +696,11 @@ public sealed partial class MainViewModel : Observable
 		try {
 			do {
 				_pollAgain = false;
-				var (seen, runs, queue, power) = await Task.Run(() => {
+				var (seen, runs, queue) = await Task.Run(() => {
 					var runs = Engine.Runs();
-					return (Seen(), runs, QueueLook(runs), PowerAfter.Look(AppPaths.Data));
+					return (Seen(), runs, QueueLook(runs));
 				});
-				Poll(seen.Mo2, seen.Game, runs, queue, power);
+				Poll(seen.Mo2, seen.Game, runs, queue);
 			} while (_pollAgain);
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidOperationException) {
 			// a file or process that changed mid-read: the next look reads it again
@@ -688,12 +713,12 @@ public sealed partial class MainViewModel : Observable
 	{
 		var runs = Engine.Runs();
 		var (mo2, game) = Seen();
-		Poll(mo2, game, runs, QueueLook(runs), PowerAfter.Look(AppPaths.Data));
+		Poll(mo2, game, runs, QueueLook(runs));
 	}
 
 	// something is going that the window shows second by second (a run and its clock, a start being checked, a queue between two
-	// setups, the countdown before the PC sleeps); while nothing is, the window looks seldom
-	public bool Busy => IsRunning || Starting || _queueGoing || PowerText != "";
+	// setups); while nothing is, the window looks seldom
+	public bool Busy => IsRunning || Starting || _queueGoing;
 	bool _queueGoing;
 
 	// the queue going (its line for the window), else the last queue's summary while nothing has started since it ended
@@ -719,17 +744,10 @@ public sealed partial class MainViewModel : Observable
 		return new QueueSeen(null, "");
 	}
 
-	void Poll(bool a_mo2, bool a_game, List<Journal> a_runs, QueueSeen a_queue, PowerAfter.Pending? a_power)
+	void Poll(bool a_mo2, bool a_game, List<Journal> a_runs, QueueSeen a_queue)
 	{
 		Mo2Open = a_mo2;
 		GameRunning = a_game;
-		var power = a_power;
-		var newPower = power == null ? "" :
-			$"The PC will {(power.Action == nameof(PowerAfter.Kind.Sleep) ? "go to sleep" : "shut down")} in {Math.Max(0, (int)(power.At - DateTime.Now).TotalSeconds)} s, as this setup asks after a run.";
-		if (newPower != "" && PowerText == "") {
-			Alert?.Invoke("The PC is about to " + (power!.Action == nameof(PowerAfter.Kind.Sleep) ? "sleep" : "shut down"), newPower);
-		}
-		PowerText = newPower;
 		var runs = a_runs;
 		FollowStart(runs);
 		var active = Engine.Active(runs);
@@ -868,20 +886,6 @@ public sealed partial class MainViewModel : Observable
 
 	// a reminder is due once every a_everyMin minutes (0 or less = never)
 	public static bool ReminderDue(double a_everyMin, DateTime a_last, DateTime a_now) => a_everyMin > 0 && a_now - a_last >= TimeSpan.FromMinutes(a_everyMin);
-
-	void CancelPower()
-	{
-		try {
-			if (PowerAfter.Look(AppPaths.Data) == null) {
-				Say("Too late to cancel - Windows was already asked.", "warn");
-				return;
-			}
-			PowerAfter.Cancel(AppPaths.Data);
-			Say("Cancelled - the PC stays on.", "good");
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
-			Say("Could not cancel: " + e.Message, "bad");
-		}
-	}
 
 	// the watched run's newest record (the cache re-reads it only when its file changed)
 	static Journal Fresh(List<Journal> a_runs, Journal a_j) =>

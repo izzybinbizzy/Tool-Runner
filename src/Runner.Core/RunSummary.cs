@@ -102,12 +102,12 @@ public sealed class RunSummary
 }
 
 // What is going right now, for a script or another program (the command line's "status"): read off the run records, the queue
-// and the pending sleep or shut-down - nothing is asked of a running run, and nothing is written.
+// - nothing is asked of a running run, and nothing is written.
 public static class RunStatus
 {
 	// State: "running" (a step works), "waiting" (the run waits for the player), "finishing" (the profile is back, the last chores
 	// go), "interrupted" (a run was cut off and its profile is not back) or "idle"
-	public sealed record Snapshot(string State, Journal? Run, StepRecord? Step, string Waiting, Journal? Interrupted, Journal? Last, QueueRun.State? Queue, PowerAfter.Pending? Power)
+	public sealed record Snapshot(string State, Journal? Run, StepRecord? Step, string Waiting, Journal? Interrupted, Journal? Last, QueueRun.State? Queue)
 	{
 		// closing the window while this holds stops nothing and leaves nothing half done
 		public bool SafeToClose => Run == null && Queue == null;
@@ -123,7 +123,7 @@ public static class RunStatus
 		var asked = new[] { run?.Doing ?? "", step?.Activity ?? "" }.FirstOrDefault(t => t.StartsWith(Runner.WaitingPrefix, StringComparison.Ordinal));
 		var waiting = asked == null ? "" : asked[Runner.WaitingPrefix.Length..];
 		var state = run == null ? (interrupted != null ? "interrupted" : "idle") : waiting != "" ? "waiting" : run.FinishingUp || run.InGameAfter ? "finishing" : "running";
-		return new Snapshot(state, run, step, waiting, interrupted, last, QueueRun.Read(a_dataDir), PowerAfter.Look(a_dataDir));
+		return new Snapshot(state, run, step, waiting, interrupted, last, QueueRun.Read(a_dataDir));
 	}
 
 	// in a few plain lines, for a person at a command window
@@ -151,9 +151,6 @@ public static class RunStatus
 		}
 		if (a_s.Queue is { Running: { } now } q) {
 			l.Add($"  queue: setup {q.Current + 1} of {q.Setups.Count} ({Path.GetFileNameWithoutExtension(now)})");
-		}
-		if (a_s.Power is { } power) {
-			l.Add($"  the PC will {(power.Action == nameof(PowerAfter.Kind.Sleep) ? "go to sleep" : "shut down")} at {power.At.ToString("HH:mm:ss", InvariantCulture)} (cancel: stop)");
 		}
 		if (a_s.Run == null && a_s.Last is { } last) {
 			l.Add($"  last run: {last.SetupName}, {last.Started.ToString("MMM d HH:mm", InvariantCulture)} - {(last.Verdict == "" ? last.State.ToString().ToLowerInvariant() : last.Verdict)}");

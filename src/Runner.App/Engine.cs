@@ -14,9 +14,21 @@ public static class AppPaths
 	public static string Setups => Path.Combine(Data, "Setups");
 	public static string Runs => Runner.RunsDir(Data);
 
+	// Windows' own app-data folder for the program's data: where the player can keep it (Settings > Program), so a new version
+	// unzipped into any other folder finds the run history, the setups and the learned settings
+	public static string AppDataFolder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Brand.Name);
+
+	public static bool InAppData => Files.SamePath(Data, AppDataFolder);
+
 	static string Resolve()
 	{
 		try {
+			// no data folder beside the program, and the player keeps it in the app-data folder: that one
+			if (!DataFolder.StandsIn(AppContext.BaseDirectory, " Data") && DataFolder.HasData(AppDataFolder)) {
+				var kept = DataFolder.Adopt(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "");
+				Directory.CreateDirectory(kept);
+				return kept;
+			}
 			if (Files.IsUnder(AppContext.BaseDirectory, Path.GetTempPath())) {
 				throw new UnauthorizedAccessException("a temporary folder");
 			}
@@ -91,7 +103,7 @@ public static class Engine
 	// every run record, newest first (read again only where a record changed)
 	public static List<Journal> Runs() => Cache.Read();
 
-	// the run that is going: also one that has finished and is at its last chores (its game for the save to play, the setup's
+	// the run that is going: also one that has finished and is at its last chores (its game for the final save, the setup's
 	// after-run commands, packing the old outputs) - Stop and the close guard reach it until its engine has ended
 	public static Journal? Active(List<Journal>? a_runs = null) => (a_runs ?? Runs()).FirstOrDefault(j => j.Live && j.OwnerAlive);
 

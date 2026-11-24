@@ -5,7 +5,7 @@ namespace ToolRunner.App;
 // watch (a network drive, a folder it may not read) there is no watcher and the timer alone looks: nothing depends on an event.
 public sealed class RunsWatch : IDisposable
 {
-	public static readonly string[] Followed = ["journal.json", "queue.json", "last queue.txt", "power.json", "last refusal.txt"];
+	public static readonly string[] Followed = ["journal.json", "queue.json", "last queue.txt", "last refusal.txt"];
 
 	readonly FileSystemWatcher? _watcher;
 

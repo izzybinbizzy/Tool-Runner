@@ -316,7 +316,7 @@ public static class Runner
 			// a finding about the run itself has no step to name (the log of a real run began its lines with a bare ": ")
 			var whose = w.Step == "" ? "" : StepCatalog.Name(w.Step) + ": ";
 			log.Warn(whose + w.Text);
-			log.Simple("Note: " + whose + w.Text);
+			log.Simple("Note: " + whose + w.Text, Level.Warn);
 		}
 		// Stop ends this run's own game and tools at once - only a process it started, still the same process (started after
 		// this run began - a PID can be reused), and never Mod Organizer itself (the put-back closes that the normal way)
@@ -436,7 +436,7 @@ public static class Runner
 				if (!RunStep(ctx, s)) {
 					return Finish(ctx, snap0, commands.Stopped ? RunState.Stopped : RunState.Failed);
 				}
-				// "stop after this step" holds while anything is still to come - a later tool, or the save to play, which starts the
+				// "stop after this step" holds while anything is still to come - a later tool, or the final save, which starts the
 				// game: asked during the last tool it once started the game all the same
 				if (journal.StopAfterStep && journal.Steps.FirstOrDefault(r => r.State == StepState.Pending) is { } next) {
 					log.Say("stopped after this step, as asked");
@@ -474,15 +474,15 @@ public static class Runner
 					// failed on record BEFORE Mod Organizer is asked to close: a close that throws (a box only the player can
 					// answer, a download still going) never leaves this run reading "finished"
 					journal.State = RunState.Failed;
-					journal.Verdict = $"every tool finished; the save to play was not made: {journal.Step("playsave")?.Note}";
+					journal.Verdict = $"every tool finished; the final save was not made: {journal.Step("playsave")?.Note}";
 					journal.TrySave();
 					try {
 						control.Close();
 					} catch (Exception e) when (e is not OperationCanceledException) {
-						log.Warn("Mod Organizer could not be closed after the save to play failed: " + Plain(e));
+						log.Warn("Mod Organizer could not be closed after the final save failed: " + Plain(e));
 					}
 					SaySummary(ctx);
-					log.Simple("Done, except the save to play: " + journal.Verdict);
+					log.Simple("Done, except the final save: " + journal.Verdict, Level.Error);
 					SaySaves(ctx);
 					journal.Ended = DateTime.Now;
 					journal.TrySave();
@@ -526,7 +526,7 @@ public static class Runner
 			Chore("the look at the output plugins' places", () => {
 				foreach (var i in PluginPlaces.Check(profile.ActivePlugins())) {
 					log.Warn(i.Text);
-					log.Simple("Note: " + i.Text);
+					log.Simple("Note: " + i.Text, Level.Warn);
 				}
 			});
 			// a mod that keeps its own list of the game's files must make it again after what this run built (GameMods.cs)
@@ -535,7 +535,7 @@ public static class Runner
 					    listCurrent && setup.AfterRun.Count > 0) is { } note) {
 					journal.Notes.Add(note);
 					log.Warn(note);
-					log.Simple("Note: " + note);
+					log.Simple("Note: " + note, Level.Warn);
 				}
 			});
 			journal.Verdict = $"finished: {todo.Count} step(s) in {total.Elapsed.TotalMinutes.ToString("0", InvariantCulture)} min";
@@ -589,7 +589,7 @@ public static class Runner
 			log.Simple("The run " + journal.Verdict + (left.Count == 0 ? ". Nothing in Mod Organizer was changed." : ". Your mods are as they were."));
 			return new RunOutcome(state, journal.Verdict, journal.Folder);
 		} catch (Exception e) when (finished) {
-			// after the put-back of a finished run (the save to play's own ending, a record the disk refused): the run stays finished
+			// after the put-back of a finished run (the final save's own ending, a record the disk refused): the run stays finished
 			log.Warn("after the run had finished: " + Plain(e));
 			journal.Notes.Add("after the run had finished: " + Plain(e));
 			if (journal.State == RunState.Finished && journal.Verdict == "") {
@@ -859,7 +859,7 @@ public static class Runner
 			}
 			// ... and against the profile the run's end leaves: a master in a mod that a command of the setup switched off
 			// after the check (or that a tool of the run replaces) is not there for the game, whether or not a tool still
-			// runs - the old output would stay on with its master off, also for the save to play's game start
+			// runs - the old output would stay on with its master off, also for the final save's game start
 			if (OldOutput.MasterGoneAfterRun(a_ctx.Setup, a_ctx.Mo2, a_before, a_todo, mod) is { } gone) {
 				throw new StepFailedException($"{name}: its old output cannot be used: {gone} - the game would not start with it");
 			}
@@ -1061,7 +1061,7 @@ public static class Runner
 				a_ctx.Log.Warn($"what it means: {why.What} What to do: {why.Todo}{(why.Help != null ? " Help: " + why.Help : "")}");
 			}
 			foreach (var line in ToolErrors.Simple(StepCatalog.Name(a_s.Key), r.State, r.Note, why)) {
-				a_ctx.Log.Simple(line);
+				a_ctx.Log.Simple(line, r.State == StepState.Stopped ? Level.Warn : Level.Error);
 			}
 			try {
 				StepKit.CloseTool(a_ctx, new StepSettings(a_s.Settings).Str("image"));
@@ -1205,7 +1205,7 @@ public static class Runner
 					a_ctx.Journal.Notes.Add(lost);
 					a_ctx.Journal.TrySave();
 					a_ctx.Log.Error(lost);
-					a_ctx.Log.Simple("Note: " + lost);
+					a_ctx.Log.Simple("Note: " + lost, Level.Warn);
 					continue;
 				}
 				p.Returning = true;
@@ -1272,7 +1272,7 @@ public static class Runner
 			j.Verdict = $"the profile could NOT be put back ({Plain(e)}) - press \"Put my profile back\" once Mod Organizer can close";
 			Keep();
 			a_ctx.Log.Error(j.Verdict);
-			a_ctx.Log.Simple("Stopped: " + j.Verdict);
+			a_ctx.Log.Simple("Stopped: " + j.Verdict, Level.Warn);
 			return new RunOutcome(j.State, j.Verdict, j.Folder);
 		}
 		if (notBack.Count > 0 || filesNotBack.Count > 0 || a_ctx.LinesLeft.Count > 0) {
@@ -1285,7 +1285,7 @@ public static class Runner
 				(notBack.Count > 0 || filesNotBack.Count > 0 ? " (kept off / in the backup)" : "") + " - press \"Put my profile back\" once the files are free";
 			Keep();
 			a_ctx.Log.Error(j.Verdict);
-			a_ctx.Log.Simple("Stopped: " + j.Verdict);
+			a_ctx.Log.Simple("Stopped: " + j.Verdict, Level.Warn);
 			return new RunOutcome(j.State, j.Verdict, j.Folder);
 		}
 		var failed = j.Steps.FirstOrDefault(r => r.State is StepState.Failed or StepState.Stopped);
@@ -1303,7 +1303,7 @@ public static class Runner
 			j.Ended = DateTime.Now;
 			SaySummary(a_ctx);
 			a_ctx.Log.Say(j.Verdict);
-			a_ctx.Log.Simple((a_state == RunState.Stopped ? "Stopped: " : "Failed: ") + j.Verdict);
+			a_ctx.Log.Simple((a_state == RunState.Stopped ? "Stopped: " : "Failed: ") + j.Verdict, a_state == RunState.Stopped ? Level.Warn : Level.Error);
 			// a failed or stopped run's backups are pruned too (they piled up until the next finished run - the fourth review, L7);
 			// a folder an unfinished run still names is never touched
 			Keep();
@@ -1349,7 +1349,7 @@ public static class Runner
 		if (a_snap != null && a_snap.Count > 0) {
 			a_ctx.Log.Say("the profile as it was before the run, with this run's finished outputs on:");
 			// The mods the run had switched off come back on, and what it built with them: the game now finds other files than
-			// at its last start in this run. A list of them made before this is old again (the save to play, which starts the
+			// at its last start in this run. A list of them made before this is old again (the final save, which starts the
 			// game after this, makes it anew).
 			if (a_ctx.Journal.SwitchedOff || a_ctx.Journal.Built.Count > 0) {
 				++a_ctx.Journal.FilesChanged;
@@ -1426,7 +1426,7 @@ public static class Runner
 			.Distinct(byName).ToList();
 		// ... and only one whose plugins find every master in the profile this put-back leaves. What the player switched in
 		// Mod Organizer during the run is kept (above): a master's mod they unticked meanwhile stays off, and the old output
-		// that needs it is then left off too and named - left on, the game would not start, not for the save to play either.
+		// that needs it is then left off too and named - left on, the game would not start, not for the final save either.
 		// The profile as it stands once the mods kept off above are off (read again: a master in one of them is not there),
 		// with the plugins ticked as they are now. A master counts when its plugin is ticked now, or when it is one of those
 		// this put-back ticks below (what it switches on, and an old output whose line the run itself had put into the list).
@@ -1868,13 +1868,13 @@ public static class Runner
 		}
 		foreach (var r in reports) {
 			a_ctx.Log.Warn("the game's crash report went with them - it is now at " + r);
-			a_ctx.Log.Simple("Note: the game's crash report is in the run's backup: " + r);
+			a_ctx.Log.Simple("The game's crash report is in the run's backup: " + r, Level.Error);
 		}
 		if (stayed.Count > 0) {
 			var text = $"{stayed.Count} file(s) the failed step left in Mod Organizer's overwrite could not be moved out ({why}) - they are still there and win over the output that was put back: " +
 				string.Join(", ", stayed.Take(6)) + (stayed.Count > 6 ? " ..." : "");
 			a_ctx.Log.Warn(text);
-			a_ctx.Log.Simple("Note: " + text);
+			a_ctx.Log.Simple("Note: " + text, Level.Warn);
 			a_ctx.Journal.Notes.Add(text);
 			a_ctx.Journal.TrySave();
 		}

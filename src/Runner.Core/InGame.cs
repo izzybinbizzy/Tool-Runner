@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 namespace ToolRunner;
 
-// The game driven for the clean save, the save to play and the shader caches. With DevBench the runner does it all; without
+// The game driven for the clean save, the final save and the shader caches. With DevBench the runner does it all; without
 // it the player is asked for each in-game action and the runner checks the result on disk (the save file, the game gone).
 public static partial class InGame
 {
@@ -387,7 +387,7 @@ public static partial class InGame
 		a_s.Str("save") is { Length: > 0 } named ? $"load the save \"{named}\"" :
 		Character(a_ctx) is { } who ? $"load the newest save of {who}" : "load your newest save";
 
-	// the steps that start the runner's own game (the clean save, the save to play, the shader caches, the game-run grass cache)
+	// the steps that start the runner's own game (the clean save, the final save, the shader caches, the game-run grass cache)
 	static readonly HashSet<string> GameSteps = ["cleansave", "playsave", "shaders", "grass"];
 
 	// when the runner's own game ran on this profile, as UTC time spans (a step still going: up to now) - only those, never a
@@ -410,7 +410,7 @@ public static partial class InGame
 
 	// The place the player stood at before the clean save is on record in the run that MADE that save. A run that starts from an
 	// earlier run's clean save - "run again from the failed step" is a new run with a record of its own - takes the marker from
-	// that run: without it the save to play was made in the test cell, and the marker stayed in the save for good. The run is
+	// that run: without it the final save was made in the test cell, and the marker stayed in the save for good. The run is
 	// known by its clean-save step ending when the save was written.
 	public static string? MarkerOfCleanSave(RunContext a_ctx)
 	{
@@ -436,7 +436,7 @@ public static partial class InGame
 		return f != null && File.Exists(f) ? File.GetLastWriteTimeUtc(f) : null;
 	}
 
-	// which save the save to play starts from (the fourth review, H1): this run's clean save; else the one the setup names; else
+	// which save the final save starts from (the fourth review, H1): this run's clean save; else the one the setup names; else
 	// an older run's clean save ONLY when it is newer than the player's own newest save (the player has not played since); else
 	// the player's newest - never an old clean save over progress made after it
 	public static (string? Save, string Why) PlaySaveFrom(string? a_thisRun, string? a_named, DateTime? a_oldClean, string? a_player, DateTime? a_playerTime)
@@ -481,7 +481,7 @@ public static partial class InGame
 	public static bool HasDynDolod(Profile a_profile) =>
 		a_profile.States().Where(s => s.Value == '+').Any(s => File.Exists(Path.Combine(a_profile.Mo2.ModDir(s.Key), "SKSE", "Plugins", "DynDOLOD.dll")));
 
-	// the clean save's "dyndolod_off" (the save to play reads the same one - the fourth review, L1 / L2)
+	// the clean save's "dyndolod_off" (the final save reads the same one - the fourth review, L1 / L2)
 	static bool DynOff(RunContext a_ctx) =>
 		a_ctx.Setup.StepSettings("cleansave") is { } cs && cs["dyndolod_off"] != null ? new StepSettings(cs).Bool("dyndolod_off", false) : HasDynDolod(a_ctx.Profile);
 
@@ -1095,7 +1095,7 @@ public static partial class InGame
 			// a compile that started under the load is never cut off - the load clock waits while one runs
 			if (t.Elapsed > limit - TimeSpan.FromMinutes(1) && Compiling(LogFolders(a_ctx.Setup, a_ctx.Mo2), a_ctx.Mo2.OverwriteDir, started)) {
 				a_ctx.Log.Detail("shaders still compiling under the load - waiting for them");
-				// counted as a compile at this start too (the save to play reports a stale cache - the fourth review, L3)
+				// counted as a compile at this start too (the final save reports a stale cache - the fourth review, L3)
 				compiled = true;
 				t.Restart();
 			}
@@ -1417,7 +1417,7 @@ public static partial class InGame
 				}
 			}
 			ReadyToMove(a_ctx);
-			// where the player stands, kept as a persistent marker in the save (the save to play takes them back to it)
+			// where the player stands, kept as a persistent marker in the save (the final save takes them back to it)
 			var marker = DevBench.FormKey(a_ctx.DevBench.PapyrusOn(Player, "ObjectReference", "PlaceAtMe", new { form = "0x0000003B" }, 1, true, false));
 			if (marker != null) {
 				var angle = a_ctx.DevBench.PapyrusOn(Player, "ObjectReference", "GetAngleZ")?.GetValue<double>() ?? 0;
@@ -1426,7 +1426,7 @@ public static partial class InGame
 				a_ctx.Journal.Save();
 				a_ctx.Log.Detail($"your place recorded (marker {marker})");
 			} else {
-				a_ctx.Log.Warn("your place could not be recorded - the save to play will leave you in " + cell);
+				a_ctx.Log.Warn("your place could not be recorded - the final save will leave you in " + cell);
 			}
 			MoveWithFollowers(a_ctx, () => a_ctx.DevBench.Console("coc " + cell), () => WaitPlace(a_ctx));
 			a_ctx.Pause(TimeSpan.FromSeconds(a_s.Int("settle_s", 10)));
@@ -1467,7 +1467,7 @@ public static partial class InGame
 		a_ctx.Log.Detail($"clean save made: \"{SaveClean}\"");
 	}
 
-	// the save to play: the clean save loaded with every new output on, a full minute, the player taken back to the place
+	// the final save: the clean save loaded with every new output on, a full minute, the player taken back to the place
 	// recorded before QASmoke, DynDOLOD on again, saved (his addition 1). A compile at this start means the shader cache was
 	// out of date - said in the run's result (his question 2026-10-27, "rebuilding another tool wont cause shaders to need to
 	// be rebuilt")
@@ -1583,7 +1583,7 @@ public static partial class InGame
 		}
 		var (pick, why) = PlaySaveFrom(a_ctx.CleanSaveName, named, oldClean, player, SaveTime(a_ctx.Profile, player));
 		var from = pick ?? throw new StepFailedException(why);
-		a_ctx.Log.Detail($"the save to play starts from \"{from}\" ({why})");
+		a_ctx.Log.Detail($"the final save starts from \"{from}\" ({why})");
 		var marker = a_ctx.Journal.ReturnMarker;
 		if (marker == null && a_ctx.CleanSaveName == null && from == SaveClean && MarkerOfCleanSave(a_ctx) is { } kept) {
 			marker = kept;
@@ -1601,7 +1601,7 @@ public static partial class InGame
 			var compiled = StartAndLoad(a_ctx, "playsave", a_s, from);
 			if (compiled) {
 				a_ctx.Log.Warn("the game compiled shaders at this start - the shader cache was out of date (a shader mod, its settings or the game changed)");
-				a_ctx.Journal.Notes.Add("the shader cache was out of date at the save to play - the next run rebuilds it");
+				a_ctx.Journal.Notes.Add("the shader cache was out of date at the final save - the next run rebuilds it");
 			}
 			Settle(a_ctx, "playsave", a_s.Int("wait_s", 60), "letting the save settle for a minute");
 			if (marker != null) {
@@ -1617,7 +1617,7 @@ public static partial class InGame
 				a_ctx.Log.Detail("you are back where you stood before the clean save");
 			} else {
 				a_ctx.Log.Warn("no place was recorded in this run (the clean save was made by an earlier run) - the player stays where the clean save left them");
-				a_ctx.Journal.Notes.Add("the save to play was made where the clean save ended - no place from before it was recorded in this run");
+				a_ctx.Journal.Notes.Add("the final save was made where the clean save ended - no place from before it was recorded in this run");
 			}
 			if (DynOff(a_ctx)) {
 				const string cls = "SHESON_DynDOLOD_Plugin";

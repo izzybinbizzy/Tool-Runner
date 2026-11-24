@@ -19,7 +19,13 @@ public static class UiState
 	// a width and a height kept together are one write
 	static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(150);
 
-	public static string File => FileForTests ?? Path.Combine(AppPaths.Data, "window.json");
+	public static string File => FileForTests ?? Path.Combine(s_movedTo ?? AppPaths.Data, "window.json");
+
+	// the data folder moved while the program runs (Settings > Keep data through updates): what the window still writes before it
+	// closes goes there, never into the old folder - written there, it would stand again and the next start would take it
+	static volatile string? s_movedTo;
+
+	public static void MovedTo(string a_dir) => s_movedTo = a_dir;
 
 	// the offline tests keep it in a file of their own (and start from nothing kept, before and after)
 	public static string? FileForTests

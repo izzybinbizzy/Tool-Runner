@@ -264,7 +264,7 @@ public static class SettingsPanel
 			pages.Add((a_name, p));
 			return p;
 		}
-		StackPanel setupPage = Page("Setup"), runPage = Page("Run"), gamePage = Page("Game steps"), backupPage = Page("Backups"), alertPage = Page("Alerts and power"),
+		StackPanel setupPage = Page("Setup"), runPage = Page("Run"), gamePage = Page("Game steps"), backupPage = Page("Backups"), alertPage = Page("Alerts"),
 			stepPage = Page("Steps"), toolPage = Page("Tools"), changesPage = Page("MO2 Changelog"), programPage = Page("Program");
 		var cats = new ListBox { Width = 168, Margin = new Thickness(0, 0, 16, 0), ItemsSource = pages.Select(p => p.Name).ToList(), SelectedIndex = s_page < pages.Count ? s_page : 0,
 			VerticalAlignment = VerticalAlignment.Top, BorderThickness = new Thickness(0), Background = System.Windows.Media.Brushes.Transparent };
@@ -360,20 +360,8 @@ public static class SettingsPanel
 		Field(stack, apply, "Scratch folder (emptied after a run)", work, "scratch");
 		Field(stack, apply, "SKSE log folder (empty = My Games)", work, "skseLogs");
 		stack = gamePage;
-		// his checklist 457: the character whose saves the in-game steps load (the names are read off the saves, off the window's thread)
-		Field(stack, apply, "Character (empty = the newest save)", work, "character");
-		var whoHint = new TextBlock { Style = (Style)a_w.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(230, -6, 0, 10) };
-		stack.Children.Add(whoHint);
-		var forSaves = a_vm.Setup!;
-		_ = Task.Run(() => {
-			try {
-				var mo2 = Mo2Instance.Load(forSaves.Mo2Exe, forSaves.Mo2Instance);
-				return SaveHeader.Characters(InGame.SavesDir(new Profile(mo2, forSaves.Profile, () => false)));
-			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) {
-				return new List<string>();
-			}
-		}).ContinueWith(t => whoHint.Dispatcher.BeginInvoke(() => whoHint.Text = t.Result.Count == 0 ? "No saves found in this profile yet." :
-			"Characters with saves here, most recently played first: " + string.Join(", ", t.Result.Take(12))), TaskScheduler.Default);
+		// the character whose saves the game steps load, picked from the characters of the profile's saves (read off the window's thread)
+		CharacterChoice(stack, apply, work, a_vm.Setup!);
 		// ---- Game steps (the rest of that page)
 		// his checklist 460
 		work["quietGame"] ??= false;
@@ -428,16 +416,11 @@ public static class SettingsPanel
 		work["zipBackups"] ??= true;
 		Field(backupPage, apply, "Zip old outputs in the backup (much smaller)", work, "zipBackups", JsonValueKind.True);
 
-		// ---- Alerts and power
+		// ---- Alerts
 		var alerts = work["alerts"] as JsonObject ?? (JsonObject)(work["alerts"] = new JsonObject { ["notification"] = true, ["sound"] = true, ["flash"] = false });
 		Field(alertPage, apply, "Windows notification", alerts, "notification", JsonValueKind.True);
 		Field(alertPage, apply, "Sound", alerts, "sound", JsonValueKind.True);
 		Field(alertPage, apply, "Flash the taskbar button", alerts, "flash", JsonValueKind.True);
-		// his checklist 461 / 463: both optional, off unless set
-		Choice(alertPage, apply, "After the run, the PC", work, "afterRunPower", [("none", "stays on"), ("sleep", "sleeps, as Windows is set (one minute's notice)"),
-			("shutdown", "shuts down (one minute's notice)")]);
-		work["afterRunPowerOnlyFinished"] ??= true;
-		Field(alertPage, apply, "Only after a finished run (a failed run keeps the PC on)", work, "afterRunPowerOnlyFinished", JsonValueKind.True);
 
 		// ---- MO2 Changelog: a profile only tests use, or test mods, can be left out of the view (nothing is lost)
 		var changes = work["changes"] as JsonObject ?? (JsonObject)(work["changes"] = new JsonObject());
@@ -912,8 +895,8 @@ public static class SettingsPanel
 		undo.Click += (_, _) => a_w.ShowPanel("settings", true);
 		folders.Click += (_, _) => MainViewModel.OpenFolder(AppPaths.Data);
 		// his checklist 484: a clean removal of everything the program keeps (to the Recycle Bin, never erased)
-		var remove = new Button { Content = "Remove its data ...", Style = (Style)a_w.FindResource("Danger"), Margin = new Thickness(10, 0, 0, 0),
-			ToolTip = "Sends the program's own data and its run backups to the Recycle Bin - the mods the tools made stay in Mod Organizer" };
+		var remove = new Button { Content = "Remove program data...", Style = (Style)a_w.FindResource("Danger"), Margin = new Thickness(10, 0, 0, 0),
+			ToolTip = "Moves Tool Runner's data and run backups to the Recycle Bin. The mods the tools created stay in Mod Organizer." };
 		remove.Click += async (_, _) => {
 			remove.IsEnabled = false;
 			try {
@@ -926,6 +909,20 @@ public static class SettingsPanel
 		bar.Children.Add(save);
 		bar.Children.Add(undo);
 		bar.Children.Add(folders);
+		// the data kept in Windows' own app-data folder, so a new version unzipped anywhere keeps the run history
+		if (!AppPaths.InAppData) {
+			var keep = new Button { Content = "Keep data through updates...", Style = (Style)a_w.FindResource("Ghost"), Margin = new Thickness(10, 0, 0, 0),
+				ToolTip = "Moves Tool Runner's data (setups, run history, learned settings) into Windows' app-data folder, where every new version finds it" };
+			keep.Click += async (_, _) => {
+				keep.IsEnabled = false;
+				try {
+					await MoveDataToAppData(a_w, errors);
+				} finally {
+					keep.IsEnabled = true;
+				}
+			};
+			bar.Children.Add(keep);
+		}
 		bar.Children.Add(remove);
 		var where = new TextBlock { Text = "Data folder (setups, runs, backups): " + AppPaths.Data, Style = (Style)a_w.FindResource("MutedText"),
 			TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0) };
@@ -942,8 +939,22 @@ public static class SettingsPanel
 			host.Children.Add(p);
 		}
 		ShowPages("");
-		DockPanel.SetDock(cats, Dock.Left);
-		dock.Children.Add(cats);
+		// History and Themes open from here (they are not on the main window): above the list of pages
+		var side = new DockPanel { Width = 168, Margin = new Thickness(0, 0, 16, 0) };
+		var opens = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
+		foreach (var (text, panel, keys) in new[] { ("History", "history", "Ctrl+H"), ("Themes", "themes", "Ctrl+T") }) {
+			var open = new Button { Content = text, Style = (Style)a_w.FindResource("Ghost"), HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 0, 0, 6),
+				ToolTip = (panel == "history" ? "Past runs and the MO2 Changelog" : "The window's look and text size") + " (" + keys + ")" };
+			open.Click += (_, _) => a_w.ShowPanel(panel);
+			opens.Children.Add(open);
+		}
+		DockPanel.SetDock(opens, Dock.Top);
+		side.Children.Add(opens);
+		cats.Width = double.NaN;
+		cats.Margin = new Thickness(0);
+		side.Children.Add(cats);
+		DockPanel.SetDock(side, Dock.Left);
+		dock.Children.Add(side);
 		dock.Children.Add(scroller);
 		return dock;
 	}
@@ -1128,6 +1139,35 @@ public static class SettingsPanel
 	// everything the program keeps to the Recycle Bin, after a plain list of what goes and what stays; the window closes after,
 	// since the folder it writes into is gone. Refused while a run goes or one still needs its profile put back.
 	// the slow parts (listing every backup folder, recycling) run off the window's thread; the button stays off meanwhile
+	static async Task MoveDataToAppData(MainWindow a_w, TextBlock a_errors)
+	{
+		if (HasChanges && !Ask.Show(a_w, "Settings not saved", "You changed settings and did not press Save. Go on without saving them?", "Go on", "Keep editing")) {
+			return;
+		}
+		var to = AppPaths.AppDataFolder;
+		if (!Ask.Show(a_w, "Keep data through updates", $"Tool Runner's data (your setups, the run history, the settings learned from your tools) moves from\n{AppPaths.Data}\nto\n{to}\n\n" +
+			    "Every copy of Tool Runner on this PC then uses it, also a new version unzipped into another folder. Run backups stay where your setups put them.\n\n" +
+			    "Tool Runner closes when the move is done; start it again.", "Move my data", "Not now")) {
+			return;
+		}
+		using var hand = a_w.Working("the program's data is being moved");
+		try {
+			await Task.Run(() => {
+				using var hold = Runner.HoldIfFree() ?? throw new InvalidOperationException("a run is going - move the data when it has ended");
+				// what the window keeps goes along (its sizes and flags), and what it writes from here on goes to the new place
+				UiState.Save();
+				DataFolder.MoveTo(AppPaths.Data, to);
+				UiState.MovedTo(to);
+			});
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) {
+			a_errors.Text = "Not moved: " + e.Message;
+			return;
+		}
+		HasChanges = false;
+		Ask.Tell(a_w, "Moved", $"Your data is now in {to}. Tool Runner closes now; start it again.", "Close");
+		Application.Current.Shutdown();
+	}
+
 	static async Task RemoveData(MainWindow a_w, TextBlock a_errors)
 	{
 		if (HasChanges && !Ask.Show(a_w, "Settings not saved", "You changed settings and did not press Save. Go on without saving them?", "Go on", "Keep editing")) {
@@ -1241,10 +1281,124 @@ public static class SettingsPanel
 			edit = t;
 		}
 		System.Windows.Automation.AutomationProperties.SetName(edit, a_label);
-		Grid.SetColumn(edit, 1);
-		row.Children.Add(edit);
+		// a setting that holds a folder or a program: picked with Windows' own picker, or typed
+		FrameworkElement shown = edit;
+		if (edit is TextBox pathBox && kind == JsonValueKind.String && PathKind(a_key) is { } pick) {
+			var browse = new Button { Content = "Browse...", Style = (Style)Application.Current.FindResource("Ghost"), Margin = new Thickness(8, 0, 0, 0),
+				ToolTip = pick == PathPick.Folder ? "Choose the folder" : "Choose the program" };
+			System.Windows.Automation.AutomationProperties.SetName(browse, "Browse for " + a_label);
+			browse.Click += (_, _) => {
+				if (Browse(pick, pathBox.Text.Trim(), a_label) is { } chosen) {
+					pathBox.Text = chosen;
+				}
+			};
+			var both = new DockPanel();
+			DockPanel.SetDock(browse, Dock.Right);
+			both.Children.Add(browse);
+			both.Children.Add(pathBox);
+			shown = both;
+		}
+		Grid.SetColumn(shown, 1);
+		row.Children.Add(shown);
 		a_host.Children.Add(row);
 	}
+
+	enum PathPick
+	{
+		Folder,
+		Program,
+	}
+
+	// which settings hold a folder or a program (null: neither; a step's "executable" is the NAME of its entry in Mod Organizer's
+	// Executables list, no path)
+	static PathPick? PathKind(string a_key) => a_key switch {
+		"exe" => PathPick.Program,
+		_ when a_key.EndsWith("_exe", StringComparison.Ordinal) => PathPick.Program,
+		"instance" or "backups" or "scratch" or "skseLogs" or "output_dir" => PathPick.Folder,
+		_ when a_key.EndsWith("_dir", StringComparison.Ordinal) || a_key.EndsWith("Dir", StringComparison.Ordinal) => PathPick.Folder,
+		_ => null,
+	};
+
+	// Windows' own folder or file picker, opened where the setting points now; the path chosen, or null when it was cancelled
+	static string? Browse(PathPick a_pick, string a_now, string a_label)
+	{
+		var start = a_now == "" ? null : a_pick == PathPick.Folder ? a_now : Path.GetDirectoryName(a_now);
+		if (start != null && !Directory.Exists(start)) {
+			start = null;
+		}
+		if (a_pick == PathPick.Folder) {
+			var d = new Microsoft.Win32.OpenFolderDialog { Title = a_label, InitialDirectory = start ?? "" };
+			return d.ShowDialog() == true ? d.FolderName : null;
+		}
+		var f = new Microsoft.Win32.OpenFileDialog { Title = a_label, Filter = "Programs (*.exe)|*.exe|All files|*.*", InitialDirectory = start ?? "" };
+		return f.ShowDialog() == true ? f.FileName : null;
+	}
+
+	// The character the game steps load: the most recent save of any character, or one character's. The list holds the characters
+	// found in the profile's saves, most recently played first; a name the setup holds that no save carries stays in it, marked
+	const string AnyCharacter = "Most recent save (any character)";
+
+	static void CharacterChoice(Panel a_host, List<Func<string?>> a_apply, JsonObject a_obj, Setup a_setup)
+	{
+		const string label = "Character to load";
+		var row = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(230) });
+		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+		row.Children.Add(new TextBlock { Text = label, Foreground = Brushes2.Get("Accent"), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) });
+		var current = Setup.Str(a_obj, "character");
+		var names = new List<string> { AnyCharacter };
+		if (current != null) {
+			names.Add(current);
+		}
+		var box = new ComboBox { ItemsSource = names.ToList(), SelectedIndex = current == null ? 0 : 1,
+			ToolTip = "The game steps load this character's newest save. Characters are read from the saves in this profile." };
+		// (filling the list once the saves are read is no change of the player's)
+		var filling = false;
+		box.SelectionChanged += (_, _) => {
+			if (!filling) {
+				Changed();
+			}
+		};
+		System.Windows.Automation.AutomationProperties.SetName(box, label);
+		a_apply.Add(() => {
+			var picked = box.SelectedIndex > 0 ? box.SelectedItem as string : null;
+			var name = picked?.EndsWith(NoSaves, StringComparison.Ordinal) == true ? picked[..^NoSaves.Length] : picked;
+			if (name == null) {
+				a_obj.Remove("character");
+			} else {
+				a_obj["character"] = name;
+			}
+			return null;
+		});
+		Grid.SetColumn(box, 1);
+		row.Children.Add(box);
+		a_host.Children.Add(row);
+		_ = Task.Run(() => {
+			try {
+				var mo2 = Mo2Instance.Load(a_setup.Mo2Exe, a_setup.Mo2Instance);
+				return SaveHeader.Characters(InGame.SavesDir(new Profile(mo2, a_setup.Profile, () => false)));
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) {
+				return new List<string>();
+			}
+		}).ContinueWith(t => box.Dispatcher.BeginInvoke(() => {
+			// the player may have picked meanwhile: that pick stays picked
+			var picked = box.SelectedIndex > 0 ? box.SelectedItem as string : null;
+			var found = t.Result;
+			var list = new List<string> { AnyCharacter };
+			list.AddRange(found);
+			if (current != null && !found.Contains(current, StringComparer.OrdinalIgnoreCase)) {
+				list.Add(current + NoSaves);
+			}
+			filling = true;
+			box.ItemsSource = list;
+			var at = picked == null ? 0 : list.FindIndex(n => string.Equals(Bare(n), Bare(picked), StringComparison.OrdinalIgnoreCase));
+			static string Bare(string a_entry) => a_entry.EndsWith(NoSaves, StringComparison.Ordinal) ? a_entry[..^NoSaves.Length] : a_entry;
+			box.SelectedIndex = Math.Max(0, at);
+			filling = false;
+		}), TaskScheduler.Default);
+	}
+
+	const string NoSaves = " (no saves in this profile)";
 
 	static void Choice(Panel a_host, List<Func<string?>> a_apply, string a_label, JsonObject a_obj, string a_key, (string Value, string Text)[] a_options)
 	{

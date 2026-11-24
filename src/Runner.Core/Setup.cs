@@ -62,7 +62,7 @@ public sealed class Setup
 			o["settings"] as JsonObject ?? new JsonObject(), Bool(o, OldOutput.Key) ?? false)).Where(s => s.Key != "").ToList() ?? [];
 
 	// a new game (the player starts a new character after the run): there is no save of theirs to keep clean or to bring
-	// back, so the clean save and the save to play are left out of every run while it is on (dyndolod.info/Help/Clean-Save)
+	// back, so the clean save and the final save are left out of every run while it is on (dyndolod.info/Help/Clean-Save)
 	public bool NewGame => Bool(Root, "newGame") ?? false;
 
 	public static readonly IReadOnlyList<string> SaveSteps = ["cleansave", "playsave"];

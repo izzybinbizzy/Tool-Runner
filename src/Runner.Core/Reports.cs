@@ -160,7 +160,8 @@ public static class Reports
 		o["interrupted"] = a_s.Interrupted == null ? null : Run(a_s.Interrupted);
 		o["lastRun"] = a_s.Last == null ? null : Run(a_s.Last);
 		o["queue"] = a_s.Queue == null ? null : new JsonObject { ["setups"] = List(a_s.Queue.Setups), ["current"] = a_s.Queue.Current };
-		o["power"] = a_s.Power == null ? null : new JsonObject { ["action"] = a_s.Power.Action.ToLowerInvariant(), ["at"] = Iso(a_s.Power.At) };
+		// (a key older versions filled - kept, since names are only ever added)
+		o["power"] = null;
 		return o;
 	}
 

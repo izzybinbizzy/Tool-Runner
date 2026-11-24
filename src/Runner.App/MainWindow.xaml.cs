@@ -30,7 +30,7 @@ public partial class MainWindow : Window
 	string _historyView = "history";
 	// the log in a window of its own, with its text box and its Follow tick there
 	PanelWindow? _logWindow;
-	TextBox? _logOut;
+	LogView? _logOut;
 	CheckBox? _followOut;
 	// whether the log was shown in the main window before it went into its own
 	bool _logWasHere = true;
@@ -165,9 +165,6 @@ public partial class MainWindow : Window
 		}
 	}
 
-	// which moments of the power countdown were already said (-1 = its start)
-	readonly HashSet<int> _powerSaid = [];
-
 	void Announce(object? a_s, System.ComponentModel.PropertyChangedEventArgs a_e)
 	{
 		switch (a_e.PropertyName) {
@@ -182,17 +179,6 @@ public partial class MainWindow : Window
 			break;
 		case nameof(MainViewModel.Verdict) when _vm.Verdict != "":
 			A11y.Say(this, _vm.NowTitle + ": " + _vm.Verdict, true);
-			break;
-		case nameof(MainViewModel.PowerText):
-			// the countdown changes every second: it is said once when it starts and at 30 and 10 seconds, never each second (a
-			// screen reader would be interrupted until the Cancel button is out of reach)
-			var left = System.Text.RegularExpressions.Regex.Match(_vm.PowerText, @"in (\d+) s") is { Success: true } m ? int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) : -1;
-			if (_vm.PowerText == "") {
-				_powerSaid.Clear();
-			} else if (_powerSaid.Count == 0 || (left is 30 or 10 && _powerSaid.Add(left))) {
-				_powerSaid.Add(-1);
-				A11y.Say(this, _vm.PowerText, true);
-			}
 			break;
 		case nameof(MainViewModel.NewVersion) when _vm.NewVersion != "":
 			A11y.Say(this, _vm.NewVersion);
@@ -553,7 +539,7 @@ public partial class MainWindow : Window
 
 	// ---------------------------------------------------------------- the log
 	// the log grows by appending (re-setting a long text every second re-lays the whole box); kept under 200,000 characters
-	// the box's length, counted as text is added: reading LogBox.Text to measure it copies the whole box (up to 400 KB, a fresh
+	// the box's length, counted as text is added: reading the box's whole text to measure it copies it (up to 400 KB, a fresh
 	// large-object allocation) every second of a run
 	int _logChars;
 
@@ -564,7 +550,7 @@ public partial class MainWindow : Window
 		}
 		_logChars += a_add.Length;
 		var trim = _logChars > 200_000;
-		void Into(TextBox a_box, bool a_follow)
+		void Into(LogView a_box, bool a_follow)
 		{
 			if (a_reset) {
 				a_box.Clear();
@@ -572,7 +558,7 @@ public partial class MainWindow : Window
 			if (a_add.Length > 0) {
 				a_box.AppendText(a_add);
 				if (trim) {
-					a_box.Text = a_box.Text[^Math.Min(150_000, a_box.Text.Length)..];
+					a_box.KeepLast(150_000);
 				}
 			}
 			if (a_follow) {
@@ -679,8 +665,8 @@ public partial class MainWindow : Window
 			return open;
 		}
 		var w = new PanelWindow(this, "log", "LOG", 960, 640);
-		var box = new TextBox { IsReadOnly = true, IsUndoEnabled = false, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-			TextWrapping = TextWrapping.NoWrap, Text = LogBox.Text };
+		var box = new LogView();
+		box.AppendText(LogBox.Text);
 		box.SetResourceReference(FontFamilyProperty, "MonoFont");
 		box.SetResourceReference(FontSizeProperty, "SizeLog");
 		box.SetResourceReference(BackgroundProperty, "Panel2");
@@ -692,7 +678,7 @@ public partial class MainWindow : Window
 			ToolTip = "Every line of the run, for finding a fault. Unticked: the run step by step in plain words." };
 		detailed.SetBinding(System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty, new System.Windows.Data.Binding(nameof(MainViewModel.DetailedLog)) { Source = _vm, Mode = System.Windows.Data.BindingMode.TwoWay });
 		var wrap = new CheckBox { Content = "Wrap lines", Margin = new Thickness(0, 0, 14, 0), VerticalAlignment = VerticalAlignment.Center };
-		wrap.Click += (_, _) => box.TextWrapping = wrap.IsChecked == true ? TextWrapping.Wrap : TextWrapping.NoWrap;
+		wrap.Click += (_, _) => box.Wrap = wrap.IsChecked == true;
 		var copy = new Button { Content = "Copy all", Style = (Style)FindResource("Ghost"), ToolTip = "The whole log shown here, to the clipboard" };
 		copy.Click += (_, _) => {
 			try {
@@ -721,14 +707,12 @@ public partial class MainWindow : Window
 			}
 			found.Text = "";
 			follow.IsChecked = false;
-			box.Focus();
-			box.Select(a_at, a_length);
-			box.ScrollToLine(box.GetLineIndexFromCharacterIndex(a_at));
+			box.Reveal(a_at, a_length);
 		}
 		void FindNext()
 		{
 			var q = find.Text;
-			Reveal(LogSearch.Next(box.Text, q, box.SelectionLength > 0 ? box.SelectionStart + 1 : box.CaretIndex), q.Length, q == "" ? "" : "Not in the log.");
+			Reveal(LogSearch.Next(box.Text, q, box.FoundAt + 1), q.Length, q == "" ? "" : "Not in the log.");
 		}
 		next.Click += (_, _) => FindNext();
 		find.KeyDown += (_, e) => {
@@ -791,9 +775,7 @@ public partial class MainWindow : Window
 	}
 
 	// ---------------------------------------------------------------- panels, each in a window of its own
-	void History_Click(object a_s, RoutedEventArgs a_e) => ShowPanel("history");
 	void Settings_Click(object a_s, RoutedEventArgs a_e) => ShowPanel("settings");
-	void Themes_Click(object a_s, RoutedEventArgs a_e) => ShowPanel("themes");
 
 	// every panel window closed (the off-screen pictures between two of them)
 	public void ClosePanels()
