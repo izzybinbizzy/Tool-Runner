@@ -68,8 +68,6 @@ public partial class MainWindow : Window
 		_timer.Tick += async (_, _) => await Look();
 		_timer.Start();
 		StateChanged += (_, _) => Wake();
-		// nothing moves in a window nobody sees (minimized, or put away while a run goes)
-		void SeenOrNot() => _vm.WindowAway = WindowState == WindowState.Minimized || !IsVisible;
 		StateChanged += (_, _) => SeenOrNot();
 		// how it stood before it was minimized: closed from the taskbar while minimized, it comes back maximized if it was
 		StateChanged += (_, _) => {
@@ -93,7 +91,7 @@ public partial class MainWindow : Window
 		if (!App.Headless) {
 			_watch = new RunsWatch(AppPaths.Runs, Wake);
 		}
-		Footer.Text = $"Ctrl+Enter start  ·  F5 check  ·  Ctrl+D dry run  ·  Ctrl+H history  ·  Ctrl+L log  ·  Ctrl+T themes  ·  Ctrl+, settings   ·   version {AppVersion}";
+		Footer.Text = $"Ctrl+K do anything  ·  Ctrl+Enter start  ·  F5 check  ·  Ctrl+D dry run  ·  Ctrl+H history  ·  Ctrl+L log  ·  Ctrl+J compact  ·  Ctrl+T themes  ·  Ctrl+, settings   ·   version {AppVersion}";
 		Footer.ToolTip = "Data folder: " + AppPaths.Data;
 		PreviewKeyDown += OnKeys;
 		// a mod ticked in Mod Organizer while the window was in the background: each step's last run is worked out again
@@ -126,6 +124,10 @@ public partial class MainWindow : Window
 
 	public void Say(string a_text) => _vm.Say(a_text, "warn");
 
+	// nothing moves in a window nobody sees (minimized, or put away while a run goes) - unless the compact view shows the run:
+	// it is for exactly the time the main window is minimized
+	void SeenOrNot() => _vm.WindowAway = (WindowState == WindowState.Minimized || !IsVisible) && _compact is not { IsVisible: true };
+
 	// work the window carries itself (Settings' own buttons): it is not closed in the middle of it
 	public IDisposable Working(string a_what) => _vm.Working(a_what);
 
@@ -135,7 +137,7 @@ public partial class MainWindow : Window
 		await _vm.PollAsync();
 		// the notification-area icon (there once a run started or a notification was shown) says what runs
 		if (_vm.IsRunning || _tray?.Shown == true) {
-			_tray?.Show(Brand.Name + " - " + _vm.NowTitle);
+			_tray?.Show(Brand.Name + " - " + _vm.NowTitle + (_vm.FinishAt == "" ? "" : ", " + _vm.FinishAt));
 		}
 		var pace = _vm.Busy ? Live : WindowState == WindowState.Minimized ? Away : Calm;
 		if (_timer.Interval != pace) {
@@ -269,6 +271,12 @@ public partial class MainWindow : Window
 			break;
 		case Key.L:
 			PopLog();
+			break;
+		case Key.K:
+			ShowCommands();
+			break;
+		case Key.J:
+			ShowCompact();
 			break;
 		case Key.F when _panels.TryGetValue("settings", out var settings) && ReferenceEquals(a_s, settings):
 			SettingsPanel.FocusFind();
@@ -701,9 +709,63 @@ public partial class MainWindow : Window
 		foreach (var c in new UIElement[] { detailed, follow, wrap, copy }) {
 			bar.Children.Add(c);
 		}
+		// his checklist 635: search the log, and jump to the first line the run marked as a problem (Follow lets go, so the line
+		// found stays in view while the run writes on)
+		var find = new TextBox { MinWidth = 200, Margin = new Thickness(0, 0, 8, 0), VerticalContentAlignment = VerticalAlignment.Center, ToolTip = "Find in the log (Enter: the next one)" };
+		AutomationPropertiesName(find, "Find in the log");
+		var next = new Button { Content = "Find next", Style = (Style)FindResource("Ghost"), Margin = new Thickness(0, 0, 8, 0) };
+		var problem = new Button { Content = "First problem", Style = (Style)FindResource("Ghost"), ToolTip = "The first line the run marked as a failure, else as a warning" };
+		var found = new TextBlock { Style = (Style)FindResource("MutedText"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
+		void Reveal(int a_at, int a_length, string a_none)
+		{
+			if (a_at < 0) {
+				found.Text = a_none;
+				return;
+			}
+			found.Text = "";
+			follow.IsChecked = false;
+			box.Focus();
+			box.Select(a_at, a_length);
+			box.ScrollToLine(box.GetLineIndexFromCharacterIndex(a_at));
+		}
+		void FindNext()
+		{
+			var q = find.Text;
+			Reveal(LogSearch.Next(box.Text, q, box.SelectionLength > 0 ? box.SelectionStart + 1 : box.CaretIndex), q.Length, q == "" ? "" : "Not in the log.");
+		}
+		next.Click += (_, _) => FindNext();
+		find.KeyDown += (_, e) => {
+			if (e.Key == Key.Enter) {
+				FindNext();
+				find.Focus();
+				e.Handled = true;
+			}
+		};
+		void ShowFirstProblem()
+		{
+			var at = LogSearch.FirstProblem(box.Text);
+			var end = at < 0 ? -1 : box.Text.IndexOf('\n', at);
+			Reveal(at, at < 0 ? 0 : (end < 0 ? box.Text.Length : end) - at, "No line of this log is marked as a problem.");
+		}
+		problem.Click += (_, _) => {
+			// the simple log marks no line (only the detailed one says "!" and "!!!"): the detailed log is shown first, and the
+			// search runs once its text is in (CodeRabbit on pull request #38)
+			if (!_vm.DetailedLog) {
+				_vm.DetailedLog = true;
+				Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, ShowFirstProblem);
+				return;
+			}
+			ShowFirstProblem();
+		};
+		var findBar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+		foreach (var c in new UIElement[] { find, next, problem, found }) {
+			findBar.Children.Add(c);
+		}
 		var dock = new DockPanel();
 		DockPanel.SetDock(bar, Dock.Top);
+		DockPanel.SetDock(findBar, Dock.Top);
 		dock.Children.Add(bar);
+		dock.Children.Add(findBar);
 		dock.Children.Add(box);
 		w.Body = dock;
 		_logWindow = w;
@@ -855,10 +917,14 @@ public partial class MainWindow : Window
 			_historyView = a_which;
 		}
 		w.Head(a_which switch { "history" => "HISTORY", "changes" => "MO2 CHANGELOG", "themes" => "THEMES", _ => "SETTINGS" });
+		// while the setup is renamed its settings are not shown: what was typed there would belong to the old file, whose Save
+		// is refused once the rename is done. The rename shows them when it ends
+		var held = a_which == "settings" && _vm.Renaming;
 		w.Body = a_which switch {
 			"history" => WithSwitch(HistoryPanel(), a_which),
 			"changes" => WithSwitch(ChangesPanel(null), a_which),
 			"themes" => ThemeGallery.Build(this, _vm),
+			_ when held => RenameNotice(),
 			_ => SettingsPanel.Build(this, _vm),
 		};
 		if (w.Body is DependencyObject drawn) {
@@ -871,9 +937,16 @@ public partial class MainWindow : Window
 			Front(w);
 		}
 		if (!a_quiet || isNew) {
-			w.TakeKeyboard(a_which == "settings" ? SettingsPanel.FocusFind : null);
+			w.TakeKeyboard(a_which == "settings" && !held ? SettingsPanel.FocusFind : null);
 		}
 		return w;
+	}
+
+	TextBlock RenameNotice()
+	{
+		var t = new TextBlock { Text = "The setup is being renamed. Its settings show here as soon as that is done.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
+		t.SetResourceReference(TextBlock.ForegroundProperty, "Muted");
+		return t;
 	}
 
 	// Another setup was picked while Settings stands open: it shows that setup's settings from here - unless something typed
@@ -1496,6 +1569,50 @@ public static class Ask
 	{
 		var result = false;
 		var w = Make(a_owner, a_title, a_text, a_yes, a_no, a_yesPressed => result = a_yesPressed);
+		w.ShowDialog();
+		return result;
+	}
+
+	// A name typed in (a setup copied or renamed): null when the player went back. a_bad says what is wrong with a name, in words
+	// (null = good); the box stays until a good one is typed or it is closed
+	public static string? Input(Window a_owner, string a_title, string a_text, string a_value, string a_yes, Func<string, string?> a_bad)
+	{
+		string? result = null;
+		var room = SystemParameters.WorkArea;
+		var w = new Window {
+			Owner = a_owner, Title = a_title, Width = Math.Min(520, room.Width), SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+			Background = Brushes2.Get("Panel"), Foreground = Brushes2.Get("Text"), ResizeMode = ResizeMode.CanResize, ShowInTaskbar = false, MinWidth = UiState.Least(360, room.Width),
+			FontFamily = (System.Windows.Media.FontFamily)a_owner.FindResource("UiFont"), FontSize = (double)a_owner.FindResource("SizeBody"),
+		};
+		var box = new TextBox { Text = a_value, Margin = new Thickness(0, 10, 0, 0) };
+		System.Windows.Automation.AutomationProperties.SetName(box, a_title);
+		var why = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0), Foreground = Brushes2.Get("Bad") };
+		var yes = new Button { Content = a_yes, Style = (Style)a_owner.FindResource("Primary"), Margin = new Thickness(0, 0, 10, 0), IsDefault = true };
+		var no = new Button { Content = "Cancel", Style = (Style)a_owner.FindResource("Ghost"), IsCancel = true };
+		void Judge() => why.Text = a_bad(box.Text) ?? "";
+		box.TextChanged += (_, _) => Judge();
+		yes.Click += (_, _) => {
+			Judge();
+			if (why.Text == "") {
+				result = box.Text.Trim();
+				w.Close();
+			}
+		};
+		var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 18, 0, 0) };
+		buttons.Children.Add(yes);
+		buttons.Children.Add(no);
+		var body = new StackPanel { Margin = new Thickness(22) };
+		body.Children.Add(new TextBlock { Text = a_title, Style = (Style)a_owner.FindResource("H1"), Margin = new Thickness(0, 0, 0, 12), FontSize = (double)a_owner.FindResource("SizeHeading1") });
+		body.Children.Add(new TextBlock { Text = a_text, TextWrapping = TextWrapping.Wrap });
+		body.Children.Add(box);
+		body.Children.Add(why);
+		body.Children.Add(buttons);
+		w.Content = new Border { Background = Brushes2.Get("Panel"), Child = body };
+		w.Loaded += (_, _) => {
+			box.Focus();
+			box.SelectAll();
+			A11y.Say(w, a_title + ". " + a_text, true);
+		};
 		w.ShowDialog();
 		return result;
 	}

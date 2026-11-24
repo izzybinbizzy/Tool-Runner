@@ -53,7 +53,15 @@
           <TextBlock Grid.Column="0" Text="Setup" Foreground="{DynamicResource Muted}" VerticalAlignment="Center" Margin="0,0,8,0"
                      Visibility="{Binding Roomy, Converter={StaticResource Vis}}"/>
           <ComboBox Grid.Column="1" x:Name="SetupBox" ItemsSource="{Binding Setups}" SelectedItem="{Binding SelectedSetup}" DisplayMemberPath="Name" MinWidth="120"
-                    HorizontalAlignment="Stretch" AutomationProperties.Name="Setup" IsEnabled="{Binding IsRunning, Converter={StaticResource Not}}"/>
+                    HorizontalAlignment="Stretch" AutomationProperties.Name="Setup" IsEnabled="{Binding IsRunning, Converter={StaticResource Not}}"
+                    ToolTip="The setup shown. Right-click to copy or rename it">
+            <ComboBox.ContextMenu>
+              <ContextMenu>
+                <MenuItem Header="_Copy this setup ..." Click="DuplicateSetup_Click"/>
+                <MenuItem Header="_Rename this setup ..." Click="RenameSetup_Click"/>
+              </ContextMenu>
+            </ComboBox.ContextMenu>
+          </ComboBox>
           <Button Grid.Column="2" Content="_New setup" Style="{StaticResource Ghost}" Margin="8,0,0,0" Click="NewSetup_Click" ToolTip="Make a setup for an MO2 profile (Ctrl+N)"
                   IsEnabled="{Binding IsRunning, Converter={StaticResource Not}}" AutomationProperties.AcceleratorKey="Ctrl+N"/>
         </Grid>
@@ -122,7 +130,7 @@
               <Button x:Name="UseOldButton" Content="{Binding UseOldLabel}" Style="{StaticResource Ghost}" Click="UseOld_Click"
                       ToolTip="The selected step is not run and the output its tool made before stays in your game. A box says first exactly what that means for this tool. Pressed again, the step is built anew."/>
             </WrapPanel>
-            <TextBlock Text="Drag a step to move it. Right-click for more." Style="{StaticResource MutedText}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+            <TextBlock Text="Drag a step to move it. Double-click for its settings, right-click for more." Style="{StaticResource MutedText}" Margin="0,6,0,0" TextWrapping="Wrap"/>
           </StackPanel>
         </Border>
         <Grid Margin="6,0">
@@ -133,7 +141,7 @@
                  BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                  AutomationProperties.Name="Steps" KeyDown="StepList_KeyDown" CheckBox.Click="StepOn_Click"
                  AllowDrop="True" PreviewMouseLeftButtonDown="StepList_Press" PreviewMouseMove="StepList_Drag" PreviewMouseLeftButtonUp="StepList_Release"
-                 DragOver="StepList_DragOver" DragLeave="StepList_DragLeave" Drop="StepList_Drop">
+                 DragOver="StepList_DragOver" DragLeave="StepList_DragLeave" Drop="StepList_Drop" MouseDoubleClick="StepList_DoubleClick">
           <!-- no event handler inside a template or a style: WPF numbers them wrongly there (it crashed at start) -->
           <!-- a step is dragged by its row to any place (the handlers above, on the list itself); the line a row shows says where it would land -->
           <ListBox.ContextMenu>
@@ -143,6 +151,10 @@
               <MenuItem Header="Run _until this step" Click="RunUntil_Click"/>
               <Separator/>
               <MenuItem Header="{Binding UseOldLabel}" Click="UseOld_Click"/>
+              <Separator/>
+              <MenuItem Header="Open its _settings" Click="StepSettings_Click" InputGestureText="Double-click"/>
+              <MenuItem Header="Open its output mod's f_older" Click="OpenOutput_Click"/>
+              <MenuItem Header="Open its tool's _page" Click="OpenToolPage_Click"/>
               <Separator/>
               <MenuItem Header="Move _up" Click="Up_Click"/>
               <MenuItem Header="Move _down" Click="Down_Click"/>
@@ -244,6 +256,7 @@
               <StackPanel DockPanel.Dock="Right" HorizontalAlignment="Right" Margin="14,0,0,0">
                 <TextBlock Text="{Binding Clock}" FontFamily="{DynamicResource HeadFont}" FontSize="{DynamicResource SizeClock}" Foreground="{DynamicResource AccentLight}" HorizontalAlignment="Right"/>
                 <TextBlock Text="{Binding Left}" Style="{StaticResource MutedText}" HorizontalAlignment="Right" Visibility="{Binding Left, Converter={StaticResource NotEmpty}}"/>
+              <TextBlock Text="{Binding FinishAt}" Style="{StaticResource MutedText}" HorizontalAlignment="Right" Visibility="{Binding FinishAt, Converter={StaticResource NotEmpty}}"/>
                 <TextBlock Text="{Binding StepOf}" Style="{StaticResource MutedText}" HorizontalAlignment="Right" Visibility="{Binding StepOf, Converter={StaticResource NotEmpty}}"/>
               </StackPanel>
               <StackPanel>
@@ -305,6 +318,8 @@
               <Button Content="_Dry run" Style="{StaticResource Ghost}" Command="{Binding DryRunCommand}" Margin="0,0,8,8"
                       ToolTip="Goes through everything a start would meet and then do - the check, what is switched off, what is built, the room on disk. Nothing is started and nothing is changed (Ctrl+D)"
                       AutomationProperties.AcceleratorKey="Ctrl+D"/>
+              <Button Content="Compact _view" Style="{StaticResource Ghost}" Click="Compact_Click" Margin="0,0,8,8"
+                      ToolTip="A small window for a second screen: the step, the clock, the progress bar and Stop (Ctrl+J)" AutomationProperties.AcceleratorKey="Ctrl+J"/>
               <!-- the last run failed or was stopped: run it again from the step it stopped at -->
               <Button Content="{Binding RetryText}" Style="{StaticResource Ghost}" Command="{Binding RetryCommand}" Margin="0,0,8,8"
                       Visibility="{Binding RetryFrom, Converter={StaticResource NotEmpty}}"

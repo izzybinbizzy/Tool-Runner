@@ -101,10 +101,10 @@ public static class Engine
 		(a_runs ?? Runs()).FirstOrDefault(j => a_setupFile == null || string.Equals(j.SetupFile, a_setupFile, StringComparison.OrdinalIgnoreCase));
 
 	// each step's usual time: the median of its finished runs (for the time-left estimate)
-	public static Dictionary<string, TimeSpan> UsualTimes(string a_setupFile)
+	public static Dictionary<string, TimeSpan> UsualTimes(string a_setupFile, List<Journal>? a_runs = null)
 	{
 		var all = new Dictionary<string, List<double>>();
-		foreach (var j in Runs().Where(j => string.Equals(j.SetupFile, a_setupFile, StringComparison.OrdinalIgnoreCase)).Take(30)) {
+		foreach (var j in (a_runs ?? Runs()).Where(j => string.Equals(j.SetupFile, a_setupFile, StringComparison.OrdinalIgnoreCase)).Take(30)) {
 			foreach (var s in j.Steps.Where(s => s.State == StepState.Done && s.Started != null && s.Ended != null)) {
 				(all.TryGetValue(s.Key, out var l) ? l : all[s.Key] = []).Add((s.Ended!.Value - s.Started!.Value).TotalSeconds);
 			}
