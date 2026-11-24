@@ -14,9 +14,9 @@ namespace ToolRunner.App;
 public partial class MainWindow : Window
 {
 	readonly MainViewModel _vm = new();
-	// How often the window looks: every second while something is going (a run's clock and progress, a start being checked, the
-	// countdown before the PC sleeps), seldom while nothing is, hardly at all while it is minimised. A change in the runs folder
-	// (RunsWatch) and the window coming back wake it at once, so a slow look loses nothing
+	// How often the window looks: every second while something is going (a run's clock and progress, a start being checked),
+	// seldom while nothing is, hardly at all while it is minimised. A change in the runs folder (RunsWatch) and the window
+	// coming back wake it at once, so a slow look loses nothing
 	static readonly TimeSpan Live = TimeSpan.FromSeconds(1), Calm = TimeSpan.FromSeconds(3), Away = TimeSpan.FromSeconds(20);
 	readonly DispatcherTimer _timer = new() { Interval = Live };
 	RunsWatch? _watch;
@@ -127,6 +127,14 @@ public partial class MainWindow : Window
 
 	// work the window carries itself (Settings' own buttons): it is not closed in the middle of it
 	public IDisposable Working(string a_what) => _vm.Working(a_what);
+
+	// The runs folder watched, or let go. It is let go while the program's data is removed: Windows moves no folder to the
+	// Recycle Bin while a folder inside it is watched (the timer alone looks meanwhile)
+	public void WatchRuns(bool a_on)
+	{
+		_watch?.Dispose();
+		_watch = a_on && !App.Headless ? new RunsWatch(AppPaths.Runs, Wake) : null;
+	}
 
 	// one look, and the pace of the next ones set by what it found
 	async Task Look()

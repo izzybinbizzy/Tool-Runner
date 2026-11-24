@@ -1244,15 +1244,23 @@ public static class SettingsPanel
 		if (!Ask.Show(a_w, "Remove the program's data", text, "Send them to the Recycle Bin", "Keep everything")) {
 			return;
 		}
-		List<string> failed;
+		List<string> failed = [];
 		using var hand = a_w.Working("the program's data is being removed");
+		// the window's own watch on the runs folder is let go first: with it, Windows refuses to move the data folder
+		a_w.WatchRuns(false);
 		try {
-			failed = await Task.Run(() => DataRemoval.Carry(plan));
+			// (with no write of the window's own in between, and none after all of it went: UiState.RemoveWith)
+			await Task.Run(() => UiState.RemoveWith(() => {
+				failed = DataRemoval.Carry(plan);
+				return failed.Count == 0;
+			}));
 		} catch (InvalidOperationException e) {
+			a_w.WatchRuns(true);
 			a_errors.Text = "Not removed: " + e.Message + ".";
 			return;
 		}
 		if (failed.Count > 0) {
+			a_w.WatchRuns(true);
 			a_errors.Text = "Some of it could not go to the Recycle Bin:\n" + string.Join("\n", failed);
 			return;
 		}
