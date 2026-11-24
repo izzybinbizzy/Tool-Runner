@@ -190,6 +190,11 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 			}
 		}
 		var missing = en.Concat(dis).Where(m => !seen.Contains(m)).ToList();
+		// a "*" line is Mod Organizer's own (the base game, a Creation Club file): in the list, and never switched by anyone
+		var its = States().Where(s => s.Value == '*').Select(s => s.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+		if (missing.FirstOrDefault(its.Contains) is { } own) {
+			throw new KeyNotFoundException($"\"{own}\" is one of Mod Organizer's own entries (the game's or a Creation Club file's) and cannot be switched on or off");
+		}
 		if (missing.Count > 0) {
 			throw new KeyNotFoundException("not in the mod list: " + string.Join(", ", missing));
 		}

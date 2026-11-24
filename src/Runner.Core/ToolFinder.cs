@@ -186,7 +186,8 @@ public static class ToolFinder
 			added.Add(title);
 		}
 		if (added.Count > 0) {
-			Files.Copy(a_mo2.IniPath, BackupOf(a_mo2), true);
+			// a later add keeps the first copy too: never written over, so the ini as it was before any add stays
+			Files.Copy(a_mo2.IniPath, Files.FreeFile(BackupOf(a_mo2)), false);
 			Files.WriteAtomic(a_mo2.IniPath, text);
 		}
 		return added;

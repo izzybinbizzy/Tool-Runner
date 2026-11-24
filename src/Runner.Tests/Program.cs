@@ -1120,7 +1120,11 @@ public static class Program
 		Check(open.Running, "one look failed: it counts as open");
 		Check(!open.Running, "and as closed again once Windows answers");
 
-		Equal("_CON.demo copy", ToolRunner.App.Theme.FileSafe("CON.demo copy"), "a name Windows keeps for a device gets a mark in front");
+		Equal("Theme CON.demo copy", ToolRunner.App.Theme.FileSafe("CON.demo copy"), "a name Windows keeps for a device gets a word in front");
+		Check(ToolRunner.App.Theme.PlainFont("Segoe UI Variable Text, Segoe UI"), "a font's family names are a font");
+		foreach (var place in new[] { @"\\server\share\#Font", "file:///C:/fonts/#Font", "./#Font", @"C:\fonts\Font.ttf", " " }) {
+			Check(!ToolRunner.App.Theme.PlainFont(place), $"a theme's font is a name, never a place to load one from: {place}");
+		}
 		Equal("Ocean  dark copy", ToolRunner.App.Theme.FileSafe("Ocean: dark copy"), "a character Windows refuses in a name is taken out");
 		Equal("Theme", ToolRunner.App.Theme.FileSafe("..."), "a name with nothing left is given one");
 
@@ -1613,6 +1617,17 @@ public static class Program
 		File.WriteAllText(dll, "v2");
 		Check(a != ShaderStep.Fingerprint(mo2, c), "a new DLL = a new fingerprint");
 		Check(!ShaderStep.UpToDate(mo2, c), "no cache = not up to date");
+		// the shader mod's meta.ini counts by the version it names: what Mod Organizer writes there on its own (an update
+		// check, an endorsement) never makes the cache old - only the old way of reading a stamp counts the whole file
+		var meta = Path.Combine(f.Mods, "Shader Mod", "meta.ini");
+		File.WriteAllText(meta, "[General]\r\nmodid=192816\r\nversion=2.0.1\r\ninstallationFile=Shader Mod 2.0.1.7z\r\nlastNexusQuery=2026-11-01T10:00:00Z\r\nendorsed=0\r\n");
+		var queried = ShaderStep.Fingerprint(mo2, c);
+		var queriedOld = ShaderStep.Fingerprint(mo2, c, null, null, null, true, true, false);
+		File.WriteAllText(meta, "[General]\r\nmodid=192816\r\nversion=2.0.1\r\ninstallationFile=Shader Mod 2.0.1.7z\r\nlastNexusQuery=2026-11-24T15:00:00Z\r\nendorsed=1\r\n");
+		Equal(queried, ShaderStep.Fingerprint(mo2, c), "an update check or an endorsement leaves it as it was");
+		Check(queriedOld != ShaderStep.Fingerprint(mo2, c, null, null, null, true, true, false), "(the old way counted the whole file)");
+		File.WriteAllText(meta, "[General]\r\nmodid=192816\r\nversion=2.0.2\r\ninstallationFile=Shader Mod 2.0.2.7z\r\nlastNexusQuery=2026-11-24T15:00:00Z\r\nendorsed=1\r\n");
+		Check(queried != ShaderStep.Fingerprint(mo2, c), "a new version of the shader mod makes it new");
 		// with the profile: a feature mod's shader file changes it; what a generator writes (a plugin, a mesh) never does
 		var p = ProfileOf(f);
 		var feature = Path.Combine(f.Mods, "Base Mod", "Shaders", "Features", "Grass.ini");
@@ -1669,15 +1684,18 @@ public static class Program
 		Directory.CreateDirectory(cacheDir);
 		File.WriteAllText(Path.Combine(cacheDir, "a shader.bin"), "compiled");
 		var stamp = Path.Combine(f.Mods, "Cache Mod", Brand.Name + " cache.json");
-		File.WriteAllText(stamp, new JsonObject { ["fingerprint"] = set, ["files"] = 1, ["verified"] = true, ["winners"] = true, ["settings"] = "boot" }.ToJsonString());
+		File.WriteAllText(stamp, new JsonObject { ["fingerprint"] = set, ["files"] = 1, ["verified"] = true, ["winners"] = true, ["settings"] = "boot", ["meta"] = "version" }.ToJsonString());
 		Equal(null, ShaderStep.WhyStale(mo2, c, p), "a cache stamped the new way is current");
 		File.WriteAllText(settings, """{ "Presets": { "activePackId": "another" }, "Disable at Boot": { "Skylighting": true, "Grass Lighting": false } }""");
 		Check(ShaderStep.UpToDate(mo2, c, p), "and stays current when the game rewrites its settings");
 		File.WriteAllText(settings, """{ "Presets": { "activePackId": "another" }, "Disable at Boot": { "Skylighting": false, "Grass Lighting": false } }""");
 		Check((ShaderStep.WhyStale(mo2, c, p) ?? "").Contains("features switched off at the game's start", StringComparison.Ordinal),
 			"a feature switched at the game's start is another cache, and the reason is said: " + ShaderStep.WhyStale(mo2, c, p));
-		File.WriteAllText(stamp, new JsonObject { ["fingerprint"] = ShaderStep.Fingerprint(mo2, c, p, null, null, true, false), ["files"] = 1, ["verified"] = true, ["winners"] = true }.ToJsonString());
+		File.WriteAllText(stamp, new JsonObject { ["fingerprint"] = ShaderStep.Fingerprint(mo2, c, p, null, null, true, false, false), ["files"] = 1, ["verified"] = true, ["winners"] = true }.ToJsonString());
 		Equal(null, ShaderStep.WhyStale(mo2, c, p), "an older stamp (every value counted) is read the way it was written: no cache is built again for the change");
+		// one written while settings counted by their boot part but meta.ini whole: read that way too
+		File.WriteAllText(stamp, new JsonObject { ["fingerprint"] = ShaderStep.Fingerprint(mo2, c, p, null, null, true, true, false), ["files"] = 1, ["verified"] = true, ["winners"] = true, ["settings"] = "boot" }.ToJsonString());
+		Equal(null, ShaderStep.WhyStale(mo2, c, p), "a stamp from before meta.ini counted by its version is read the way it was written");
 		File.Delete(Path.Combine(cacheDir, "a shader.bin"));
 		Check((ShaderStep.WhyStale(mo2, c, p) ?? "").Contains("holds 0 shader(s)", StringComparison.Ordinal), "a cache that lost its shaders says so: " + ShaderStep.WhyStale(mo2, c, p));
 		File.Delete(stamp);
@@ -4962,6 +4980,20 @@ public static class Program
 			Equal(mod, AcmosStep.LodFolder(scratch, mod), "a stray file in the scratch is no terrain LOD");
 			File.WriteAllText(Path.Combine(scratch, "textures", "terrain", "b.dds"), "x");
 			Equal(scratch, AcmosStep.LodFolder(scratch, mod), "the scratch folder first when it holds the LOD");
+			// what stands between quote marks on ACMOS's command line holds none itself
+			Equal<string?>(null, AcmosStep.QuoteIn("Paths Only", scratch, null), "a road set and a folder as they are");
+			Check(AcmosStep.QuoteIn("Paths Only", "Roads\" -o:\"C:\\Somewhere else") is { } quoted && RunnerErrors.Find(quoted)?.Code == "TR-318",
+				"a setting that would end its quote early and pass ACMOS arguments of its own is refused, with what to do");
+			// a folder a run empties into its backup is never a whole drive, nor a folder the player or Windows keeps other things in
+			var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+			if (home != "") {
+				Equal<string?>("a whole drive", StepKit.KeptFolder(Path.GetPathRoot(home)!), "a drive's own root");
+				Equal<string?>("your user folder", StepKit.KeptFolder(home + "\\"), "the player's own folder");
+				Check(StepKit.KeptFolder(Path.GetDirectoryName(home)!) != null, "a folder that holds it");
+				Equal<string?>("your Downloads folder", StepKit.KeptFolder(Path.Combine(home, "downloads")), "their downloads, however it is spelled");
+				Equal<string?>(null, StepKit.KeptFolder(Path.Combine(home, "Downloads", "Modding", "xLODGen Output")), "a folder of its own inside one of them is fine");
+			}
+			Equal<string?>(null, StepKit.KeptFolder(scratch), "and so is the tool's own scratch folder");
 		} finally {
 			Directory.Delete(dir, true);
 		}
@@ -7436,6 +7468,9 @@ public static class Program
 			Throws<InvalidOperationException>(() => Latest(Answer(good, a_url: "https://example.com/Tool.Runner.1.1.zip")), "a download from anywhere but the program's own repository");
 			Throws<InvalidOperationException>(() => Latest(Answer(good, a_name: "Something else.zip")), "a release without the program's own zip");
 			Throws<InvalidOperationException>(() => Latest([]), "an answer with no release");
+			var noSum = Answer(good);
+			((JsonObject)((JsonArray)noSum["assets"]!)[1]!).Remove("digest");
+			Throws<InvalidOperationException>(() => Latest(noSum), "a download GitHub gives no check sum for: never installed from here");
 			// what is fetched and then refused: nothing of it stays
 			Throws<InvalidOperationException>(() => Download(Latest(Answer(good, a_sha: new string('0', 64)))), "a download whose check sum is not GitHub's");
 			Check(NothingLeft(), "and nothing of it is kept");
@@ -7548,6 +7583,15 @@ public static class Program
 			Check(File.Exists(oldExe) && !File.Exists(Path.Combine(program, "README (old).txt")) && !File.Exists(zip), "the first clean-up takes what it can (the old program is still ending)");
 			ProgramUpdate.CleanUp(data);
 			Check(!File.Exists(oldExe) && NothingLeft(), "the next takes the rest, and its own record");
+			// a record that names a file in a folder that holds no copy of this program removes nothing there
+			var elsewhere = Path.Combine(top, "elsewhere");
+			Directory.CreateDirectory(elsewhere);
+			var notMine = Path.Combine(elsewhere, "Notes (old).txt");
+			File.WriteAllText(notMine, "a file of someone else's");
+			Directory.CreateDirectory(ProgramUpdate.UpdatesDir(data));
+			File.WriteAllText(Path.Combine(ProgramUpdate.UpdatesDir(data), "installed.json"), System.Text.Json.JsonSerializer.Serialize(new ProgramUpdate.Installed([notMine], Path.Combine(top, "nowhere.zip"))));
+			ProgramUpdate.CleanUp(data);
+			Check(File.Exists(notMine), "a file outside the program's own folder is never removed by a clean-up");
 			Equal("the program, version 1.1", File.ReadAllText(started), "the program in place stays");
 
 			// what is new, said once: this version's own lines, and the setup keys read differently since the version before
@@ -7931,6 +7975,9 @@ public static class Program
 		Equal("TexGen", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "output_mod", -1)), "a setting's own name");
 		Equal("", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "TexGen Output", 0)), "never the step already open");
 		Equal(0, ToolRunner.App.SettingsPanel.StepsWith(steps, " ", -1).Count, "no word, no steps");
+		// a setup file may hold a setting with no name at all: it has no label, and nothing fails over it
+		steps.Add(new() { ["step"] = "acmos", ["settings"] = new JsonObject { [""] = "nameless" } });
+		Equal("ACMOS Road Generator", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "nameless", -1)), "a setting with an empty name is still searched");
 	}
 
 	// his list of 2026-11-16: a step dragged to any place, a check that also looks for updates, windows that keep their size
@@ -10437,6 +10484,92 @@ public static class Program
 			}
 		}
 		return missing;
+	}
+
+	// FasterNGIO runs through a command line written from the setup: nothing in its program path or its arguments may be read
+	// there as a command of its own (a setup file can come from anyone)
+	static void T_TheGrassStepRunsNoCommandHiddenInItsSettings()
+	{
+		const string exe = @"C:\Tools\FasterNGIO\FasterNGIO.exe";
+		Equal<string?>(null, GrassStep.WrapperRefuses(exe, null), "no arguments: its own");
+		Equal<string?>(null, GrassStep.WrapperRefuses(exe, "--world all"), "plain arguments");
+		Equal<string?>(null, GrassStep.WrapperRefuses(exe, "--world \"Tamriel\""), "a quoted value is still an argument");
+		foreach (var bad in new[] { "--world all & calc", "--world all | more", "--world all > x.txt", "--world all < x", "--world ^all", "--world all\r\ndel x", "--world all\nx" }) {
+			Check(GrassStep.WrapperRefuses(exe, bad) is { } why && RunnerErrors.Find(why)?.Code == "TR-317", "refused, with what to do: " + bad.Replace("\r", "\\r", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal));
+		}
+		Check(GrassStep.WrapperRefuses(@"C:\Tools\Fast""&calc&"".exe", null) != null, "a program path that closes its own quotes");
+		Check(GrassStep.WrapperRefuses(@"C:\A & B\FasterNGIO.exe", null) != null, "a program path that holds a command mark");
+	}
+
+	// the setup's own name names its run's folder and its backup: one with a folder part never reaches them
+	static void T_ASetupNamedWithAFolderPartIsRefused()
+	{
+		var problems = Setup.FromJson(new JsonObject { ["name"] = @"..\..\Elsewhere" }).Problems();
+		Check(problems.FirstOrDefault(p => p.Contains("not a plain name", StringComparison.Ordinal)) is { } said && RunnerErrors.Find(said)?.Code == "TR-120", "refused by the setup's own check: " + string.Join(" | ", problems));
+		Check(!Setup.FromJson(new JsonObject { ["name"] = "My Profile - LOD" }).Problems().Any(p => p.Contains("not a plain name", StringComparison.Ordinal)), "a plain name passes");
+		using var f = new FakeMo2();
+		var setup = f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		setup.Root["name"] = @"..\..\Elsewhere";
+		setup.Save();
+		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+		Check(r.State == RunState.Failed && r.Folder == null && r.Verdict.Contains("not a plain name", StringComparison.Ordinal), "the run is refused before anything is made: " + r.Verdict);
+		Check(!Directory.EnumerateDirectories(f.Root, "*Elsewhere*", SearchOption.AllDirectories).Any(), "no folder of that name anywhere");
+	}
+
+	// a setup brought in from elsewhere starts no program of its own choosing and allows no add-on for the player
+	static void T_AnImportedSetupStartsNoProgramOfItsOwn()
+	{
+		var s = Setup.FromJson(new JsonObject {
+			["mo2"] = new JsonObject { ["exe"] = @"C:\Elsewhere\ModOrganizer.exe", ["profile"] = "Test" },
+			[AddOns.NoAskSetting] = true,
+			["steps"] = new JsonArray(
+				new JsonObject { ["step"] = "grass", ["settings"] = new JsonObject { ["fasterngio_exe"] = @"C:\Elsewhere\FasterNGIO.exe", ["fasterngio_args"] = "--world all", ["output_mod"] = "Grass" } },
+				new JsonObject { ["step"] = "acmos", ["settings"] = new JsonObject { ["exe"] = @"C:\Elsewhere\acmos.exe", ["output_mod"] = "Roads" } },
+				new JsonObject { ["step"] = "treelodgen", ["settings"] = new JsonObject { ["launcher"] = @"C:\Elsewhere\run.cmd", ["output_mod"] = "Trees" } },
+				new JsonObject { ["step"] = AddOns.KeyPrefix + "Their Patcher", ["settings"] = new JsonObject { ["sha"] = "ABCD", ["output_mod"] = "Theirs" } }),
+		});
+		var gone = s.TakeOutWhatStartsPrograms();
+		Equal("", Setup.Str((JsonObject)s.Root["mo2"]!, "exe"), "Mod Organizer's program is the player's to set");
+		Check(s.Root[AddOns.NoAskSetting] == null, "the add-on question is not switched off for them");
+		var steps = s.Steps;
+		Check(steps.All(st => Setup.Str(st.Settings, "exe") == null && Setup.Str(st.Settings, "fasterngio_exe") == null && Setup.Str(st.Settings, "launcher") == null), "no step starts a program it names");
+		Check(steps.Single(st => st.Key.StartsWith(AddOns.KeyPrefix, StringComparison.Ordinal)).Settings["sha"] == null, "the add-on is asked about again");
+		Check(steps.All(st => Setup.Str(st.Settings, "output_mod") != null) && Setup.Str(steps[0].Settings, "fasterngio_args") == "--world all", "what is no program stays");
+		Equal(6, gone.Count, "each named: " + string.Join(" | ", gone));
+		// and every folder or file of the PC it came from: a step empties its output folder into the run's backup, and on this PC
+		// that path could be any folder of the player's
+		var paths = Setup.FromJson(new JsonObject {
+			["backups"] = @"D:\Their\Backups",
+			["steps"] = new JsonArray(new JsonObject { ["step"] = "pandora", ["settings"] = new JsonObject { ["output_dir"] = @"C:\Users\them\Documents", ["output_mod"] = "Behaviours" } }),
+		});
+		var taken = SetupShare.TakeOutPaths(paths.Root);
+		Check(paths.Root["backups"] == null && Setup.Str(paths.Steps[0].Settings, "output_dir") == null && Setup.Str(paths.Steps[0].Settings, "output_mod") == "Behaviours",
+			"its folders are taken out, its mod names stay");
+		Check(taken.Count == 2 && taken.All(t => t.Contains("the PC it came from", StringComparison.Ordinal)), "each named: " + string.Join(" | ", taken));
+	}
+
+	// a whole number a setup gives is a number the program can hold, or it is not given
+	static void T_ASetupNumberOutOfRangeIsNoNumber()
+	{
+		var o = new JsonObject { ["big"] = 1e12, ["small"] = -1e12, ["plain"] = 5.0, ["whole"] = 7 };
+		Equal<int?>(null, Setup.Int(o, "big"), "too big");
+		Equal<int?>(null, Setup.Int(o, "small"), "too small");
+		Equal<int?>(5, Setup.Int(o, "plain"), "a whole number written as 5.0");
+		Equal<int?>(7, Setup.Int(o, "whole"), "a whole number");
+	}
+
+	// Mod Organizer's own entries (the game's, a Creation Club file's) are in the list and are never switched: said so
+	static void T_ModOrganizersOwnEntriesAreNeverSwitched()
+	{
+		using var f = new FakeMo2();
+		var p = ProfileOf(f);
+		try {
+			p.SetMods(["DLC: Dawnguard"], []);
+			Check(false, "it was switched");
+		} catch (KeyNotFoundException e) {
+			Check(e.Message.Contains("Mod Organizer's own entries", StringComparison.Ordinal), "said as what it is, not as missing: " + e.Message);
+		}
+		Check(p.States()["DLC: Dawnguard"] == '*', "left as it was");
 	}
 
 	static void T_EveryRefusalIsInTheCatalog()

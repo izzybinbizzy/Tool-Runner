@@ -497,11 +497,17 @@ public static class Cli
 			return 1;
 		}
 		var commands = s.TakeOutCommands();
+		var programs = s.TakeOutWhatStartsPrograms();
+		programs.AddRange(SetupShare.TakeOutPaths(s.Root));
 		Directory.CreateDirectory(AppPaths.Setups);
 		s.Save(dst);
 		Console.WriteLine("setup written: " + dst);
 		if (commands > 0) {
 			Console.WriteLine($"its {commands} own command(s) to run before or after a run were taken out - a setup from elsewhere runs no command on this PC; add your own in Settings");
+		}
+		if (programs.Count > 0) {
+			// a setup from elsewhere starts no program the player did not point it at, and allows no add-on for them
+			Console.WriteLine("taken out - set your own in Settings: " + string.Join("; ", programs));
 		}
 		return 0;
 	}

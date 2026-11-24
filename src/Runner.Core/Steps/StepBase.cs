@@ -293,6 +293,31 @@ public static class StepKit
 				yield return new Issue(a_step, true, $"{a_label} {a_dir} is in (or holds) {what} - use an empty folder of its own");
 			}
 		}
+		if (KeptFolder(a_dir) is { } kept) {
+			yield return new Issue(a_step, true, $"{a_label} {a_dir} is (or holds) {kept} - a run empties this folder into its backup: use an empty folder of its own");
+		}
+	}
+
+	// A folder a run empties into its backup is a folder of the tool's own: never a whole drive, nor a folder Windows or the
+	// player keeps other things in (the documents, the desktop, the programs) - nor one that holds such a folder. A folder
+	// inside one of those is fine. Returns what the folder is, in words, or null
+	public static string? KeptFolder(string a_dir)
+	{
+		var full = Path.GetFullPath(a_dir);
+		if (Path.GetPathRoot(full) is { Length: > 0 } root && Files.SamePath(root, full)) {
+			return "a whole drive";
+		}
+		var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+		(string Dir, string What)[] kept = [
+			(home, "your user folder"), (Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "your desktop"),
+			(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "your Documents folder"), (home == "" ? "" : Path.Combine(home, "Downloads"), "your Downloads folder"),
+			(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "your Pictures folder"), (Environment.GetFolderPath(Environment.SpecialFolder.MyMusic), "your Music folder"),
+			(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "your Videos folder"), (Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Windows' own folder"),
+			(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "the Program Files folder"), (Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "the Program Files folder"),
+			(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Windows' program data folder"),
+			(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "your app-data folder"), (Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "your app-data folder"),
+		];
+		return kept.FirstOrDefault(k => k.Dir != "" && Files.IsUnder(k.Dir, full)).What;
 	}
 
 	// a mod's new output is complete: its parked old output stays in the backup and is never put back

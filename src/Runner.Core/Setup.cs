@@ -143,7 +143,7 @@ public sealed class Setup
 		a_o[a_key] is JsonValue v && v.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s) ? s : null;
 
 	public static int? Int(JsonObject a_o, string a_key) =>
-		a_o[a_key] is JsonValue v ? (v.TryGetValue<int>(out var i) ? i : v.TryGetValue<double>(out var d) ? (int)d : null) : null;
+		a_o[a_key] is JsonValue v ? (v.TryGetValue<int>(out var i) ? i : v.TryGetValue<double>(out var d) && d >= int.MinValue && d <= int.MaxValue ? (int)d : null) : null;
 
 	public static double? Num(JsonObject a_o, string a_key) =>
 		a_o[a_key] is JsonValue v ? (v.TryGetValue<double>(out var d) ? d : v.TryGetValue<int>(out var i) ? i : null) : null;
@@ -210,6 +210,10 @@ public sealed class Setup
 		foreach (var (where, name) in ModNames().Where(m => !PlainName(m.Name)).DistinctBy(m => m.Name).Take(5)) {
 			p.Add($"{where} is not a mod's name (one plain folder name: no \\ / : and no \"..\"): {name}");
 		}
+		// its own name names the run's folder and its backup: with a folder part in it those landed outside the program's data
+		if (Str(Root, "name") is { } own && !PlainName(own)) {
+			p.Add($"the setup's name is not a plain name (one folder name: no \\ / : * ? \" < > | and no \"..\"): {own}");
+		}
 		if (Root["placement"] is JsonArray places && places.Any(e => e is not JsonArray a || !IsPlace(a))) {
 			p.Add("the setup's \"placement\" holds an entry that is not [plugin, after this plugin]");
 		}
@@ -261,6 +265,39 @@ public sealed class Setup
 		Root.Remove("beforeRun");
 		Root.Remove("afterRun");
 		return n;
+	}
+
+	// the files Windows starts as a program
+	static readonly string[] ProgramKinds = [".exe", ".bat", ".cmd", ".com", ".ps1", ".vbs"];
+
+	// A setup that came from somewhere else never starts a program on this PC that the player did not point it at, and never
+	// allows an add-on for them: every program path it names is taken out (Mod Organizer's and each step's), and with it every
+	// add-on step's approval and the setting that turns the add-on question off. Returns what went, in words
+	public List<string> TakeOutWhatStartsPrograms()
+	{
+		var gone = new List<string>();
+		static bool Program(string a_key, string a_value) =>
+			a_key is "exe" || a_key.EndsWith("_exe", StringComparison.Ordinal) ||
+			ProgramKinds.Any(x => a_value.Trim().Trim('"').EndsWith(x, StringComparison.OrdinalIgnoreCase));
+		if (Root["mo2"] is JsonObject mo2 && Str(mo2, "exe") is { Length: > 0 }) {
+			mo2["exe"] = "";
+			gone.Add("which Mod Organizer it starts (mo2.exe)");
+		}
+		if (Root.Remove(AddOns.NoAskSetting)) {
+			gone.Add($"the setting that allows every add-on without asking ({AddOns.NoAskSetting})");
+		}
+		foreach (var s in Steps) {
+			foreach (var (key, value) in s.Settings.ToList()) {
+				if (value is JsonValue v && v.TryGetValue<string>(out var text) && text.Trim() != "" && Program(key, text)) {
+					s.Settings.Remove(key);
+					gone.Add($"the program {StepCatalog.Name(s.Key)} starts ({key})");
+				}
+			}
+			if (s.Key.StartsWith(AddOns.KeyPrefix, StringComparison.Ordinal) && s.Settings.Remove("sha")) {
+				gone.Add($"the approval of the add-on {s.Key[AddOns.KeyPrefix.Length..]} (allow it again in Settings > Tools > ADD-ONS)");
+			}
+		}
+		return gone;
 	}
 
 	// the folders the setup itself names (empty ones included): its backups, its scratch, each step's output (a_running: only the

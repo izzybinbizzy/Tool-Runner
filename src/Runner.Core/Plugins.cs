@@ -24,7 +24,7 @@ public static class Plugins
 		var outList = new List<string>();
 		using var fs = new FileStream(a_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
 		var head = new byte[24];
-		if (fs.Read(head, 0, 24) < 24 || Encoding.ASCII.GetString(head, 0, 4) != "TES4") {
+		if (fs.ReadAtLeast(head, 24, false) < 24 || Encoding.ASCII.GetString(head, 0, 4) != "TES4") {
 			return outList;
 		}
 		var size = BitConverter.ToUInt32(head, 4);
@@ -32,7 +32,8 @@ public static class Plugins
 			return outList;
 		}
 		var data = new byte[size];
-		var read = fs.Read(data, 0, (int)size);
+		// one Read may stop short of what was asked (a network drive): read until the header is whole or the file ends
+		var read = fs.ReadAtLeast(data, data.Length, false);
 		int i = 0;
 		while (i + 6 <= read) {
 			var type = Encoding.ASCII.GetString(data, i, 4);
@@ -53,11 +54,11 @@ public static class Plugins
 		var outSet = new HashSet<string>(StringComparer.Ordinal);
 		using var fs = new FileStream(a_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
 		var head = new byte[24];
-		if (fs.Read(head, 0, 24) < 24 || Encoding.ASCII.GetString(head, 0, 4) != "TES4") {
+		if (fs.ReadAtLeast(head, 24, false) < 24 || Encoding.ASCII.GetString(head, 0, 4) != "TES4") {
 			return outSet;
 		}
 		fs.Seek(BitConverter.ToUInt32(head, 4), SeekOrigin.Current);
-		while (fs.Position + 24 <= fs.Length && fs.Read(head, 0, 24) == 24) {
+		while (fs.Position + 24 <= fs.Length && fs.ReadAtLeast(head, 24, false) == 24) {
 			var size = BitConverter.ToUInt32(head, 4);
 			if (Encoding.ASCII.GetString(head, 0, 4) != "GRUP" || size < 24) {
 				break;
@@ -75,11 +76,11 @@ public static class Plugins
 		var outSet = new HashSet<string>(StringComparer.Ordinal);
 		using var fs = new FileStream(a_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
 		var head = new byte[24];
-		if (fs.Read(head, 0, 24) < 24 || Encoding.ASCII.GetString(head, 0, 4) != "TES4") {
+		if (fs.ReadAtLeast(head, 24, false) < 24 || Encoding.ASCII.GetString(head, 0, 4) != "TES4") {
 			return outSet;
 		}
 		fs.Seek(BitConverter.ToUInt32(head, 4), SeekOrigin.Current);
-		while (fs.Position + 24 <= fs.Length && fs.Read(head, 0, 24) == 24) {
+		while (fs.Position + 24 <= fs.Length && fs.ReadAtLeast(head, 24, false) == 24) {
 			var size = BitConverter.ToUInt32(head, 4);
 			if (Encoding.ASCII.GetString(head, 0, 4) != "GRUP" || size < 24) {
 				break;
@@ -89,7 +90,7 @@ public static class Plugins
 			var end = fs.Position - 24 + size;
 			if ((label == "STAT" && !outSet.Contains("TREE")) || (label == "WRLD" && a_land && !outSet.Contains("LAND"))) {
 				// inside the group: a nested group's header is stepped into, a record is skipped by its data size
-				while (fs.Position + 24 <= end && fs.Read(head, 0, 24) == 24) {
+				while (fs.Position + 24 <= end && fs.ReadAtLeast(head, 24, false) == 24) {
 					var type = Encoding.ASCII.GetString(head, 0, 4);
 					if (type == "GRUP") {
 						continue;
@@ -135,7 +136,7 @@ public static class Plugins
 			}
 			using var fs = new FileStream(a_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
 			var h = new byte[12];
-			var flags = fs.Read(h, 0, 12) == 12 && Encoding.ASCII.GetString(h, 0, 4) == "TES4" ? BitConverter.ToUInt32(h, 8) : 0;
+			var flags = fs.ReadAtLeast(h, 12, false) == 12 && Encoding.ASCII.GetString(h, 0, 4) == "TES4" ? BitConverter.ToUInt32(h, 8) : 0;
 			// (never without end: a load order has a few thousand plugins at most)
 			if (s_flags.Count > 20000) {
 				s_flags.Clear();

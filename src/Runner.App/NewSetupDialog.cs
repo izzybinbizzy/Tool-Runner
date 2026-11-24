@@ -16,6 +16,7 @@ public static class NewSetupDialog
 			Owner = a_owner, Title = "New setup", Width = Math.Min(640, room.Width), SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner,
 			Background = Brushes2.Get("Panel"), Foreground = Brushes2.Get("Text"), ResizeMode = ResizeMode.CanResize, MinWidth = UiState.Least(480, room.Width),
 			MinHeight = UiState.Least(320, room.Height), ShowInTaskbar = false,
+			FontFamily = (System.Windows.Media.FontFamily)a_owner.FindResource("UiFont"), FontSize = (double)a_owner.FindResource("SizeBody"),
 		};
 		var stack = new StackPanel { Margin = new Thickness(22) };
 		stack.Children.Add(new TextBlock { Text = "NEW SETUP", Style = (Style)a_owner.FindResource("H1"), Margin = new Thickness(0, 0, 0, 6), FontSize = (double)a_owner.FindResource("SizeHeading1") });
@@ -154,7 +155,14 @@ public static class NewSetupDialog
 					var line = new DockPanel { Margin = new Thickness(0, 2, 0, 2) };
 					if (r.State == ToolFinder.Found.Missing) {
 						var page = new Button { Content = "Its page", Style = (Style)a_owner.FindResource("Ghost"), Margin = new Thickness(8, 0, 0, 0), ToolTip = r.Tool.Page };
-						page.Click += (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(r.Tool.Page) { UseShellExecute = true });
+						page.Click += (_, _) => {
+							try {
+								System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(r.Tool.Page) { UseShellExecute = true })?.Dispose();
+							} catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) {
+								note.Text = $"{r.Tool.Name}'s page did not open ({e.Message}): {r.Tool.Page}";
+								note.Foreground = Brushes2.Get("Bad");
+							}
+						};
 						DockPanel.SetDock(page, Dock.Right);
 						line.Children.Add(page);
 					}
@@ -199,6 +207,12 @@ public static class NewSetupDialog
 		create.Click += async (_, _) => {
 			if (profile.SelectedItem is not string p || name.Text.Trim() == "") {
 				note.Text = "Pick Mod Organizer, a profile and a name.";
+				note.Foreground = Brushes2.Get("Bad");
+				return;
+			}
+			// (the name is a folder's name too - a run's records and backups: one no run would take is said here, not at the first run)
+			if (!Setup.PlainName(Safe(name.Text.Trim()))) {
+				note.Text = $"\"{name.Text.Trim()}\" cannot be a setup's name: Windows takes no folder of that name. Give it another one.";
 				note.Foreground = Brushes2.Get("Bad");
 				return;
 			}

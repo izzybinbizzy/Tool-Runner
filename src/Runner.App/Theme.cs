@@ -382,7 +382,7 @@ public static class Theme
 		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"];
 
 	// A theme's name as a file's name: every character Windows refuses in a name taken out (a theme may be called "Ocean: dark",
-	// and a slash in a name would put the copy outside the Themes folder), and a name Windows keeps for a device given a mark in
+	// and a slash in a name would put the copy outside the Themes folder), and a name Windows keeps for a device given a word in
 	// front ("CON.demo copy.json" is still the console, whatever follows the dot)
 	public static string FileSafe(string a_title)
 	{
@@ -390,8 +390,13 @@ public static class Theme
 		if (safe.Length == 0) {
 			return "Theme";
 		}
-		return DeviceNames.Contains(safe.Split('.')[0].Trim(), StringComparer.OrdinalIgnoreCase) ? "_" + safe : safe;
+		return DeviceNames.Contains(safe.Split('.')[0].Trim(), StringComparer.OrdinalIgnoreCase) ? "Theme " + safe : safe;
 	}
+
+	// A font is named by its family ("Segoe UI", or several with commas between them). Windows Presentation Foundation also takes
+	// a place to load one from - a folder, a share, an address, with "#" before the family - and a theme file that comes from
+	// someone else would then have the window read fonts from wherever it names: a value that holds any part of a place is no name
+	public static bool PlainFont(string a_font) => a_font.Trim().Length > 0 && a_font.IndexOfAny(['#', '/', '\\', ':']) < 0;
 
 	// null: a later pick took this one's place, and nothing was applied
 	public static async Task<List<string>?> ApplyAsync(string a_name)
@@ -494,7 +499,11 @@ public static class Theme
 		if (a_t["fonts"] is JsonObject fonts) {
 			foreach (var (name, key) in FontKeys) {
 				if (Value(fonts[name]) is { Length: > 0 } f) {
-					res[key] = new FontFamily(f);
+					if (PlainFont(f)) {
+						res[key] = new FontFamily(f);
+					} else {
+						a_problems.Add($"fonts.{name}: \"{f}\" must be a font's name (Segoe UI), not a file, a folder or an address");
+					}
 				}
 			}
 		}

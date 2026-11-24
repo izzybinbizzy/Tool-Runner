@@ -49,6 +49,8 @@ public sealed class GrassStep : IStep
 		if ((a_s.Str("by") ?? "fasterngio") == "fasterngio") {
 			if (a_s.Str("fasterngio_exe") is not { Length: > 0 } exe || !File.Exists(exe)) {
 				yield return new Issue(Key, true, "FasterNGIO's program is not found (set \"fasterngio_exe\")");
+			} else if (WrapperRefuses(exe, a_s.Str("fasterngio_args")) is { } refused) {
+				yield return new Issue(Key, true, refused);
 			}
 		} else if (Setup.Bool(a_c.Setup.Root, "gameFolderWrites") != true) {
 			yield return new Issue(Key, true, "the game route needs NGIO's PrecacheGrass.txt in the game folder, and this setup does not allow writing there");
@@ -71,6 +73,15 @@ public sealed class GrassStep : IStep
 	// the step failed with "exit code 1" and no cause)
 	// The exit code is kept first and a line break written before it: FasterNGIO's last line may end without one (a progress
 	// line), and the wrapper's own line glued to it would never be read as the end
+	// The program and its arguments go into the wrapper's command line as they are: a character there that cmd reads as a
+	// command of its own would run something else than FasterNGIO. Refused, never escaped - a setup file can come from anyone
+	public static string? WrapperRefuses(string a_exe, string? a_args) =>
+		a_exe.IndexOfAny(['&', '|', '<', '>', '^', '"', '\r', '\n']) >= 0
+			? "FasterNGIO's program path holds a character that the command line it runs through would read as a command of its own (& | < > ^ \" or a line break) - move FasterNGIO to a folder whose path has none"
+			: (a_args ?? "").IndexOfAny(['&', '|', '<', '>', '^', '\r', '\n']) >= 0
+				? "FasterNGIO's arguments hold a character that the command line it runs through would read as a command of its own (& | < > ^ or a line break) - take it out of the step's \"fasterngio_args\""
+				: null;
+
 	public static string WrapperText(string a_exe, string a_args, string a_outFile) =>
 		$"@echo off\r\nchcp 65001 >nul\r\necho started %DATE% %TIME% > \"{a_outFile}\"\r\n\"{a_exe.Replace("%", "%%", StringComparison.Ordinal)}\" {a_args} >> \"{a_outFile}\" 2>&1\r\n" +
 		$"set TRCODE=%ERRORLEVEL%\r\necho.>> \"{a_outFile}\"\r\necho exit code %TRCODE% >> \"{a_outFile}\"\r\n";
@@ -98,6 +109,9 @@ public sealed class GrassStep : IStep
 		var outFile = Path.Combine(work, "output.txt");
 		Files.TryDelete(outFile);
 		var cmd = Path.Combine(work, "run.cmd");
+		if (WrapperRefuses(exe, a_s.Str("fasterngio_args")) is { } refused) {
+			throw new StepFailedException(refused);
+		}
 		var args = (a_s.Str("fasterngio_args") ?? "--world all").Replace("%", "%%", StringComparison.Ordinal);
 		Files.WriteAtomic(cmd, WrapperText(exe, args, outFile), new System.Text.UTF8Encoding(false));
 		var image = Path.GetFileName(exe);
@@ -314,8 +328,11 @@ public sealed class ShaderStep : IStep
 	// fingerprint a cache had before layers were known, so an older stamp still reads)
 	// a_winners: false = the fingerprint as it was before it knew which mod wins a shader file two mods ship (an older stamp)
 	// a_bootOnly: false = the fingerprint as it was while a settings file counted with every value in it (an older stamp)
+	// a_metaVersion: false = the fingerprint as it was while the shader mod's meta.ini counted whole (an older stamp). Mod
+	// Organizer writes its update checks into that file (lastNexusQuery, lastNexusUpdate, endorsed): counted whole, a check
+	// for updates made the next run compile the whole cache again
 	public static string Fingerprint(Mo2Instance a_mo2, Cache a_c, Profile? a_profile = null, IReadOnlyCollection<string>? a_otherCaches = null,
-		IReadOnlyCollection<string>? a_layers = null, bool a_winners = true, bool a_bootOnly = true)
+		IReadOnlyCollection<string>? a_layers = null, bool a_winners = true, bool a_bootOnly = true, bool a_metaVersion = true)
 	{
 		using var sha = SHA256.Create();
 		void Add(string a_file)
@@ -361,6 +378,20 @@ public sealed class ShaderStep : IStep
 			var line = System.Text.Encoding.UTF8.GetBytes(Path.GetFileName(a_file).ToLowerInvariant() + "|boot|" + boot);
 			sha.TransformBlock(line, 0, line.Length, null, 0);
 		}
+		// Mod Organizer's record of the mod by what says which version is installed: its version, its download's file name, its
+		// Nexus number and file. What Mod Organizer itself writes into it later (update checks, an endorsement, notes) is no part
+		// of what the cache is built from
+		void AddMeta(string a_file)
+		{
+			if (!File.Exists(a_file)) {
+				return;
+			}
+			var keep = Files.ReadSharedText(a_file).Split('\n').Select(l => l.Trim())
+				.Where(l => l.StartsWith("version=", StringComparison.OrdinalIgnoreCase) || l.StartsWith("installationFile=", StringComparison.OrdinalIgnoreCase) ||
+					l.StartsWith("modid=", StringComparison.OrdinalIgnoreCase) || l.Contains("\\fileid=", StringComparison.OrdinalIgnoreCase));
+			var line = System.Text.Encoding.UTF8.GetBytes("meta.ini|version|" + string.Join("|", keep));
+			sha.TransformBlock(line, 0, line.Length, null, 0);
+		}
 		// each shader file by the mods that ship it: where two do, which one wins is part of what the cache is built from
 		var shippedBy = new Dictionary<string, List<string>>(StringComparer.Ordinal);
 		void AddShaders(string a_mod)
@@ -389,7 +420,11 @@ public sealed class ShaderStep : IStep
 			foreach (var f in Directory.EnumerateFiles(dir, "*.dll", SearchOption.AllDirectories).Order(StringComparer.OrdinalIgnoreCase)) {
 				Add(f);
 			}
-			Add(Path.Combine(dir, "meta.ini"));
+			if (a_metaVersion) {
+				AddMeta(Path.Combine(dir, "meta.ini"));
+			} else {
+				Add(Path.Combine(dir, "meta.ini"));
+			}
 			foreach (var f in Directory.EnumerateFiles(dir, "Settings*.json", SearchOption.AllDirectories).Order(StringComparer.OrdinalIgnoreCase)) {
 				AddSettings(f);
 			}
@@ -412,7 +447,11 @@ public sealed class ShaderStep : IStep
 					Add(f);
 				}
 			}
-			Add(Path.Combine(a_mo2.ModDir(layer), "meta.ini"));
+			if (a_metaVersion) {
+				AddMeta(Path.Combine(a_mo2.ModDir(layer), "meta.ini"));
+			} else {
+				Add(Path.Combine(a_mo2.ModDir(layer), "meta.ini"));
+			}
 			AddShaders(layer);
 		}
 		if (a_profile != null) {
@@ -493,7 +532,8 @@ public sealed class ShaderStep : IStep
 			// The next build stamps it the new way
 			var winners = o?["winners"] is JsonValue wv && wv.TryGetValue<bool>(out var w) && w;
 			var bootOnly = o?["settings"]?.ToString() == StampSettings;
-			return o?["fingerprint"]?.ToString() == Fingerprint(a_mo2, a_c, a_profile, a_otherCaches, a_layers, winners, bootOnly) ? null :
+			var metaVersion = o?["meta"]?.ToString() == StampMeta;
+			return o?["fingerprint"]?.ToString() == Fingerprint(a_mo2, a_c, a_profile, a_otherCaches, a_layers, winners, bootOnly, metaVersion) ? null :
 				"what it is built from changed since its build: the shader mod or its version, a shader file of a ticked mod, " +
 				(bootOnly ? "the features switched off at the game's start" : "a settings file of the shader mod") + ", or the game's version";
 		} catch (Exception e) when (e is System.Text.Json.JsonException or InvalidOperationException or FormatException) {
@@ -503,6 +543,9 @@ public sealed class ShaderStep : IStep
 
 	// how a stamp says its fingerprint takes a settings file by its boot part only
 	const string StampSettings = "boot";
+
+	// how a stamp says its fingerprint takes the shader mod's meta.ini by what names the installed version only
+	const string StampMeta = "version";
 
 	// one cache to build: its switches for the compile, the other ticked shader mods it is built together with (Layers), and
 	// whether it is the cache the profile itself runs
@@ -860,7 +903,7 @@ public sealed class ShaderStep : IStep
 		// the cache is built and kept by now: a stamp that cannot be written only means it is built again next time
 		try {
 			Files.WriteAtomic(StampFile(a_ctx.Mo2, c), new JsonObject { ["fingerprint"] = Fingerprint(a_ctx.Mo2, c, a_ctx.Profile, a_otherCaches, a_b.Layers), ["built"] = DateTime.Now.ToString("O"), ["files"] = count,
-				["verified"] = verified, ["winners"] = true, ["settings"] = StampSettings }.ToJsonString());
+				["verified"] = verified, ["winners"] = true, ["settings"] = StampSettings, ["meta"] = StampMeta }.ToJsonString());
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			a_ctx.Log.Warn($"the {c.ShaderMod} cache is built, but its record could not be written ({e.Message}) - the next run builds it again");
 		}

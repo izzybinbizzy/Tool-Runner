@@ -177,8 +177,12 @@ public static class ProgramUpdate
 			throw new InvalidOperationException("the release's download does not come from the program's own repository - not taken");
 		}
 		var size = asset["size"] is JsonValue sv && sv.TryGetValue<long>(out var n) ? n : 0;
-		var digest = asset["digest"]?.ToString();
-		return new Release(version, listed, url, size, digest != null && digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase) ? digest[7..].Trim() : null);
+		// GitHub's own check sum of the file is what proves the download is the file the release holds: without one, the program
+		// is never replaced from inside - the release's page has it
+		if (asset["digest"]?.ToString() is not { } digest || !digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase) || digest[7..].Trim().Length != 64) {
+			throw new InvalidOperationException($"the release {version} lists no check sum for its download, so it is not installed from here - take it from its page");
+		}
+		return new Release(version, listed, url, size, digest[7..].Trim());
 	}
 
 	// The download fetched into the data folder's Updates and checked; returns the zip. Nothing is left behind when it fails.
@@ -369,7 +373,9 @@ public static class ProgramUpdate
 			return;
 		}
 		// only what an install itself names "(old)" or keeps in Updates: a record edited by hand removes nothing else
-		var left = was.Old.Where(f => Path.GetFileNameWithoutExtension(f).EndsWith(" (old)", StringComparison.Ordinal)).ToList();
+		// - and only in a folder that holds this program: the record names files anywhere on the PC
+		var left = was.Old.Where(f => Path.GetFileNameWithoutExtension(f).EndsWith(" (old)", StringComparison.Ordinal) &&
+			Path.GetDirectoryName(f) is { Length: > 0 } dir && System.IO.File.Exists(Path.Combine(dir, ProgramFile))).ToList();
 		foreach (var f in left.ToList()) {
 			TryDelete(f);
 			if (!System.IO.File.Exists(f)) {

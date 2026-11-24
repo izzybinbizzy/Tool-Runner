@@ -228,7 +228,7 @@ public static class SettingsPanel
 		}
 	}
 
-	static string Label(string a_key) => Labels.TryGetValue(a_key, out var l) ? l : char.ToUpperInvariant(a_key[0]) + a_key[1..].Replace('_', ' ');
+	static string Label(string a_key) => Labels.TryGetValue(a_key, out var l) ? l : a_key.Length == 0 ? "" : char.ToUpperInvariant(a_key[0]) + a_key[1..].Replace('_', ' ');
 
 	// his checklist 471: the program's own new versions - kept for the whole program, saved the moment it is ticked
 	static void NewVersions(MainWindow a_w, StackPanel a_stack)
@@ -356,7 +356,7 @@ public static class SettingsPanel
 				if (Ask.Show(a_w, "Shared copy made", $"It is ready: {Path.GetFileName(file)}\n\nWhat the other player sets themselves:\n" +
 				    (gone.Count == 0 ? "nothing" : string.Join("\n", gone.Select(g => "- " + g))) + "\n\nThey bring it in with the import command (see the readme).",
 				    "Show the file", "Close")) {
-					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{file}\"") { UseShellExecute = true });
+					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{file}\"") { UseShellExecute = true })?.Dispose();
 				}
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or System.Text.Json.JsonException or InvalidDataException) {
 				a_vm.Say("The shared copy could not be made: " + e.Message, "bad");
@@ -1386,8 +1386,12 @@ public static class SettingsPanel
 					a_obj.Remove(a_key);
 					return null;
 				}
-				if (!double.TryParse(t.Text.Trim().Replace(',', '.'), System.Globalization.NumberStyles.Float, InvariantCulture, out var d) || d < 0) {
+				if (!double.TryParse(t.Text.Trim().Replace(',', '.'), System.Globalization.NumberStyles.Float, InvariantCulture, out var d) || !(d >= 0)) {
 					return $"{a_label}: needs a number, 0 or more";
+				}
+				// (a whole number is kept as one: past what one holds, the number kept would not be the number typed)
+				if (d > 2_000_000_000) {
+					return $"{a_label}: needs a number below 2,000,000,000";
 				}
 				if (d < 1 && a_key.EndsWith("_min", StringComparison.Ordinal)) {
 					return $"{a_label}: needs 1 minute or more";

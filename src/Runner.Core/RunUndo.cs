@@ -77,6 +77,31 @@ public static class RunUndo
 				if (files.Count != want.Count || files.Any(e => !want.TryGetValue(e.FullName, out var n) || n != e.Length)) {
 					throw new InvalidDataException($"the zip holds {files.Count} of {want.Count} files");
 				}
+				// every file read back out of the zip and held against the one it was packed from, before that one is erased: a
+				// list that matches says nothing of the bytes
+				done = 0;
+				var other = new byte[block.Length];
+				foreach (var e in files) {
+					a_ct.ThrowIfCancellationRequested();
+					using var packed = e.Open();
+					using var from = new FileStream(Path.Combine(dir, e.FullName), FileMode.Open, FileAccess.Read, FileShare.Read, block.Length, FileOptions.SequentialScan);
+					while (true) {
+						a_ct.ThrowIfCancellationRequested();
+						var n = packed.ReadAtLeast(block, block.Length, false);
+						var m = from.ReadAtLeast(other, other.Length, false);
+						if (n != m || !block.AsSpan(0, n).SequenceEqual(other.AsSpan(0, m))) {
+							throw new InvalidDataException($"{e.FullName} did not read back out of the zip as it was packed");
+						}
+						if (n == 0) {
+							break;
+						}
+						done += n;
+						if (a_doing != null && said.Elapsed > TimeSpan.FromSeconds(2)) {
+							said.Restart();
+							a_doing($"checking the packed old outputs: {(bytes == 0 ? 100 : done * 100 / bytes)} %");
+						}
+					}
+				}
 			}
 			Files.Move(part, zip, true);
 		} catch (OperationCanceledException) {
