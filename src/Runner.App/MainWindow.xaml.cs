@@ -601,8 +601,9 @@ public partial class MainWindow : Window
 	{
 		LogBox.Visibility = a_show ? Visibility.Visible : Visibility.Collapsed;
 		Follow.Visibility = a_show ? Visibility.Visible : Visibility.Collapsed;
-		LogHide.Content = a_show ? "Hide" : "Show";
-		LogHide.ToolTip = a_show ? "Hides the log here; the cards above take its room" : "Shows the log here again";
+		// (set after the window was put into its language: said in it here)
+		LogHide.Content = WindowWords.Word(a_show ? "Hide" : "Show");
+		LogHide.ToolTip = WindowWords.Word(a_show ? "Hides the log here; the cards above take its room" : "Shows the log here again");
 		NowRow.Height = a_show ? GridLength.Auto : new GridLength(1, GridUnitType.Star);
 		// With the cards' room theirs to fill, they are at least as tall as that room (the run's card takes what is over);
 		// holding more than fits, they scroll as one. With the log shown they are as tall as they need
@@ -772,16 +773,16 @@ public partial class MainWindow : Window
 		_logWasHere = LogHere;
 		ShowLogHere(false);
 		LogHide.IsEnabled = false;
-		LogPop.Content = "_Bring back";
-		LogPop.ToolTip = "Closes the log's own window and shows the log here again (Ctrl+L brings that window forward)";
+		LogPop.Content = WindowWords.Word("_Bring back");
+		LogPop.ToolTip = WindowWords.Word("Closes the log's own window and shows the log here again (Ctrl+L brings that window forward)");
 		w.PreviewKeyDown += OnKeys;
 		w.Closed += (_, _) => {
 			_logWindow = null;
 			_logOut = null;
 			_followOut = null;
 			LogHide.IsEnabled = true;
-			LogPop.Content = "_Pop out";
-			LogPop.ToolTip = "The log in a window of its own: size it, move it to another screen (Ctrl+L)";
+			LogPop.Content = WindowWords.Word("_Pop out");
+			LogPop.ToolTip = WindowWords.Word("The log in a window of its own: size it, move it to another screen (Ctrl+L)");
 			if (!_closingAll) {
 				ShowLogHere(_logWasHere);
 			}
