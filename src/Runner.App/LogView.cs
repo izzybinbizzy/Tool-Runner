@@ -125,7 +125,8 @@ public sealed class LogView : RichTextBox
 	public static string Mark(string a_line)
 	{
 		var at = a_line.IndexOf("  ", StringComparison.Ordinal);
-		if (at < 0) {
+		// (only right after the time at a line's start, as the search reads it: two spaces further in are the line's own words)
+		if (at < 0 || at > 12) {
 			return "";
 		}
 		var rest = a_line.AsSpan(at + 2);

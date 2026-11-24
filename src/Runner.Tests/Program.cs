@@ -41,6 +41,9 @@ public static class Program
 		InGame.FreeBytes = _ => 1L << 50;
 		DiskForecast.Real = DiskForecast.Real with { Free = _ => 1L << 50 };
 		SystemChecks.SteamRunning = () => false;
+		// nor this PC's own data: the tests' data folder stands beside them before anything asks for one, so an app-data
+		// folder this PC chose for every copy of the program is never taken for theirs
+		Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory, Brand.Name + " Data"));
 		var tests = typeof(Program).GetMethods(System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)
 			.Where(m => m.Name.StartsWith("T_", StringComparison.Ordinal) && m.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)).OrderBy(m => m.MetadataToken);
 		foreach (var t in tests) {
@@ -5712,8 +5715,6 @@ public static class Program
 		}
 	}
 
-	// the rename: the takeover's own check for an old copy, as the program runs it (no stand-in): a running program file under
-	// the old name keeps the old folder where it is; once it ends, the folder is taken over
 	// His 675 ("Yes; a"): the data kept in Windows' app-data folder - copied whole, its paths repointed, the old folder gone; never
 	// over a folder that holds anything, and a copy that fails leaves the data where it was
 	static void T_TheDataMovesWholeToTheAppDataFolder()
@@ -5777,6 +5778,8 @@ public static class Program
 		}
 	}
 
+	// the rename: the takeover's own check for an old copy, as the program runs it (no stand-in): a running program file under
+	// the old name keeps the old folder where it is; once it ends, the folder is taken over
 	static void T_DataFolderWaitsForARunningOldCopy()
 	{
 		var parent = Path.Combine(Path.GetTempPath(), "SUP old copy " + Guid.NewGuid().ToString("N"));
