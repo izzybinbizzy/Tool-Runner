@@ -50,7 +50,7 @@ public sealed class RunPreview
 		}
 		// the same list the run switches off (Runner.OutputsOff), only when a step past the shader caches runs
 		if (a_todo.Any(s => s.Key is not "shaders" and not "playsave")) {
-			var off = Runner.OutputsToTurnOff(a_setup, st);
+			var off = Runner.OutputsToTurnOff(a_setup, st, a_todo);
 			p.OffForTheRun.AddRange(off);
 			foreach (var (m, why) in profile.Dependents(off.Select(o => o.Mod))) {
 				p.OffForTheRun.Add((m, why));
@@ -90,10 +90,6 @@ public sealed class RunPreview
 				l.Add($"  - {u.Name}: \"{u.Mod}\"");
 				l.AddRange(OldOutput.Warning(u, ProfileName).Select(w => "      " + w));
 			}
-		}
-		if (Steps.Any(s => s.Key == "loot")) {
-			l.Add("");
-			l.Add("LOOT sorts your plugins. The new order stays; Undo the last run takes it back.");
 		}
 		if (Forecast?.Lines() is { Count: > 0 } room) {
 			l.Add("");

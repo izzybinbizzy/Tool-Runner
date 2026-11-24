@@ -117,14 +117,13 @@ public sealed class Journal
 	public bool StopAfterStep { get; set; }
 	public List<StepRecord> Steps { get; set; } = [];
 	public List<string> Built { get; set; } = [];
+	// set only by older versions, on a run that changed the plugin order: read so such a run still has an order for Undo to take
+	// back (and its backup still counts as one to keep); no run of this version sets it (CodeRabbit on pull request #40)
+	public bool OrderChanged { get; set; }
 	// the steps this run did not run because the setup uses their old output, each with that output's mod - on record before
 	// the run switches it back on at the step's place (OldOutput), and Done once it has; a put-back switches the ones that
 	// were carried out on like what the run built, and leaves the others as the profile had them before the run
 	public List<OldUse> UsedOld { get; set; } = [];
-	// LOOT's sort finished: its list is in this run's folder (LootStep.SortedFile) and every put-back of this run keeps it
-	public bool Sorted { get; set; }
-	// that sort left the plugin files other than they were before the run: Undo has an order to take back
-	public bool OrderChanged { get; set; }
 	public List<string> Retire { get; set; } = [];
 	public List<string> Added { get; set; } = [];
 	// Output mods that stood in the mods folder with no line in the mod list: the run gave each one its line before its

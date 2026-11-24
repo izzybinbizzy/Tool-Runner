@@ -427,7 +427,7 @@ public static class Runner
 						RunPhase(ctx, "cleansave", "the clean save, first half: to QASmoke with the profile as it is", () => InGame.Deactivate(ctx, new StepSettings(s.Key == "cleansave" ? s.Settings : setup.StepSettings("cleansave")!)));
 						control.Close();
 					}
-					OutputsOff(ctx);
+					OutputsOff(ctx, todo);
 					outputsOff = true;
 				}
 				if (outputsOff) {
@@ -726,12 +726,15 @@ public static class Runner
 	// every output the setup's steps make goes OFF before the first step (his rule 2026-10-02: no tool reads its own or a later
 	// step's output) - except the shader caches (no tool reads one, and with it off every game start recompiles) - plus every
 	// mod a step replaces and the setup's LOD outputs
-	static void OutputsOff(RunContext a_ctx)
+	static void OutputsOff(RunContext a_ctx, List<Setup.StepEntry> a_todo)
 	{
-		var off = OutputsToTurnOff(a_ctx.Setup, a_ctx.Profile.States()).Select(o => o.Mod).ToList();
+		var off = OutputsToTurnOff(a_ctx.Setup, a_ctx.Profile.States(), a_todo).Select(o => o.Mod).ToList();
 		// a ticked mod whose plugin needs one of those as a master goes off with them (a tool refuses a plugin with a missing master)
 		var deps = a_ctx.Profile.Dependents(off);
 		a_ctx.Log.Say("every output OFF before the first tool:");
+		if (EarlierOutputs(a_ctx.Setup, a_todo) is { Count: > 0 } kept) {
+			a_ctx.Log.Say($"left on, made by the steps before this run's first one (not run again): {string.Join(", ", kept)}");
+		}
 		foreach (var (m, why) in deps) {
 			a_ctx.Log.Detail($"also off for the run: {m} ({why})");
 		}
@@ -870,25 +873,63 @@ public static class Runner
 		}
 	}
 
-	// the ticked mods a run switches off before its first tool, each with why (the run itself and its preview use this one list)
-	public static List<(string Mod, string Why)> OutputsToTurnOff(Setup a_setup, IReadOnlyDictionary<string, char> a_states)
+	// His checklist 650 ("user choice."): a run that starts at a later step - "run from", "run again from the failed step", one
+	// step only - leaves the outputs of the switched-on steps before it ON (the setup's "keepEarlierOutputs", default on): those
+	// tools are not run again, and the tools after them build on what they made (DynDOLOD on TexGen's output, grass LOD on the
+	// grass cache - dyndolod.info/Help/Grass-LOD). Off, every output goes off as in a whole run (his rule of 2026-10-02).
+	public const string KeepEarlierSetting = "keepEarlierOutputs";
+
+	public static bool KeepsEarlierOutputs(Setup a_setup) => Setup.Bool(a_setup.Root, KeepEarlierSetting) != false;
+
+	// the output mods a run of a_todo leaves on because their steps come before its first step (empty for a whole run, or with
+	// the setting off)
+	public static HashSet<string> EarlierOutputs(Setup a_setup, IReadOnlyList<Setup.StepEntry>? a_todo)
+	{
+		var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		if (a_todo is not { Count: > 0 } || !KeepsEarlierOutputs(a_setup)) {
+			return keep;
+		}
+		// the steps a run would run or use, in order: a step this version does not know is in no run, and keeps nothing on
+		var steps = a_setup.OnSteps;
+		var first = steps.FindIndex(s => s.Key == a_todo[0].Key);
+		foreach (var s in steps.Take(Math.Max(first, 0))) {
+			if (new StepSettings(s.Settings).OutputMod is { } om) {
+				keep.Add(om);
+			}
+		}
+		// an output a step at or after the start makes again is that step's, and goes off for it as always
+		foreach (var s in steps.Skip(Math.Max(first, 0)).Where(s => s.On && a_todo.Any(t => t.Key == s.Key))) {
+			if (new StepSettings(s.Settings).OutputMod is { } om) {
+				keep.Remove(om);
+			}
+		}
+		return keep;
+	}
+
+	// the ticked mods a run switches off before its first tool, each with why (the run itself and its preview use this one list).
+	// a_todo: the steps the run runs (null: the whole setup)
+	public static List<(string Mod, string Why)> OutputsToTurnOff(Setup a_setup, IReadOnlyDictionary<string, char> a_states, IReadOnlyList<Setup.StepEntry>? a_todo = null)
 	{
 		var outList = new List<(string Mod, string Why)>();
-		void Add(string a_mod, string a_why)
+		var earlier = EarlierOutputs(a_setup, a_todo);
+		// a_replacedByTheRun: a step the run runs replaces it - it goes off even when an earlier step's output is kept on, or that
+		// tool would read what it replaces (CodeRabbit on pull request #40)
+		void Add(string a_mod, string a_why, bool a_replacedByTheRun = false)
 		{
-			if (a_states.TryGetValue(a_mod, out var f) && f == '+' && !outList.Any(o => string.Equals(o.Mod, a_mod, StringComparison.OrdinalIgnoreCase))) {
+			if (a_states.TryGetValue(a_mod, out var f) && f == '+' && (a_replacedByTheRun || !earlier.Contains(a_mod)) && !outList.Any(o => string.Equals(o.Mod, a_mod, StringComparison.OrdinalIgnoreCase))) {
 				outList.Add((a_mod, a_why));
 			}
 		}
-		var all = a_setup.EnabledSteps.Where(s => s.Key != "shaders").Select(s => (Name: StepCatalog.Name(s.Key), S: new StepSettings(s.Settings))).ToList();
-		foreach (var (name, s) in all) {
+		var all = a_setup.EnabledSteps.Where(s => s.Key != "shaders").Select(s => (s.Key, Name: StepCatalog.Name(s.Key), S: new StepSettings(s.Settings))).ToList();
+		foreach (var (_, name, s) in all) {
 			if (s.OutputMod is { } om) {
 				Add(om, "made by " + name);
 			}
 		}
-		foreach (var (name, s) in all) {
+		foreach (var (key, name, s) in all) {
+			var inRun = a_todo == null || a_todo.Any(t => t.Key == key);
 			foreach (var m in s.List("replaces")) {
-				Add(m, "replaced by " + name);
+				Add(m, "replaced by " + name, inRun);
 			}
 		}
 		// an old output that is used goes off with the rest - no tool before its step's place reads it - and comes back on there
@@ -1008,7 +1049,6 @@ public static class Runner
 	{
 		var r = a_ctx.Journal.Step(a_s.Key)!;
 		var step = StepRegistry.For(a_s.Key);
-		a_ctx.OutputUntouched = false;
 		a_ctx.Log.Say("");
 		a_ctx.Log.Say($"=== {StepCatalog.Name(a_s.Key)} ===");
 		a_ctx.Log.Simple($"{a_ctx.Journal.Steps.IndexOf(r) + 1}/{a_ctx.Journal.Steps.Count} {StepCatalog.Name(a_s.Key)} started");
@@ -1078,7 +1118,7 @@ public static class Runner
 			}
 			return false;
 		}
-		foreach (var m in new[] { a_ctx.OutputUntouched ? null : new StepSettings(a_s.Settings).OutputMod }.OfType<string>().Concat(a_ctx.PendingEnable)) {
+		foreach (var m in new[] { new StepSettings(a_s.Settings).OutputMod }.OfType<string>().Concat(a_ctx.PendingEnable)) {
 			StepKit.MarkReplaced(a_ctx, m);
 			if (!a_ctx.Journal.Built.Contains(m)) {
 				a_ctx.Journal.Built.Add(m);
@@ -1109,7 +1149,7 @@ public static class Runner
 	// later, never what decides a step that has finished: a folder that will not list is simply not measured
 	static void Measure(RunContext a_ctx, StepRecord a_r)
 	{
-		if (a_r.Output is not { } mod || a_ctx.OutputUntouched) {
+		if (a_r.Output is not { } mod) {
 			return;
 		}
 		try {
@@ -1370,9 +1410,6 @@ public static class Runner
 			// the player's plugin ticks as they left them, read before the order files go back
 			var marks = theirs.Count > 0 ? a_ctx.Profile.PluginMarks() : [];
 			a_ctx.Profile.Restore(a_snap);
-			if (a_ctx.Journal.Sorted) {
-				LootStep.KeepIn(a_ctx);
-			}
 			if (theirs.Count > 0) {
 				a_ctx.Log.Warn($"you changed {theirs.Count} mod(s) in Mod Organizer during the run - kept as you left them: " +
 					string.Join(", ", theirs.Select(p => (p.Value == '+' ? "on " : "off ") + p.Key)));

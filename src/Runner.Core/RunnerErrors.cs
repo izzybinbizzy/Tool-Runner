@@ -112,8 +112,6 @@ public static class RunnerErrors
 			"Learn PGPatcher's settings again from its own window (Settings > Steps > PGPatcher > Learn its settings), or tick / untick PGLite in Mod Organizer to match."),
 		E("TR-311", "its add-on file is gone|its add-on file:|changed since you allowed it|the mod that holds it|its program could not be opened|its add-on file changed while it was being read","An add-on step's file is missing, changed, or its mod is switched off.",
 			"Tick the add-on's mod in Mod Organizer and look at the add-on again in Settings > Tools > ADD-ONS; allow it only if you trust what it starts."),
-		E("TR-317", "Mod Organizer's LOOT is not there", "The LOOT sort step runs the LOOT that ships inside Mod Organizer, and it is missing from Mod Organizer's folder.",
-			"Reinstall Mod Organizer over itself (it brings its loot folder back), or untick the LOOT sort step."),
 		E("TR-320", "it is set to use its old output, and there is none to use", "A step is set to use the output its tool made before, and that output mod is missing or empty.",
 			"Select the step in the list and press \"Use old output\" again to switch it off, so the tool builds its output in this run. From the next run on that output can be used."),
 		E("TR-321", "its old output cannot be used:|its old output cannot be used in this run:",
@@ -151,8 +149,6 @@ public static class RunnerErrors
 			"Open the tool once by hand and look at its own log: it usually found nothing to work on (no worldspace ticked, a missing master, a wrong output path)."),
 		E("TR-412", "opened on the player's screen", "A tool that runs hidden showed a window on your screen, so it was ended.",
 			"Run again from this step. If it happens every time, switch \"Hidden\" off for that step in Settings > Steps, so the tool runs in the open."),
-		E("TR-414", "LOOT wrote no sorted list|LOOT's sorted list is empty|LOOT did not see", "LOOT could not sort this load order, so your order was left as it was.",
-			"Press Sort in Mod Organizer itself to read LOOT's own message (a rule that goes in a circle, no masterlist yet while offline), put that right, then run again from this step - or untick the LOOT sort step."),
 		E("TR-415", "the game shows a box this run does not know|the game's box did not close after its answer was pressed|the game shows a Windows box this step does not answer","A mod, or the game, asked a question the run cannot answer for you, so the game was closed and the step stopped.",
 			"Start the game yourself once and answer it (many such questions come only once), or switch off that mod's own setting that asks; then run again from this step. " +
 			"While you are at the PC you can also answer it during the run: the window names the box and waits a minute before the step stops."),

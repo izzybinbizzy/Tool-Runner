@@ -214,7 +214,6 @@ public static class SettingsPanel
 	// DynDOLOD's own help on the clean save
 	public static (string Url, string What)? HelpPage(string a_step) =>
 		a_step is "cleansave" or "playsave" ? ("https://dyndolod.info/Help/Clean-Save", "DynDOLOD's help on the clean save") :
-		a_step == Steps.LootStep.StepKey ? ("https://loot.github.io/", "LOOT's own page") :
 		ToolUpdates.Known.TryGetValue(a_step, out var src) ? (src.Page.Replace("?tab=files", "", StringComparison.Ordinal), "the tool's own page") : null;
 
 	static string Label(string a_key) => Labels.TryGetValue(a_key, out var l) ? l : char.ToUpperInvariant(a_key[0]) + a_key[1..].Replace('_', ' ');
@@ -407,6 +406,9 @@ public static class SettingsPanel
 		// his checklist 270 ("all 3."): the preview before a run
 		work["previewBeforeRun"] ??= true;
 		Field(runPage, apply, "Show the run preview before it starts", work, "previewBeforeRun", JsonValueKind.True);
+		// his checklist 650 ("user choice."): on by default - the tools after them build on what the skipped tools made
+		work[Runner.KeepEarlierSetting] ??= true;
+		Field(runPage, apply, "When a run starts at a later step, leave the earlier tools' outputs on (they are not run again)", work, Runner.KeepEarlierSetting, JsonValueKind.True);
 		Field(runPage, apply, "Check on a tool that sits idle for (minutes)", work, "idleMinutes", JsonValueKind.Number);
 		Field(runPage, apply, "Free disk space needed (GB)", work, "minFreeGb", JsonValueKind.Number);
 		// the forecast of the room a run takes: on, a run that will not fit is not started; off, it is only told

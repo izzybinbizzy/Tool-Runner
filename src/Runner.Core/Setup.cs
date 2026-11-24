@@ -72,14 +72,20 @@ public sealed class Setup
 	// a step that is on, is not left out, and is set to use the output it made before: its tool does not run (OldOutput)
 	public bool UsesOld(StepEntry a_s) => a_s.On && a_s.UseOld && !LeftOutForNewGame(a_s.Key) && OldOutput.CanKeep(a_s.Key, new StepSettings(a_s.Settings));
 
-	// the steps that are switched on (and not left out for a new game), whether a run runs them or uses their old output
-	public List<StepEntry> OnSteps => Steps.Where(s => s.On && !LeftOutForNewGame(s.Key)).ToList();
+	// the steps that are switched on (and not left out for a new game), whether a run runs them or uses their old output. A step
+	// this program does not have (one an older version had, or a name it never knew) is left out of every run: an older setup
+	// file still loads, and the check says what it leaves out (NotKnown)
+	public List<StepEntry> OnSteps => Steps.Where(s => s.On && !LeftOutForNewGame(s.Key) && (StepCatalog.Known(s.Key) || s.Key is "snowfixer" or "autoblend")).ToList();
+
+	// the steps the setup names that this program does not have, each once
+	public List<string> NotKnown => Steps.Select(s => s.Key).Where(k => !StepCatalog.Known(k) && k is not "snowfixer" and not "autoblend").Distinct().ToList();
 
 	// the steps a run runs
 	public List<StepEntry> EnabledSteps => OnSteps.Where(s => !UsesOld(s)).ToList();
 
 	// the steps a run does not run, because the output each made before is used
-	public List<StepEntry> KeptSteps => Steps.Where(UsesOld).ToList();
+	// (only of steps this version has: a removed step's old output is not managed - CodeRabbit on pull request #40)
+	public List<StepEntry> KeptSteps => OnSteps.Where(UsesOld).ToList();
 
 	public const string PgLiteMod = "PGLite";
 
@@ -183,6 +189,7 @@ public sealed class Setup
 		}
 		if (Steps.Count == 0) p.Add("the setup has no steps");
 		if (EnabledSteps.Count == 0) p.Add(KeptSteps.Count > 0 ? "every step that is switched on uses its old output - nothing would run" :
+			Steps.Any(s => s.On) && Steps.Where(s => s.On).All(s => NotKnown.Contains(s.Key)) ? "none of the steps it has switched on is one this version has: " + string.Join(", ", NotKnown) :
 			Steps.Any(s => s.On) ? "only the save steps are switched on, and they are left out for a new game" : "every step is switched off");
 		var dup = Steps.GroupBy(s => s.Key).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
 		if (dup.Count > 0) p.Add("a step is listed twice: " + string.Join(", ", dup));
@@ -190,8 +197,6 @@ public sealed class Setup
 		foreach (var gone in Steps.Select(s => s.Key).Where(k => k is "snowfixer" or "autoblend").Distinct()) {
 			p.Add($"{(gone == "snowfixer" ? "SnowFixer" : "AutoBlend")} is no longer supported - Landscape Fixer replaced it: add Landscape Fixer and take this step out");
 		}
-		var unknown = Steps.Where(s => !StepCatalog.Known(s.Key) && s.Key is not "snowfixer" and not "autoblend").Select(s => s.Key).ToList();
-		if (unknown.Count > 0) p.Add("unknown step(s): " + string.Join(", ", unknown));
 		// A setup file comes from anywhere (a guide, a Discord). What it gives as a mod's name is joined to Mod Organizer's mods
 		// folder as it stands: with a folder part in it ("..\..\profiles\Default") or a whole path, a meta.ini was written there,
 		// a line put into the mod list and everything in that folder moved into the run's backup. Only a plain folder name is a mod
