@@ -29,7 +29,7 @@ public static partial class ToolUpdates
 		["smash"] = new("39378", null, "https://www.nexusmods.com/skyrimspecialedition/mods/39378?tab=files"),
 		["reqtificator"] = new("60888", null, "https://www.nexusmods.com/skyrimspecialedition/mods/60888?tab=files"),
 		["upf"] = new(null, "z-edit/zedit", "https://github.com/z-edit/zedit/releases"),
-		// its Nexus page says "MOVED": its releases are on GitHub
+		// its Nexus page says "MOVED" (read 2026-10-27): its releases are on GitHub
 		["wryebash"] = new(null, "wrye-bash/wrye-bash", "https://github.com/wrye-bash/wrye-bash/releases"),
 		["synthesis"] = new(null, "Mutagen-Modding/Synthesis", "https://github.com/Mutagen-Modding/Synthesis/releases"),
 	};

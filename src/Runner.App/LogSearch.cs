@@ -1,6 +1,6 @@
 namespace ToolRunner.App;
 
-// The log window's search and "first problem": where in the log's text the next match, or the first line
+// The log window's search and "first problem" (his checklist 635): where in the log's text the next match, or the first line
 // the run marked as a problem, starts. The run marks a warning "! " and a failure "!!! " after the time (RunLog.Say).
 public static class LogSearch
 {

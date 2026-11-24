@@ -50,7 +50,7 @@ public static class NewSetupDialog
 		Row("Output mod names ({output} and {profile} are filled in)", pattern);
 		stack.Children.Add(note);
 
-		// a step exists only for a tool Mod Organizer's list holds, so this comes before the setup is made
+		// his checklist 467: a step exists only for a tool Mod Organizer's list holds, so this comes before the setup is made
 		var findTools = new Button { Content = "Find my tools ...", Style = (Style)a_owner.FindResource("Ghost"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 10, 0, 0),
 			ToolTip = "Says which tools Mod Organizer's list holds, which are on this PC but not listed, and where to get the rest" };
 		var toolRows = new StackPanel();

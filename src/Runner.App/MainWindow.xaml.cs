@@ -101,10 +101,10 @@ public partial class MainWindow : Window
 		if (_vm.Setups.Count == 0) {
 			_vm.Say("No setup yet: press New setup and pick your Mod Organizer and profile.", "warn");
 		}
-		// what changes on its own is said to a screen reader - once the window is up, so the first look at the
+		// what changes on its own is said to a screen reader (his checklist 490) - once the window is up, so the first look at the
 		// last run is not read out as news
 		Loaded += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => _vm.PropertyChanged += Announce);
-		// once the window is up, at most once a day, whether a newer version of the program is out
+		// his checklist 471: once the window is up, at most once a day, whether a newer version of the program is out
 		// (never for the off-screen pictures: no web question, no file written into that data folder, no banner in a picture)
 		Loaded += async (_, _) => {
 			if (!App.Headless) {
@@ -345,7 +345,7 @@ public partial class MainWindow : Window
 		_ = _vm.StartWith(a_how == "only" ? a_row.Key : null, a_how == "from" ? a_row.Key : null, a_how == "until" ? a_row.Key : null);
 	}
 
-	// A step may use the output its tool made before - behind a box that says exactly what that means
+	// His word of 2026-11-21: a step may use the output its tool made before - behind a box that says exactly what that means
 	// for this tool, now. Pressed for a step that is set so already, it is built again from the next run on, with no box
 	bool _oldAsked;
 
@@ -427,7 +427,7 @@ public partial class MainWindow : Window
 		}
 	}
 
-	// players may reorder, behind a warning window saying things could go wrong out of order - the buttons, the
+	// his rule: players may reorder, behind a warning window saying things could go wrong out of order - the buttons, the
 	// keys and a drag all come through here
 	async void MoveTo(StepRow a_row, int a_to)
 	{
@@ -445,7 +445,7 @@ public partial class MainWindow : Window
 	}
 
 	// ---------------------------------------------------------------- a step dragged to another place
-	// A step is dragged in the list to wherever the player wants it. The handlers sit on the list
+	// His list of 2026-11-16: a step is dragged in the list to wherever the player wants it. The handlers sit on the list
 	// itself (never in its row template: WPF numbers handlers wrongly there). A press on a row's tick box, or a move shorter
 	// than Windows' own drag distance, is no drag; nothing moves while a run goes.
 	const string DragFormat = "ToolRunner.Step";
@@ -710,7 +710,7 @@ public partial class MainWindow : Window
 		foreach (var c in new UIElement[] { detailed, follow, wrap, copy }) {
 			bar.Children.Add(c);
 		}
-		// search the log, and jump to the first line the run marked as a problem (Follow lets go, so the line
+		// his checklist 635: search the log, and jump to the first line the run marked as a problem (Follow lets go, so the line
 		// found stays in view while the run writes on)
 		var find = new TextBox { MinWidth = 200, Margin = new Thickness(0, 0, 8, 0), VerticalContentAlignment = VerticalAlignment.Center, ToolTip = "Find in the log (Enter: the next one)" };
 		AutomationPropertiesName(find, "Find in the log");
@@ -748,7 +748,7 @@ public partial class MainWindow : Window
 		}
 		problem.Click += (_, _) => {
 			// the simple log marks no line (only the detailed one says "!" and "!!!"): the detailed log is shown first, and the
-			// search runs once its text is in
+			// search runs once its text is in (CodeRabbit on pull request #38)
 			if (!_vm.DetailedLog) {
 				_vm.DetailedLog = true;
 				Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, ShowFirstProblem);
@@ -1063,7 +1063,7 @@ public partial class MainWindow : Window
 			Foreground = Brushes2.Get("Text"), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
 		AutomationPropertiesName(log, "The run's log");
 		var open = new Button { Content = "Open folder", Style = (Style)FindResource("Ghost"), Margin = new Thickness(0, 0, 8, 0), ToolTip = "This run's folder: its logs and its record" };
-		// one zip for a bug report, names masked; made on the player's press, never sent anywhere
+		// his checklist 482: one zip for a bug report, names masked; made on the player's press, never sent anywhere
 		var report = new Button { Content = "Bug report ...", Style = (Style)FindResource("Ghost"),
 			ToolTip = "Puts this run's logs, its setup and the versions of everything into one zip, with your Windows name and PC name masked - for a GitHub issue" };
 		report.Click += async (_, _) => {
@@ -1086,7 +1086,7 @@ public partial class MainWindow : Window
 				report.IsEnabled = true;
 			}
 		};
-		// asked first; the box names what it does, and a run that cannot be undone says why
+		// his checklist 454: asked first; the box names what it does, and a run that cannot be undone says why
 		var undo = new Button { Content = "Undo this run ...", Style = (Style)FindResource("Ghost"), Margin = new Thickness(8, 0, 0, 0),
 			ToolTip = "Puts each output and your mod and plugin lists back as they were before this run - only the last run on that profile" };
 		undo.Click += async (_, _) => {
@@ -1175,7 +1175,7 @@ public partial class MainWindow : Window
 
 	static void AutomationPropertiesName(DependencyObject a_o, string a_name) => System.Windows.Automation.AutomationProperties.SetName(a_o, a_name);
 
-	// each tool of the setup set up by hand in its own window, whenever wanted
+	// his word of 2026-11-21: each tool of the setup set up by hand in its own window, whenever wanted
 	bool _toolsAsked;
 
 	async void Tools_Click(object a_s, RoutedEventArgs a_e)

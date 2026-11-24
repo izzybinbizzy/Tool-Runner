@@ -2,7 +2,7 @@ namespace ToolRunner.App;
 
 // How the window is drawn. Without the graphics card unless the player asks for it: a page of text and a few bars gains nothing
 // from one, and WPF's hardware path holds some 24 MB more for as long as the window is open and starts about a third slower
-// (measured on a busy PC: 77 MB of private memory with it, 53 without). The pick is one word in the data folder's
+// (measured 2026-11-10 on a busy PC: 77 MB of private memory with it, 53 without). The pick is one word in the data folder's
 // "drawing.txt" and applies at the next start.
 public static class Drawing
 {

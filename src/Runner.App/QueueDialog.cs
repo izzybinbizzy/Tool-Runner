@@ -75,7 +75,7 @@ public static class QueueDialog
 		}
 		Fill(rows.Count > 0 ? 0 : -1);
 
-		// a setup is dragged to its place in the queue (by its handle or the row around its tick box - a press on
+		// his checklist 635: a setup is dragged to its place in the queue (by its handle or the row around its tick box - a press on
 		// the tick box itself ticks it)
 		Row? pressed = null, dragging = null;
 		Point pressAt = default;
@@ -89,7 +89,7 @@ public static class QueueDialog
 				if (rows.FirstOrDefault(r => ReferenceEquals(r.Item, d)) is { } hit) {
 					return hit;
 				}
-				// the padding round a row is its container's, not the row's own: a drop there is
+				// the padding round a row is its container's, not the row's own (CodeRabbit on pull request #38): a drop there is
 				// that row's too
 				if (d is ListBoxItem container && rows.FirstOrDefault(r => ReferenceEquals(r.Item, container.Content)) is { } around) {
 					return around;
