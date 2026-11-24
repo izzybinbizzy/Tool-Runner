@@ -3,7 +3,7 @@ using ToolRunner.Steps;
 namespace ToolRunner;
 
 // A player may use the output a tool made before instead of having it built again, and is told, tool by tool, exactly what that
-// means. A step set so ("useOld" beside its "on") does not run. Its old output goes off with every
+// means (his word of 2026-11-21). A step set so ("useOld" beside its "on") does not run. Its old output goes off with every
 // other output before the first tool and comes back on at the step's own place in the order - where a fresh one would be
 // switched on - so no tool before it reads it and every tool after it does. What the choice means is worked out each time, never
 // only printed: when the output was made, what changed in the profile since, which tools before it are built again in this run,

@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 
 namespace ToolRunner;
 
-// A setup copied or renamed from the window's setup list. A copy is a new setup beside the first with the
+// A setup copied or renamed from the window's setup list (his checklist 635). A copy is a new setup beside the first with the
 // tools' settings it had learned; nothing of the first one changes. A rename takes everything of the setup along: every run
 // record that names its file (History, the last runs, the usual times, "Run again from", Undo all find a setup by its file) and
 // the settings learned from its tools' own windows.
@@ -65,7 +65,7 @@ public static class SetupFiles
 		var learned = LearnedDir(a_file);
 		var learnedTo = LearnedDir(to);
 		// learned settings left under that name by a setup that is gone would be the copy's (they are found by the setup's file
-		// name alone), whether or not the first setup has learned any
+		// name alone), whether or not the first setup has learned any (CodeRabbit on pull request #38)
 		if (Directory.Exists(learnedTo)) {
 			throw new ArgumentException($"learned tool settings for \"{a_name.Trim()}\" are there already ({learnedTo}) - pick another name");
 		}
@@ -146,14 +146,14 @@ public static class SetupFiles
 			foreach (var d in Directory.GetDirectories(a_runsDir)) {
 				try {
 					// a folder without a record is no run; a folder that cannot be looked into is not taken for one without
-					// (File.Exists says false for both)
+					// (File.Exists says false for both - CodeRabbit on pull request #38)
 					if (!Directory.EnumerateFiles(d, "journal.json", SearchOption.TopDirectoryOnly).Any()) {
 						continue;
 					}
 					runs.Add(Journal.Load(d));
 				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidDataException) {
 					// A record that does not read may be an unfinished run's, whose put-back reads the setup by the file it names:
-					// nothing moves until it reads
+					// nothing moves until it reads (CodeRabbit on pull request #38)
 					throw new InvalidOperationException($"the run record in \"{d}\" could not be read ({e.Message}), so it is not known whether that run still needs this setup - close what holds it, then rename again", e);
 				}
 			}
@@ -169,7 +169,7 @@ public static class SetupFiles
 		}
 		File.Move(a_file, to);
 		// its learned settings go with it and its own name inside follows, or the file and the folder go back to their old names:
-		// the setup never stands half renamed (a name inside that did not write left both moved)
+		// the setup never stands half renamed (CodeRabbit on pull request #38: a name inside that did not write left both moved)
 		var origin = LearnedDir(a_file);
 		var folderMoved = false;
 		var nameChanged = false;
@@ -197,6 +197,7 @@ public static class SetupFiles
 		}
 		// every run record that names the setup follows it. One that cannot be written stops the rename: the records already
 		// written name the old file again and the setup goes back to its old name, so no run loses its setup in History
+		// (CodeRabbit on pull request #38)
 		var repointed = new List<Journal>();
 		foreach (var j in runs.Where(j => Files.SamePath(j.SetupFile, a_file))) {
 			j.SetupFile = to;

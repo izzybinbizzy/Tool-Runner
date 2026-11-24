@@ -89,7 +89,7 @@ public static class Preflight
 			var s = new StepSettings(a_setup.StepSettings(key) ?? []);
 			try {
 				outList.AddRange(step.Check(c, s));
-				// a note, never a stop
+				// his checklist 445: a note, never a stop
 				if (ToolProof.Newer(key, ToolUpdates.Yours(a_mo2, s).Version) is { } newer) {
 					outList.Add(newer);
 				}
@@ -123,7 +123,7 @@ public static class Preflight
 	}
 }
 
-// a second, older output of the same tool still ticked (an earlier manual run, another tool's output under
+// his checklist 455: a second, older output of the same tool still ticked (an earlier manual run, another tool's output under
 // another name). A new output goes to the bottom of Mod Organizer's left pane, so an old copy higher up WINS and hides the fresh
 // build without a word - each is named before the run. Only files nothing but that tool writes count (measured on a 1,200-mod
 // testing setup 2026-11-07: Pandora's and Nemesis's engine folders are also in 50 ordinary animation mods, so they are not used)

@@ -514,7 +514,7 @@ public static class Runner
 				journal.Doing = "the setup's command after the run";
 				// A command of the setup may add, move or take away game files, also when it then fails, and nobody can tell
 				// from here: it counts as a change BEFORE it runs, so the note below never calls the game's list current
-				// after it
+				// after it (CodeRabbit on pull request #35)
 				++journal.FilesChanged;
 				journal.TrySave();
 				Chore("the command after the run", () => Hook(ctx, cmd, "after the run", CancellationToken.None, cts.Token));
@@ -522,7 +522,7 @@ public static class Runner
 			Chore("the look at Mod Organizer's overwrite", () => ReportOverwrite(ctx));
 			Chore("tidying old backups", () => PruneBackups(ctx));
 			Chore("noting the tools' versions for the next run", () => ToolVersions.Remember(setup, mo2, journal.Steps.Where(r => r.State == StepState.Done).Select(r => r.Key)));
-			// said at the end too - a run's own placement may have just moved them; a look that fails changes nothing
+			// his checklist 456: said at the end too - a run's own placement may have just moved them; a look that fails changes nothing
 			Chore("the look at the output plugins' places", () => {
 				foreach (var i in PluginPlaces.Check(profile.ActivePlugins())) {
 					log.Warn(i.Text);
@@ -544,7 +544,7 @@ public static class Runner
 			SaySummary(ctx);
 			log.Say("ALL DONE: " + journal.Verdict);
 			log.Simple("ALL DONE: " + journal.Verdict);
-			// the old outputs packed into one zip, as the very last thing and only after a run that finished -
+			// his checklist 454: the old outputs packed into one zip, as the very last thing and only after a run that finished -
 			// it can take minutes, the window says so, and Stop ends it at once (the run stays finished)
 			if (Setup.Bool(setup.Root, "zipBackups") != false && !journal.Parked.Any(p => !p.Replaced && !p.PutBack)) {
 				Chore("packing the old outputs", () => RunUndo.Pack(ctx.BackupFolder, log, a_doing => {
@@ -901,7 +901,7 @@ public static class Runner
 		return outList;
 	}
 
-	// only the last few runs' backups are kept - the setup's "keepBackups" (default 5, 0 = keep
+	// his checklist 270 ("all 3."): only the last few runs' backups are kept - the setup's "keepBackups" (default 5, 0 = keep
 	// all). Only THIS setup's run folders go, oldest first, never the running one or one an unfinished run still needs.
 	// a run that did not finish may leave the runner's own save (QASmoke, DynDOLOD off) as the newest one: said in its verdict
 	static void SaySaves(RunContext a_ctx)
@@ -1304,7 +1304,7 @@ public static class Runner
 			SaySummary(a_ctx);
 			a_ctx.Log.Say(j.Verdict);
 			a_ctx.Log.Simple((a_state == RunState.Stopped ? "Stopped: " : "Failed: ") + j.Verdict, a_state == RunState.Stopped ? Level.Warn : Level.Error);
-			// a failed or stopped run's backups are pruned too (they piled up until the next finished run);
+			// a failed or stopped run's backups are pruned too (they piled up until the next finished run - the fourth review, L7);
 			// a folder an unfinished run still names is never touched
 			Keep();
 			PruneBackups(a_ctx);
@@ -1598,7 +1598,7 @@ public static class Runner
 			return new RunOutcome(RunState.Failed, a_j.Verdict, a_j.Folder);
 		}
 		// a step the crash cut off ends when its run record was last written - never left open (an open game step would read as
-		// the runner's game running "until now" and hide every save the player made since). The time was
+		// the runner's game running "until now" and hide every save the player made since - the fifth review, N1). The time was
 		// read at the top: by now this put-back has written the record itself
 		var died = a_j.Ended ?? lastWritten;
 		foreach (var r in a_j.Steps.Where(r => r.State is StepState.Running or StepState.Pending)) {
@@ -1616,7 +1616,7 @@ public static class Runner
 		return new RunOutcome(RunState.Restored, a_j.Verdict, a_j.Folder);
 	}
 
-	// the last run undone - each output back to what it was before the run (the new one set aside in the run's
+	// his checklist 454: the last run undone - each output back to what it was before the run (the new one set aside in the run's
 	// backup, never erased), outputs the run made new taken out, the order files as they were before it; whatever the player changed
 	// in Mod Organizer since the run began stays
 	public static RunOutcome Undo(Journal a_j)

@@ -6,7 +6,7 @@ using System.Windows.Data;
 
 namespace ToolRunner.App;
 
-// The window built ready for translators, English first. A language is one file, Languages\<its name>.json in the data folder:
+// His checklist 476: the window built ready for translators, English first. A language is one file, Languages\<its name>.json in the data folder:
 // { "the English words": "their translation" }. Whatever a file leaves out stays English, and text a binding fills (what a run is doing) is left
 // alone: a translator can start small. Settings makes the file from what the window shows.
 public static class WindowWords

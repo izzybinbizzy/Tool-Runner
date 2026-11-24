@@ -96,6 +96,7 @@ public partial class App : Application
 		// the theme picked last time, before the window is drawn
 		Theme.ApplySaved();
 		WindowFrame.PaintEveryWindowOnOpen();
+		// his checklist 476
 		var languageProblem = WindowWords.LoadPicked();
 		WindowWords.OnEveryWindow();
 		var w = new MainWindow();
@@ -109,17 +110,17 @@ public partial class App : Application
 		}
 		// One full collection once the window is up and has settled. What starting it took (the markup read, the theme's first
 		// pass, the first look at every run record) is given back then; left alone it is held until memory runs short, which
-		// for an idle window is never (measured: about 6 MB less private memory for as long as the window stays open)
+		// for an idle window is never (measured 2026-11-10: about 6 MB less private memory for as long as the window stays open)
 		_ = Task.Run(async () => {
 			await Task.Delay(TimeSpan.FromSeconds(8)).ConfigureAwait(false);
 			System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
 			GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, true, true);
 		});
-		// started from Mod Organizer's Tools menu, on the profile it shows
+		// his checklist 468: started from Mod Organizer's Tools menu, on the profile it shows
 		if (args.Length == 6 && args[0] == "--for-profile" && args[2] == "--mo2" && args[4] == "--base") {
 			w.ShowProfile(args[3], args[5], args[1]);
 		}
-		// runs at a set time are gone: a task an older version made is cleared away, off the
+		// runs at a set time are gone (his checklist answer 451): a task an older version made is cleared away, off the
 		// window's thread (a failure leaves it; it can start nothing that is not there)
 		_ = Task.Run(() => {
 			try {
@@ -335,7 +336,7 @@ public partial class App : Application
 		Save("3f dashboard, the log popped out");
 		w.ClosePanels();
 		Pump(w, 300);
-		// the preview before a run, for a made-up run
+		// the preview before a run (his checklist 270), for a made-up run
 		var demo = new RunPreview();
 		demo.Steps.AddRange([new("synthesis", "Synthesis", "Synthesis Output", false), new("xlodgen", "xLODGen", "xLODGen Output", false),
 			new("dyndolod", "DynDOLOD", "DynDOLOD Output", false), new("playsave", "Final save", null, false)]);
@@ -352,7 +353,7 @@ public partial class App : Application
 		Pump(box, 600);
 		Save("7 preview before a run", box);
 		box.Close();
-		// the tools of a setup that has not run yet, each to set up in its own window
+		// the tools of a setup that has not run yet, each to set up in its own window (his word of 2026-11-21)
 		var toolsBox = w.DemoToolsBox();
 		toolsBox.ShowActivated = false;
 		toolsBox.WindowStartupLocation = WindowStartupLocation.Manual;
@@ -362,7 +363,7 @@ public partial class App : Application
 		Pump(toolsBox, 600);
 		Save("7c set up your tools", toolsBox);
 		toolsBox.Close();
-		// a tool's old output used instead of building it again: the box that says what that means for this tool
+		// a tool's old output used instead of building it again: the box that says what that means for this tool (his word of 2026-11-21)
 		var oldBox = w.DemoOldOutputBox();
 		oldBox.ShowActivated = false;
 		oldBox.WindowStartupLocation = WindowStartupLocation.Manual;
@@ -405,7 +406,7 @@ public partial class App : Application
 		w.Demo(false);
 		Pump(w, 600);
 		Save("5 a run going");
-		// the compact view of that run, and the command box with a few letters typed
+		// his checklist 635: the compact view of that run, and the command box with a few letters typed
 		var compact = w.ShowCompact();
 		compact.ShowActivated = false;
 		compact.ShowInTaskbar = false;

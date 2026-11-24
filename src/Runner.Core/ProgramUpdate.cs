@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace ToolRunner;
 
-// "A new version is out": at most once a day the program reads the newest version of ITSELF where it is
+// "A new version is out" (his checklist 471): at most once a day the program reads the newest version of ITSELF where it is
 // published - its Nexus page once it has one, until then the repository's latest GitHub release - and the window says so with
 // a link to the download page. Nothing is downloaded or installed: the download stays the player's. The player can turn the
 // check off, and a version they set aside ("Not now") is not mentioned again; the next newer one is.

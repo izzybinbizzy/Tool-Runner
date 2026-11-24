@@ -4,7 +4,7 @@ using System.Windows.Input;
 
 namespace ToolRunner.App;
 
-// Ctrl+K: type a few letters, pick what to do - any button of the window, a setup to show, a step's settings,
+// Ctrl+K (his checklist 635): type a few letters, pick what to do - any button of the window, a setup to show, a step's settings,
 // a run of one step, or a search in the settings for the words typed. Enter does the picked one, Escape closes the box.
 public static class CommandBox
 {

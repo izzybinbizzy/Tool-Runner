@@ -2,7 +2,7 @@ using System.Text;
 
 namespace ToolRunner;
 
-// The game's load boxes in any language, by the game's own text for them and never by a list of ours. The boxes that
+// His checklist 439: the game's load boxes in any language, by the game's own text for them and never by a list of ours. The boxes that
 // ask to activate or search for missing content sit in Interface\translate_<language>.txt inside its interface archive, under fixed
 // keys; "... continue loading?" is a game setting, read through DevBench. Every language's words are taken: no need to know which one
 // the game runs. A game in English never comes here.

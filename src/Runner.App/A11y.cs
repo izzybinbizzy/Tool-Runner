@@ -4,7 +4,7 @@ using System.Windows.Automation.Peers;
 
 namespace ToolRunner.App;
 
-// Screen readers: what changes on its own - a message, the step that runs, a
+// Screen readers (his checklist 490, "keyboard + screen readers"): what changes on its own - a message, the step that runs, a
 // guided step waiting, the verdict - is said through UI Automation's notification event, which Narrator, NVDA and JAWS read
 // out. WPF's LiveSetting alone says nothing: the program has to raise the event itself.
 public static class A11y
