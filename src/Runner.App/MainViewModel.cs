@@ -1131,14 +1131,31 @@ public sealed partial class MainViewModel : Observable
 		// the engine checks everything first and may refuse: the next looks read its run record or its refusal
 		Say("Starting - checking every tool and setting ...", "");
 		_startAsked = DateTime.Now;
+		_startPid = int.TryParse(text, System.Globalization.NumberStyles.Integer, InvariantCulture, out var pid) ? pid : null;
 		_run = null;
 		WantsLook?.Invoke();
 	}
 
 	DateTime? _startAsked;
+	// the engine that start began, while it checks (a big profile, or a Mod Organizer it waits for, can take minutes)
+	int? _startPid;
 
 	// a start was asked and the engine has neither made its run record nor refused yet (it checks every tool first)
 	public bool Starting => _startAsked != null;
+
+	// the engine started at a_asked still runs (by its number and its start time: a number Windows gave out again is not it)
+	static bool EngineAlive(int? a_pid, DateTime a_asked)
+	{
+		if (a_pid is not { } pid) {
+			return false;
+		}
+		try {
+			using var p = Process.GetProcessById(pid);
+			return !p.HasExited && p.StartTime >= a_asked.AddSeconds(-5);
+		} catch (Exception e) when (e is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) {
+			return false;
+		}
+	}
 
 	// after Start: the run's own record appears (it started), or the engine's refusal (shown with its reason), or nothing
 	void FollowStart(List<Journal> a_runs)
@@ -1153,7 +1170,7 @@ public sealed partial class MainViewModel : Observable
 			// the engine's own words begin "not started: " already
 			Say("Not started: " + WithTodo(why.StartsWith("not started: ", StringComparison.Ordinal) ? why["not started: ".Length..] : why), "bad");
 			_startAsked = null;
-		} else if (DateTime.Now - asked > TimeSpan.FromSeconds(90)) {
+		} else if (DateTime.Now - asked > TimeSpan.FromSeconds(90) && (!EngineAlive(_startPid, asked) || DateTime.Now - asked > TimeSpan.FromMinutes(15))) {
 			Say("The run did not start and gave no reason - nothing was changed. Press Check (F5) to see what is wrong.", "bad");
 			_startAsked = null;
 		}

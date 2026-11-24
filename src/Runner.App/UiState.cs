@@ -25,7 +25,18 @@ public static class UiState
 	// closes goes there, never into the old folder - written there, it would stand again and the next start would take it
 	static volatile string? s_movedTo;
 
-	public static void MovedTo(string a_dir) => s_movedTo = a_dir;
+	// The data folder moved by a_move to a_to with no write of the window's in between: what is kept goes into the old folder
+	// first (it moves along), and a write that comes during the move waits and then goes to the new place. One that landed
+	// between the old folder's removal and the switch would make a data folder beside the program again, and the next start
+	// would take that nearly empty one
+	public static void MoveWith(Action a_move, string a_to)
+	{
+		lock (Disk) {
+			Save();
+			a_move();
+			s_movedTo = a_to;
+		}
+	}
 
 	// the offline tests keep it in a file of their own (and start from nothing kept, before and after)
 	public static string? FileForTests

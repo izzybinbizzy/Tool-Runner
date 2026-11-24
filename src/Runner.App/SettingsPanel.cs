@@ -1169,9 +1169,7 @@ public static class SettingsPanel
 			await Task.Run(() => {
 				using var hold = Runner.HoldIfFree() ?? throw new InvalidOperationException("a run is going - move the data when it has ended");
 				// what the window keeps goes along (its sizes and flags), and what it writes from here on goes to the new place
-				UiState.Save();
-				DataFolder.MoveTo(AppPaths.Data, to);
-				UiState.MovedTo(to);
+				UiState.MoveWith(() => DataFolder.MoveTo(AppPaths.Data, to), to);
 			});
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) {
 			a_errors.Text = "Not moved: " + e.Message;

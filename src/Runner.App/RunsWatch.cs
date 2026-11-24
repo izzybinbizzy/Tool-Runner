@@ -1,7 +1,6 @@
 namespace ToolRunner.App;
 
-// The runs folder watched for the files the window follows - a run's record, the queue, the notice before the PC sleeps, a
-// refused start - so a change wakes the window's look at once and its timer can be slow while nothing runs. Where Windows cannot
+// The runs folder watched for the files the window follows - a run's record, the queue, a refused start - so a change wakes the window's look at once and its timer can be slow while nothing runs. Where Windows cannot
 // watch (a network drive, a folder it may not read) there is no watcher and the timer alone looks: nothing depends on an event.
 public sealed class RunsWatch : IDisposable
 {

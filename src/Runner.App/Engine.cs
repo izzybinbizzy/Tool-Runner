@@ -98,7 +98,7 @@ public static class Engine
 	{
 		try {
 			return File.Exists(RefusalFile) && File.GetLastWriteTime(RefusalFile) >= a_since.AddSeconds(-5) ? Files.ReadSharedText(RefusalFile).Trim() : null;
-		} catch (IOException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			return null;
 		}
 	}
