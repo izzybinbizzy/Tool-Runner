@@ -5,7 +5,7 @@ using ToolRunner.Steps;
 
 namespace ToolRunner;
 
-// His checklist 445: a tool's update can rename or move the buttons this program presses. Each release names the versions it was proven with, and the
+// A tool's update can rename or move the buttons this program presses. Each release names the versions it was proven with, and the
 // pre-check says when a player's tool is newer; "Test my tools" opens each tool that is driven through its window to the window a run presses, and
 // looks for what it would press. Nothing is pressed and nothing runs.
 public static class ToolProof

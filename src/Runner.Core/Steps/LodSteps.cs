@@ -227,7 +227,7 @@ public sealed class AcmosStep : IStep
 		// ACMOS 4.1+'s own command line (its readme and source): -autorun presses Generate itself, skips the zip question and exits
 		// when done. Its output goes to a folder of its OWN: with output = the LOD folder it still asks "overwrite the LOD textures?".
 		// It needs no load order, so it runs on a hidden desktop - nothing on the player's screen. (Its Tk button ignores every click
-		// not from the real mouse - UI Automation, BM_CLICK, posted mouse, the parent's WM_COMMAND, all measured 2026-10-27.)
+		// not from the real mouse - UI Automation, BM_CLICK, posted mouse, the parent's WM_COMMAND, all measured.)
 		var exe = a_s.Str("exe") ?? a_ctx.Mo2.Executable(a_s.Req("executable"))?.Binary ?? throw new StepFailedException("ACMOS's program is not found");
 		var toolDir = Path.GetDirectoryName(exe)!;
 		var logs = Path.Combine(toolDir, "logs");
@@ -678,7 +678,7 @@ public sealed class DynDolodStep : DynDolodFamily
 
 	public override void Run(RunContext a_ctx, StepSettings a_s)
 	{
-		// a setup rule (his, 2026-10-10): no terrain underside - written into the preset the options window loads, read back
+		// a setup rule (his): no terrain underside - written into the preset the options window loads, read back
 		if (a_s.Bool("no_terrain_underside", false) && a_s.Str("preset") is { } preset) {
 			// read as single bytes (an ANSI preset keeps every accented letter); [ \t]* keeps the line's own \r
 			var raw = System.Text.Encoding.Latin1.GetString(Files.ReadShared(preset));

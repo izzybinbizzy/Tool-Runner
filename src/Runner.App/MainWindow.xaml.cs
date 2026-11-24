@@ -104,10 +104,10 @@ public partial class MainWindow : Window
 		if (_vm.Setups.Count == 0) {
 			_vm.Say("No setup yet: press New setup and pick your Mod Organizer and profile.", "warn");
 		}
-		// what changes on its own is said to a screen reader (his checklist 490) - once the window is up, so the first look at the
+		// what changes on its own is said to a screen reader - once the window is up, so the first look at the
 		// last run is not read out as news
 		Loaded += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => _vm.PropertyChanged += Announce);
-		// his checklist 471: once the window is up, at most once a day, whether a newer version of the program is out
+		// once the window is up, at most once a day, whether a newer version of the program is out
 		// (never for the off-screen pictures: no web question, no file written into that data folder, no banner in a picture)
 		Loaded += async (_, _) => {
 			if (!App.Headless) {
@@ -338,7 +338,7 @@ public partial class MainWindow : Window
 		_ = _vm.StartWith(a_how == "only" ? a_row.Key : null, a_how == "from" ? a_row.Key : null, a_how == "until" ? a_row.Key : null);
 	}
 
-	// His word of 2026-11-21: a step may use the output its tool made before - behind a box that says exactly what that means
+	// A step may use the output its tool made before - behind a box that says exactly what that means
 	// for this tool, now. Pressed for a step that is set so already, it is built again from the next run on, with no box
 	bool _oldAsked;
 
@@ -420,7 +420,7 @@ public partial class MainWindow : Window
 		}
 	}
 
-	// his rule: players may reorder, behind a warning window saying things could go wrong out of order - the buttons, the
+	// players may reorder, behind a warning window saying things could go wrong out of order - the buttons, the
 	// keys and a drag all come through here
 	async void MoveTo(StepRow a_row, int a_to)
 	{
@@ -438,7 +438,7 @@ public partial class MainWindow : Window
 	}
 
 	// ---------------------------------------------------------------- a step dragged to another place
-	// His list of 2026-11-16: a step is dragged in the list to wherever the player wants it. The handlers sit on the list
+	// A step is dragged in the list to wherever the player wants it. The handlers sit on the list
 	// itself (never in its row template: WPF numbers handlers wrongly there). A press on a row's tick box, or a move shorter
 	// than Windows' own drag distance, is no drag; nothing moves while a run goes.
 	const string DragFormat = "ToolRunner.Step";
@@ -1008,7 +1008,7 @@ public partial class MainWindow : Window
 			Foreground = Brushes2.Get("Text"), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
 		AutomationPropertiesName(log, "The run's log");
 		var open = new Button { Content = "Open folder", Style = (Style)FindResource("Ghost"), Margin = new Thickness(0, 0, 8, 0), ToolTip = "This run's folder: its logs and its record" };
-		// his checklist 482: one zip for a bug report, names masked; made on the player's press, never sent anywhere
+		// one zip for a bug report, names masked; made on the player's press, never sent anywhere
 		var report = new Button { Content = "Bug report ...", Style = (Style)FindResource("Ghost"),
 			ToolTip = "Puts this run's logs, its setup and the versions of everything into one zip, with your Windows name and PC name masked - for a GitHub issue" };
 		report.Click += async (_, _) => {
@@ -1029,7 +1029,7 @@ public partial class MainWindow : Window
 				report.IsEnabled = true;
 			}
 		};
-		// his checklist 454: asked first; the box names what it does, and a run that cannot be undone says why
+		// asked first; the box names what it does, and a run that cannot be undone says why
 		var undo = new Button { Content = "Undo this run ...", Style = (Style)FindResource("Ghost"), Margin = new Thickness(8, 0, 0, 0),
 			ToolTip = "Puts each output and your mod and plugin lists back as they were before this run - only the last run on that profile" };
 		undo.Click += async (_, _) => {
@@ -1118,7 +1118,7 @@ public partial class MainWindow : Window
 
 	static void AutomationPropertiesName(DependencyObject a_o, string a_name) => System.Windows.Automation.AutomationProperties.SetName(a_o, a_name);
 
-	// his word of 2026-11-21: each tool of the setup set up by hand in its own window, whenever wanted
+	// each tool of the setup set up by hand in its own window, whenever wanted
 	bool _toolsAsked;
 
 	async void Tools_Click(object a_s, RoutedEventArgs a_e)
@@ -1190,7 +1190,7 @@ public partial class MainWindow : Window
 	public Window DemoInstallBox() => Ask.Make(this, $"Install {Brand.Name} 1.1?",
 		InstallText(new ProgramUpdate.Release("1.1", $"{Brand.Name} 1.1.zip", "", 1_290_000, null), Path.Combine("D:", "Modding", "Tools", Brand.Name)), "Download and install", "Not now", _ => { });
 
-	// His list of 2026-11-16, point 1: a new version taken and installed from inside the program. Only from the program's own
+	// A new version taken and installed from inside the program. Only from the program's own
 	// GitHub release, checked before anything is replaced, and never while a run goes. The data folder is no part of it.
 	bool _installing;
 
@@ -1201,7 +1201,6 @@ public partial class MainWindow : Window
 		}
 		// a run, or the window's own work (a put-back, an undo, a tool's settings being learned): either may be using the
 		// program's files, so nothing is replaced under it - asked again after each wait below, where such work can begin
-		// (CodeRabbit on pull request #37)
 		bool Busy()
 		{
 			if (_vm.IsRunning || _vm.Starting) {
@@ -1292,7 +1291,7 @@ public partial class MainWindow : Window
 		ClosePanels();
 		await Task.Run(UiState.Save);
 		// a write that failed is tried once more; still not written, the new version is not started from here: this window's
-		// own write as it closed would put the old values back over the new version's (CodeRabbit on pull request #37)
+		// own write as it closed would put the old values back over the new version's
 		if (UiState.Unsaved) {
 			await Task.Run(UiState.Save);
 		}

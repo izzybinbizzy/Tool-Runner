@@ -8,7 +8,6 @@ namespace ToolRunner.App;
 // (what they hold beyond it scrolls), and the log gets what they leave; with the log hidden the cards get all of the rest.
 // A grid's rows cannot say this: a row "as tall as its content" takes that height even where the column does not have it,
 // and so pushed the heading - or, with the log hidden, the run's own card with Start and Stop - out of the window
-// (CodeRabbit on pull request #35).
 public sealed class CardsOverLog : Panel
 {
 	UIElement? At(int a_place) => a_place < InternalChildren.Count ? InternalChildren[a_place] : null;

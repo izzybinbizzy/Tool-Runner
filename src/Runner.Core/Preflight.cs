@@ -14,7 +14,7 @@ public static class Preflight
 	{
 		var outList = new List<Issue>();
 		// steps an older version had (or a name this program never knew): left out, and said - here, so F5, the window's check, the
-		// check command and a start all say it (CodeRabbit on pull request #40)
+		// check command and a start all say it
 		if (a_setup.NotKnown is { Count: > 0 } notKnown) {
 			outList.Add(new Issue("", false, $"this setup names step(s) this version does not have, left out of the run: {string.Join(", ", notKnown)} - take them out of the setup to stop this note"));
 		}
@@ -94,7 +94,7 @@ public static class Preflight
 			var s = new StepSettings(a_setup.StepSettings(key) ?? []);
 			try {
 				outList.AddRange(step.Check(c, s));
-				// his checklist 445: a note, never a stop
+				// a note, never a stop
 				if (ToolProof.Newer(key, ToolUpdates.Yours(a_mo2, s).Version) is { } newer) {
 					outList.Add(newer);
 				}
@@ -128,7 +128,7 @@ public static class Preflight
 	}
 }
 
-// his checklist 455: a second, older output of the same tool still ticked (an earlier manual run, another tool's output under
+// a second, older output of the same tool still ticked (an earlier manual run, another tool's output under
 // another name). A new output goes to the bottom of Mod Organizer's left pane, so an old copy higher up WINS and hides the fresh
 // build without a word - each is named before the run. Only files nothing but that tool writes count (measured on a 1,200-mod
 // testing setup 2026-11-07: Pandora's and Nemesis's engine folders are also in 50 ordinary animation mods, so they are not used)
@@ -165,8 +165,7 @@ public static class Duplicates
 
 	// the mods the run itself switches off are no rivals: every output of the setup, every mod a step replaces, its LOD outputs -
 	// the same for every step, so the pre-check works it out once
-	// a_todo: the steps the run runs - a run from a later step keeps the earlier outputs on, and those are rivals then (CodeRabbit on
-	// pull request #40)
+	// a_todo: the steps the run runs - a run from a later step keeps the earlier outputs on, and those are rivals then
 	public static HashSet<string> Off(Setup a_setup, IReadOnlyDictionary<string, char> a_states, IReadOnlyList<Setup.StepEntry>? a_todo = null) =>
 		Runner.OutputsToTurnOff(a_setup, a_states, a_todo).Select(o => o.Mod).ToHashSet(StringComparer.OrdinalIgnoreCase);
 

@@ -192,7 +192,7 @@ public static partial class Native
 	}
 
 	// the FULL text of an edit / memo (UI Automation cuts a VCL memo at 2048 characters), unpacked when a tool answers with its
-	// ANSI bytes packed two to a character (xLODGen 4.1.5o, 2026-10-12)
+	// ANSI bytes packed two to a character (xLODGen 4.1.5o)
 	// A window that does not answer in time reads as no text this look: the caller's loop goes on to its own clock
 	public static string ControlText(nint a_hwnd)
 	{
