@@ -4242,6 +4242,22 @@ public static class Program
 		// an output a step at or after the start makes again is that step's, and goes off for it
 		var shared = f.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Output A" }), ("xlodgen", new JsonObject { ["output_mod"] = "Output A" }));
 		Equal("Output A", Off(shared, Runner.Plan(shared, null, "xlodgen", null)), "an output the run makes again goes off for it");
+		// CodeRabbit on pull request #40: an earlier output that a step of the run replaces goes off all the same
+		var replacing = f.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Output A" }), ("xlodgen", new JsonObject { ["output_mod"] = "Output B", ["replaces"] = new JsonArray("Output A") }));
+		Equal("Output A|Output B", Off(replacing, Runner.Plan(replacing, null, "xlodgen", null)), "an earlier output the run's step replaces goes off for it");
+		// ... the rival check counts the earlier output kept on as a rival, as the run leaves it
+		Check(!Duplicates.Off(setup, st, from).Contains("Output A") && Duplicates.Off(setup, st).Contains("Output A"), "the rival check's off list is the run's own");
+		// ... a step this version does not have is no kept step either, its old output left alone
+		var old = Setup.FromJson(new JsonObject { ["steps"] = new JsonArray(
+			new JsonObject { ["step"] = "easynpc", [OldOutput.Key] = true, ["settings"] = new JsonObject { ["output_mod"] = "Old NPC" } },
+			new JsonObject { ["step"] = "synthesis", [OldOutput.Key] = true, ["settings"] = new JsonObject { ["output_mod"] = "Output A" } }) });
+		Equal("synthesis", string.Join(",", old.KeptSteps.Select(s => s.Key)), "only a step this version has keeps its old output");
+		// ... a run recorded by an older version that changed the plugin order still left something for Undo
+		var legacy = Path.Combine(f.Data, "legacy run");
+		Directory.CreateDirectory(legacy);
+		File.WriteAllText(Path.Combine(legacy, "journal.json"), "{ \"OrderChanged\": true }");
+		Check(RunUndo.LeftSomething(Journal.Load(legacy)), "an older run's changed order still counts for Undo");
+		Directory.Delete(legacy, true);
 		// the run itself: the earlier output stays on through the run, and the log says why
 		StepRegistry.Replace(new FakeStep("xlodgen", (ctx, s) => {
 			Check(ctx.Profile.IsOn("Output A") && !ctx.Profile.IsOn("Output B"), "while the later tool runs, the earlier output is on and its own is off");

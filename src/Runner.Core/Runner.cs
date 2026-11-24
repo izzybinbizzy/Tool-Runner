@@ -189,10 +189,6 @@ public static class Runner
 		}
 		try {
 			c.Check = Preflight.Run(setup, mo2, c.Todo.Select(s => s.Key).ToList());
-			// steps an older version had (or a name this program never knew): left out, and said
-			if (setup.NotKnown is { Count: > 0 } notKnown) {
-				c.Check.Add(new Issue("", false, $"this setup names step(s) this version does not have, left out of the run: {string.Join(", ", notKnown)} - take them out of the setup to stop this note"));
-			}
 			if (pgNote is { Length: > 0 }) {
 				c.Check.Add(new Issue("pgpatcher", false, pgNote));
 			}
@@ -915,21 +911,24 @@ public static class Runner
 	{
 		var outList = new List<(string Mod, string Why)>();
 		var earlier = EarlierOutputs(a_setup, a_todo);
-		void Add(string a_mod, string a_why)
+		// a_replacedByTheRun: a step the run runs replaces it - it goes off even when an earlier step's output is kept on, or that
+		// tool would read what it replaces (CodeRabbit on pull request #40)
+		void Add(string a_mod, string a_why, bool a_replacedByTheRun = false)
 		{
-			if (a_states.TryGetValue(a_mod, out var f) && f == '+' && !earlier.Contains(a_mod) && !outList.Any(o => string.Equals(o.Mod, a_mod, StringComparison.OrdinalIgnoreCase))) {
+			if (a_states.TryGetValue(a_mod, out var f) && f == '+' && (a_replacedByTheRun || !earlier.Contains(a_mod)) && !outList.Any(o => string.Equals(o.Mod, a_mod, StringComparison.OrdinalIgnoreCase))) {
 				outList.Add((a_mod, a_why));
 			}
 		}
-		var all = a_setup.EnabledSteps.Where(s => s.Key != "shaders").Select(s => (Name: StepCatalog.Name(s.Key), S: new StepSettings(s.Settings))).ToList();
-		foreach (var (name, s) in all) {
+		var all = a_setup.EnabledSteps.Where(s => s.Key != "shaders").Select(s => (s.Key, Name: StepCatalog.Name(s.Key), S: new StepSettings(s.Settings))).ToList();
+		foreach (var (_, name, s) in all) {
 			if (s.OutputMod is { } om) {
 				Add(om, "made by " + name);
 			}
 		}
-		foreach (var (name, s) in all) {
+		foreach (var (key, name, s) in all) {
+			var inRun = a_todo == null || a_todo.Any(t => t.Key == key);
 			foreach (var m in s.List("replaces")) {
-				Add(m, "replaced by " + name);
+				Add(m, "replaced by " + name, inRun);
 			}
 		}
 		// an old output that is used goes off with the rest - no tool before its step's place reads it - and comes back on there
