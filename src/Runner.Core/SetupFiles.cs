@@ -219,6 +219,8 @@ public static class SetupFiles
 				back = false;
 			}
 		}
+		// the setup and its learned settings, where they ended up, when they could not be put together again (null: together)
+		string? apart = null;
 		if (back) {
 			var wentBack = false;
 			try {
@@ -241,6 +243,10 @@ public static class SetupFiles
 						NameInside(to, a_file, a_name.Trim());
 					}
 				} catch (Exception e2) when (e2 is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException) {
+					// never a rename said to have worked: the setup and its learned settings are named where they are
+					var setupNow = File.Exists(to) ? to : a_file;
+					var learnedNow = Directory.Exists(learnedTo) ? learnedTo : origin;
+					apart = $"the setup is at \"{setupNow}\" and its learned settings are in \"{learnedNow}\" ({e2.Message}) - close what holds them, then rename the setup again";
 				}
 			}
 			if (wentBack) {
@@ -253,6 +259,10 @@ public static class SetupFiles
 			if (!j.TrySave() && !Names(j.Folder, to)) {
 				notRepointed.Add(j.Folder);
 			}
+		}
+		if (apart != null) {
+			throw new IOException("the rename could not be finished, nor taken back whole: " + apart +
+				(notRepointed.Count == 0 ? "" : $"; the run records in {string.Join(", ", notRepointed.Select(f => "\"" + Path.GetFileName(f) + "\""))} still name its old file"));
 		}
 		return new Renamed(to, matching.Count - notRepointed.Count, notRepointed);
 	}

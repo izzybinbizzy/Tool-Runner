@@ -40,26 +40,39 @@ public abstract class LauncherStep : IStep
 	// one gets them all). A file that holds no object, or an empty one, holds none of them
 	public static string? MissingField(string? a_settings)
 	{
-		if (a_settings is not { Length: > 0 } || a_settings.Trim().Length == 0) {
+		if (a_settings == null) {
 			return null;
+		}
+		if (a_settings.Trim().Length == 0) {
+			return Pointing[0];
 		}
 		var held = JsonNode.Parse(a_settings) as JsonObject;
 		return held == null ? Pointing[0] : Pointing.FirstOrDefault(k => !held.ContainsKey(k));
+	}
+
+	// What stops the step in the tool's settings file before anything of it changes (null: nothing - no file yet is fine, a new
+	// one gets every field): a file that is there but blank, one that does not read as settings, one that lost a field this
+	// program points
+	public static string? SettingsProblem(string? a_settings, string a_name)
+	{
+		if (a_settings != null && a_settings.Trim().Length == 0) {
+			return $"{a_name}'s settings file is empty - nothing was changed and {a_name} was not started. Open {a_name} once through Mod Organizer, let it save its settings, then run the step again.";
+		}
+		string? gone;
+		try {
+			gone = MissingField(a_settings);
+		} catch (JsonException) {
+			return $"{a_name}'s settings file does not read as settings - nothing was changed and {a_name} was not started." + OursToFix(a_name);
+		}
+		return gone == null ? null : $"{a_name}'s settings file no longer holds \"{gone}\", which Tool Runner sets to point it at this profile and this output - nothing was changed and {a_name} was not started." + OursToFix(a_name);
 	}
 
 	// the tool's settings file still holds every field this program points: looked at before anything of the step is changed
 	void CheckSettings(RunContext a_ctx)
 	{
 		var file = SettingsFile(a_ctx);
-		var name = StepCatalog.Name(Key);
-		string? gone;
-		try {
-			gone = MissingField(File.Exists(file) ? Files.ReadSharedText(file) : null);
-		} catch (JsonException) {
-			throw new StepFailedException($"{name}'s settings file does not read as settings - nothing was changed and {name} was not started." + OursToFix(name));
-		}
-		if (gone != null) {
-			throw new StepFailedException($"{name}'s settings file no longer holds \"{gone}\", which Tool Runner sets to point it at this profile and this output - nothing was changed and {name} was not started." + OursToFix(name));
+		if (SettingsProblem(File.Exists(file) ? Files.ReadSharedText(file) : null, StepCatalog.Name(Key)) is { } why) {
+			throw new StepFailedException(why);
 		}
 	}
 

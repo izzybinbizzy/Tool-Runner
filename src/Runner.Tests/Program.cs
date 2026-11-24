@@ -6560,6 +6560,14 @@ public static class Program
 		// the game's folder is one of them (CodeRabbit on pull request #38)
 		Equal("GameLocation", LauncherStep.MissingField("{ \"Mo2InstancePath\": \"C:\\\\M\", \"Mo2ProfileName\": \"A\", \"GameDirectory\": \"C:\\\\G\", \"OutputLocation\": \"C:\\\\O\" }"), "the game's folder under another name is found too");
 		Check(LauncherStep.OursToFix("Landscape Fixer").Contains("Tool Runner's GitHub page, never on Landscape Fixer's own page", StringComparison.Ordinal), "and the report goes to Tool Runner");
+		// what the step itself stops on, before anything is changed: a file that is there but blank stops it as well
+		Equal<string?>(null, LauncherStep.SettingsProblem(null, "Landscape Fixer"), "no settings file yet: the step goes on");
+		foreach (var blank in new[] { "", "   ", "\r\n\t \n" }) {
+			Check(LauncherStep.SettingsProblem(blank, "Landscape Fixer")?.Contains("settings file is empty", StringComparison.Ordinal) == true, $"a blank settings file stops the step ({blank.Length} characters)");
+			Equal("Mo2InstancePath", LauncherStep.MissingField(blank), "and holds none of the fields");
+		}
+		Check(LauncherStep.SettingsProblem("{ not settings", "Landscape Fixer")?.Contains("does not read as settings", StringComparison.Ordinal) == true, "a file that does not read stops it");
+		Check(LauncherStep.SettingsProblem("{}", "Landscape Fixer")?.Contains("no longer holds \"Mo2InstancePath\"", StringComparison.Ordinal) == true, "a file that lost a field stops it");
 	}
 
 	static void T_SynthesisUsesTheGameModOrganizerRuns()
