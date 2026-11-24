@@ -76,10 +76,8 @@ public partial class MainWindow
 			_vm.Say($"No page is known for {row.Name}'s tool.", "warn");
 			return;
 		}
-		try {
-			System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(help.Url) { UseShellExecute = true });
-		} catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) {
-			_vm.Say($"{help.What} did not open: {e.Message}", "bad");
+		if (MainViewModel.OpenPage(help.Url) is { } why) {
+			_vm.Say($"{help.What} did not open: {why}", "bad");
 		}
 	}
 

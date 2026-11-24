@@ -379,7 +379,7 @@
             <Button DockPanel.Dock="Right" x:Name="LogPop" Content="_Pop out" Style="{StaticResource Ghost}" Click="LogPop_Click" Margin="8,0,0,0"
                     ToolTip="The log in a window of its own: size it, move it to another screen (Ctrl+L)" AutomationProperties.AcceleratorKey="Ctrl+L"/>
             <Button DockPanel.Dock="Right" x:Name="LogHide" Content="Hide" Style="{StaticResource Ghost}" Click="LogHide_Click" Margin="14,0,0,0"
-                    ToolTip="Hides the log here; the card above takes its room"/>
+                    ToolTip="Hides the log here; the cards above take its room"/>
             <CheckBox DockPanel.Dock="Right" x:Name="Follow" Content="Follow" IsChecked="True" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"
                       ToolTip="Keeps the newest line in view"/>
             <CheckBox DockPanel.Dock="Right" Content="Detailed" IsChecked="{Binding DetailedLog}" Margin="0,0,14,0" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"
