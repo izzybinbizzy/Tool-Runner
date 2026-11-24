@@ -177,7 +177,7 @@ public static class QueueDialog
 		start.Click += (_, _) => {
 			var files = rows.Where(r => r.Box.IsChecked == true).Select(r => r.File).ToList();
 			if (files.Count < 2) {
-				note.Text = "Tick at least two setups (one setup is a normal Start).";
+				note.Text = WindowWords.Word("Tick at least two setups (one setup is a normal Start).");
 				return;
 			}
 			picked = new Picked(files, keep.IsChecked == true);

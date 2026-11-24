@@ -6,12 +6,30 @@ using System.Windows.Data;
 
 namespace ToolRunner.App;
 
-// His checklist 476: the window built ready for translators, English first. A language is one file, Languages\<its name>.json in the data folder:
-// { "the English words": "their translation" }. Whatever a file leaves out stays English, and text a binding fills (what a run is doing) is left
-// alone: a translator can start small. Settings makes the file from what the window shows.
+// The window in other languages. A language is { "the English words": "their translation" }: the program ships some inside itself
+// (Languages\<its name>.json in the source), and a file of the same shape in the data folder's Languages folder adds a language or
+// corrects a shipped one, text by text. Whatever a language leaves out stays English, and text a binding fills (what a run is
+// doing) is left alone. Settings makes such a file from what the window shows.
 public static class WindowWords
 {
 	public const string English = "English";
+
+	const string ShippedPrefix = "Language.";
+
+	// the languages inside the program
+	public static List<string> Shipped() =>
+		[.. typeof(WindowWords).Assembly.GetManifestResourceNames().Where(n => n.StartsWith(ShippedPrefix, StringComparison.Ordinal) && n.EndsWith(".json", StringComparison.Ordinal))
+			.Select(n => n[ShippedPrefix.Length..^".json".Length])];
+
+	public static string? ShippedText(string a_name)
+	{
+		using var s = typeof(WindowWords).Assembly.GetManifestResourceStream(ShippedPrefix + a_name + ".json");
+		if (s == null) {
+			return null;
+		}
+		using var r = new StreamReader(s);
+		return r.ReadToEnd();
+	}
 
 	static Dictionary<string, string> s_words = new(StringComparer.Ordinal);
 	// back from a translation to its English, so a file made with a language in use still has English keys
@@ -31,11 +49,14 @@ public static class WindowWords
 
 	public static List<string> Available()
 	{
-		var names = new List<string> { English };
-		if (Directory.Exists(Folder)) {
-			names.AddRange(Directory.GetFiles(Folder, "*.json").Select(f => Path.GetFileNameWithoutExtension(f)!).Order(StringComparer.OrdinalIgnoreCase));
+		var names = new List<string>(Shipped());
+		try {
+			if (Directory.Exists(Folder)) {
+				names.AddRange(Directory.GetFiles(Folder, "*.json").Select(f => Path.GetFileNameWithoutExtension(f)!));
+			}
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 		}
-		return names;
+		return [English, .. names.Where(n => n != English).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase)];
 	}
 
 	public static void Pick(string a_name)
@@ -43,6 +64,9 @@ public static class WindowWords
 		Directory.CreateDirectory(AppPaths.Data);
 		Files.WriteAtomic(PickedFile, a_name);
 	}
+
+	// a text the code shows in a list (not one the window's walk reaches) in the language in use
+	public static string Word(string a_english) => s_words.TryGetValue(a_english, out var w) ? w : a_english;
 
 	public static void Use(IReadOnlyDictionary<string, string> a_words)
 	{
@@ -77,18 +101,34 @@ public static class WindowWords
 			return $"the language {name} is no language's name: the window stays in English";
 		}
 		var file = Path.Combine(Folder, name + ".json");
+		// the shipped words first, then the player's own file over them, text by text
+		var words = new Dictionary<string, string>(StringComparer.Ordinal);
+		var shipped = Shipped().FirstOrDefault(s => s.Equals(name, StringComparison.OrdinalIgnoreCase)) is { } sn ? ShippedText(sn) : null;
+		if (shipped != null && Read(shipped, out _) is { } inside) {
+			foreach (var (k, v) in inside) {
+				words[k] = v;
+			}
+		}
 		try {
-			if (!File.Exists(file)) {
+			if (File.Exists(file)) {
+				if (Read(Files.ReadSharedText(file), out var problem) is not { } own) {
+					if (shipped == null) {
+						return $"the language file {name} does not read ({problem}): the window stays in English";
+					}
+					Use(words);
+					return $"your language file {name} does not read ({problem}): the window uses the shipped {name} without it";
+				}
+				foreach (var (k, v) in own.Where(p => !string.IsNullOrWhiteSpace(p.Value))) {
+					words[k] = v;
+				}
+			} else if (shipped == null) {
 				return $"the language {name} was not found: the window stays in English";
 			}
-			if (Read(Files.ReadSharedText(file), out var problem) is not { } words) {
-				return $"the language file {name} does not read ({problem}): the window stays in English";
-			}
-			Use(words);
-			return "";
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			return $"the language file {name} could not be read ({e.Message}): the window stays in English";
 		}
+		Use(words);
+		return "";
 	}
 
 	public static bool GoodName(string a_name) => a_name.Trim().Length > 0 && a_name == Path.GetFileName(a_name) && a_name is not ("." or "..");
@@ -118,6 +158,10 @@ public static class WindowWords
 			case HeaderedItemsControl h when Free(HeaderedItemsControl.HeaderProperty) && h.Header is string hs && !string.IsNullOrWhiteSpace(hs):
 				Do(hs, w => h.Header = w);
 				break;
+		}
+		// a window's own title (its title bar and the taskbar's list of windows)
+		if (a_root is Window win && Free(Window.TitleProperty) && !string.IsNullOrWhiteSpace(win.Title)) {
+			Do(win.Title, w => win.Title = w);
 		}
 		if (a_root is FrameworkElement fe) {
 			if (Free(FrameworkElement.ToolTipProperty) && fe.ToolTip is string tip && !string.IsNullOrWhiteSpace(tip)) {

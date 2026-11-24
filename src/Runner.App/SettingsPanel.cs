@@ -274,10 +274,12 @@ public static class SettingsPanel
 		}
 		StackPanel setupPage = Page("Setup"), runPage = Page("Run"), gamePage = Page("Game steps"), backupPage = Page("Backups"), alertPage = Page("Alerts"),
 			stepPage = Page("Steps"), toolPage = Page("Tools"), changesPage = Page("MO2 Changelog"), programPage = Page("Program");
-		var cats = new ListBox { Width = 168, Margin = new Thickness(0, 0, 16, 0), ItemsSource = pages.Select(p => p.Name).ToList(), SelectedIndex = s_page < pages.Count ? s_page : 0,
+		// (the pages are shown in the window's language and known by their English names)
+		var cats = new ListBox { Width = 168, Margin = new Thickness(0, 0, 16, 0), ItemsSource = pages.Select(p => WindowWords.Word(p.Name)).ToList(), SelectedIndex = s_page < pages.Count ? s_page : 0,
 			VerticalAlignment = VerticalAlignment.Top, BorderThickness = new Thickness(0), Background = System.Windows.Media.Brushes.Transparent };
 		System.Windows.Automation.AutomationProperties.SetName(cats, "Settings pages");
 		s_cats = cats;
+		s_catNames = [.. pages.Select(p => p.Name)];
 		var host = new StackPanel();
 		var scroller = new ScrollViewer { Content = host, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Padding = new Thickness(0, 0, 12, 0) };
 		System.Windows.Automation.AutomationProperties.SetName(scroller, "The settings of the page picked");
@@ -436,10 +438,8 @@ public static class SettingsPanel
 		Field(changesPage, apply, "Hide mods whose name starts with (one per line)", changes, "hideModsStartingWith", JsonValueKind.Array);
 		stack = programPage;
 
-		// the window's look for every setup (his ask 2026-10-27: themes his design agent makes from "Theme template.json")
-		// his checklist 476
 		Head("LANGUAGE");
-		var languageNote = new TextBlock { Text = "English, or a language file in the Languages folder. A file holds each English text and its translation; what it leaves out stays English. Nothing is translated yet: this is ready for whoever wants to.",
+		var languageNote = new TextBlock { Text = "The window's language. A language file of your own in the Languages folder adds to the shipped ones, or corrects one: it holds each English text and its translation, and what it leaves out stays as it was.",
 			Style = (Style)a_w.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
 		var languages = new ComboBox { MinWidth = 220, Margin = new Thickness(0, 0, 10, 0), ItemsSource = WindowWords.Available(), SelectedItem = WindowWords.Picked() };
 		System.Windows.Automation.AutomationProperties.SetName(languages, "The window's language");
@@ -1007,6 +1007,7 @@ public static class SettingsPanel
 	static int s_page;
 
 	static ListBox? s_cats;
+	static List<string> s_catNames = [];
 
 	// the line of the drawing on screen that says why its settings were not saved (a save of an earlier drawing that ends
 	// late writes its failure there)
@@ -1041,11 +1042,11 @@ public static class SettingsPanel
 			return false;
 		}
 		// a search left in the box would keep hiding the step's fields: the category's own change clears it, but Steps may be
-		// the page already (CodeRabbit on pull request #38)
+		// the page already
 		if (s_find is { } f && f.Text != "") {
 			f.Text = "";
 		}
-		if (cats.Items.IndexOf("Steps") is var page and >= 0) {
+		if (s_catNames.IndexOf("Steps") is var page and >= 0) {
 			cats.SelectedIndex = page;
 		}
 		pick.SelectedIndex = i;
@@ -1069,7 +1070,7 @@ public static class SettingsPanel
 			return null;
 		}
 		cats.SelectedIndex = a_page;
-		return cats.Items[a_page] as string;
+		return a_page < s_catNames.Count ? s_catNames[a_page] : cats.Items[a_page] as string;
 	}
 
 	// the search's line under its box: how many settings on screen hold the word, and the other steps whose settings hold it (a

@@ -4761,6 +4761,32 @@ public static class Program
 	}
 
 	// a language file: a value left empty stays English, a name is only a name, and a file that does not read is not replaced
+	// The languages shipped inside the program: each one reads, gives every text a translation (none left empty), keeps one access
+	// key where the English has one and every key shortcut the English names, and is offered in the language list
+	static void T_EveryShippedLanguageReadsWhole()
+	{
+		var shipped = ToolRunner.App.WindowWords.Shipped();
+		foreach (var name in new[] { "Deutsch", "Español", "Français", "Italiano", "Polski", "Português (Brasil)", "Türkçe", "Русский", "Українська", "日本語", "简体中文", "한국어" }) {
+			Check(shipped.Contains(name), "shipped: " + name);
+		}
+		var offered = ToolRunner.App.WindowWords.Available();
+		Check(offered[0] == ToolRunner.App.WindowWords.English && shipped.All(offered.Contains), "English first, then every shipped language: " + string.Join(", ", offered));
+		foreach (var name in shipped) {
+			var words = ToolRunner.App.WindowWords.Read(ToolRunner.App.WindowWords.ShippedText(name)!, out var problem);
+			Check(words != null, $"{name} reads: {problem}");
+			Check(words!.Count >= 300, $"{name} holds the window's texts ({words.Count})");
+			foreach (var (english, word) in words) {
+				Check(!string.IsNullOrWhiteSpace(word), $"{name}: no empty translation for {english}");
+				if (english.Count(c => c == '_') == 1) {
+					Check(word.Count(c => c == '_') == 1, $"{name}: one access key in {word}");
+				}
+				foreach (var key in System.Text.RegularExpressions.Regex.Matches(english, @"Ctrl\+(?:Enter|[A-Z,])|\bF\d\b").Select(m => m.Value)) {
+					Check(word.Contains(key, StringComparison.Ordinal), $"{name}: {key} kept in {word}");
+				}
+			}
+		}
+	}
+
 	static void T_ALanguageFileCannotHarmTheWindow()
 	{
 		ToolRunner.App.WindowWords.Use(new Dictionary<string, string> { ["Start"] = "Starten", ["Empty"] = null!, ["Blank"] = "  " });

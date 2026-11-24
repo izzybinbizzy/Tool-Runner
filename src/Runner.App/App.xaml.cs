@@ -300,7 +300,13 @@ public partial class App : Application
 		var w = new MainWindow { ShowActivated = false, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.Manual, Left = -30000, Top = -30000 };
 		w.Show();
 		Pump(w, 2500);
-		void Save(string a_name, Window? a_of = null) => Picture(a_of ?? w, a_dir, a_name);
+		// every text a drawing shows that no binding fills: the list a language is translated from ("window words.json")
+		var words = new SortedSet<string>(StringComparer.Ordinal);
+		void Save(string a_name, Window? a_of = null)
+		{
+			Picture(a_of ?? w, a_dir, a_name);
+			words.UnionWith(WindowWords.Seen(a_of ?? w));
+		}
 		Save("1 dashboard");
 		var history = w.ShowPanel("history");
 		Pump(w, 600);
@@ -438,6 +444,24 @@ public partial class App : Application
 		}
 		Theme.Apply(Theme.Default, false);
 		Pump(w, 400);
+		// the window in a shipped language whose words run long: nothing may be cut off or overlap
+		if (WindowWords.ShippedText("Deutsch") is { } de && WindowWords.Read(de, out _) is { } german) {
+			WindowWords.Use(german);
+			w.Demo(false);
+			// (a text the code gives a button is worked out again: the old-output button's words)
+			w.DemoUsesOld("dyndolod", false);
+			WindowWords.Tree(w);
+			Pump(w, 600);
+			Save("10 a run going - Deutsch");
+			var deSettings = w.ShowPanel("settings", true);
+			WindowWords.Tree(deSettings);
+			Pump(w, 600);
+			Save("10b settings - Deutsch", deSettings);
+			w.ClosePanels();
+			WindowWords.Use(new Dictionary<string, string>());
+		}
+		w.Demo(true);
+		Pump(w, 300);
 		// the run waits on the player's own Mod Organizer: its band without a Done button
 		w.DemoWaitsOutside();
 		Pump(w, 600);
@@ -479,6 +503,8 @@ public partial class App : Application
 		Save("7b a dry run that would be refused", dryBox);
 		dryBox.Close();
 		w.Close();
+		File.WriteAllText(Path.Combine(a_dir, "window words.json"), System.Text.Json.JsonSerializer.Serialize(words.ToDictionary(k => k, _ => ""),
+			new System.Text.Json.JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
 		if (squeezed.Count > 0) {
 			File.WriteAllLines(Path.Combine(a_dir, "layout problems.txt"), squeezed);
 			ConsoleAttach.ToParent();
