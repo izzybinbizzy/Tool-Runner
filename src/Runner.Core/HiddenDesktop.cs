@@ -103,11 +103,15 @@ public sealed partial class HiddenDesktop : IDisposable
 				// a look that fails (a process gone mid-read) is tried again next time: an exception here would end the program
 				try {
 					var tree = Procs.Tree(a_root);
+					var starts = tree.Select(pid => (pid, Procs.StartTime(pid))).ToList();
 					var shown = OnPlayersDesktop(tree);
 					if (shown.Count > 0) {
 						_leak = "a window of the tool opened on the player's screen (" + string.Join(", ", shown.Select(h => "'" + Native.WindowText(h) + "'")) + ") - the tool was ended";
-						foreach (var pid in tree.AsEnumerable().Reverse()) {
-							Procs.KillTree(pid);
+						// each by its number AND the start time read with the list: one that ended and whose number another took is left
+						foreach (var (pid, began) in starts.AsEnumerable().Reverse()) {
+							if (began is { } at) {
+								Procs.KillTree(pid, at);
+							}
 						}
 						return;
 					}

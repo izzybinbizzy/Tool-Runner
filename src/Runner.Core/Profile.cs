@@ -692,7 +692,8 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 					if (!mastersCache.TryGetValue(full, out var ms)) {
 						try {
 							ms = Plugins.Masters(full);
-						} catch (IOException) {
+						} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+							// (a plugin Windows will not let it read is no master of anything, as in InPluginMasterOrder)
 							ms = [];
 						}
 						mastersCache[full] = ms;

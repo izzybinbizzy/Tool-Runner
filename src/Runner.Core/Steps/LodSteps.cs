@@ -425,7 +425,7 @@ public static class Cli
 				}
 			});
 		} catch {
-			Procs.KillTree(p.Id);
+			Procs.End(p);
 			throw;
 		} finally {
 			string text;

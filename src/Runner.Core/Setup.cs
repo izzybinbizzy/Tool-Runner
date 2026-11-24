@@ -51,7 +51,9 @@ public sealed class Setup
 		new Dictionary<string, string>();
 
 	public IReadOnlyList<Profile.PlaceRule> Placement =>
-		(Root["placement"] as JsonArray)?.OfType<JsonArray>().Where(a => a.Count >= 2)
+		// (a setup file comes from anywhere: an entry whose two names are not both given is no rule - a null there threw at the
+		// end of the put-back, the one place this is read; the check names such an entry)
+		(Root["placement"] as JsonArray)?.OfType<JsonArray>().Where(a => a.Count >= 2 && a[0] is JsonValue && a[1] is JsonValue)
 			.Select(a => new Profile.PlaceRule(a[0]!.ToString(), a[1]!.ToString(), a.Count > 2 && a[2]?.ToString() == "active")).ToList() ?? [];
 
 	// UseOld: the step is not run and the output it made before is used (OldOutput) - it counts only for a step that is on
@@ -202,6 +204,9 @@ public sealed class Setup
 		// a line put into the mod list and everything in that folder moved into the run's backup. Only a plain folder name is a mod
 		foreach (var (where, name) in ModNames().Where(m => !PlainName(m.Name)).DistinctBy(m => m.Name).Take(5)) {
 			p.Add($"{where} is not a mod's name (one plain folder name: no \\ / : and no \"..\"): {name}");
+		}
+		if (Root["placement"] is JsonArray places && places.Any(e => e is not JsonArray a || a.Count < 2 || a[0] is not JsonValue || a[1] is not JsonValue)) {
+			p.Add("the setup's \"placement\" holds an entry that is not [plugin, after this plugin]");
 		}
 		return p;
 	}

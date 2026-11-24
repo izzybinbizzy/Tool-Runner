@@ -301,8 +301,9 @@ public sealed class Journal
 				if (System.IO.File.Exists(Path.Combine(d, "journal.json"))) {
 					j = Load(d);
 				}
-			} catch (JsonException) {
-			} catch (IOException) {
+			} catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException or InvalidDataException) {
+				// (a record that does not read is passed over here - an empty one, "null", too; NewestUnreadable keeps a start from
+				// going over the newest such record)
 			}
 			if (j != null) {
 				yield return j;
@@ -389,8 +390,8 @@ public sealed class JournalCache(string a_runsDir)
 				var j = Journal.Load(d);
 				_seen[d] = (f.LastWriteTimeUtc, f.Length, j);
 				list.Add(j);
-			} catch (JsonException) {
-			} catch (IOException) {
+			} catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException or InvalidDataException) {
+				// (passed over, as Journal.All does)
 			}
 		}
 		foreach (var gone in _seen.Keys.Where(k => !live.Contains(k)).ToList()) {

@@ -156,6 +156,9 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 
 	public List<string> DownloadsInProgress() => Downloads(Mo2.DownloadsDir).Active;
 
+	// what stands for the downloads when their folder could not be looked into
+	public const string UnreadDownloads = "its downloads folder could not be read, so a download may be going";
+
 	// a download MO2 finished but whose "<file>.unfinished" stayed beside it, byte for byte the same: MO2 cannot finish it and
 	// resumes it at every start, so it is no download in progress (one held a whole evening's game line, 2026-11-02) - named,
 	// never deleted (the player removes it, or its row in MO2's Downloads tab)
@@ -171,8 +174,10 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 				var done = stub[..^".unfinished".Length];
 				(File.Exists(done) && SameBytes(stub, done) ? stale : active).Add(Path.GetFileName(stub));
 			}
-		} catch (IOException) {
-		} catch (UnauthorizedAccessException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			// a folder that could not be looked into is no answer: "nothing downloads" is not known, and Mod Organizer is never
+			// closed under a download - it counts as one, by its reason
+			active.Add(UnreadDownloads);
 		}
 		return (active, stale);
 	}

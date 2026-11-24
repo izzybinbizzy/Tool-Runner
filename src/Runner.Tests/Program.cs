@@ -3973,6 +3973,23 @@ public static class Program
 	}
 
 	// a run record whose PID now belongs to another program (after a crash and a restart) is not "alive"
+	// a run record that holds no record ("null") is passed over by every list of the runs, as one that does not read is - it
+	// threw out of the list, and with it out of the window's look and the status command; a start still stops at it when it is the newest
+	static void T_ARecordThatHoldsNothingIsPassedOver()
+	{
+		using var f = new FakeMo2();
+		var runs = Runner.RunsDir(f.Data);
+		var good = Path.Combine(runs, "2026-01-01 00-00-00 Test");
+		var empty = Path.Combine(runs, "2026-01-02 00-00-00 Test");
+		Directory.CreateDirectory(good);
+		Directory.CreateDirectory(empty);
+		new Journal { Folder = good, SetupFile = f.SetupFile, State = RunState.Finished }.Save();
+		File.WriteAllText(Path.Combine(empty, "journal.json"), "null");
+		Equal(1, Journal.All(runs).Count(), "the list holds the one that reads");
+		Equal(1, new JournalCache(runs).Read().Count, "and so does the window's cached list");
+		Check(Journal.NewestUnreadable(runs) is { } dim && Files.SamePath(dim.Folder, empty), "the newest record that holds nothing still stops a start");
+	}
+
 	static void T_ReusedPidIsNotTheRun()
 	{
 		var me = Environment.ProcessId;
@@ -5222,6 +5239,9 @@ public static class Program
 			return;
 		}
 		const string probe = "MO2 Tool Runner - zz offline leftover", theirs = "MO2 Tool Runner - zz offline not ours";
+		// what is tested is which task goes, never how fast Windows answers: a PC busy with other work took over 30 s
+		var limit = Schedule.Limit;
+		Schedule.Limit = TimeSpan.FromMinutes(3);
 		try {
 			Check(Schedule.AddProbe(probe) && Schedule.Exists(probe), "a leftover task made");
 			Check(Schedule.AddProbe(theirs, "cmd.exe") && Schedule.Exists(theirs), "a same-named task of the player's made");
@@ -5230,6 +5250,7 @@ public static class Program
 		} finally {
 			Schedule.DeleteProbe(probe);
 			Schedule.DeleteProbe(theirs);
+			Schedule.Limit = limit;
 		}
 	}
 
@@ -8514,7 +8535,9 @@ public static class Program
 		s.Root["zipBackups"] = false;
 		s.Save();
 		var keep = Runner.HookHurry;
-		Runner.HookHurry = TimeSpan.FromSeconds(2);
+		// the hurry each command gets once Stop is pressed: long enough for the second command (an echo) to start and end on a
+		// PC busy with other work - at 2 s it was itself cut off there - and well short of the first one's 39 s
+		Runner.HookHurry = TimeSpan.FromSeconds(8);
 		try {
 			var runs = Runner.RunsDir(f.Data);
 			var stopper = Task.Run(() => {
@@ -9562,7 +9585,12 @@ public static class Program
 			["steps"] = new JsonArray(new JsonObject { ["step"] = "cleansave" }, new JsonObject { ["step"] = "cleansave" }, new JsonObject { ["step"] = "snowfixer" },
 				new JsonObject { ["step"] = "nosuchstep", ["settings"] = new JsonObject { ["output_mod"] = @"..\outside" } }) }).Problems());
 		said.AddRange(Setup.FromJson(new JsonObject { ["steps"] = new JsonArray(new JsonObject { ["step"] = "synthesis", ["on"] = false }) }).Problems());
-		Check(said.Count >= 14, "the setup's own problems were all met: " + string.Join(" | ", said));
+		// a plugin place without both its names is refused at the check, and never read as a rule (it threw at the put-back's end)
+		var badPlace = Setup.FromJson(new JsonObject { ["placement"] = JsonNode.Parse("[[null, \"Skyrim.esm\"], [\"Only.esp\"], [\"Mine.esp\", \"Skyrim.esm\"]]") });
+		Check(badPlace.Placement.Count == 1 && badPlace.Placement[0].ToString().Contains("Mine.esp", StringComparison.Ordinal), "only the whole entry is a plugin place");
+		said.AddRange(badPlace.Problems().Where(p => p.Contains("placement", StringComparison.Ordinal)));
+		Check(said[^1].Contains("placement", StringComparison.Ordinal), "and the check names the others");
+		Check(said.Count >= 15, "the setup's own problems were all met: " + string.Join(" | ", said));
 		// a blocked start, as a run says it
 		var notes = Path.Combine(Runner.RunsDir(f.Data), "2026-01-01 00-00-00 Test");
 		Directory.CreateDirectory(notes);

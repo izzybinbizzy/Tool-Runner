@@ -401,8 +401,12 @@ public static class StepKit
 		while (Ours().Count > 0 && sw.Elapsed < TimeSpan.FromSeconds(8)) {
 			Thread.Sleep(500);
 		}
+		// each by its number AND the start time on the run's record: one whose number changed hands since is no longer ours
+		var at = a_control.Started.OwnedAt();
 		foreach (var pid in Ours()) {
-			Procs.KillTree(pid);
+			if (at.TryGetValue(pid, out var started)) {
+				Procs.KillTree(pid, started);
+			}
 		}
 		a_log.Detail($"{a_image} closed");
 	}

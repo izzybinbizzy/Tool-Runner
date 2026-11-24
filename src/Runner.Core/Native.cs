@@ -421,6 +421,20 @@ public static partial class Procs
 	public static TimeSpan CpuGain(IReadOnlyDictionary<int, TimeSpan> a_before, IReadOnlyDictionary<int, TimeSpan> a_now) =>
 		a_now.Aggregate(TimeSpan.Zero, (sum, kv) => sum + (kv.Value - a_before.GetValueOrDefault(kv.Key) is { Ticks: > 0 } d ? d : TimeSpan.Zero));
 
+	// A process this run holds the Process of, ended through that handle with all it started: its number may be another's by
+	// now, the handle is not
+	public static void End(Process a_p)
+	{
+		try {
+			a_p.Kill(true);
+			a_p.WaitForExit(10000);
+		} catch (InvalidOperationException) {
+		} catch (Win32Exception) {
+		} catch (AggregateException) {
+			// the process itself is ended first; one of the programs under it would not go
+		}
+	}
+
 	public static void KillTree(int a_root)
 	{
 		try {
