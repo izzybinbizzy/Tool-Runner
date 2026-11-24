@@ -1,6 +1,6 @@
 namespace ToolRunner;
 
-// His checklist 468: the program's entry in Mod Organizer's Tools menu, one small plugin file that opens its window on the profile Mod Organizer
+// The program's entry in Mod Organizer's Tools menu, one small plugin file that opens its window on the profile Mod Organizer
 // shows. Offered from Settings; Mod Organizer loads it the next time it starts. A copy points at the program that added it, so a program moved
 // since reads as different and is offered again.
 public static class Mo2MenuEntry
@@ -40,7 +40,7 @@ public static class Mo2MenuEntry
 	public static bool Present(Mo2Instance a_mo2) => File.Exists(There(a_mo2));
 }
 
-// His checklist 477: a run closes and starts Mod Organizer about 13 times (about 6 minutes). With this option on it stays open: the order files are written
+// A run closes and starts Mod Organizer about 13 times (about 6 minutes). With this option on it stays open: the order files are written
 // while it is open and read back in by the plugin above before each tool. A file for each question and each answer, in the plugin's own data folder.
 public static class Companion
 {
@@ -72,7 +72,7 @@ public static class Companion
 	}
 }
 
-// His checklist 492: our own add-on for Root Builder setups, Root Builder Profiles (izzydoingit), offered from Settings where Root Builder
+// Our own add-on for Root Builder setups, Root Builder Profiles (izzydoingit), offered from Settings where Root Builder
 // is in the player's Mod Organizer. It is our code and uses none of Root Builder's; Root Builder itself (Kezyma) comes from its own page and
 // nothing of it ships here. Mod Organizer loads the add-on the next time it starts.
 public static class RootBuilderAddOn

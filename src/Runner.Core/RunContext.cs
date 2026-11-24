@@ -283,7 +283,7 @@ public sealed class Toggle : IDisposable
 			_ctx.Log.Error($"could not close Mod Organizer to put the mods back after {_label}: {e.Message}");
 			throw;
 		}
-		// what the player changed in Mod Organizer while the step's switches were on (CodeRabbit on PR #24): read before the order
+		// what the player changed in Mod Organizer while the step's switches were on: read before the order
 		// files go back, laid back over them after, and still counted as the player's (the expectation goes back to before the
 		// step), so the run's final put-back sees and keeps it too
 		var theirs = _ctx.Profile.ChangedByOthers();
@@ -307,7 +307,7 @@ public sealed class Toggle : IDisposable
 				// The game made its list of files while this step's mods were switched: with them back as they were, that list
 				// names other files than the game now finds. Counted when the step ends, after a finished game step has called
 				// its list current (Crdw.StepEnded) - a game step that writes nothing left a list from before the put-back
-				// marked current, and no later game start made a new one (CodeRabbit on pull request #35)
+				// marked current, and no later game start made a new one
 				_ctx.SwitchedBack = true;
 			} else if (_ctx.Journal.FilesChanged > 0) {
 				// no list was made meanwhile, and the mods are as they were before: nothing has changed for the game's list
@@ -380,8 +380,8 @@ public static class Waits
 	public static TimeSpan GoneGrace { get; set; } = TimeSpan.FromMinutes(3);
 
 	// a_progress: for a tool driven through its window - what its window says; a change counts as work, and so does CPU its CHILD
-	// processes use (a long patcher shows nothing new for minutes - the fourth review, M2), never the window process's own (a
-	// window drawing itself uses CPU while the tool does nothing - Synthesis sat 4 min on its main screen, 2026-10-27)
+	// processes use (a long patcher shows nothing new for minutes), never the window process's own (a
+	// window drawing itself uses CPU while the tool does nothing - Synthesis sat 4 min on its main screen)
 	public static void Tool(RunContext a_ctx, string a_step, Process a_proc, TimeSpan a_deadline, Func<Poll> a_poll,
 		Func<bool>? a_onIdle = null, TimeSpan? a_every = null, Func<string>? a_progress = null)
 	{
