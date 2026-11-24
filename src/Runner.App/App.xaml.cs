@@ -72,7 +72,7 @@ public partial class App : Application
 			// the themed box over the window (every pop-up wears the theme); Windows' own box only when the window cannot carry one
 			try {
 				if (MainWindow is { IsLoaded: true } owner && Ask.Show(owner, "Something went wrong", text, "Open the data folder", "Close")) {
-					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(AppPaths.Data) { UseShellExecute = true });
+					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(AppPaths.Data) { UseShellExecute = true })?.Dispose();
 				} else if (MainWindow is not { IsLoaded: true }) {
 					MessageBox.Show(text, Brand.Name, MessageBoxButton.OK, MessageBoxImage.Warning);
 				}

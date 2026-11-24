@@ -1066,7 +1066,11 @@ public static class Program
 		Check(open.Running, "one look failed: it counts as open");
 		Check(!open.Running, "and as closed again once Windows answers");
 
-		Equal("_CON.demo copy", ToolRunner.App.Theme.FileSafe("CON.demo copy"), "a name Windows keeps for a device gets a mark in front");
+		Equal("Theme CON.demo copy", ToolRunner.App.Theme.FileSafe("CON.demo copy"), "a name Windows keeps for a device gets a word in front");
+		Check(ToolRunner.App.Theme.PlainFont("Segoe UI Variable Text, Segoe UI"), "a font's family names are a font");
+		foreach (var place in new[] { @"\\server\share\#Font", "file:///C:/fonts/#Font", "./#Font", @"C:\fonts\Font.ttf", " " }) {
+			Check(!ToolRunner.App.Theme.PlainFont(place), $"a theme's font is a name, never a place to load one from: {place}");
+		}
 		Equal("Ocean  dark copy", ToolRunner.App.Theme.FileSafe("Ocean: dark copy"), "a character Windows refuses in a name is taken out");
 		Equal("Theme", ToolRunner.App.Theme.FileSafe("..."), "a name with nothing left is given one");
 
@@ -7431,6 +7435,9 @@ public static class Program
 		Equal("TexGen", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "output_mod", -1)), "a setting's own name");
 		Equal("", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "TexGen Output", 0)), "never the step already open");
 		Equal(0, ToolRunner.App.SettingsPanel.StepsWith(steps, " ", -1).Count, "no word, no steps");
+		// a setup file may hold a setting with no name at all: it has no label, and nothing fails over it
+		steps.Add(new() { ["step"] = "acmos", ["settings"] = new JsonObject { [""] = "nameless" } });
+		Equal("ACMOS Road Generator", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "nameless", -1)), "a setting with an empty name is still searched");
 	}
 
 	// his list of 2026-11-16: a step dragged to any place, a check that also looks for updates, windows that keep their size
