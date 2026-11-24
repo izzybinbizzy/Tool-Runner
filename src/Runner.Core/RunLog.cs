@@ -207,11 +207,11 @@ public sealed class RunLog : IDisposable
 		Line?.Invoke(a_text, a_level);
 	}
 
-	// a line of the simple log (the detailed log has its own wording of the same moment), marked as the detailed log marks a
-	// warning or a failure, so the window colors both the same way
-	// what a simple log's line carries after its time: the window colors it by this
+	// what a log's line carries after its time: the window colors it by this
 	public static string MarkOf(Level a_level) => a_level switch { Level.Warn => "! ", Level.Error => "!!! ", _ => "" };
 
+	// a line of the simple log (the detailed log has its own wording of the same moment), marked as the detailed log marks a
+	// warning or a failure, so the window colors both the same way
 	public void Simple(string a_text, Level a_level = Level.Info)
 	{
 		lock (_gate) {

@@ -1272,7 +1272,7 @@ public static class Runner
 			j.Verdict = $"the profile could NOT be put back ({Plain(e)}) - press \"Put my profile back\" once Mod Organizer can close";
 			Keep();
 			a_ctx.Log.Error(j.Verdict);
-			a_ctx.Log.Simple("Stopped: " + j.Verdict, Level.Warn);
+			a_ctx.Log.Simple("Stopped: " + j.Verdict, Level.Error);
 			return new RunOutcome(j.State, j.Verdict, j.Folder);
 		}
 		if (notBack.Count > 0 || filesNotBack.Count > 0 || a_ctx.LinesLeft.Count > 0) {
@@ -1285,7 +1285,7 @@ public static class Runner
 				(notBack.Count > 0 || filesNotBack.Count > 0 ? " (kept off / in the backup)" : "") + " - press \"Put my profile back\" once the files are free";
 			Keep();
 			a_ctx.Log.Error(j.Verdict);
-			a_ctx.Log.Simple("Stopped: " + j.Verdict, Level.Warn);
+			a_ctx.Log.Simple("Stopped: " + j.Verdict, Level.Error);
 			return new RunOutcome(j.State, j.Verdict, j.Folder);
 		}
 		var failed = j.Steps.FirstOrDefault(r => r.State is StepState.Failed or StepState.Stopped);

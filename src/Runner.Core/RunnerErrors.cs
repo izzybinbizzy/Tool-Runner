@@ -129,7 +129,7 @@ public static class RunnerErrors
 		// ---- a run that stopped part way
 		E("TR-401", "could NOT be put back|the profile is back except|put back except|could not put the profile back", "The run ended, but a file was held by another program, so part of your profile is not back yet.",
 			"Close what holds the file (Mod Organizer, a tool left open, an Explorer preview), then press \"Put my profile back\". Until then that mod stays switched off, and its old output is safe in the run's backup."),
-		E("TR-402", "the final save was not made", "Every tool finished and your outputs are on; only the last save in the game was not made.",
+		E("TR-402", "the final save was not made|the save to play was not made", "Every tool finished and your outputs are on; only the last save in the game was not made.",
 			"Load the clean save yourself, walk back to where you were, and save - or run only the Final save step (right-click it)."),
 		E("TR-403", "Mod Organizer was not ready after|Mod Organizer did not close within|Mod Organizer's companion did not read the lists back", "Mod Organizer did not answer in time (a box of its own left open, a very large load order, a slow disk).",
 			"Open Mod Organizer once by hand and answer whatever it asks, close it, then run again from this step."),

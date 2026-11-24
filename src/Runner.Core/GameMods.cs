@@ -239,7 +239,7 @@ public static partial class FasterArchives
 			a_ctx.Log.Warn(What + ". Choose in its window; the run starts the game again when that window has closed.");
 		}
 		a_ctx.Log.Simple(repacking ? "Note: Faster Archives is repacking the game's archives - the run goes on when it has finished" : "Waiting for you: " + What + " - it waits for your choice in its own window",
-		repacking ? Level.Warn : Level.Error);
+			repacking ? Level.Warn : Level.Error);
 		if (tools.Count == 0) {
 			a_ctx.Log.Detail("its window has closed already - starting the game again");
 			return;
