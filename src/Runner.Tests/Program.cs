@@ -7709,6 +7709,40 @@ public static class Program
 			ToolRunner.App.UiState.SaveAtClose();
 			Check(!ToolRunner.App.UiState.Unsaved && ToolRunner.App.UiState.WrittenAtClose && JsonNode.Parse(File.ReadAllText(kept))!["test.width"]!.GetValue<double>() == 1100,
 				"a last write that goes through is in the file");
+			// The program's data removed: a removal that left something behind changes nothing; after one that took all of it,
+			// what the closing window still sets is kept in memory only - written, it would make the data folder again
+			ToolRunner.App.UiState.FileForTests = kept;
+			Check(!ToolRunner.App.UiState.RemoveWith(() => false), "a removal that did not take everything says so");
+			ToolRunner.App.UiState.Set("test.width", 1200);
+			ToolRunner.App.UiState.Save();
+			Equal(1200.0, JsonNode.Parse(File.ReadAllText(kept))!["test.width"]!.GetValue<double>(), "and leaves the window's own writes as they were");
+			Check(ToolRunner.App.UiState.RemoveWith(() => {
+				File.Delete(kept);
+				return true;
+			}) && !ToolRunner.App.UiState.Unsaved, "a removal that took everything leaves nothing to write");
+			ToolRunner.App.UiState.Set("test.height", 700);
+			ToolRunner.App.UiState.SaveAtClose();
+			Check(!File.Exists(kept) && !ToolRunner.App.UiState.Unsaved, "what the closing window sets after it is never written: the removed data stays removed");
+			Equal(700.0, ToolRunner.App.UiState.Number("test.height") ?? 0, "(it is still kept for as long as the program runs)");
+			// ... and the window lets go of its watch on the runs folder for a removal (MainWindow.WatchRuns): Windows moves no
+			// folder - to the Recycle Bin or anywhere - while a folder inside it is watched
+			var watched = Path.Combine(f.Root, "Data watched");
+			Directory.CreateDirectory(Path.Combine(watched, "Runs"));
+			using (var watch = new ToolRunner.App.RunsWatch(Path.Combine(watched, "Runs"), () => { })) {
+				var refused = !watch.Watching;
+				try {
+					if (watch.Watching) {
+						Directory.Move(watched, watched + " moved");
+					}
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+					refused = true;
+				}
+				Check(refused, "a data folder whose runs folder is watched is not moved");
+			}
+			if (Directory.Exists(watched)) {
+				Directory.Move(watched, watched + " moved");
+			}
+			Check(Directory.Exists(watched + " moved") && !Directory.Exists(watched), "with the watch let go it is");
 		} finally {
 			ToolRunner.App.UiState.FileForTests = null;
 		}
