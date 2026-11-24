@@ -121,7 +121,7 @@ public static class Schedule
 	// the test's own task removed whatever it runs
 	public static void DeleteProbe(string a_name) => Schtasks("/Delete", "/TN", a_name, "/F");
 
-	// schtasks writes in the console's code page, not UTF-8 (a localized Windows' messages came out garbled)
+	// schtasks writes in the console's code page, not UTF-8 (a localized Windows' messages came out garbled - the fourth review, L6)
 	static Encoding ConsoleText()
 	{
 		try {

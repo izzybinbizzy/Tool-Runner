@@ -58,7 +58,7 @@ public static partial class SystemChecks
 		return GlobalMemoryStatusEx(ref m) ? (m.TotalPhys / 1073741824.0, m.AvailPhys / 1073741824.0) : null;
 	};
 
-	// Steam changing the game under a run. Steam's own record of the game (appmanifest_489830.acf in the steamapps
+	// his checklist 438: Steam changing the game under a run. Steam's own record of the game (appmanifest_489830.acf in the steamapps
 	// folder above "common") says what it is doing - when the record is of this very folder; another copy in the same library, GOG or a
 	// modlist's own copy has nothing to read. Only a state of real work with Steam running refuses a run: a queued or paused update
 	// (a player staying on a version on purpose) or Steam closed in the middle of one only warns

@@ -56,7 +56,7 @@ public sealed partial class HiddenDesktop : IDisposable
 	{
 		var si = new STARTUPINFO { cb = Marshal.SizeOf<STARTUPINFO>(), lpDesktop = Name };
 		// CreateProcessW may write into the command line: a writable, zero-ended buffer. CREATE_NO_WINDOW: a console program gets
-		// no console - Windows Terminal would open one on the player's screen whatever desktop the program is on
+		// no console - Windows Terminal would open one on the player's screen whatever desktop the program is on (2026-10-27)
 		if (!CreateProcessW(null, (a_commandLine + "\0").ToCharArray(), 0, 0, false, CREATE_NO_WINDOW, 0, a_cwd, ref si, out var pi)) {
 			throw new StepFailedException($"could not start {a_commandLine} (error {Marshal.GetLastWin32Error()})");
 		}

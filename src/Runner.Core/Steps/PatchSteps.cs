@@ -447,7 +447,7 @@ public sealed class SynthesisStep : IStep
 			go = Buttons();
 		}
 		foreach (var b in go) {
-			// the whole window, so a change far down a big pipeline still counts as the start
+			// the whole window, so a change far down a big pipeline still counts as the start (the fifth review, N3)
 			var before = Uia.TextOf(a_w(), int.MaxValue);
 			if (!Uia.Press(b)) {
 				continue;

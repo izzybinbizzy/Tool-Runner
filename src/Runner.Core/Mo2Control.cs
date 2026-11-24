@@ -17,7 +17,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	readonly RunLog _log = a_log;
 
 	// (a WMI start cannot reach a hidden desktop: its WinstationDesktop setting was ignored and the window opened on the player's
-	// screen - measured; a hidden start goes through HiddenDesktop.Start, which watches for exactly that)
+	// screen - measured 2026-10-27; a hidden start goes through HiddenDesktop.Start, which watches for exactly that)
 	public static int StartDetached(string a_commandLine, string a_cwd)
 	{
 		using var cls = new ManagementClass(@"root\cimv2", "Win32_Process", null);
@@ -132,12 +132,12 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 
 	public static bool IsJava(string a_image) => a_image.Equals("javaw.exe", StringComparison.OrdinalIgnoreCase) || a_image.Equals("java.exe", StringComparison.OrdinalIgnoreCase);
 
-	// this program started from Mod Organizer's Tools menu is its child, and never a program the run waits for
+	// this program started from Mod Organizer's Tools menu (his checklist 468) is its child, and never a program the run waits for
 	public static bool IsThisProgram(string a_image) => Journal.IsRunnerName(Path.GetFileNameWithoutExtension(a_image));
 
 	public bool Running => IsRunning() && !HeldOpen;
 
-	// the option to keep Mod Organizer open during a run. HeldOpen: it stays open, and the order files may be written; what is written is
+	// his checklist 477: the option to keep Mod Organizer open during a run. HeldOpen: it stays open, and the order files may be written; what is written is
 	// read back in before anything else starts or it closes, or it would write its old lists over them
 	public bool CompanionOn { get; set; }
 	public bool HeldOpen { get; private set; }
@@ -160,7 +160,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	public const string UnreadDownloads = "its downloads folder could not be read, so a download may be going";
 
 	// a download MO2 finished but whose "<file>.unfinished" stayed beside it, byte for byte the same: MO2 cannot finish it and
-	// resumes it at every start, so it is no download in progress (one held a whole evening's game line) - named,
+	// resumes it at every start, so it is no download in progress (one held a whole evening's game line, 2026-11-02) - named,
 	// never deleted (the player removes it, or its row in MO2's Downloads tab)
 	public static (List<string> Active, List<string> Stale) Downloads(string a_dir)
 	{
@@ -217,7 +217,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	}
 
 	// a program still running from Mod Organizer's own folders while MO2 is closed (a crash dumper of a game that died, kept
-	// alive inside the virtual Data folder): MO2 started beside it can crash at once (measured, three crashes) - so
+	// alive inside the virtual Data folder): MO2 started beside it can crash at once (measured 2026-10-06, three crashes) - so
 	// MO2 waits for it to end, then names it and refuses the start; it is never ended here (its PID may not be ours)
 	public Func<List<(int Pid, string Image)>>? LeftoverProbe { get; set; }
 	public static TimeSpan LeftoverWait { get; set; } = TimeSpan.FromMinutes(2);
@@ -670,7 +670,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		Thread.Sleep(800);
 	}
 
-	// Mod Organizer closed before Root Builder's clear would leave its files in the game folder
+	// his checklist 443: Mod Organizer closed before Root Builder's clear would leave its files in the game folder
 	void WaitForRootBuilder(CancellationToken a_ct)
 	{
 		if ((RunningProbe == null || RootBuilderProbe != null) && (RootBuilderProbe != null || Mo2.RootBuilderBuilds) && !_rootBuilderStuck &&
@@ -719,7 +719,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	readonly HashSet<string> _leftAlone = [];
 	HashSet<string> _boxesBeforeClose = [];
 
-	// a Mod Organizer set to words we cannot read (its own setting, else Windows' language, as it picks one itself)
+	// his checklist 439: a Mod Organizer set to words we cannot read (its own setting, else Windows' language, as it picks one itself)
 	public static bool SpeaksOther(string a_setting, string a_windows) => !(a_setting == "" ? a_windows : a_setting).StartsWith("en", StringComparison.OrdinalIgnoreCase);
 
 	public static TimeSpan PlayerQuiet { get; set; } = TimeSpan.FromSeconds(45);
@@ -890,7 +890,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		return p;
 	}
 
-	// the tools at a lower priority (the setup's "lowerPriority") - the PC stays smooth while they work; the
+	// his checklist 479: the tools at a lower priority (the setup's "lowerPriority") - the PC stays smooth while they work; the
 	// processes a tool starts after this take its priority with them (Windows passes below-normal on to its children)
 	public bool LowerPriority { get; set; }
 

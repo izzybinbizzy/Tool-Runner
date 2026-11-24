@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace ToolRunner;
 
-// "Help me report a bug": one zip holding what a bug report needs - the run's record and both its logs, the
+// "Help me report a bug" (his checklist 482): one zip holding what a bug report needs - the run's record and both its logs, the
 // setup it ran, the crash notes, and the versions of the program, Windows, Mod Organizer, the game and each step's tool - with the
 // player's own names masked (their Windows user name and the PC's name), ready to attach to an issue. Nothing is sent anywhere:
 // the zip is the player's to post or not.

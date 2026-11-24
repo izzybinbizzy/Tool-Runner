@@ -175,7 +175,7 @@ public sealed class GrassStep : IStep
 	}
 
 	// the old route: NGIO's PrecacheGrass.txt in the game folder, the game started until the cache is complete; a crash is resumed
-	// by starting again. His numbers: a first start that dies within 5 minutes is a broken setup; after that short
+	// by starting again. His numbers (2026-09-30): a first start that dies within 5 minutes is a broken setup; after that short
 	// crashes are normal, but more than 15 restarts, or 3 in a row that add no grass file, stop the step.
 	void ByGame(RunContext a_ctx, StepSettings a_s)
 	{
@@ -323,7 +323,7 @@ public sealed class ShaderStep : IStep
 	public const string BootKey = "Disable at Boot";
 
 	// a_otherCaches: the mods of the setup's OTHER caches (shader, output and settings mod) - left out, so switching the tick
-	// between two shader mods or updating one never makes the other's cache stale
+	// between two shader mods or updating one never makes the other's cache stale (the fourth review, M1)
 	// a_layers: the other ticked shader mods this cache is built together with - part of it, hashed with it (none = the
 	// fingerprint a cache had before layers were known, so an older stamp still reads)
 	// a_winners: false = the fingerprint as it was before it knew which mod wins a shader file two mods ship (an older stamp)
@@ -347,7 +347,7 @@ public sealed class ShaderStep : IStep
 		}
 		// A settings file counts by the one part of it that says what is built: the features it switches off at the game's
 		// start (BootKey). Its other values are not part of the cache, and the game rewrites them by itself: in a real run
-		// it changed three preset fields at a start, the file no longer matched, and the next run built the whole
+		// (2026-11-21) it changed three preset fields at a start, the file no longer matched, and the next run built the whole
 		// cache again - twenty minutes for nothing, at every run. What the shader mod itself decides to compile again at a
 		// start, the run waits for before it loads a save (InGame.WaitCompile) and says in its notes.
 		void AddSettings(string a_file)
@@ -804,7 +804,7 @@ public sealed class ShaderStep : IStep
 						var logFresh = log != null && File.GetLastWriteTimeUtc(log) >= started.AddSeconds(-5);
 						var text = logFresh ? Files.ReadSharedText(log!) : "";
 						var n = Files.CountFiles(owCache);
-						// the shader mod must show it runs within a few minutes (it stands down beside a DLL it refuses).
+						// the shader mod must show it runs within a few minutes (it stands down beside a DLL it refuses - 2026-10-09).
 						// Shaders arriving in the cache ARE that sign: a log can be elsewhere (SKSE's log folder moved) or late - a
 						// player's run of 2026-11-04 failed here with 101 shaders already written
 						if (!sane && sw.Elapsed > TimeSpan.FromSeconds(45)) {

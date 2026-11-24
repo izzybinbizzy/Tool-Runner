@@ -210,7 +210,7 @@ public static class Uia
 	}
 
 	// a Win32 button gets a posted click message (Invoke can wait inside a click handler that runs a modal loop, and is refused
-	// on a hidden desktop - measured); any other button Invoke, else the message. Never the real mouse.
+	// on a hidden desktop - measured 2026-10-27); any other button Invoke, else the message. Never the real mouse.
 	public static bool Press(AutomationElement a_e)
 	{
 		try {
@@ -290,7 +290,7 @@ public static class Uia
 			var cls = Native.ClassName(h);
 			// Only a window that can be a box, or hold one, becomes a UI Automation element: the message-box classes, and Qt
 			// windows (a Qt box shows inside its window's tree). Every other window is left out, a tool's main window and the
-			// windows it owns alike: .NET's UI Automation client keeps every element it ever made (measured: about
+			// windows it owns alike: .NET's UI Automation client keeps every element it ever made (measured 2026-11-07: about
 			// 1 KB a call, growing without end, when every window of a tool was read every two seconds). An owned window used to
 			// be let in here and then never became a box (a box is told by its class below), so each look made its element for
 			// nothing - OwnedWindows names those without one

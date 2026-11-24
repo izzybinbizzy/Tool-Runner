@@ -110,7 +110,7 @@ public static class Cli
 	}
 
 	// the newest run of the setup (or of any setup), zipped with its logs for a bug report; prints where the zip is
-	// a copy of the setup another player can import - paths of this PC and its commands taken out
+	// his checklist 466: a copy of the setup another player can import - paths of this PC and its commands taken out
 	static int ShareCmd(string[] a_args)
 	{
 		var file = Opt(a_args, "--setup") ?? throw new ArgumentException("--setup <file> is needed");

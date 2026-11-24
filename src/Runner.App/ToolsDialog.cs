@@ -3,7 +3,7 @@ using System.Windows.Controls;
 
 namespace ToolRunner.App;
 
-// "there needs to be an initial pop up for each mod on the initial run that allows users to manually
+// His word of 2026-11-21: "there needs to be an initial pop up for each mod on the initial run that allows users to manually
 // configure each patcher before the run, and also a way to manually do it afterwards as well."
 // One box for both: every tool of the setup that has a window of its own, each with a button that opens that window through
 // Mod Organizer. The player sets the tool up there, saves and closes it, and its settings are kept with the setup and used

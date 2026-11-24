@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace ToolRunner;
 
-// Shareable setups: a copy of a setup another player can import - its steps, their order and their options
+// Shareable setups (his checklist 466): a copy of a setup another player can import - its steps, their order and their options
 // kept, everything that belongs to this PC taken out: the Mod Organizer it points at, the backup folder, every value that holds a
 // path of this PC, and the commands it runs before and after a run (a shared file must never run something on another PC). The
 // player's Windows and PC names are masked in what is left. The copy says what the importing player sets themselves.
