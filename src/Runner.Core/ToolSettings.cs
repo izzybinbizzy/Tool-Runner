@@ -284,11 +284,11 @@ public static partial class ToolSettings
 	// What would make "Learn its settings" wait before the tool's window opens (null: nothing - it opens at once): this setup's
 	// Mod Organizer is open and cannot be closed under a game, a download, a repack or a program of the player's (his report of
 	// 2026-11-22: with the game open, the box greyed its window, the tool never came and the box would not close).
-	public static string? WhyNotNow(Setup a_setup)
+	public static string? WhyNotNow(Setup a_setup, CancellationToken a_ct = default)
 	{
 		var mo2 = Mo2Instance.Load(a_setup.Mo2Exe, a_setup.Mo2Instance);
 		var control = new Mo2Control(mo2, a_setup.Profile, RunLog.Null) { AllowCloseTheirs = true };
-		return control.Running ? control.WhyNotClosable() : null;
+		return control.Running ? control.WhyNotClosable(a_ct) : null;
 	}
 
 	// a_stillOn: told the mod that was switched on for the tool's window when it could not be switched off again (the log

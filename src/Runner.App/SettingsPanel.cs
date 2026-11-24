@@ -805,7 +805,8 @@ public static class SettingsPanel
 				ShowLearn();
 				learn.Click += async (_, _) => {
 					if (s_learning is { } o) {
-						if (!o.Stopping && (!o.Opened || AskStopLearning(a_w))) {
+						// (not open yet: stopped at once; open: only on the player's word - decided on the one state the opening sets)
+						if (!o.Stopping && (o.StopIfNotOpen() || AskStopLearning(a_w))) {
 							o.Stop();
 							learn.IsEnabled = false;
 						}
@@ -1031,7 +1032,10 @@ public static class SettingsPanel
 		if (s_learning is not { } o || o.Stopping) {
 			return true;
 		}
-		if (o.Opened && !AskStopLearning(a_over)) {
+		if (o.StopIfNotOpen()) {
+			return true;
+		}
+		if (!AskStopLearning(a_over)) {
 			return false;
 		}
 		o.Stop();

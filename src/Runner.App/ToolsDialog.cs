@@ -153,7 +153,7 @@ public static class ToolsDialog
 			if (opening is not { Stopping: false } o) {
 				return opening != null;
 			}
-			if (o.Opened && !Ask.Show(w, $"Stop waiting for {a_name}?", $"{a_name} is open. Its settings are kept once you save and close it there.\n\n" +
+			if (!o.StopIfNotOpen() && !Ask.Show(w, $"Stop waiting for {a_name}?", $"{a_name} is open. Its settings are kept once you save and close it there.\n\n" +
 				    $"If you stop waiting, {a_name} stays open, but nothing it saves is kept with this setup.", "Stop waiting", "Keep waiting")) {
 				return false;
 			}

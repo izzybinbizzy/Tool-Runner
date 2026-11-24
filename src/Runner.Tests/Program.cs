@@ -4153,7 +4153,7 @@ public static class Program
 		var learnWas = ToolOpen.LearnWith;
 		try {
 			var learnedCalls = 0;
-			ToolOpen.BusyLook = _ => "the game is running (SkyrimSE.exe)";
+			ToolOpen.BusyLook = (_, _) => "the game is running (SkyrimSE.exe)";
 			ToolOpen.LearnWith = (_, _, _, _, _, _) => {
 				++learnedCalls;
 				return new ToolSettings.Learned { Step = "texgen", Tool = "TexGen" };
@@ -4194,7 +4194,7 @@ public static class Program
 				Check(r.Why!.Contains("not opened", StringComparison.Ordinal), "and says nothing was opened: " + r.Why);
 			}
 			// the tool's window already up, the wait stopped on the player's word: it ends, and says the window stays open
-			ToolOpen.BusyLook = _ => null;
+			ToolOpen.BusyLook = (_, _) => null;
 			ToolOpen.LearnWith = (_, _, _, ct, _, opened) => {
 				opened();
 				ct.WaitHandle.WaitOne(TimeSpan.FromSeconds(30));
@@ -4210,6 +4210,8 @@ public static class Program
 				for (var w = System.Diagnostics.Stopwatch.StartNew(); w.Elapsed < TimeSpan.FromSeconds(10) && !o.Opened;) {
 					Thread.Sleep(20);
 				}
+				// once its window is up, a stop is never made without the player's word
+				Check(!o.StopIfNotOpen() && !o.Stopping, "an open tool is not stopped without asking");
 				o.Stop();
 				var r = going.GetAwaiter().GetResult();
 				Check(asks == 0, "nothing holding Mod Organizer: no question, the tool opens");
@@ -4228,9 +4230,10 @@ public static class Program
 			using (var looking = new ManualResetEventSlim(false))
 			using (var o = new ToolOpen()) {
 				var go = new ManualResetEventSlim(false);
-				ToolOpen.BusyLook = _ => {
+				// (a look that a Stop ends where it stands, as the real one now does)
+				ToolOpen.BusyLook = (_, stop) => {
 					looking.Set();
-					go.Wait(TimeSpan.FromSeconds(10));
+					go.Wait(TimeSpan.FromSeconds(10), stop);
 					return "the game is running (SkyrimSE.exe)";
 				};
 				var asks = 0;
@@ -4246,7 +4249,7 @@ public static class Program
 				go.Dispose();
 			}
 			// a look that fails is said, never a wait
-			ToolOpen.BusyLook = _ => throw new IOException("the Mod Organizer folder does not read");
+			ToolOpen.BusyLook = (_, _) => throw new IOException("the Mod Organizer folder does not read");
 			using (var o = new ToolOpen()) {
 				var r = o.Go(setup, "texgen", _ => true, _ => { }).GetAwaiter().GetResult();
 				Check(r.How == ToolOpen.Ending.Failed && r.Why!.Contains("does not read", StringComparison.Ordinal), "a look that failed is said as it is");
