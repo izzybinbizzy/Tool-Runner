@@ -4430,6 +4430,10 @@ public static class Program
 		var changed = ToolSettings.Changed(before, ToolSettings.Scan([tool], []));
 		Equal(2, changed.Count, "the two settings files it wrote (not its log, not a text file, not one it left alone): " + string.Join(", ", changed));
 		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A", ["executable"] = "SomeTool" }));
+		// (the tool stands in Mod Organizer's list, as every tool whose settings were learned does: its folder is where they go)
+		var ini = Path.Combine(f.Instance, "ModOrganizer.ini");
+		File.WriteAllText(ini, File.ReadAllText(ini).Replace("[customExecutables]\r\nsize=1\r\n", "[customExecutables]\r\nsize=2\r\n" +
+			$"2\\title=SomeTool\r\n2\\binary={Path.Combine(tool, "SomeTool.exe").Replace('\\', '/')}\r\n2\\arguments=\r\n", StringComparison.Ordinal));
 		var setup = Setup.Load(f.SetupFile);
 		var l = ToolSettings.Keep(setup, "landscapefixer", "SomeTool", changed);
 		Equal(2, ToolSettings.Load(setup, "landscapefixer")!.Files.Count, "kept with the setup");
@@ -4445,6 +4449,16 @@ public static class Program
 		Check(seen.Contains("by its window", StringComparison.Ordinal), "the run used the learned settings: " + seen);
 		Equal("{\"a\": 3}", File.ReadAllText(settings), "the player's own settings are back after the run");
 		Equal(l.Files.Count, 2, "(learned set)");
+		// a record that names a file anywhere but the tool's own folders (edited by hand, or learned before the tool moved) is
+		// refused before a byte is written there
+		var elsewhere = Path.Combine(f.Root, "Elsewhere", "settings.json");
+		Directory.CreateDirectory(Path.GetDirectoryName(elsewhere)!);
+		File.WriteAllText(elsewhere, "theirs");
+		ToolSettings.Keep(setup, "landscapefixer", "SomeTool", [elsewhere]);
+		File.WriteAllText(elsewhere, "theirs, changed since");
+		var refused = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+		Check(refused.State != RunState.Finished && refused.Verdict.Contains("outside their folder", StringComparison.Ordinal), "the step stops, saying so: " + refused.Verdict);
+		Equal("theirs, changed since", File.ReadAllText(elsewhere), "and the file elsewhere is as it was");
 	}
 
 	// his word of 2026-11-21: each patcher set up by hand before a setup's first run, and again whenever wanted - the box
@@ -10558,6 +10572,81 @@ public static class Program
 		Check(!Directory.EnumerateDirectories(f.Root, "*Elsewhere*", SearchOption.AllDirectories).Any(), "no folder of that name anywhere");
 	}
 
+	// the small faults of the file work: a link inside what is moved, a mod list with two kinds of line ending, an output mod
+	// half made, a game folder that is gone, a place that is no place
+	static void T_TheSmallFaultsOfTheFileWork()
+	{
+		using var f = new FakeMo2();
+		// a link inside a folder that is moved goes as the link it is: the folder it points at keeps what it holds
+		var kept = Path.Combine(f.Root, "Kept elsewhere");
+		var from = Path.Combine(f.Root, "Moved from");
+		var into = Path.Combine(f.Root, "Moved into");
+		Directory.CreateDirectory(kept);
+		Directory.CreateDirectory(from);
+		File.WriteAllText(Path.Combine(kept, "theirs.txt"), "x");
+		File.WriteAllText(Path.Combine(from, "plain.txt"), "y");
+		var link = Path.Combine(from, "link");
+		using (var mk = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), $"/d /c mklink /J \"{link}\" \"{kept}\"") { CreateNoWindow = true, UseShellExecute = false })!) {
+			mk.WaitForExit();
+		}
+		if (Directory.Exists(link)) {
+			Check(Files.IsLink(link) && !Files.IsLink(kept), "a junction is a link, a plain folder is none");
+			Files.MoveContents(from, into);
+			Check(File.Exists(Path.Combine(into, "plain.txt")) && Files.IsLink(Path.Combine(into, "link")), "the file moved, and the link moved as a link");
+			Check(File.Exists(Path.Combine(kept, "theirs.txt")), "the folder the link points at still holds its file");
+			Directory.Delete(Path.Combine(into, "link"));
+		} else {
+			Console.WriteLine("      (no junction could be made here: the link part is skipped)");
+		}
+
+		// a mod list with both kinds of line ending is read line by line, and written back in the kind most of its lines have
+		var list = Path.Combine(f.ProfileDir, "modlist.txt");
+		var was = f.Text("modlist.txt");
+		File.WriteAllText(list, "+Mixed One\n-Mixed Two\r\n" + was);
+		Directory.CreateDirectory(Path.Combine(f.Mods, "Mixed One"));
+		Directory.CreateDirectory(Path.Combine(f.Mods, "Mixed Two"));
+		var p = ProfileOf(f);
+		var states = p.States();
+		Check(states.TryGetValue("Mixed One", out var one) && one == '+' && states.TryGetValue("Mixed Two", out var two) && two == '-', "each of the two mods is its own line: " + string.Join(", ", states.Keys.Take(4)));
+		p.SetMods(["Mixed Two"], ["Mixed One"]);
+		Check(f.Text("modlist.txt").StartsWith("-Mixed One\r\n+Mixed Two\r\n", StringComparison.Ordinal), "switched, and written in the list's own kind of line ending");
+		File.WriteAllText(list, was);
+
+		// an output mod whose line cannot be written (Mod Organizer is open) leaves no folder behind
+		var open = new Profile(Mo2Instance.Load(f.Exe, f.Instance), "Test", () => true);
+		Throws<Mo2OpenException>(() => open.EnsureMod("Never Listed"), "a line cannot be written while Mod Organizer is open");
+		Check(!Directory.Exists(Path.Combine(f.Mods, "Never Listed")), "and the folder made for it is gone again");
+		Directory.CreateDirectory(Path.Combine(f.Mods, "Was There"));
+		File.WriteAllText(Path.Combine(f.Mods, "Was There", "theirs.esp"), "x");
+		Throws<Mo2OpenException>(() => open.EnsureMod("Was There"), "the same for a folder that was there before");
+		Check(File.Exists(Path.Combine(f.Mods, "Was There", "theirs.esp")), "which is never taken away");
+
+		// a log read as it grows is the whole log at every look, whatever was added, and starts over on a file that was replaced
+		var grownLog = Path.Combine(f.Root, "growing.log");
+		var grown = new GrowingText();
+		File.WriteAllText(grownLog, "[10:00] Loading Settings Complete\n[10:01] Shader compilation started\n");
+		Equal(File.ReadAllText(grownLog), grown.Read(grownLog), "the first look: all of it");
+		File.AppendAllText(grownLog, "[10:02] remaining=12 (ünïcode)\n[10:03] half a li");
+		Equal("[10:00] Loading Settings Complete\n[10:01] Shader compilation started\n[10:02] remaining=12 (ünïcode)\n", grown.Read(grownLog), "what was added, to its last whole line");
+		File.AppendAllText(grownLog, "ne\n");
+		Equal(File.ReadAllText(grownLog), grown.Read(grownLog), "the line once it is whole");
+		Equal(File.ReadAllText(grownLog), grown.Read(grownLog), "nothing added: the same text");
+		File.WriteAllText(grownLog, "[11:00] another start's log, longer than the first one was, so its length alone would not tell that it is new\n[11:01] Shader compilation completed\n" + new string('x', 200) + "\n");
+		Equal(File.ReadAllText(grownLog), grown.Read(grownLog), "a file that was replaced is read from its start");
+
+		// no place is under nothing and the same as nothing
+		Check(!Files.SamePath("", f.Root) && !Files.SamePath(f.Root, " ") && !Files.IsUnder("", f.Root) && !Files.IsUnder(f.Root, ""), "an empty text names no folder");
+		Equal<long?>(null, Files.FreeOn(""), "and has no free room to tell");
+
+		// a game folder that is gone is said by the check, with what to do
+		var setup = f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		Directory.Move(f.Game, f.Game + " moved");
+		var found = Preflight.Run(setup, Mo2Instance.Load(f.Exe, f.Instance), ["landscapefixer"]);
+		Check(found.FirstOrDefault(i => i.Blocking && i.Text.Contains("the game folder Mod Organizer names is not there", StringComparison.Ordinal)) is { } gone &&
+			RunnerErrors.Find(gone.Text)?.Code == "TR-214", "the check stops on it: " + string.Join(" | ", found.Where(i => i.Blocking).Select(i => i.Text)));
+		Directory.Move(f.Game + " moved", f.Game);
+	}
+
 	// a setup brought in from elsewhere starts no program of its own choosing and allows no add-on for the player
 	static void T_AnImportedSetupStartsNoProgramOfItsOwn()
 	{
@@ -10571,7 +10660,7 @@ public static class Program
 				new JsonObject { ["step"] = AddOns.KeyPrefix + "Their Patcher", ["settings"] = new JsonObject { ["sha"] = "ABCD", ["output_mod"] = "Theirs" } }),
 		});
 		var gone = s.TakeOutWhatStartsPrograms();
-		Equal("", Setup.Str((JsonObject)s.Root["mo2"]!, "exe"), "Mod Organizer's program is the player's to set");
+		Equal("", s.Mo2Exe, "Mod Organizer's program is the player's to set");
 		Check(s.Root[AddOns.NoAskSetting] == null, "the add-on question is not switched off for them");
 		var steps = s.Steps;
 		Check(steps.All(st => Setup.Str(st.Settings, "exe") == null && Setup.Str(st.Settings, "fasterngio_exe") == null && Setup.Str(st.Settings, "launcher") == null), "no step starts a program it names");

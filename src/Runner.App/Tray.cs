@@ -73,7 +73,7 @@ public sealed unsafe partial class Tray : IDisposable
 	{
 		if (_added) {
 			_added = false;
-			Show(_tip == "" ? "Tool Runner" : _tip);
+			Show(_tip == "" ? Brand.Name : _tip);
 		}
 	}
 
@@ -108,7 +108,7 @@ public sealed unsafe partial class Tray : IDisposable
 	public bool Notify(string a_title, string a_text, bool a_sound)
 	{
 		if (!_added) {
-			Show("Tool Runner");
+			Show(Brand.Name);
 		}
 		if (!_added) {
 			return false;

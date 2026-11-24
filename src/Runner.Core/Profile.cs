@@ -40,8 +40,11 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 	static (List<string> Lines, string Nl, Encoding How) ReadLines(string a_path)
 	{
 		var text = Files.DecodeText(Files.ReadShared(a_path), out var how);
-		var nl = text.Contains("\r\n") ? "\r\n" : "\n";
-		return (text.Split(nl).ToList(), nl, how);
+		// A list with both kinds of line ending (one edited by hand) is still read line by line - split by one kind alone, two
+		// mods came back as one line - and is written back in the kind most of its lines have. Mod Organizer writes one kind
+		var windows = text.Split("\r\n").Length - 1;
+		var plain = text.Count(c => c == '\n') - windows;
+		return (text.Replace("\r\n", "\n").Split('\n').ToList(), windows > 0 && windows >= plain ? "\r\n" : "\n", how);
 	}
 
 	static void WriteLines(string a_path, List<string> a_lines, string a_nl, Encoding a_how) => Files.WriteAtomic(a_path, Files.EncodeText(string.Join(a_nl, a_lines), a_how));
@@ -214,12 +217,23 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 	public void EnsureMod(string a_mod, RunLog? a_log = null)
 	{
 		var d = Mo2.ModDir(a_mod);
-		if (!Directory.Exists(d)) {
+		var made = !Directory.Exists(d);
+		if (made) {
 			Directory.CreateDirectory(d);
 			Files.WriteAtomic(Path.Combine(d, "meta.ini"), $"[General]\r\nmodid=0\r\nversion=\r\ncomments={MadeBy}{Brand.Name}\r\n");
 			a_log?.Detail($"made the output mod {a_mod}");
 		}
-		ListMod(a_mod, a_log);
+		try {
+			ListMod(a_mod, a_log);
+		} catch (Exception e) when (made && e is IOException or UnauthorizedAccessException or InvalidOperationException) {
+			// its line could not be written (Mod Organizer open, a name the list cannot hold): the folder made a moment ago goes
+			// again - left there, it was an empty mod nothing had on record
+			try {
+				Files.DeleteDir(d);
+			} catch (Exception again) when (again is IOException or UnauthorizedAccessException) {
+			}
+			throw;
+		}
 		Added.Add(a_mod);
 	}
 

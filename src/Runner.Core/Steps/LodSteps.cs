@@ -137,7 +137,7 @@ public sealed class XLodGenStep : IStep
 				a_ctx.Log.Detail($"the worldspace list: {names[i].Count} worldspace(s) offered ({lists.Count} list(s) in xLODGen's options)");
 				return lists[i];
 			}
-			Thread.Sleep(1000);
+			a_ctx.Pause(TimeSpan.FromSeconds(1));
 		}
 		throw new StepFailedException($"xLODGen's options show no worldspace list within {a_timeout.TotalSeconds:0} s");
 	}

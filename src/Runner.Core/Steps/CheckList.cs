@@ -7,7 +7,7 @@ namespace ToolRunner.Steps;
 // messages; a tick is set by selecting the row and sending Space to the list itself (no keyboard focus needed).
 public static class CheckList
 {
-	public static bool[] Ticks(nint a_list, int a_count)
+	public static bool[] Ticks(nint a_list, int a_count, CancellationToken a_ct = default)
 	{
 		var outArr = new bool[a_count];
 		var pic = Capture.Client(a_list) ?? throw new StepFailedException("could not draw the worldspace list to read its ticks");
@@ -15,7 +15,7 @@ public static class CheckList
 			var r = ItemRect(a_list, i);
 			if (r.Top < 0 || r.Bottom > pic.Height || r.Height <= 0) {
 				Ask(a_list, Native.LB_SETTOPINDEX, i);
-				Thread.Sleep(150);
+				Waits.Pause(TimeSpan.FromMilliseconds(150), a_ct);
 				pic = Capture.Client(a_list) ?? throw new StepFailedException("could not draw the worldspace list to read its ticks");
 				r = ItemRect(a_list, i);
 			}
@@ -68,7 +68,7 @@ public static class CheckList
 		if (count != names.Count) {
 			names = names.Take(count).ToList();
 		}
-		var now = Ticks(hwnd, names.Count);
+		var now = Ticks(hwnd, names.Count, a_ctx.Cancel);
 		var changed = 0;
 		for (int i = 0; i < names.Count; ++i) {
 			if (now[i] != a_want(names[i])) {
@@ -77,11 +77,11 @@ public static class CheckList
 				Ask(hwnd, Native.WM_CHAR, Native.VK_SPACE);
 				Ask(hwnd, Native.WM_KEYUP, Native.VK_SPACE);
 				++changed;
-				Thread.Sleep(80);
+				a_ctx.Pause(TimeSpan.FromMilliseconds(80));
 			}
 		}
-		Thread.Sleep(400);
-		var after = Ticks(hwnd, names.Count);
+		a_ctx.Pause(TimeSpan.FromMilliseconds(400));
+		var after = Ticks(hwnd, names.Count, a_ctx.Cancel);
 		var bad = names.Where((n, i) => after[i] != a_want(n)).Take(5).ToList();
 		a_ctx.Log.Detail($"worldspaces: {names.Count(a_want)} of {names.Count} ticked, {changed} changed");
 		if (bad.Count > 0) {

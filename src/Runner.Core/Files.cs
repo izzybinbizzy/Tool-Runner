@@ -32,11 +32,15 @@ public static partial class Files
 		}
 	}
 
+	static int s_writes;
+
 	public static void WriteAtomic(string a_path, ReadOnlySpan<byte> a_bytes)
 	{
 		var dir = Path.GetDirectoryName(Path.GetFullPath(a_path)) ?? throw new ArgumentException("no folder: " + a_path);
 		Directory.CreateDirectory(dir);
-		var tmp = Path.Combine(dir, "." + Path.GetFileName(a_path) + "." + Environment.ProcessId + ".tmp");
+		// its own temp file for every write: two threads writing the same file at once would otherwise share one, and the bytes
+		// of one be swapped in under the other's name
+		var tmp = Path.Combine(dir, $".{Path.GetFileName(a_path)}.{Environment.ProcessId}.{Interlocked.Increment(ref s_writes)}.tmp");
 		// a failed write (a full disk) leaves no temp file behind in the player's folder either
 		try {
 			using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough)) {
@@ -236,7 +240,9 @@ public static partial class Files
 			}
 			var target = Path.Combine(a_dst, name);
 			if (Directory.Exists(entry)) {
-				if (Directory.Exists(target)) {
+				if (IsLink(entry)) {
+					MoveLink(entry, target);
+				} else if (Directory.Exists(target)) {
 					MoveContents(entry, target);
 					DeleteDir(entry);
 				} else {
@@ -245,6 +251,24 @@ public static partial class Files
 			} else {
 				Move(entry, target, true);
 			}
+		}
+	}
+
+	// a folder that is a link to another folder (a junction, a symbolic link)
+	public static bool IsLink(string a_dir) => new DirectoryInfo(a_dir).Attributes.HasFlag(FileAttributes.ReparsePoint);
+
+	// A link found inside what is moved goes as the link it is - never by emptying the folder it points at, which is somewhere
+	// else and not part of the move. A rename moves a link; where a rename cannot (another disk, a folder already there) the move
+	// stops and says so
+	static void MoveLink(string a_link, string a_target)
+	{
+		if (Directory.Exists(a_target) || File.Exists(a_target)) {
+			throw new IOException($"{a_link} is a link to another folder and {a_target} is there already - not moved; move or remove the link yourself");
+		}
+		try {
+			Retry(() => Directory.Move(a_link, a_target), true);
+		} catch (IOException e) when ((e.HResult & 0xFFFF) == NotSameDevice) {
+			throw new IOException($"{a_link} is a link to another folder and cannot go to another disk - move or remove the link yourself", e);
 		}
 	}
 
@@ -313,6 +337,10 @@ public static partial class Files
 	// the nearest folder at or above a_path that is there (a backup folder a run has yet to make is asked about through its parent)
 	static string? Standing(string a_path)
 	{
+		// (a setting left empty names no place at all)
+		if (string.IsNullOrWhiteSpace(a_path)) {
+			return null;
+		}
 		for (var d = Path.GetFullPath(a_path); !string.IsNullOrEmpty(d); d = Path.GetDirectoryName(d)) {
 			if (Directory.Exists(d)) {
 				return d;
@@ -359,13 +387,71 @@ public static partial class Files
 		File.AppendAllText(a_path, a_text);
 	}
 
+	// (an empty text names no place: it is under nothing and the same as nothing - a setting left empty reaches both)
 	public static bool IsUnder(string a_path, string a_root)
 	{
+		if (string.IsNullOrWhiteSpace(a_path) || string.IsNullOrWhiteSpace(a_root)) {
+			return false;
+		}
 		var p = Path.GetFullPath(a_path).TrimEnd('\\') + "\\";
 		var r = Path.GetFullPath(a_root).TrimEnd('\\') + "\\";
 		return p.StartsWith(r, StringComparison.OrdinalIgnoreCase);
 	}
 
 	public static bool SamePath(string a_a, string a_b) =>
+		!string.IsNullOrWhiteSpace(a_a) && !string.IsNullOrWhiteSpace(a_b) &&
 		string.Equals(Path.GetFullPath(a_a).TrimEnd('\\'), Path.GetFullPath(a_b).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
+}
+
+// A text file another program keeps adding to (a log), read whole as it grows: the first look reads all of it, each later one
+// only the whole lines added since - a log of megabytes is not read and decoded again every few seconds for the lines at its
+// start. A file that was replaced (another path, shorter, other first bytes) is read from its start again.
+public sealed class GrowingText
+{
+	const int HeadSize = 64;
+
+	string? _path;
+	long _pos;
+	byte[] _head = [];
+	Encoding _how = new UTF8Encoding(false);
+	string _text = "";
+
+	public string Read(string a_path)
+	{
+		using var fs = new FileStream(a_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+		var head = new byte[(int)Math.Min(HeadSize, fs.Length)];
+		var headGot = fs.ReadAtLeast(head, head.Length, false);
+		var same = Math.Min(headGot, _head.Length);
+		// (two bytes a letter: a line's end found byte by byte would cut a letter in two - such a file is read whole each time)
+		var wide = _how.CodePage is 1200 or 1201;
+		if (wide || _pos == 0 || !string.Equals(a_path, _path, StringComparison.OrdinalIgnoreCase) || fs.Length < _pos || same < _head.Length ||
+		    !head.AsSpan(0, same).SequenceEqual(_head.AsSpan(0, same))) {
+			fs.Position = 0;
+			var all = new byte[fs.Length];
+			var got = fs.ReadAtLeast(all, all.Length, false);
+			_path = a_path;
+			_text = Files.DecodeText(all[..got], out _how);
+			_pos = got;
+			_head = all[..Math.Min(HeadSize, got)];
+			return _text;
+		}
+		if (fs.Length == _pos) {
+			return _text;
+		}
+		fs.Position = _pos;
+		var added = new byte[fs.Length - _pos];
+		var read = fs.ReadAtLeast(added, added.Length, false);
+		// a line still being written waits for the next look
+		var end = Array.LastIndexOf(added, (byte)'\n', Math.Max(0, read - 1)) + 1;
+		if (read == 0 || end == 0) {
+			return _text;
+		}
+		_text += _how.GetString(added, 0, end);
+		_pos += end;
+		// (a file that was shorter than the head kept of it has grown past it: the head is filled up, so a replaced file is told)
+		if (_head.Length < HeadSize) {
+			_head = head[..headGot];
+		}
+		return _text;
+	}
 }

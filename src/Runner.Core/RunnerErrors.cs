@@ -86,6 +86,8 @@ public static class RunnerErrors
 			"Untick plugins you do not need, or make small ones light (ESL-flag them with xEdit where they allow it), until you are under the limit."),
 		E("TR-213", "this Mod Organizer manages another game", "The Mod Organizer this setup points at is set up for another game (Skyrim VR, Enderal, the 2011 Skyrim, Fallout).",
 			"Tool Runner works with Skyrim Special Edition and its Anniversary Edition (Steam and GOG). Point the setup at the Mod Organizer instance of that game: Settings > Setup."),
+		E("TR-214", "Mod Organizer names no game folder|the game folder Mod Organizer names is not there", "Mod Organizer's settings name no game folder, or one that is gone (the game moved, a drive not plugged in).",
+			"Open Mod Organizer and let it find the game again (it asks at its start when the folder is gone), close it, then press Check (F5)."),
 
 		// ---- the check before a run: a step's own settings and its tool
 		E("TR-301", "no output mod is set|no output folder is set|the terrain LOD folder it reads is not set|no shader cache is set", "A step has no place to put what it makes.",

@@ -32,6 +32,14 @@ public static class Preflight
 		if (OtherGame(a_mo2) is { } other) {
 			outList.Add(new Issue("", true, $"this Mod Organizer manages another game ({other}) - Tool Runner works with Skyrim Special Edition and its Anniversary Edition only"));
 		}
+		// the game folder comes from Mod Organizer's own settings, and the checks and steps after this look into it (the game's
+		// plugins, its version): with none named, they would look into a folder "Data" wherever the program happens to stand
+		if (a_mo2.GameDir == "" || !Directory.Exists(a_mo2.GameDir)) {
+			outList.Add(new Issue("", true, a_mo2.GameDir == ""
+				? "Mod Organizer names no game folder (gamePath in its ModOrganizer.ini is empty) - open Mod Organizer once and pick the game"
+				: $"the game folder Mod Organizer names is not there: {a_mo2.GameDir}"));
+			return outList;
+		}
 		if (GameCheck() is { Count: > 0 } game) {
 			outList.Add(new Issue("", true, "the game is running (" + string.Join(", ", game) + ") - close it first"));
 		}

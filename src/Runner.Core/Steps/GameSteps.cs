@@ -796,13 +796,16 @@ public sealed class ShaderStep : IStep
 					var peak = 0.0;
 					double? cores = null;
 					Stopwatch? low = null;
+					// this start's shader log, whole (its first lines say whether the shader mod runs and whether a compile is
+					// open), read as it grows
+					var grown = new GrowingText();
 					while (!g.HasExited) {
 						a_ctx.Cancel.ThrowIfCancellationRequested();
 						// (looked up again at every look: a mapped log folder may only be made during this start)
 						logs = InGame.LogFolders(a_ctx.Setup, a_ctx.Mo2);
 						var log = InGame.NewestShaderLog(logs);
 						var logFresh = log != null && File.GetLastWriteTimeUtc(log) >= started.AddSeconds(-5);
-						var text = logFresh ? Files.ReadSharedText(log!) : "";
+						var text = logFresh ? grown.Read(log!) : "";
 						var n = Files.CountFiles(owCache);
 						// the shader mod must show it runs within a few minutes (it stands down beside a DLL it refuses - 2026-10-09).
 						// Shaders arriving in the cache ARE that sign: a log can be elsewhere (SKSE's log folder moved) or late - a

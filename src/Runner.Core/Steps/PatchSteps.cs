@@ -170,7 +170,7 @@ public abstract class LauncherStep : IStep
 					throw new StepFailedException($"{name}'s window did not appear within 3 minutes." + OursToFix(name));
 				// its button, once its window has finished laying itself out (usable, on screen)
 				System.Windows.Automation.AutomationElement? go = null;
-				for (var sw = System.Diagnostics.Stopwatch.StartNew(); go == null; Thread.Sleep(1000)) {
+				for (var sw = System.Diagnostics.Stopwatch.StartNew(); go == null; a_ctx.Pause(TimeSpan.FromSeconds(1))) {
 					a_ctx.Cancel.ThrowIfCancellationRequested();
 					go = Uia.Button(w, names) is { } b && Uia.Usable(b) ? b : null;
 					if (go == null && (Exited(proc) || sw.Elapsed > TimeSpan.FromMinutes(1))) {
@@ -180,7 +180,7 @@ public abstract class LauncherStep : IStep
 				Uia.Press(go);
 				// it started = its button goes grey while it works. Landscape Fixer refuses a run it cannot do (no game, no profile)
 				// only on its status line - never a box - so that line is what the step names
-				for (var sw = System.Diagnostics.Stopwatch.StartNew(); Uia.Usable(go); Thread.Sleep(500)) {
+				for (var sw = System.Diagnostics.Stopwatch.StartNew(); Uia.Usable(go); a_ctx.Pause(TimeSpan.FromMilliseconds(500))) {
 					a_ctx.Cancel.ThrowIfCancellationRequested();
 					UnknownBox(name, image);
 					// a run so short its button went grey and back between two looks has still written its output
@@ -507,8 +507,7 @@ public sealed class SynthesisStep : IStep
 			}
 			var until = DateTime.UtcNow.AddSeconds(45);
 			while (DateTime.UtcNow < until) {
-				a_ctx.Cancel.ThrowIfCancellationRequested();
-				Thread.Sleep(1500);
+				a_ctx.Pause(TimeSpan.FromMilliseconds(1500));
 				StillOpen("right after Run was pressed");
 				if (Uia.TextOf(a_w(), int.MaxValue) != before || Buttons().Count == 0) {
 					a_ctx.Log.Detail("Synthesis: Run pressed, its patchers started");
