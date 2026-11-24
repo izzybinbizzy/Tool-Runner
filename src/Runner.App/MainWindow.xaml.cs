@@ -1251,7 +1251,8 @@ public partial class MainWindow : Window
 					var zip = await Task.Run(() => ProgramUpdate.Download(release, AppPaths.Data, progress, CancellationToken.None));
 					_vm.Say("Putting the new version in place ...", "");
 					exe = await Task.Run(() => ProgramUpdate.Install(zip, folder, AppPaths.Data));
-				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or System.Net.Http.HttpRequestException or TaskCanceledException) {
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or InvalidDataException or System.Net.Http.HttpRequestException or TaskCanceledException) {
+					// (InvalidDataException: a file of the download that does not unpack - Install has put everything back first)
 					_vm.Say($"Not installed: {e.Message}. Nothing of this version was changed - its download page has the new one.", "bad");
 					return;
 				}
