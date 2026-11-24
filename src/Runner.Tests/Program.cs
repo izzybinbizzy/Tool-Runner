@@ -4572,6 +4572,20 @@ public static class Program
 			Equal(mod, AcmosStep.LodFolder(scratch, mod), "a stray file in the scratch is no terrain LOD");
 			File.WriteAllText(Path.Combine(scratch, "textures", "terrain", "b.dds"), "x");
 			Equal(scratch, AcmosStep.LodFolder(scratch, mod), "the scratch folder first when it holds the LOD");
+			// what stands between quote marks on ACMOS's command line holds none itself
+			Equal<string?>(null, AcmosStep.QuoteIn("Paths Only", scratch, null), "a road set and a folder as they are");
+			Check(AcmosStep.QuoteIn("Paths Only", "Roads\" -o:\"C:\\Somewhere else") is { } quoted && RunnerErrors.Find(quoted)?.Code == "TR-318",
+				"a setting that would end its quote early and pass ACMOS arguments of its own is refused, with what to do");
+			// a folder a run empties into its backup is never a whole drive, nor a folder the player or Windows keeps other things in
+			var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+			if (home != "") {
+				Equal<string?>("a whole drive", StepKit.KeptFolder(Path.GetPathRoot(home)!), "a drive's own root");
+				Equal<string?>("your user folder", StepKit.KeptFolder(home + "\\"), "the player's own folder");
+				Check(StepKit.KeptFolder(Path.GetDirectoryName(home)!) != null, "a folder that holds it");
+				Equal<string?>("your Downloads folder", StepKit.KeptFolder(Path.Combine(home, "downloads")), "their downloads, however it is spelled");
+				Equal<string?>(null, StepKit.KeptFolder(Path.Combine(home, "Downloads", "Modding", "xLODGen Output")), "a folder of its own inside one of them is fine");
+			}
+			Equal<string?>(null, StepKit.KeptFolder(scratch), "and so is the tool's own scratch folder");
 		} finally {
 			Directory.Delete(dir, true);
 		}

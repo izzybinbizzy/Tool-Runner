@@ -90,7 +90,8 @@ public static class RunnerErrors
 		// ---- the check before a run: a step's own settings and its tool
 		E("TR-301", "no output mod is set|no output folder is set|the terrain LOD folder it reads is not set|no shader cache is set", "A step has no place to put what it makes.",
 			"Open Settings > Steps, pick the step, and fill in its output mod (and its output folder where it has one). A new setup fills these in by itself."),
-		E("TR-302", "is in (or holds)|(the folder it writes into) holds a program", "A tool's output folder is one of Mod Organizer's own folders, the game's folder, or the tool's own folder.",
+		E("TR-302", "is in (or holds)|is (or holds)|(the folder it writes into) holds a program",
+			"A tool's output folder is one of Mod Organizer's own folders, the game's folder, the tool's own folder, a whole drive, or a folder you or Windows keep other things in.",
 			"Give the step an empty folder of its own outside those (Settings > Steps > The tool's own output folder)."),
 		E("TR-303", "no Mod Organizer executable is set for this step|Mod Organizer has no executable called|which does not exist", "The tool is not in Mod Organizer's Executables list under the name the setup uses, or its entry points at a file that is gone.",
 			"Add or correct the tool in Mod Organizer (the gears button > Executables), or let the program add it: New setup > Find my tools. Then press Check (F5)."),
@@ -116,6 +117,8 @@ public static class RunnerErrors
 			"Set DynDOLOD's folder in Settings > Steps > AnvilLOD."),
 		E("TR-317", "would read as a command of its own", "FasterNGIO runs through a command line, and its program path or its arguments hold a character that command line would read as a command of its own.",
 			"Take that character out of the grass step's arguments (Settings > Steps > Grass cache), or move FasterNGIO to a folder whose path has none of & | < > ^ \"."),
+		E("TR-318", "a quote mark (\") stands in", "ACMOS is started with its road set and its LOD folder between quote marks, and one of them holds a quote mark of its own.",
+			"Open Settings > Steps > ACMOS Road Generator and take the quote mark out of the road set's name or the terrain LOD folder."),
 		E("TR-310", "the PGPatcher settings set is missing|but the PGPatcher settings have PGLite Mode", "PGPatcher's saved settings do not match this profile.",
 			"Learn PGPatcher's settings again from its own window (Settings > Steps > PGPatcher > Learn its settings), or tick / untick PGLite in Mod Organizer to match."),
 		E("TR-311", "its add-on file is gone|its add-on file:|changed since you allowed it|the mod that holds it|its program could not be opened|its add-on file changed while it was being read","An add-on step's file is missing, changed, or its mod is switched off.",

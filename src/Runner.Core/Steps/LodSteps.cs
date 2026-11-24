@@ -213,7 +213,14 @@ public sealed class AcmosStep : IStep
 		if (a_s.Str("reads") is not { Length: > 0 }) yield return new Issue(Key, true, "the terrain LOD folder it reads is not set");
 		// a mod there would be moved into itself (its LOD parked in the backup), and its painted copy made beside it in MO2's folders
 		foreach (var i in StepKit.CheckOutputDir(a_c, Key, a_s.Str("reads"), "the terrain LOD folder it reads")) yield return i;
+		if (QuoteIn(a_s.Str("roads"), a_s.Str("reads")) is { } quoted) yield return new Issue(Key, true, quoted);
 	}
+
+	// The road set and the LOD folder stand between quote marks on ACMOS's command line: a quote mark inside one would end it
+	// early, and what follows would reach ACMOS as arguments of its own (another folder to write into). No road set and no
+	// folder has one
+	public static string? QuoteIn(params string?[] a_values) =>
+		a_values.FirstOrDefault(v => v?.Contains('"') == true) is { } bad ? $"a quote mark (\") stands in {bad} - no road set and no folder has one" : null;
 
 	public void Run(RunContext a_ctx, StepSettings a_s)
 	{
@@ -237,6 +244,9 @@ public sealed class AcmosStep : IStep
 		var roadsOut = reads + " roads";
 		StepKit.ParkDir(a_ctx, roadsOut, "ACMOS roads");
 		var roads = a_s.Str("roads") ?? AcmosRoads(toolDir) ?? "Paths Only";
+		if (QuoteIn(roads, lod, roadsOut) is { } quoted) {
+			throw new StepFailedException("ACMOS: " + quoted);
+		}
 		var args = $"-autorun -t:\"{roads}\" -l:\"{lod}\" -o:\"{roadsOut}\"";
 		var cmd = $"{Mo2Control.Quote(exe)} {args}";
 		a_ctx.Activity(Key, "painting roads into the terrain LOD");
