@@ -94,7 +94,7 @@ public static class SettingsPanel
 		static Button Link(MainWindow a_win, string a_text, string a_url)
 		{
 			var b = new Button { Content = a_text, Style = (Style)a_win.FindResource("Ghost"), Margin = new Thickness(10, 0, 0, 0), ToolTip = a_url };
-			b.Click += (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(a_url) { UseShellExecute = true });
+			b.Click += (_, _) => Opened(a_win, a_url);
 			return b;
 		}
 		var docs = new WrapPanel { Margin = new Thickness(-10, 0, 0, 6) };
@@ -216,6 +216,14 @@ public static class SettingsPanel
 		a_step is "cleansave" or "playsave" ? ("https://dyndolod.info/Help/Clean-Save", "DynDOLOD's help on the clean save") :
 		a_step == Steps.LootStep.StepKey ? ("https://loot.github.io/", "LOOT's own page") :
 		ToolUpdates.Known.TryGetValue(a_step, out var src) ? (src.Page.Replace("?tab=files", "", StringComparison.Ordinal), "the tool's own page") : null;
+
+	// a page in the player's browser; when it does not open, the main window says why
+	static void Opened(MainWindow a_w, string a_url)
+	{
+		if (MainViewModel.OpenPage(a_url) is { } why) {
+			a_w.Say("The page did not open: " + why);
+		}
+	}
 
 	static string Label(string a_key) => Labels.TryGetValue(a_key, out var l) ? l : char.ToUpperInvariant(a_key[0]) + a_key[1..].Replace('_', ' ');
 
@@ -528,8 +536,25 @@ public static class SettingsPanel
 								a_vm.Say("A run is using this setup: add it when the run is done.", "warn");
 								return;
 							}
+							if (a_vm.Saving || a_vm.Renaming) {
+								a_vm.Say("The setup is still being saved or renamed - add it again in a moment.", "warn");
+								return;
+							}
+							var before = (JsonObject)current.Root.DeepClone();
 							var order = AddOns.AddToSetup(current.Root, addOn, current.Profile);
-							current.Save();
+							try {
+								current.Save();
+							} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+								// the setup shown goes back to what its file holds
+								foreach (var k in current.Root.Select(x => x.Key).ToList()) {
+									current.Root.Remove(k);
+								}
+								foreach (var (k, v) in before.ToList()) {
+									current.Root[k] = v?.DeepClone();
+								}
+								a_vm.Say("Not added: the setup could not be saved: " + e.Message, "bad");
+								return;
+							}
 							a_vm.LoadSetups(current.File);
 							a_w.ShowPanel("settings", true);
 							if (order != null) {
@@ -656,7 +681,7 @@ public static class SettingsPanel
 					if (r.Newer) {
 						var get = new Button { Content = "Open its download page", Style = (Style)a_w.FindResource("Ghost"), Margin = new Thickness(10, 0, 0, 0) };
 						var page = r.Page;
-						get.Click += (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(page) { UseShellExecute = true });
+						get.Click += (_, _) => Opened(a_w, page);
 						DockPanel.SetDock(get, Dock.Right);
 						row.Children.Add(get);
 					}
@@ -742,7 +767,7 @@ public static class SettingsPanel
 				var page = new Button { Content = "Its own page", Style = (Style)a_w.FindResource("Ghost"), Margin = new Thickness(10, 0, 0, 0), ToolTip = help.Url,
 					VerticalAlignment = VerticalAlignment.Top };
 				System.Windows.Automation.AutomationProperties.SetHelpText(page, help.What);
-				page.Click += (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(help.Url) { UseShellExecute = true });
+				page.Click += (_, _) => Opened(a_w, help.Url);
 				DockPanel.SetDock(page, Dock.Right);
 				aboutRow.Children.Add(page);
 			}
@@ -895,7 +920,7 @@ public static class SettingsPanel
 		undo.Click += (_, _) => a_w.ShowPanel("settings", true);
 		folders.Click += (_, _) => MainViewModel.OpenFolder(AppPaths.Data);
 		// his checklist 484: a clean removal of everything the program keeps (to the Recycle Bin, never erased)
-		var remove = new Button { Content = "Remove program data...", Style = (Style)a_w.FindResource("Danger"), Margin = new Thickness(10, 0, 0, 0),
+		var remove = new Button { Content = "Remove program data ...", Style = (Style)a_w.FindResource("Danger"), Margin = new Thickness(10, 0, 0, 0),
 			ToolTip = "Moves Tool Runner's data and run backups to the Recycle Bin. The mods the tools created stay in Mod Organizer." };
 		remove.Click += async (_, _) => {
 			remove.IsEnabled = false;
@@ -911,7 +936,7 @@ public static class SettingsPanel
 		bar.Children.Add(folders);
 		// the data kept in Windows' own app-data folder, so a new version unzipped anywhere keeps the run history
 		if (!AppPaths.InAppData) {
-			var keep = new Button { Content = "Keep data through updates...", Style = (Style)a_w.FindResource("Ghost"), Margin = new Thickness(10, 0, 0, 0),
+			var keep = new Button { Content = "Keep data through updates ...", Style = (Style)a_w.FindResource("Ghost"), Margin = new Thickness(10, 0, 0, 0),
 				ToolTip = "Moves Tool Runner's data (setups, run history, learned settings) into Windows' app-data folder, where every new version finds it" };
 			keep.Click += async (_, _) => {
 				keep.IsEnabled = false;
@@ -1296,11 +1321,11 @@ public static class SettingsPanel
 		// a setting that holds a folder or a program: picked with Windows' own picker, or typed
 		FrameworkElement shown = edit;
 		if (edit is TextBox pathBox && kind == JsonValueKind.String && PathKind(a_key) is { } pick) {
-			var browse = new Button { Content = "Browse...", Style = (Style)Application.Current.FindResource("Ghost"), Margin = new Thickness(8, 0, 0, 0),
+			var browse = new Button { Content = "Browse ...", Style = (Style)Application.Current.FindResource("Ghost"), Margin = new Thickness(8, 0, 0, 0),
 				ToolTip = pick == PathPick.Folder ? "Choose the folder" : "Choose the program" };
 			System.Windows.Automation.AutomationProperties.SetName(browse, "Browse for " + a_label);
 			browse.Click += (_, _) => {
-				if (Browse(pick, pathBox.Text.Trim(), a_label) is { } chosen) {
+				if (Browse(Window.GetWindow(browse), pick, pathBox.Text.Trim(), a_label) is { } chosen) {
 					pathBox.Text = chosen;
 				}
 			};
@@ -1332,7 +1357,7 @@ public static class SettingsPanel
 	};
 
 	// Windows' own folder or file picker, opened where the setting points now; the path chosen, or null when it was cancelled
-	static string? Browse(PathPick a_pick, string a_now, string a_label)
+	static string? Browse(Window? a_owner, PathPick a_pick, string a_now, string a_label)
 	{
 		var start = a_now == "" ? null : a_pick == PathPick.Folder ? a_now : Path.GetDirectoryName(a_now);
 		if (start != null && !Directory.Exists(start)) {
@@ -1340,10 +1365,10 @@ public static class SettingsPanel
 		}
 		if (a_pick == PathPick.Folder) {
 			var d = new Microsoft.Win32.OpenFolderDialog { Title = a_label, InitialDirectory = start ?? "" };
-			return d.ShowDialog() == true ? d.FolderName : null;
+			return (a_owner == null ? d.ShowDialog() : d.ShowDialog(a_owner)) == true ? d.FolderName : null;
 		}
 		var f = new Microsoft.Win32.OpenFileDialog { Title = a_label, Filter = "Programs (*.exe)|*.exe|All files|*.*", InitialDirectory = start ?? "" };
-		return f.ShowDialog() == true ? f.FileName : null;
+		return (a_owner == null ? f.ShowDialog() : f.ShowDialog(a_owner)) == true ? f.FileName : null;
 	}
 
 	// The character the game steps load: the most recent save of any character, or one character's. The list holds the characters
@@ -1393,6 +1418,9 @@ public static class SettingsPanel
 				return new List<string>();
 			}
 		}).ContinueWith(t => box.Dispatcher.BeginInvoke(() => {
+			if (!t.IsCompletedSuccessfully) {
+				return;
+			}
 			// the player may have picked meanwhile: that pick stays picked
 			var picked = box.SelectedIndex > 0 ? box.SelectedItem as string : null;
 			var found = t.Result;

@@ -277,10 +277,8 @@ public sealed partial class MainViewModel : Observable
 	public string NewVersion { get; set => Set(ref field, value); } = "";
 	string _newVersion = "";
 	public Cmd OpenNewVersionCommand => field ??= new(() => {
-		try {
-			System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ProgramUpdate.Page) { UseShellExecute = true });
-		} catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) {
-			Say("The download page did not open: " + e.Message, "bad");
+		if (OpenPage(ProgramUpdate.Page) is { } why) {
+			Say("The download page did not open: " + why, "bad");
 		}
 	});
 	public Cmd SetAsideNewVersionCommand => field ??= new(() => {
@@ -400,7 +398,7 @@ public sealed partial class MainViewModel : Observable
 		}
 		try {
 			Setup = Setup.Load(SelectedSetup.File);
-		} catch (Exception e) when (e is IOException or System.Text.Json.JsonException or InvalidDataException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException) {
 			Say("This setup does not read: " + e.Message, "bad");
 			return;
 		}
@@ -1283,8 +1281,9 @@ public sealed partial class MainViewModel : Observable
 	void StopAfter()
 	{
 		if (Engine.Active() is { } j) {
-			Commands.Send(j.Folder, "stop after");
-			Say("It will stop when this step is done, and put your profile back.", "warn");
+			if (Send(j, "stop after")) {
+				Say("It will stop when this step is done, and put your profile back.", "warn");
+			}
 		} else {
 			Say("No run is going.", "");
 		}
@@ -1293,8 +1292,9 @@ public sealed partial class MainViewModel : Observable
 	void StopNow()
 	{
 		if (Engine.Active() is { } j) {
-			Commands.Send(j.Folder, "stop");
-			Say("Stopping now: the tool is closed and your profile put back.", "warn");
+			if (Send(j, "stop")) {
+				Say("Stopping now: the tool is closed and your profile put back.", "warn");
+			}
 		} else {
 			Say("No run is going.", "");
 		}
@@ -1303,10 +1303,43 @@ public sealed partial class MainViewModel : Observable
 	void Continue()
 	{
 		if (Engine.Active() is { } j) {
-			Commands.Send(j.Folder, "continue");
-			Waiting = "";
+			if (Send(j, "continue")) {
+				Waiting = "";
+			}
 		} else {
 			Say("No run is waiting for you.", "");
+		}
+	}
+
+	// the run reads its commands from a file in its folder; one that could not be written there is said, to press again
+	bool Send(Journal a_run, string a_command)
+	{
+		if (TrySend(a_run.Folder, a_command) is { } why) {
+			Say($"The run did not get \"{a_command}\": {why} - press it again.", "bad");
+			return false;
+		}
+		return true;
+	}
+
+	// null when the command is in the run's folder, else why not
+	public static string? TrySend(string a_runFolder, string a_command)
+	{
+		try {
+			Commands.Send(a_runFolder, a_command);
+			return null;
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			return e.Message;
+		}
+	}
+
+	// a web page in the player's browser; null when it opened, else why not
+	public static string? OpenPage(string a_url)
+	{
+		try {
+			Process.Start(new ProcessStartInfo(a_url) { UseShellExecute = true })?.Dispose();
+			return null;
+		} catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) {
+			return e.Message;
 		}
 	}
 
@@ -1346,7 +1379,7 @@ public sealed partial class MainViewModel : Observable
 		try {
 			var r = await Task.Run(() => Runner.Undo(Journal.Load(a_folder))).ConfigureAwait(true);
 			Say(r.Verdict, r.State == RunState.Restored ? "good" : "bad");
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or System.Text.Json.JsonException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or InvalidDataException or System.Text.Json.JsonException) {
 			Say("The run could not be undone: " + e.Message, "bad");
 		} finally {
 			Restoring = false;

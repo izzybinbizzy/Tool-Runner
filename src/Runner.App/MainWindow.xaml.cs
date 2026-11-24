@@ -91,7 +91,7 @@ public partial class MainWindow : Window
 		if (!App.Headless) {
 			_watch = new RunsWatch(AppPaths.Runs, Wake);
 		}
-		Footer.Text = $"Ctrl+K do anything  ·  Ctrl+Enter start  ·  F5 check  ·  Ctrl+D dry run  ·  Ctrl+H history  ·  Ctrl+L log  ·  Ctrl+J compact  ·  Ctrl+T themes  ·  Ctrl+, settings   ·   version {AppVersion}";
+		Footer.Text = $"Ctrl+K commands  ·  Ctrl+Enter start  ·  F5 check  ·  Ctrl+D dry run  ·  Ctrl+H history  ·  Ctrl+L log  ·  Ctrl+J compact  ·  Ctrl+T themes  ·  Ctrl+, settings   ·   version {AppVersion}";
 		Footer.ToolTip = "Data folder: " + AppPaths.Data;
 		PreviewKeyDown += OnKeys;
 		// a mod ticked in Mod Organizer while the window was in the background: each step's last run is worked out again
@@ -1058,9 +1058,11 @@ public partial class MainWindow : Window
 				    "To report the bug: open an issue on the program's GitHub page, say what happened and what you expected, and attach this zip.",
 				    "Show the zip and open the issue page", "Close")) {
 					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{zip}\"") { UseShellExecute = true });
-					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(BugReport.Issues) { UseShellExecute = true });
+					if (MainViewModel.OpenPage(BugReport.Issues) is { } why) {
+						_vm.Say("The issue page did not open: " + why, "bad");
+					}
 				}
-			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException) {
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException or System.ComponentModel.Win32Exception) {
 				_vm.Say("The bug report could not be made: " + e.Message, "bad");
 			} finally {
 				report.IsEnabled = true;
@@ -1082,7 +1084,7 @@ public partial class MainWindow : Window
 						_vm.Say("It cannot be undone: " + why + ".", "bad");
 						return;
 					}
-				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or System.Text.Json.JsonException) {
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or InvalidDataException or System.Text.Json.JsonException) {
 					_vm.Say("It cannot be undone: " + e.Message, "bad");
 					return;
 				}
@@ -1105,7 +1107,7 @@ public partial class MainWindow : Window
 				try {
 					log.Text = File.Exists(p) ? Tail(p, 150_000) : "(no log)";
 					log.ScrollToEnd();
-				} catch (IOException e) {
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 					log.Text = e.Message;
 				}
 			}
@@ -1228,8 +1230,9 @@ public partial class MainWindow : Window
 			stopped.Add(a_run.Folder);
 		}
 		while (DateTime.Now < until && StillGoing()) {
-			if (Engine.Active() is { } next && stopped.Add(next.Folder)) {
-				Commands.Send(next.Folder, "stop");
+			// a stop that could not be written is written again at the next beat
+			if (Engine.Active() is { } next && stopped.Add(next.Folder) && MainViewModel.TrySend(next.Folder, "stop") != null) {
+				stopped.Remove(next.Folder);
 			}
 			await Task.Delay(1000);
 		}
@@ -1296,12 +1299,13 @@ public partial class MainWindow : Window
 					? "Closing the window stops the run as soon as it starts (nothing has been changed yet), and a queue starts no further setup. The window closes once that is done."
 					: "Closing the window stops the run: the tool it is running is closed and your profile put back, as with Stop now. The window closes once that is done.",
 				"Stop the run and close", "Keep the window open")) {
-				if (run != null) {
-					Commands.Send(run.Folder, "stop");
+				if (run != null && MainViewModel.TrySend(run.Folder, "stop") is { } why) {
+					_vm.Say("The run did not get the stop: " + why + " - the window stays open; close it again to try once more.", "bad");
+				} else {
+					_vm.Say("Stopping the run - the window closes once your profile is back.", "warn");
+					_stopping = true;
+					_ = CloseWhenStopped(run);
 				}
-				_vm.Say("Stopping the run - the window closes once your profile is back.", "warn");
-				_stopping = true;
-				_ = CloseWhenStopped(run);
 			}
 			a_e.Cancel = true;
 		}
