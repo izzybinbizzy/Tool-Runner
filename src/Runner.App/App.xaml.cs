@@ -499,15 +499,16 @@ public partial class App : Application
 			w.SayFooter();
 			WindowWords.Tree(w);
 			Pump(w, 600);
-			Save("10 a run going - Deutsch");
+			// (pictures only: what a German drawing shows never goes into the window words, which list the English)
+			Picture(w, a_dir, "10 a run going - Deutsch");
 			var deSettings = w.ShowPanel("settings", true);
 			WindowWords.Tree(deSettings);
 			Pump(w, 600);
-			Save("10b settings - Deutsch", deSettings);
+			Picture(deSettings, a_dir, "10b settings - Deutsch");
 			// a step's settings picked after Settings opened (drawn then, so walked into the language then): labels, defaults
 			if (SettingsPanel.ShowStep("dyndolod")) {
 				Pump(w, 600);
-				Save("10c settings, a step - Deutsch", deSettings);
+				Picture(deSettings, a_dir, "10c settings, a step - Deutsch");
 			}
 			w.ClosePanels();
 			WindowWords.Use(new Dictionary<string, string>());
