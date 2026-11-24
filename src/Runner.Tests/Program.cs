@@ -6553,6 +6553,9 @@ public static class Program
 		// the field, and says the fault is Tool Runner's to report - never the tool author's
 		Equal<string?>(null, LauncherStep.MissingField("{ \"Mo2InstancePath\": \"C:\\\\M\", \"Mo2ProfileName\": \"A\", \"GameLocation\": \"C:\\\\G\", \"OutputLocation\": \"C:\\\\O\" }"), "all four fields there");
 		Equal<string?>(null, LauncherStep.MissingField(null), "no file yet: a new one gets them all");
+		Equal("Mo2InstancePath", LauncherStep.MissingField("{}"), "a file the tool wrote with no fields holds none of them");
+		Equal("Mo2InstancePath", LauncherStep.MissingField("[1, 2]"), "a file that holds no settings object holds none of them");
+		Throws<System.Text.Json.JsonException>(() => LauncherStep.MissingField("{ not settings"), "a file that does not read is said, never taken as complete");
 		Equal("OutputLocation", LauncherStep.MissingField("{ \"Mo2InstancePath\": \"C:\\\\M\", \"Mo2ProfileName\": \"A\", \"GameLocation\": \"C:\\\\G\", \"OutputFolder\": \"C:\\\\O\" }"), "a renamed field is found");
 		// the game's folder is one of them (CodeRabbit on pull request #38)
 		Equal("GameLocation", LauncherStep.MissingField("{ \"Mo2InstancePath\": \"C:\\\\M\", \"Mo2ProfileName\": \"A\", \"GameDirectory\": \"C:\\\\G\", \"OutputLocation\": \"C:\\\\O\" }"), "the game's folder under another name is found too");

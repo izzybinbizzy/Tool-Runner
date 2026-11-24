@@ -37,22 +37,35 @@ public abstract class LauncherStep : IStep
 	static readonly string[] Pointing = ["Mo2InstancePath", "Mo2ProfileName", "GameLocation", "OutputLocation"];
 
 	// the first of those fields a settings file the tool already wrote does not hold (null: all there, or no file yet - a new
-	// one gets them all)
+	// one gets them all). A file that holds no object, or an empty one, holds none of them
 	public static string? MissingField(string? a_settings)
 	{
-		if (a_settings is not { Length: > 0 } || JsonNode.Parse(a_settings) is not JsonObject held || held.Count == 0) {
+		if (a_settings is not { Length: > 0 } || a_settings.Trim().Length == 0) {
 			return null;
 		}
-		return Pointing.FirstOrDefault(k => !held.ContainsKey(k));
+		var held = JsonNode.Parse(a_settings) as JsonObject;
+		return held == null ? Pointing[0] : Pointing.FirstOrDefault(k => !held.ContainsKey(k));
+	}
+
+	// the tool's settings file still holds every field this program points: looked at before anything of the step is changed
+	void CheckSettings(RunContext a_ctx)
+	{
+		var file = SettingsFile(a_ctx);
+		var name = StepCatalog.Name(Key);
+		string? gone;
+		try {
+			gone = MissingField(File.Exists(file) ? Files.ReadSharedText(file) : null);
+		} catch (JsonException) {
+			throw new StepFailedException($"{name}'s settings file does not read as settings - nothing was changed and {name} was not started." + OursToFix(name));
+		}
+		if (gone != null) {
+			throw new StepFailedException($"{name}'s settings file no longer holds \"{gone}\", which Tool Runner sets to point it at this profile and this output - nothing was changed and {name} was not started." + OursToFix(name));
+		}
 	}
 
 	void PointAtThisRun(RunContext a_ctx, string a_output)
 	{
 		var file = SettingsFile(a_ctx);
-		var name = StepCatalog.Name(Key);
-		if (MissingField(File.Exists(file) ? File.ReadAllText(file) : null) is { } gone) {
-			throw new StepFailedException($"{name}'s settings file no longer holds \"{gone}\", which Tool Runner sets to point it at this profile and this output - nothing was changed and {name} was not started." + OursToFix(name));
-		}
 		// the instance is the folder that holds ModOrganizer.ini (its base folder can point elsewhere - a mods folder moved off it)
 		var text = PointedAt(File.Exists(file) ? File.ReadAllText(file) : null, Path.GetDirectoryName(a_ctx.Mo2.IniPath)!, a_ctx.Profile.Name, a_ctx.Mo2.GameDir, a_output);
 		StepKit.KeepFile(a_ctx, file);
@@ -123,6 +136,7 @@ public abstract class LauncherStep : IStep
 		var name = StepCatalog.Name(Key);
 		// the process to watch: the setup's own, else the program MO2's entry starts (its title need not be the file's name)
 		var image = a_s.Str("image") ?? (a_ctx.Mo2.Executable(a_s.Req("executable"))?.Binary is { Length: > 0 } binary ? Path.GetFileName(binary) : a_s.Req("executable") + ".exe");
+		CheckSettings(a_ctx);
 		StepKit.ParkMod(a_ctx, Key, mod);
 		var tw = a_s.Str("tool_writes");
 		var toolDir = tw is { Length: > 0 } ? a_ctx.Mo2.ModDir(tw) : null;

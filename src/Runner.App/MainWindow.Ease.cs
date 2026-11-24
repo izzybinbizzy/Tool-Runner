@@ -98,6 +98,8 @@ public partial class MainWindow
 			return;
 		}
 		_copying = true;
+		// the window's own work: closing waits for it, so a copy is never cut off half made
+		using var hold = _vm.Working("a setup is being copied");
 		try {
 			var from = item.File;
 			var made = await Task.Run(() => SetupFiles.Duplicate(from, name)).ConfigureAwait(true);
@@ -135,6 +137,8 @@ public partial class MainWindow
 			return;
 		}
 		_renaming = true;
+		// the window's own work: closing waits for it, so a rename is never cut off between its files
+		using var hold = _vm.Working("a setup is being renamed");
 		// from here no change or save of the setup starts (Renaming), until the renamed one is shown
 		_vm.Renaming = true;
 		try {
