@@ -857,8 +857,13 @@ public sealed class ShaderStep : IStep
 			StepKit.MarkReplaced(a_ctx, c.OutputMod);
 		}
 		// stamped against the profile as it is put back, the state the next freshness check reads - never the compile's own switches
-		Files.WriteAtomic(StampFile(a_ctx.Mo2, c), new JsonObject { ["fingerprint"] = Fingerprint(a_ctx.Mo2, c, a_ctx.Profile, a_otherCaches, a_b.Layers), ["built"] = DateTime.Now.ToString("O"), ["files"] = count,
-			["verified"] = verified, ["winners"] = true, ["settings"] = StampSettings }.ToJsonString());
+		// the cache is built and kept by now: a stamp that cannot be written only means it is built again next time
+		try {
+			Files.WriteAtomic(StampFile(a_ctx.Mo2, c), new JsonObject { ["fingerprint"] = Fingerprint(a_ctx.Mo2, c, a_ctx.Profile, a_otherCaches, a_b.Layers), ["built"] = DateTime.Now.ToString("O"), ["files"] = count,
+				["verified"] = verified, ["winners"] = true, ["settings"] = StampSettings }.ToJsonString());
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			a_ctx.Log.Warn($"the {c.ShaderMod} cache is built, but its record could not be written ({e.Message}) - the next run builds it again");
+		}
 		a_ctx.Note($"shaders ({c.OutputMod}): {result}");
 	}
 }

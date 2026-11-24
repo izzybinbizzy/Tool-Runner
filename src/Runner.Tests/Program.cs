@@ -3972,7 +3972,6 @@ public static class Program
 		}
 	}
 
-	// a run record whose PID now belongs to another program (after a crash and a restart) is not "alive"
 	// a run record that holds no record ("null") is passed over by every list of the runs, as one that does not read is - it
 	// threw out of the list, and with it out of the window's look and the status command; a start still stops at it when it is the newest
 	static void T_ARecordThatHoldsNothingIsPassedOver()
@@ -3990,6 +3989,7 @@ public static class Program
 		Check(Journal.NewestUnreadable(runs) is { } dim && Files.SamePath(dim.Folder, empty), "the newest record that holds nothing still stops a start");
 	}
 
+	// a run record whose PID now belongs to another program (after a crash and a restart) is not "alive"
 	static void T_ReusedPidIsNotTheRun()
 	{
 		var me = Environment.ProcessId;

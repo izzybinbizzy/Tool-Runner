@@ -61,15 +61,7 @@ public static class Runner
 		var held = new List<Mutex>();
 		try {
 			foreach (var name in MutexNames) {
-				Mutex m;
-				try {
-					m = new Mutex(false, name, out _);
-				} catch (UnauthorizedAccessException) {
-					// a lock made by a copy started as administrator cannot be opened from here: that copy holds it, and the lock is
-					// not free - said as for any run that is going, never an error out of every caller
-					new Held(held).Dispose();
-					return null;
-				}
+				var m = new Mutex(false, name, out _);
 				bool got;
 				try {
 					got = m.WaitOne(0);
@@ -83,6 +75,11 @@ public static class Runner
 				}
 				held.Add(m);
 			}
+		} catch (UnauthorizedAccessException) {
+			// a lock made by a copy started as administrator cannot be opened from here: that copy holds it, and the lock is not
+			// free - said as for any run that is going, never an error out of every caller
+			new Held(held).Dispose();
+			return null;
 		} catch {
 			// a lock that would not open (access, a bad name) never leaves the ones already taken held
 			new Held(held).Dispose();
@@ -2069,10 +2066,9 @@ public sealed class Commands(Journal a_journal, Action a_cancel) : IDisposable
 	{
 		try {
 			PollOnce();
-		} catch (Exception e) when (e is not OutOfMemoryException) {
+		} catch (Exception) {
 			// this is a timer thread: whatever left it would end the whole program, and a run that ends that way never puts the profile
 			// back. A look that failed is made again at the next beat
-		} catch (OutOfMemoryException) {
 		} finally {
 			lock (_gate) {
 				if (!_disposed) {
