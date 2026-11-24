@@ -223,7 +223,7 @@ public sealed class Journal
 
 	// set when putting the profile back failed (e.g. a file locked): the window keeps offering Restore until it worked
 	public bool NeedsRestore { get; set; }
-	// the player undid this run (his checklist 454): its outputs are no longer in the profile
+	// the player undid this run: its outputs are no longer in the profile
 	public bool Undone { get; set; }
 	// an undo began and has not ended: outputs and lists may be half way, so nothing new starts until it is pressed again (or the
 	// window's put-back, which ends it). What the player had changed is kept here - once the old list is back, it no longer shows it
@@ -277,7 +277,7 @@ public sealed class Journal
 	// the program under its name or any it had ("Tool Runner", "MO2 Tool Runner", ...), its project names when built
 	// without one, and the offline tests' own process. The rename of 2026-11-03 had left this on the old names only: every real
 	// run then read as dead to the window - Stop now sent nothing, closing the window neither asked nor stopped the run, and a
-	// running run showed as interrupted (his finds of 2026-11-04); the tests did not see it, their own process name matched
+	// running run showed as interrupted; the tests did not see it, their own process name matched
 	static string ProductOf(System.Diagnostics.Process a_p)
 	{
 		try {

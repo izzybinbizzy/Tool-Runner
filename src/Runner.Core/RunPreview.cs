@@ -2,7 +2,7 @@ using ToolRunner.Steps;
 
 namespace ToolRunner;
 
-// What a run will do, worked out before anything changes (his checklist 270, "all 3."): the tools that run and the mod each one
+// What a run will do, worked out before anything changes: the tools that run and the mod each one
 // makes, the mods switched off for the run and why, the ones a step replaces for good, the steps that start the game. Read off
 // the profile as it is - nothing is written.
 public sealed class RunPreview

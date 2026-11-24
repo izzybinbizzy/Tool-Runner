@@ -12,7 +12,7 @@ namespace ToolRunner.App;
 // start. A key left out keeps the default; a value that does not read is named, and its default kept.
 public static class Theme
 {
-	// the default look: white panels, blue accents (his order 2026-11-10). App.xaml holds its values; its theme file is built in
+	// the default look: white panels, blue accents. App.xaml holds its values; its theme file is built in
 	// like the others, for the gallery's picture of it and as the start of a player's own theme
 	public const string Default = "Daylight";
 
@@ -23,7 +23,7 @@ public static class Theme
 	static string ChoiceFile => Path.Combine(AppPaths.Data, "theme.txt");
 	static string TextSizeFile => Path.Combine(AppPaths.Data, "text size.txt");
 
-	// the looks built into the program beside the default (his checklist 473): Windows' own high-contrast colors, taken from
+	// the looks built into the program beside the default: Windows' own high-contrast colors, taken from
 	// Windows each time it is applied, and a palette whose good / warning / bad states stay apart for color-blind eyes
 	// (blue / dark yellow / orange, from the Okabe-Ito set); every state keeps its own glyph as well
 	public const string HighContrast = "High contrast", ColorBlind = "Color-blind safe";
@@ -222,7 +222,7 @@ public static class Theme
 	}
 
 	// at start: the theme picked last time (gone or broken = the built-in one). It runs before the window is made, so nothing a
-	// theme does may escape here - one that did left the program with no window, every start (the fourth review, H2)
+	// theme does may escape here - one that did left the program with no window, every start
 	public static void ApplySaved()
 	{
 		try {
@@ -560,7 +560,7 @@ public static class Theme
 				} catch (Exception e) when (e is IOException or FormatException or NotSupportedException or ArgumentException or
 				                            InvalidOperationException or System.Runtime.InteropServices.ExternalException) {
 					// a damaged picture throws FileFormatException (a FormatException) or a COM error from Windows' decoder - it is only
-					// an icon, so it never stops the theme (the fourth review, H2)
+					// an icon, so it never stops the theme
 					a_problems.Add($"icon: \"{icon}\" does not open ({e.Message})");
 				}
 			}

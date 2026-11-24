@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 
 namespace ToolRunner.Steps;
 
-// His checklist 436: LOOT's sort, run the way Mod Organizer's own Sort button runs it (its source, loot.cpp): its lootcli.exe under the virtual folder, told the
+// LOOT's sort, run the way Mod Organizer's own Sort button runs it (its source, loot.cpp): its lootcli.exe under the virtual folder, told the
 // game, the profile's list and two files to write. LOOT's own program through Mod Organizer is unsupported by LOOT (its FAQ); this one ships with Mod Organizer.
 // lootcli only writes the sorted list, so the run lays that onto the order files itself and keeps it. It runs before the tools, with the outputs off, so every
 // tool builds on the order the player plays. Off in a new setup: it changes the player's load order.

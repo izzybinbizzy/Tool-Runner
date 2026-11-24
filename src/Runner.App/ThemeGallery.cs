@@ -203,7 +203,7 @@ public static class ThemeGallery
 		buttons.Children.Add(open);
 		buttons.Children.Add(again);
 
-		// his checklist 473: bigger text for every theme, kept for the next start
+		// bigger text for every theme, kept for the next start
 		var sizeLabel = new TextBlock { Text = "TEXT SIZE", Style = (Style)a_w.FindResource("H2"), Margin = new Thickness(0, 14, 0, 6) };
 		var size = new ComboBox { MinWidth = 220, HorizontalAlignment = HorizontalAlignment.Left, ItemsSource = Theme.TextScales.Select(s => $"{s * 100:0} %").ToList(),
 			SelectedIndex = Math.Max(0, Array.IndexOf(Theme.TextScales, Theme.TextScale)) };
