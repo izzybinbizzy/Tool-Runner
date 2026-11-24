@@ -4791,7 +4791,7 @@ public static class Program
 	// entries - is in every shipped language as well, not only what a picture of the window showed
 	static void T_EveryShippedLanguageHasTheSettingsTexts()
 	{
-		string[] more = ["{0} (default {1})", "Show setup: {0}", "Settings of {0}", "Run only {0}", "Most recent save (any character)",
+		string[] more = ["{0} (default {1})", "Show setup: {0}", "Settings of {0}", "Run only {0}", "Find in the settings: \"{0}\"", "Stop the test", "Most recent save (any character)",
 			"leave it to me (unanswered, the step stops)", "every run", "never", "skip it during the run (it asks in my own game)",
 			"new cache at every game start", "leave it alone - warn me only", "off", "on", "none", "the step's own", "Data folder (setups, runs, backups): {0}", ToolRunner.App.MainWindow.FooterText, "Data folder: {0}"];
 		var must = ToolRunner.App.SettingsPanel.StepLabels.Concat(more).ToList();
