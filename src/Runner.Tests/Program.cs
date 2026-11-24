@@ -5734,6 +5734,10 @@ public static class Program
 			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from, to), "a folder that holds files is refused");
 			Check(File.Exists(Path.Combine(from, "Setups", "Test.json")), "and the data stays where it was");
 			File.Delete(Path.Combine(to, "something.txt"));
+			// a folder inside the data, or one that holds it, would be copied into itself and removed with it
+			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from, Path.Combine(from, "inside")), "a folder inside the data is refused");
+			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from, Path.GetDirectoryName(from)!), "a folder that holds the data is refused");
+			Check(File.Exists(Path.Combine(from, "Setups", "Test.json")) && !Directory.Exists(Path.Combine(from, "inside")), "and nothing moved");
 			Check(DataFolder.MoveTo(from, to) == null, "nothing is left to do by hand");
 			Check(!Directory.Exists(from), "the old folder is gone");
 			Check(!File.Exists(Path.Combine(to, ".renamed from.txt")), "every path was repointed: the copy carries no mark of a move to finish");
