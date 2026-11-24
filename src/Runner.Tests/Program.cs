@@ -4242,7 +4242,12 @@ public static class Program
 		// an output a step at or after the start makes again is that step's, and goes off for it
 		var shared = f.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Output A" }), ("xlodgen", new JsonObject { ["output_mod"] = "Output A" }));
 		Equal("Output A", Off(shared, Runner.Plan(shared, null, "xlodgen", null)), "an output the run makes again goes off for it");
-		// CodeRabbit on pull request #40: an earlier output that a step of the run replaces goes off all the same
+		// a step this version does not know is in no run: its output is not kept on as an earlier one, and a later step that makes
+		// the same output switches it off as in a whole run
+		var unknown = f.WriteSetup(("easynpc", new JsonObject { ["output_mod"] = "Shared" }), ("synthesis", new JsonObject { ["output_mod"] = "Output A" }),
+			("dyndolod", new JsonObject { ["output_mod"] = "Shared" }));
+		Check(!Runner.EarlierOutputs(unknown, Runner.Plan(unknown, "synthesis", null, null)).Contains("Shared"), "an unknown step keeps nothing on");
+		// an earlier output that a step of the run replaces goes off all the same
 		var replacing = f.WriteSetup(("synthesis", new JsonObject { ["output_mod"] = "Output A" }), ("xlodgen", new JsonObject { ["output_mod"] = "Output B", ["replaces"] = new JsonArray("Output A") }));
 		Equal("Output A|Output B", Off(replacing, Runner.Plan(replacing, null, "xlodgen", null)), "an earlier output the run's step replaces goes off for it");
 		// ... the rival check counts the earlier output kept on as a rival, as the run leaves it

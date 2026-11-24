@@ -889,9 +889,10 @@ public static class Runner
 		if (a_todo is not { Count: > 0 } || !KeepsEarlierOutputs(a_setup)) {
 			return keep;
 		}
-		var steps = a_setup.Steps;
+		// the steps a run would run or use, in order: a step this version does not know is in no run, and keeps nothing on
+		var steps = a_setup.OnSteps;
 		var first = steps.FindIndex(s => s.Key == a_todo[0].Key);
-		foreach (var s in steps.Take(Math.Max(first, 0)).Where(s => s.On && !a_setup.LeftOutForNewGame(s.Key))) {
+		foreach (var s in steps.Take(Math.Max(first, 0))) {
 			if (new StepSettings(s.Settings).OutputMod is { } om) {
 				keep.Add(om);
 			}
