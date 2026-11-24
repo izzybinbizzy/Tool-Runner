@@ -922,6 +922,20 @@ public static class SettingsPanel
 				}
 			};
 			bar.Children.Add(keep);
+		} else if (!AppPaths.AppDataChosen) {
+			// the data is there already (this copy could not write beside itself): only a new copy elsewhere would not find it yet
+			var keep = new Button { Content = "Keep data through updates", Style = (Style)a_w.FindResource("Ghost"), Margin = new Thickness(10, 0, 0, 0),
+				ToolTip = "Every copy of Tool Runner on this PC uses this data folder from now on, also a new version unzipped into another folder" };
+			keep.Click += (_, _) => {
+				try {
+					DataFolder.Choose(AppPaths.Data);
+					bar.Children.Remove(keep);
+					a_w.Say("Every copy of Tool Runner on this PC uses this data folder from now on.");
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+					errors.Text = "Not kept: " + e.Message;
+				}
+			};
+			bar.Children.Add(keep);
 		}
 		bar.Children.Add(remove);
 		var where = new TextBlock { Text = "Data folder (setups, runs, backups): " + AppPaths.Data, Style = (Style)a_w.FindResource("MutedText"),

@@ -53,7 +53,7 @@ public sealed class LogView : RichTextBox
 	}
 
 	// whole lines added at the end ("\n" between them; a last part without one is a line too)
-	public void AppendText(string a_text)
+	public void AppendLines(string a_text)
 	{
 		var parts = a_text.Split('\n');
 		for (var i = 0; i < parts.Length; ++i) {

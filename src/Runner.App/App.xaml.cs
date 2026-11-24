@@ -429,6 +429,15 @@ public partial class App : Application
 		w.Demo(true);
 		Pump(w, 600);
 		Save("6 a guided step");
+		// the same run in some of the shipped themes, a dark and a light one among them: what a theme reaches (drawn while the
+		// made-up setup still has its steps - the first start below has none)
+		foreach (var theme in new[] { Theme.BlackAndGold, "Midnight", "Paper", Theme.ColorBlind }) {
+			var themeProblems = Theme.Apply(theme, false);
+			Pump(w, 800);
+			Save("8 a run going - " + theme + (themeProblems.Count > 0 ? " - with problems" : ""));
+		}
+		Theme.Apply(Theme.Default, false);
+		Pump(w, 400);
 		// the run waits on the player's own Mod Organizer: its band without a Done button
 		w.DemoWaitsOutside();
 		Pump(w, 600);
@@ -469,15 +478,6 @@ public partial class App : Application
 		Pump(dryBox, 600);
 		Save("7b a dry run that would be refused", dryBox);
 		dryBox.Close();
-		w.Demo(true);
-		Pump(w, 400);
-		// the same run in some of the shipped themes, a dark and a light one among them: what a theme reaches
-		foreach (var theme in new[] { Theme.BlackAndGold, "Midnight", "Paper", Theme.ColorBlind }) {
-			var themeProblems = Theme.Apply(theme, false);
-			Pump(w, 800);
-			Save("8 a run going - " + theme + (themeProblems.Count > 0 ? " - with problems" : ""));
-		}
-		Theme.Apply(Theme.Default, false);
 		w.Close();
 		if (squeezed.Count > 0) {
 			File.WriteAllLines(Path.Combine(a_dir, "layout problems.txt"), squeezed);

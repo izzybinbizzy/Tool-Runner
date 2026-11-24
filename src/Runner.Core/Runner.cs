@@ -1127,8 +1127,8 @@ public static class Runner
 	static void SaySummary(RunContext a_ctx)
 	{
 		a_ctx.Log.Simple("");
-		foreach (var line in RunSummary.Of(a_ctx.Journal).Lines()) {
-			a_ctx.Log.Simple(line);
+		foreach (var (text, level) in RunSummary.Of(a_ctx.Journal).Marked()) {
+			a_ctx.Log.Simple(text, level);
 		}
 		a_ctx.Log.Simple("");
 	}

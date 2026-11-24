@@ -556,7 +556,7 @@ public partial class MainWindow : Window
 				a_box.Clear();
 			}
 			if (a_add.Length > 0) {
-				a_box.AppendText(a_add);
+				a_box.AppendLines(a_add);
 				if (trim) {
 					a_box.KeepLast(150_000);
 				}
@@ -666,7 +666,7 @@ public partial class MainWindow : Window
 		}
 		var w = new PanelWindow(this, "log", "LOG", 960, 640);
 		var box = new LogView();
-		box.AppendText(LogBox.Text);
+		box.AppendLines(LogBox.Text);
 		box.SetResourceReference(FontFamilyProperty, "MonoFont");
 		box.SetResourceReference(FontSizeProperty, "SizeLog");
 		box.SetResourceReference(BackgroundProperty, "Panel2");

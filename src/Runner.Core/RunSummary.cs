@@ -99,6 +99,19 @@ public sealed class RunSummary
 	}
 
 	public List<string> Lines() => [Title, .. Rows.Select(r => $"  {r.Label}: {r.Text}")];
+
+	// the same lines with the color each gets in the log: the run's own outcome colors its title and why it ended; what to do
+	// about it, and every note, is worth a look
+	public List<(string Text, Level Level)> Marked()
+	{
+		var outcome = Kind switch { "bad" => Level.Error, "warn" => Level.Warn, _ => Level.Info };
+		var lines = new List<(string, Level)> { (Title, outcome) };
+		foreach (var r in Rows) {
+			var level = r.Label == "Why" ? outcome : (r.Label is "What to do" or "Next" && outcome != Level.Info) || r.Label == "Note" ? Level.Warn : Level.Info;
+			lines.Add(($"  {r.Label}: {r.Text}", level));
+		}
+		return lines;
+	}
 }
 
 // What is going right now, for a script or another program (the command line's "status"): read off the run records, the queue

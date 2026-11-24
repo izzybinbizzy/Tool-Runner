@@ -195,7 +195,7 @@ public sealed class RunLog : IDisposable
 
 	public void Say(string a_text, Level a_level = Level.Info)
 	{
-		var line = $"{DateTime.Now.ToString("HH:mm:ss", InvariantCulture)}  {(a_level == Level.Detail ? "  " : "")}{(a_level == Level.Warn ? "! " : a_level == Level.Error ? "!!! " : "")}{a_text}";
+		var line = $"{DateTime.Now.ToString("HH:mm:ss", InvariantCulture)}  {(a_level == Level.Detail ? "  " : "")}{MarkOf(a_level)}{a_text}";
 		lock (_gate) {
 			Write(false, line);
 			try {
@@ -209,10 +209,13 @@ public sealed class RunLog : IDisposable
 
 	// a line of the simple log (the detailed log has its own wording of the same moment), marked as the detailed log marks a
 	// warning or a failure, so the window colors both the same way
+	// what a simple log's line carries after its time: the window colors it by this
+	public static string MarkOf(Level a_level) => a_level switch { Level.Warn => "! ", Level.Error => "!!! ", _ => "" };
+
 	public void Simple(string a_text, Level a_level = Level.Info)
 	{
 		lock (_gate) {
-			Write(true, $"{DateTime.Now.ToString("HH:mm", InvariantCulture)}  {(a_level == Level.Warn ? "! " : a_level == Level.Error ? "!!! " : "")}{a_text}");
+			Write(true, $"{DateTime.Now.ToString("HH:mm", InvariantCulture)}  {MarkOf(a_level)}{a_text}");
 		}
 	}
 

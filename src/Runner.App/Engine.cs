@@ -20,11 +20,14 @@ public static class AppPaths
 
 	public static bool InAppData => Files.SamePath(Data, AppDataFolder);
 
+	// the player chose the app-data folder for every copy (Settings > Program)
+	public static bool AppDataChosen => DataFolder.Chosen(AppDataFolder);
+
 	static string Resolve()
 	{
 		try {
-			// no data folder beside the program, and the player keeps it in the app-data folder: that one
-			if (!DataFolder.StandsIn(AppContext.BaseDirectory, " Data") && DataFolder.HasData(AppDataFolder)) {
+			// no data folder beside the program, and the player chose the app-data folder for every copy: that one
+			if (!DataFolder.StandsIn(AppContext.BaseDirectory, " Data") && DataFolder.Chosen(AppDataFolder)) {
 				var kept = DataFolder.Adopt(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "");
 				Directory.CreateDirectory(kept);
 				return kept;

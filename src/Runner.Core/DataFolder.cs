@@ -100,6 +100,18 @@ public static class DataFolder
 		}
 	}
 
+	// The file that says the player chose this folder for every copy of the program. An app-data folder can hold data without it
+	// (a copy that could not write beside itself kept its data there): only the player's choice sends a new copy to it
+	public const string ChosenMark = "used by every copy.txt";
+
+	public static bool Chosen(string a_dir) => File.Exists(Path.Combine(a_dir, ChosenMark));
+
+	public static void Choose(string a_dir)
+	{
+		Directory.CreateDirectory(a_dir);
+		Files.WriteAtomic(Path.Combine(a_dir, ChosenMark), "Every copy of " + Brand.Name + " on this PC keeps its data here (Settings > Program).\r\n");
+	}
+
 	// The data folder moved to a_to (Windows' own app-data folder, so a new version unzipped anywhere finds the run history,
 	// the setups and the learned settings). Copied whole first and read back by every file's size; only then are the paths
 	// inside its files repointed and the old folder removed. A copy that fails is taken away again and the old folder stays
@@ -140,6 +152,7 @@ public static class DataFolder
 			throw new IOException($"the data could not be copied ({e.Message}) - it is still where it was", e);
 		}
 		Repoint(to, from);
+		Choose(to);
 		// the copy is whole and in use from the next start: a part of the old folder that will not go only takes room
 		try {
 			Files.DeleteDir(from);

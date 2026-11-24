@@ -1637,6 +1637,10 @@ public sealed partial class MainViewModel : Observable
 				s.State = StepState.Done;
 				s.Elapsed = Short(TimeSpan.FromMinutes(took));
 				Line(spent, $"=== {s.Name} ===");
+				if (s.Key == "cleansave") {
+					// a warning as the log shows one (the pictures show its color)
+					Line(spent + 2.1, RunLog.MarkOf(Level.Warn) + "your followers could not be read before the teleport: DevBench did not answer in time");
+				}
 				spent += took;
 				Line(spent, $"=== {s.Name} done in {took.ToString("0.0", InvariantCulture)} min ===");
 			} else if (i == cur) {
@@ -1728,7 +1732,8 @@ public sealed partial class MainViewModel : Observable
 		Mo2Open = GameRunning = false;
 		Guide = [];
 		ShowClose();
-		LogChanged?.Invoke(string.Join("\n", RunSummary.Of(j).Lines()) + "\n", false);
+		// written as the run's own log writes it: each line after its time, with its mark
+		LogChanged?.Invoke(string.Join("\n", RunSummary.Of(j).Marked().Select(l => $"{at:HH:mm}  {RunLog.MarkOf(l.Level)}{l.Text}")) + "\n", false);
 	}
 
 	// the off-screen pictures: the window as a first start shows it (no setup made yet)

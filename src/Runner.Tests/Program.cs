@@ -5689,7 +5689,12 @@ public static class Program
 			var moved = (JsonObject)JsonNode.Parse(File.ReadAllText(Path.Combine(to, "Runs", "2026-01-01 00-00-00 Test", "journal.json")))!;
 			Check(Files.SamePath(moved["SetupFile"]!.GetValue<string>(), Path.Combine(to, "Setups", "Test.json")) && moved["Other"]!.GetValue<string>() == @"D:\elsewhere\x.json",
 				"a path into the data folder follows it, any other path stays");
-			Check(DataFolder.HasData(to) && !DataFolder.StandsIn(Path.GetDirectoryName(from)!, " Data"), "the next start finds no data beside the program and the data in the new place");
+			Check(DataFolder.Chosen(to) && !DataFolder.StandsIn(Path.GetDirectoryName(from)!, " Data"), "the next start finds no data beside the program and the new place marked as the player's choice");
+			// an app-data folder that only holds data (a copy that could not write beside itself kept it there) is no choice of the
+			// player's: a new copy elsewhere keeps its own folder beside it
+			var other = Path.Combine(root, "other appdata");
+			Directory.CreateDirectory(Path.Combine(other, "Runs"));
+			Check(DataFolder.HasData(other) && !DataFolder.Chosen(other), "data alone is not the player's choice");
 		} finally {
 			if (Directory.Exists(root)) {
 				Directory.Delete(root, true);
@@ -6841,6 +6846,45 @@ public static class Program
 	}
 
 	// the log's colors: green as planned, yellow a warning, red a failure or what goes off plan - read off the marks both logs write
+	// A long run's log as the window takes it: lines added a few at a time, the oldest cut away past 200,000 characters (as the
+	// window does), every line one colored paragraph. What it keeps must be exactly the newest lines, and the time it takes is
+	// the test's own time in the log (no limit here but a generous one: a busy PC is no failure)
+	static void T_ALongLogIsAddedAndCutWhole()
+	{
+		Exception? failed = null;
+		var t = new Thread(() => {
+			try {
+				var box = new ToolRunner.App.LogView();
+				var added = 0;
+				var sw = Stopwatch.StartNew();
+				for (var batch = 0; batch < 3000; ++batch) {
+					var lines = string.Join("\n", Enumerable.Range(0, 3).Select(i => $"21:{batch % 60:00}:{i:00}  {(i == 1 ? "! " : i == 2 && batch % 50 == 0 ? "!!! " : "")}line {batch * 3 + i} of a long run's log, about as long as most")) + "\n";
+					box.AppendLines(lines);
+					added += lines.Length;
+					if (added > 200_000) {
+						box.KeepLast(150_000);
+						added = box.Length;
+					}
+				}
+				var took = sw.Elapsed;
+				var text = box.Text;
+				Check(text.Length <= 200_000 && text.EndsWith("line 8999 of a long run's log, about as long as most\n", StringComparison.Ordinal), $"the newest lines are kept ({text.Length} characters)");
+				Check(text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length == box.Document.Blocks.Count, "one paragraph for each line kept");
+				Check(text.StartsWith("21:", StringComparison.Ordinal), "the cut falls between whole lines");
+				Check(took < TimeSpan.FromSeconds(60), $"9,000 lines added in {took.TotalSeconds:0.0} s");
+				Console.WriteLine($"      9,000 lines added and cut in {took.TotalMilliseconds:0} ms");
+			} catch (Exception e) {
+				failed = e;
+			}
+		});
+		t.SetApartmentState(ApartmentState.STA);
+		t.Start();
+		t.Join();
+		if (failed != null) {
+			throw failed;
+		}
+	}
+
 	static void T_TheLogIsColoredByWhatEachLineSays()
 	{
 		Equal("Good", ToolRunner.App.LogView.BrushKey("21:00:01  TexGen started"), "a line as planned (detailed)");
@@ -6877,6 +6921,11 @@ public static class Program
 		Check(simple.Any(l => l.StartsWith("What to do: Install and tick the missing master", StringComparison.Ordinal)), "what to do: " + all);
 		Check(simple.Any(l => l == "The tool's own words: PGPatcher.esp requires master Gone.esm"), "the tool's own words: " + all);
 		Check(simple[^1].StartsWith("Failed: stopped at PGPatcher", StringComparison.Ordinal), "the verdict last: " + all);
+		// the summary above the verdict: its title and why the run ended in red, what to do in yellow, its other rows as planned
+		Check(marked.Any(l => l.StartsWith("!!! Stopped by a problem after ", StringComparison.Ordinal)) && marked.Any(l => l.StartsWith("!!!   Why: PGPatcher", StringComparison.Ordinal)),
+			"the summary says how the run ended in red: " + all);
+		Check(marked.Any(l => l.StartsWith("!   Next: ", StringComparison.Ordinal)) && marked.Any(l => l.StartsWith("  Steps: ", StringComparison.Ordinal)),
+			"what comes next in yellow, the steps as planned: " + all);
 		var detailed = File.ReadAllText(Path.Combine(r.Folder!, "log.txt"));
 		Check(detailed.Contains("! what it means: A plugin needs a master", StringComparison.Ordinal), "the detailed log says what it means too");
 	}
