@@ -77,6 +77,9 @@ public static partial class ToolUpdates
 	[GeneratedRegex(@"\d+")]
 	private static partial Regex Numbers();
 
+	// a value with at least one number in it ("unknown" and "" have none)
+	public static bool HasVersion(string a_v) => Numbers().IsMatch(a_v);
+
 	static List<int> Parts(string a_v) => TrimZeros(Numbers().Matches(a_v).Select(m => int.TryParse(m.Value, out var n) ? n : 0).ToList());
 
 	static List<int> TrimZeros(List<int> a_l)
@@ -198,5 +201,71 @@ public static partial class ToolUpdates
 	{
 		var o = await a_http.GetFromJsonAsync<JsonObject>($"https://api.github.com/repos/{a_repo}/releases/latest", a_ct).ConfigureAwait(false);
 		return o?["tag_name"]?.ToString() ?? throw new InvalidOperationException("GitHub gave no release");
+	}
+
+	// a repository's latest release as GitHub describes it: its tag and its files (the program's own download reads it)
+	public static Task<JsonObject?> GitHubRelease(string a_repo, CancellationToken a_ct) =>
+		Http.GetFromJsonAsync<JsonObject>($"https://api.github.com/repos/{a_repo}/releases/latest", a_ct);
+
+	// A download's limits: the client's own 20 s covers only the wait for an answer's headers, never the file that follows - a
+	// server that sends its headers and then nothing would hold the download for good. So the whole of it has a deadline, and
+	// a stretch with no byte coming ends it sooner (the offline tests shorten both).
+	public static TimeSpan FetchDeadline { get; set; } = TimeSpan.FromMinutes(15);
+	public static TimeSpan FetchQuiet { get; set; } = TimeSpan.FromSeconds(60);
+
+	// A file fetched into a_to as it comes: never held in memory (the client's 1 MB limit is for answers it reads whole), and
+	// never more than a_max bytes of it. a_progress hears how many bytes have come so far.
+	public static async Task Fetch(string a_url, Stream a_to, long a_max, IProgress<long>? a_progress, CancellationToken a_ct)
+	{
+		using var whole = CancellationTokenSource.CreateLinkedTokenSource(a_ct);
+		whole.CancelAfter(FetchDeadline);
+		try {
+			using var r = await Http.GetAsync(a_url, HttpCompletionOption.ResponseHeadersRead, whole.Token).ConfigureAwait(false);
+			r.EnsureSuccessStatusCode();
+			var from = await r.Content.ReadAsStreamAsync(whole.Token).ConfigureAwait(false);
+			await using (from.ConfigureAwait(false)) {
+				await CopyWatched(from, a_to, a_max, a_progress, whole.Token).ConfigureAwait(false);
+			}
+		} catch (OperationCanceledException e) when (!a_ct.IsCancellationRequested && whole.IsCancellationRequested) {
+			throw new HttpRequestException($"the download did not finish in {FetchDeadline.TotalMinutes:0} minutes", e);
+		}
+	}
+
+	// Copy, ended when no byte has come for FetchQuiet (said as the download having stopped); the caller's own cancel stays its own
+	public static async Task CopyWatched(Stream a_from, Stream a_to, long a_max, IProgress<long>? a_progress, CancellationToken a_ct)
+	{
+		using var quiet = CancellationTokenSource.CreateLinkedTokenSource(a_ct);
+		quiet.CancelAfter(FetchQuiet);
+		var heard = new Heard(n => {
+			quiet.CancelAfter(FetchQuiet);
+			a_progress?.Report(n);
+		});
+		try {
+			await Copy(a_from, a_to, a_max, heard, quiet.Token).ConfigureAwait(false);
+		} catch (OperationCanceledException e) when (!a_ct.IsCancellationRequested && quiet.IsCancellationRequested) {
+			throw new HttpRequestException($"the download stopped: nothing came for {FetchQuiet.TotalSeconds:0} seconds", e);
+		}
+	}
+
+	// told at once on the copying thread (System.Progress would post it to a thread of its own, too late to hold a quiet stretch off)
+	sealed class Heard(Action<long> a_heard) : IProgress<long>
+	{
+		public void Report(long a_value) => a_heard(a_value);
+	}
+
+	// the same for any stream (the offline tests hand in a file's)
+	public static async Task Copy(Stream a_from, Stream a_to, long a_max, IProgress<long>? a_progress, CancellationToken a_ct)
+	{
+		var buffer = new byte[81920];
+		long total = 0;
+		int n;
+		while ((n = await a_from.ReadAsync(buffer, a_ct).ConfigureAwait(false)) > 0) {
+			total += n;
+			if (total > a_max) {
+				throw new InvalidOperationException($"the download is bigger than {a_max / (1024 * 1024)} MB - more than it can be");
+			}
+			await a_to.WriteAsync(buffer.AsMemory(0, n), a_ct).ConfigureAwait(false);
+			a_progress?.Report(total);
+		}
 	}
 }
