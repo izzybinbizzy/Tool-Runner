@@ -346,11 +346,15 @@ public static partial class ToolSettings
 					a_log.Warn($"the mod \"{toolMod}\" stays on until the next run or the next tool set up here - or untick it in Mod Organizer");
 					a_stillOn?.Invoke(toolMod);
 				} else if (toolMod != null) {
-					// even after a Stop; one that cannot go back is named, never left unsaid
+					// one that cannot go back is named, never left unsaid. A Stop pressed during this close ends its wait (a game or a
+					// download can hold it for half an hour): the mod stays on record, as above (CodeRabbit on pull request #39)
 					try {
-						control.Close(null, CancellationToken.None);
+						control.Close(null, a_ct);
 						profile.SetMods([], [toolMod], a_log);
 						Files.Delete(SwitchRecord(a_setup));
+					} catch (OperationCanceledException) {
+						a_log.Warn($"the mod \"{toolMod}\" stays on until the next run or the next tool set up here - or untick it in Mod Organizer");
+						a_stillOn?.Invoke(toolMod);
 					} catch (Exception e) when (e is Mo2BusyException or StepFailedException or IOException or UnauthorizedAccessException or InvalidOperationException or KeyNotFoundException) {
 						// (StepFailedException: Mod Organizer would not close - a box of its own nobody answered. Left to
 						// fly, it hid that the mod is still on, and the settings the tool had just saved were not kept)
@@ -363,6 +367,8 @@ public static partial class ToolSettings
 				control.ReleaseOwned();
 			}
 		}
+		// a Stop that came while the tool ended (between two looks) keeps nothing of it, as one a moment earlier would have
+		a_ct.ThrowIfCancellationRequested();
 		var changed = Changed(before, Scan(roots, skip)).Where(f => !f.EndsWith("_Debug_log.txt", StringComparison.OrdinalIgnoreCase)).ToList();
 		// a tool that keeps its window's values in no file (TexGen, DynDOLOD) still writes them into its debug log when it runs
 		var values = VarsLog(exe, a_step) is { } vl && File.GetLastWriteTimeUtc(vl) >= opened ? ReadVars(vl) : [];

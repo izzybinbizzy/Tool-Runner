@@ -3966,6 +3966,26 @@ public static class Program
 		}
 	}
 
+	// a Mod Organizer that does not close: a Stop ends the wait for it within a moment, not at the close's five-minute limit
+	// (the tools box's Stop reaches this wait - CodeRabbit on pull request #39)
+	static void T_AStopEndsTheWaitForModOrganizerToClose()
+	{
+		using var f = new FakeMo2();
+		var mo2 = Mo2Instance.Load(f.Exe, f.Instance);
+		var game = Mo2Control.GameProbe;
+		Mo2Control.GameProbe = () => [];
+		try {
+			var c = new Mo2Control(mo2, "Test", RunLog.Null) { RunningProbe = () => true, ForeignProbe = () => [], RepackProbe = () => [] };
+			using var cts = new CancellationTokenSource();
+			cts.CancelAfter(TimeSpan.FromMilliseconds(400));
+			var sw = Stopwatch.StartNew();
+			Throws<OperationCanceledException>(() => c.Close(null, cts.Token), "a Stop while Mod Organizer will not close");
+			Check(sw.Elapsed < TimeSpan.FromSeconds(10), $"and it ended the wait at once ({sw.Elapsed.TotalSeconds:0.0} s)");
+		} finally {
+			Mo2Control.GameProbe = game;
+		}
+	}
+
 	// a run record whose PID now belongs to another program (after a crash and a restart) is not "alive"
 	static void T_ReusedPidIsNotTheRun()
 	{

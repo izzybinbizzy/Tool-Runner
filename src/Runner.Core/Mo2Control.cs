@@ -647,7 +647,10 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		var sw = Stopwatch.StartNew();
 		var limit = a_timeout ?? TimeSpan.FromMinutes(5);
 		var lastPost = TimeSpan.FromSeconds(-30);
+		// a Stop ends this wait too (the tools box's Stop reaches it while Mod Organizer stays open - CodeRabbit on pull request #39);
+		// a close made without one - the put-back's - waits as before
 		while (IsRunning() && sw.Elapsed < limit) {
+			a_ct.ThrowIfCancellationRequested();
 			if (sw.Elapsed - lastPost > TimeSpan.FromSeconds(20)) {
 				var h = MainWindow();
 				if (h != 0) {
@@ -656,7 +659,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 				lastPost = sw.Elapsed;
 			}
 			AnswerCloseBoxes();
-			Thread.Sleep(700);
+			Waits.Pause(TimeSpan.FromMilliseconds(700), a_ct);
 		}
 		if (IsRunning()) {
 			// said with its cause: the box it shows that this run does not answer (the player's own work in it) holds it open
