@@ -19,7 +19,7 @@ public static class GameStart
 		return a_profile.ModOrder().Where(m => states.TryGetValue(m, out var f) && f == '+').Select(m => Path.Combine(a_profile.Mo2.ModDir(m), a_rel)).FirstOrDefault(File.Exists);
 	}
 
-	// (a file changed for the save to play, which runs after the run's record says finished, is on record as "to put back"
+	// (a file changed for the final save, which runs after the run's record says finished, is on record as "to put back"
 	// before it is changed: StepKit.KeepFile)
 	public static void Prepare(RunContext a_ctx)
 	{
@@ -210,7 +210,7 @@ public static partial class FasterArchives
 		{
 			if (Live().Count > 0) {
 				a_ctx.Log.Warn("Stop: " + LeftAtStop);
-				a_ctx.Log.Simple("Note: " + LeftAtStop);
+				a_ctx.Log.Simple("Note: " + LeftAtStop, Level.Warn);
 			}
 		}
 		var repacking = false;
@@ -238,7 +238,8 @@ public static partial class FasterArchives
 		} else {
 			a_ctx.Log.Warn(What + ". Choose in its window; the run starts the game again when that window has closed.");
 		}
-		a_ctx.Log.Simple(repacking ? "Note: Faster Archives is repacking the game's archives - the run goes on when it has finished" : "Note: " + What + " - it waits for your choice in its own window");
+		a_ctx.Log.Simple(repacking ? "Note: Faster Archives is repacking the game's archives - the run goes on when it has finished" : "Waiting for you: " + What + " - it waits for your choice in its own window",
+			repacking ? Level.Warn : Level.Error);
 		if (tools.Count == 0) {
 			a_ctx.Log.Detail("its window has closed already - starting the game again");
 			return;

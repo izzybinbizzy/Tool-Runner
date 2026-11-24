@@ -303,7 +303,7 @@ public sealed class AddOnStep(string a_key) : IStep
 			if (a_nothingIsFine) {
 				var said = $"{StepCatalog.Name(a_step)} wrote nothing through Mod Organizer, so what it made is where you told it to go. {a_mod} stays as it was.";
 				a_ctx.Log.Warn(said);
-				a_ctx.Log.Simple("Note: " + said);
+				a_ctx.Log.Simple("Note: " + said, Level.Warn);
 				return false;
 			}
 			throw new StepFailedException($"{StepCatalog.Name(a_step)} wrote nothing");

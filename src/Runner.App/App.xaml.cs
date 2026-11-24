@@ -277,11 +277,11 @@ public partial class App : Application
 		var demo = new RunPreview();
 		demo.Steps.AddRange([new("synthesis", "Synthesis", "Synthesis - " + name, false), new("xlodgen", "xLODGen", "xLODGen Output - " + name, false),
 			new("texgen", "TexGen", "TexGen Output - " + name, false), new("dyndolod", "DynDOLOD", "DynDOLOD Output - " + name, false),
-			new("playsave", "Save to play", null, false)]);
+			new("playsave", "Final save", null, false)]);
 		demo.OffForTheRun.AddRange([("Synthesis - " + name, "made by Synthesis"), ("xLODGen Output - " + name, "made by xLODGen"),
 			("TexGen Output - " + name, "made by TexGen"), ("DynDOLOD Output - " + name, "made by DynDOLOD"),
 			("Some Patch", "SomePatch.esp needs Synthesis.esp from Synthesis - " + name)]);
-		demo.StartsTheGame.Add("Save to play");
+		demo.StartsTheGame.Add("Final save");
 		var box = ShowBox(w, demo);
 		Picture(box, a_dir, "6 preview before a run");
 		box.Close();
@@ -300,7 +300,13 @@ public partial class App : Application
 		var w = new MainWindow { ShowActivated = false, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.Manual, Left = -30000, Top = -30000 };
 		w.Show();
 		Pump(w, 2500);
-		void Save(string a_name, Window? a_of = null) => Picture(a_of ?? w, a_dir, a_name);
+		// every text a drawing shows that no binding fills: the list a language is translated from ("window words.json")
+		var words = new SortedSet<string>(StringComparer.Ordinal);
+		void Save(string a_name, Window? a_of = null)
+		{
+			Picture(a_of ?? w, a_dir, a_name);
+			words.UnionWith(WindowWords.Seen(a_of ?? w));
+		}
 		Save("1 dashboard");
 		var history = w.ShowPanel("history");
 		Pump(w, 600);
@@ -339,10 +345,10 @@ public partial class App : Application
 		// the preview before a run (his checklist 270), for a made-up run
 		var demo = new RunPreview();
 		demo.Steps.AddRange([new("synthesis", "Synthesis", "Synthesis Output", false), new("xlodgen", "xLODGen", "xLODGen Output", false),
-			new("dyndolod", "DynDOLOD", "DynDOLOD Output", false), new("playsave", "Save to play", null, false)]);
+			new("dyndolod", "DynDOLOD", "DynDOLOD Output", false), new("playsave", "Final save", null, false)]);
 		demo.OffForTheRun.AddRange([("Synthesis Output", "made by Synthesis"), ("xLODGen Output", "made by xLODGen"), ("DynDOLOD Output", "made by DynDOLOD"),
 			("Some Patch", "SomePatch.esp needs Synthesis.esp from Synthesis Output")]);
-		demo.StartsTheGame.Add("Save to play");
+		demo.StartsTheGame.Add("Final save");
 		var box = Ask.Make(w, "What this run will do", string.Join("\n", demo.Lines(k => k == "dyndolod" ? TimeSpan.FromMinutes(24) : k == "synthesis" ? TimeSpan.FromMinutes(2) : null)),
 			"Start the run", "Not now", _ => { });
 		box.ShowActivated = false;
@@ -444,6 +450,17 @@ public partial class App : Application
 		w.Demo(true);
 		Pump(w, 600);
 		Save("6 a guided step");
+		// the same run in some of the shipped themes, a dark and a light one among them: what a theme reaches (drawn while the
+		// made-up setup still has its steps - the first start below has none)
+		foreach (var theme in new[] { Theme.BlackAndGold, "Midnight", "Paper", Theme.ColorBlind }) {
+			var themeProblems = Theme.Apply(theme, false);
+			Pump(w, 800);
+			Save("8 a run going - " + theme + (themeProblems.Count > 0 ? " - with problems" : ""));
+		}
+		Theme.Apply(Theme.Default, false);
+		Pump(w, 400);
+		w.Demo(true);
+		Pump(w, 300);
 		// the run waits on the player's own Mod Organizer: its band without a Done button
 		w.DemoWaitsOutside();
 		Pump(w, 600);
@@ -484,16 +501,36 @@ public partial class App : Application
 		Pump(dryBox, 600);
 		Save("7b a dry run that would be refused", dryBox);
 		dryBox.Close();
-		w.Demo(true);
-		Pump(w, 400);
-		// the same run in some of the shipped themes, a dark and a light one among them: what a theme reaches
-		foreach (var theme in new[] { Theme.BlackAndGold, "Midnight", "Paper", Theme.ColorBlind }) {
-			var themeProblems = Theme.Apply(theme, false);
-			Pump(w, 800);
-			Save("8 a run going - " + theme + (themeProblems.Count > 0 ? " - with problems" : ""));
+		// the window in a shipped language whose words run long: nothing may be cut off or overlap. Taken last: the labels it
+		// sets stay German, and no English picture or window word may come after it
+		if (WindowWords.ShippedText("Deutsch") is { } de && WindowWords.Read(de, out _) is { } german) {
+			WindowWords.Use(german);
+			// the first start's picture emptied the step list: the setup's steps read again, as picking it does
+			(w.DataContext as MainViewModel)?.LoadSteps();
+			// (a text the code gives a button is worked out again: the old-output button's words - before the made-up run, since
+			// working it out shows the card as ready)
+			w.DemoUsesOld("dyndolod", false);
+			w.Demo(false);
+			w.SayFooter();
+			WindowWords.Tree(w);
+			Pump(w, 600);
+			// (pictures only: what a German drawing shows never goes into the window words, which list the English)
+			Picture(w, a_dir, "10 a run going - Deutsch");
+			var deSettings = w.ShowPanel("settings", true);
+			WindowWords.Tree(deSettings);
+			Pump(w, 600);
+			Picture(deSettings, a_dir, "10b settings - Deutsch");
+			// a step's settings picked after Settings opened (drawn then, so walked into the language then): labels, defaults
+			if (SettingsPanel.ShowStep("dyndolod")) {
+				Pump(w, 600);
+				Picture(deSettings, a_dir, "10c settings, a step - Deutsch");
+			}
+			w.ClosePanels();
+			WindowWords.Use(new Dictionary<string, string>());
 		}
-		Theme.Apply(Theme.Default, false);
 		w.Close();
+		File.WriteAllText(Path.Combine(a_dir, "window words.json"), System.Text.Json.JsonSerializer.Serialize(words.ToDictionary(k => k, _ => ""),
+			new System.Text.Json.JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
 		if (squeezed.Count > 0) {
 			File.WriteAllLines(Path.Combine(a_dir, "layout problems.txt"), squeezed);
 			ConsoleAttach.ToParent();

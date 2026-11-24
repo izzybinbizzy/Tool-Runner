@@ -407,7 +407,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		_log.Warn($"Mod Organizer was opened outside this run (process {string.Join(", ", theirs)}) - it is never closed under you. " +
 			$"Close it when you are done and the run goes on by itself (it waits up to {UserWait.TotalMinutes:0} minutes; Stop ends the run safely)");
 		// the simple log (the window's default view) says it too - the wait can be long
-		_log.Simple($"Waiting for you: close the Mod Organizer you opened and the run goes on (up to {UserWait.TotalMinutes:0} minutes).");
+		_log.Simple($"Waiting for you: close the Mod Organizer you opened and the run goes on (up to {UserWait.TotalMinutes:0} minutes).", Level.Error);
 		WaitingForPlayer?.Invoke("close the Mod Organizer you opened and the run goes on by itself");
 		try {
 			var w = Stopwatch.StartNew();

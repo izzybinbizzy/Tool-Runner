@@ -422,7 +422,7 @@ public static class Program
 		Throws<ArgumentException>(() => Runner.Plan(s, "dyndolod", null, null), "a step the setup does not have");
 	}
 
-	// his ask 2026-11-03: a new game has no save to keep clean - the clean save and the save to play are left out while it is on
+	// his ask 2026-11-03: a new game has no save to keep clean - the clean save and the final save are left out while it is on
 	static void T_PgLiteUnticksPgPatcherUntilThePlayerTicksIt()
 	{
 		using var f = new FakeMo2();
@@ -795,10 +795,10 @@ public static class Program
 			}
 			Check(!ctx.SwitchedBack, "and with nothing switched there is nothing to put back after the list was made");
 			ctx.FreshList = false;
-			// The save to play runs after the run's record says finished. A file kept for it is on record as "to put back" in
+			// The final save runs after the run's record says finished. A file kept for it is on record as "to put back" in
 			// the very write that records the file - before the file is changed (said only after the change, a crash in
 			// between left a changed file that nothing offered to put back)
-			var forPlay = Path.Combine(f.Root, "changed for the save to play.ini");
+			var forPlay = Path.Combine(f.Root, "changed for the final save.ini");
 			File.WriteAllText(forPlay, "as it was");
 			ctx.Journal.InGameAfter = true;
 			ctx.Journal.NeedsRestore = false;
@@ -1211,7 +1211,7 @@ public static class Program
 		Equal(0, Preflight.Run(ng, Mo2Instance.Load(f.Exe, f.Instance), ng.EnabledSteps.Select(x => x.Key).ToList()).Count(i => i.Step is "cleansave" or "playsave"),
 			"no save step asks for a save");
 		var lines = RunPreview.Build(ng, Mo2Instance.Load(f.Exe, f.Instance), Runner.Plan(ng, null, null, null)).Lines(_ => null);
-		Check(lines.Any(l => l.Contains("new game", StringComparison.Ordinal) && l.Contains("Clean save", StringComparison.Ordinal) && l.Contains("Save to play", StringComparison.Ordinal)),
+		Check(lines.Any(l => l.Contains("new game", StringComparison.Ordinal) && l.Contains("Clean save", StringComparison.Ordinal) && l.Contains("Final save", StringComparison.Ordinal)),
 			"the preview says what is left out: " + string.Join(" | ", lines));
 		Check(!lines.Any(l => l.StartsWith("The game starts", StringComparison.Ordinal)), "and that the game does not start");
 		ng.Root["steps"]!.AsArray().OfType<JsonObject>().Where(o => Setup.Str(o, "step") is "landscapefixer" or "synthesis").ToList().ForEach(o => o["on"] = false);
@@ -1721,7 +1721,7 @@ public static class Program
 		Check(aTicked != ShaderStep.Fingerprint(mo2, a, p, notA), "its own shader files changed (ticked or not): A's cache is stale");
 	}
 
-	// the fourth review, H1: the save to play never starts from an old clean save when the player played after it
+	// the fourth review, H1: the final save never starts from an old clean save when the player played after it
 	static void T_SaveToPlayStartsFromTheRightSave()
 	{
 		var mon = new DateTime(2026, 10, 26, 3, 0, 0, DateTimeKind.Utc);
@@ -1740,7 +1740,7 @@ public static class Program
 			new StepRecord { Key = "pandora", Started = null },
 		};
 		var times = InGame.GameTimes(steps, mon.AddMinutes(40)).ToList();
-		Equal(2, times.Count, "the clean save and the save to play");
+		Equal(2, times.Count, "the clean save and the final save");
 		Check(!times.Any(t => mon.AddMinutes(15) >= t.From && mon.AddMinutes(15) <= t.To), "a save made during DynDOLOD is the player's");
 		// the fifth review, N1: a run that died in a game step - its open step ends where its record stopped, so a save made a
 		// day later is still the player's
@@ -1797,7 +1797,7 @@ public static class Program
 		a_ctx.SetAfter(a_mod);
 	}
 
-	// A whole run with the directory cache mod loading its cache blind: the save to play makes the game's list anew after
+	// A whole run with the directory cache mod loading its cache blind: the final save makes the game's list anew after
 	// everything the run changed, so nothing is left to say - and a command of the setup that runs after it counts as a
 	// change again, said with what to do if it changes game files (CodeRabbit on pull request #35)
 	static void T_ACommandAfterTheRunCountsAsAChange()
@@ -1812,7 +1812,7 @@ public static class Program
 		var asThePlayerHasIt = "[General]\r\nShowPopUp=b:false\r\nMode=s:LOAD\r\n";
 		File.WriteAllText(own, asThePlayerHasIt);
 		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp")));
-		// the save to play's game start, as far as the game's list goes
+		// the final save's game start, as far as the game's list goes
 		var modeAtTheStart = "";
 		StepRegistry.Replace(new FakeStep("playsave", (ctx, s) => {
 			GameStart.Prepare(ctx);
@@ -1823,7 +1823,7 @@ public static class Program
 		setup.Save();
 		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
 		Equal(RunState.Finished, r.State, r.Verdict);
-		Equal("CACHE", modeAtTheStart, "the save to play's game start makes the list anew: the run changed the game's files before it");
+		Equal("CACHE", modeAtTheStart, "the final save's game start makes the list anew: the run changed the game's files before it");
 		var j = Journal.Load(r.Folder!);
 		Equal(0, j.FilesChanged, "and nothing changed after that list was made");
 		Check(!j.Notes.Any(n => n.Contains("Cached Recursive Directory Walk", StringComparison.Ordinal)), "so nothing is left to say about it: " + string.Join(" | ", j.Notes));
@@ -1963,7 +1963,7 @@ public static class Program
 		File.WriteAllText(Path.Combine(f.Mods, "Empty Output", "grass", "Tamriel", "x0y0.cgid"), "cache");
 		gate = Runner.CheckStart(new RunRequest(f.SetupFile, f.Data));
 		Check(gate.Starts, "a file in a folder of it makes it an output: " + gate.Why);
-		// a run of only the shader caches or the save to play switches no output off and none back on: an old output that
+		// a run of only the shader caches or the final save switches no output off and none back on: an old output that
 		// is not there is not that run's business, and does not stop it (the run of a tool is stopped, as above)
 		// (a setup with a shader step that is switched on, asked for alone - and, as the control, together with a tool)
 		var realShaders = StepRegistry.For("shaders")!;
@@ -4778,6 +4778,57 @@ public static class Program
 	}
 
 	// a language file: a value left empty stays English, a name is only a name, and a file that does not read is not replaced
+	// The languages shipped inside the program: each one reads, gives every text a translation (none left empty), keeps one access
+	// key where the English has one and every key shortcut the English names, and is offered in the language list
+	static void T_EveryShippedLanguageReadsWhole()
+	{
+		var shipped = ToolRunner.App.WindowWords.Shipped();
+		foreach (var name in new[] { "Deutsch", "Español", "Français", "Italiano", "Polski", "Português (Brasil)", "Türkçe", "Русский", "Українська", "日本語", "简体中文", "한국어" }) {
+			Check(shipped.Contains(name), "shipped: " + name);
+		}
+		var offered = ToolRunner.App.WindowWords.Available();
+		Check(offered[0] == ToolRunner.App.WindowWords.English && shipped.All(offered.Contains), "English first, then every shipped language: " + string.Join(", ", offered));
+		foreach (var name in shipped) {
+			var words = ToolRunner.App.WindowWords.Read(ToolRunner.App.WindowWords.ShippedText(name)!, out var problem);
+			Check(words != null, $"{name} reads: {problem}");
+			Check(words!.Count >= 300, $"{name} holds the window's texts ({words.Count})");
+			foreach (var (english, word) in words) {
+				Check(!string.IsNullOrWhiteSpace(word), $"{name}: no empty translation for {english}");
+				if (english.Count(c => c == '_') == 1) {
+					Check(word.Count(c => c == '_') == 1, $"{name}: one access key in {word}");
+				}
+				foreach (var key in System.Text.RegularExpressions.Regex.Matches(english, @"Ctrl\+(?:Enter|[A-Z,])|\bF\d\b").Select(m => m.Value)) {
+					Check(word.Contains(key, StringComparison.Ordinal), $"{name}: {key} kept in {word}");
+				}
+			}
+		}
+	}
+
+	// what the window shows only once it is used - the step editor's labels, the settings choices not picked, the command box's
+	// entries - is in every shipped language as well, not only what a picture of the window showed
+	static void T_EveryShippedLanguageHasTheSettingsTexts()
+	{
+		string[] more = ["{0} (default {1})", "Show setup: {0}", "Settings of {0}", "Run only {0}", "Most recent save (any character)",
+			"leave it to me (unanswered, the step stops)", "every run", "never", "skip it during the run (it asks in my own game)",
+			"new cache at every game start", "leave it alone - warn me only", "off", "on", "none", "the step's own", "Data folder (setups, runs, backups): {0}", ToolRunner.App.MainWindow.FooterText, "Data folder: {0}"];
+		var must = ToolRunner.App.SettingsPanel.StepLabels.Concat(more).ToList();
+		Check(must.Count >= 55, $"the texts looked for ({must.Count})");
+		foreach (var name in ToolRunner.App.WindowWords.Shipped()) {
+			var words = ToolRunner.App.WindowWords.Read(ToolRunner.App.WindowWords.ShippedText(name)!, out _)!;
+			var missing = must.Where(m => !words.ContainsKey(m)).ToList();
+			Check(missing.Count == 0, $"{name} lacks {missing.Count}: {string.Join(" | ", missing.Take(5))}");
+		}
+		// a text with a name put into it: the language's own form, and English when a translation's places do not fit
+		try {
+			ToolRunner.App.WindowWords.Use(new Dictionary<string, string> { ["Run only {0}"] = "Nur {0} ausführen" });
+			Equal("Nur xLODGen ausführen", ToolRunner.App.WindowWords.Format("Run only {0}", "xLODGen"), "the language's own form");
+			ToolRunner.App.WindowWords.Use(new Dictionary<string, string> { ["Run only {0}"] = "Nur {1} ausführen" });
+			Equal("Run only xLODGen", ToolRunner.App.WindowWords.Format("Run only {0}", "xLODGen"), "a translation whose places do not fit: English");
+		} finally {
+			ToolRunner.App.WindowWords.Use(new Dictionary<string, string>());
+		}
+	}
+
 	static void T_ALanguageFileCannotHarmTheWindow()
 	{
 		ToolRunner.App.WindowWords.Use(new Dictionary<string, string> { ["Start"] = "Starten", ["Empty"] = null!, ["Blank"] = "  " });
@@ -5684,6 +5735,65 @@ public static class Program
 
 	// the rename: the takeover's own check for an old copy, as the program runs it (no stand-in): a running program file under
 	// the old name keeps the old folder where it is; once it ends, the folder is taken over
+	// His 675 ("Yes; a"): the data kept in Windows' app-data folder - copied whole, its paths repointed, the old folder gone; never
+	// over a folder that holds anything, and a copy that fails leaves the data where it was
+	static void T_TheDataMovesWholeToTheAppDataFolder()
+	{
+		var root = Path.Combine(Path.GetTempPath(), "mo2 tool runner tests", "data move " + Guid.NewGuid().ToString("N")[..8]);
+		var from = Path.Combine(root, "beside", Brand.Name + " Data");
+		var to = Path.Combine(root, "appdata", Brand.Name);
+		try {
+			Directory.CreateDirectory(Path.Combine(from, "Setups"));
+			Directory.CreateDirectory(Path.Combine(from, "Runs", "2026-01-01 00-00-00 Test"));
+			Directory.CreateDirectory(Path.Combine(from, "empty folder"));
+			File.WriteAllText(Path.Combine(from, "Setups", "Test.json"), "{ \"name\": \"Test\" }");
+			var record = new JsonObject { ["SetupFile"] = Path.Combine(from, "Setups", "Test.json"), ["Other"] = @"D:\elsewhere\x.json" };
+			File.WriteAllText(Path.Combine(from, "Runs", "2026-01-01 00-00-00 Test", "journal.json"), record.ToJsonString());
+			// a folder that holds anything is never moved into
+			Directory.CreateDirectory(to);
+			File.WriteAllText(Path.Combine(to, "something.txt"), "x");
+			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from, to), "a folder that holds files is refused");
+			Check(File.Exists(Path.Combine(from, "Setups", "Test.json")), "and the data stays where it was");
+			File.Delete(Path.Combine(to, "something.txt"));
+			Check(DataFolder.MoveTo(from, to) == null, "nothing is left to do by hand");
+			Check(!Directory.Exists(from), "the old folder is gone");
+			Check(!File.Exists(Path.Combine(to, ".renamed from.txt")), "every path was repointed: the copy carries no mark of a move to finish");
+			Check(File.ReadAllText(Path.Combine(to, "Setups", "Test.json")).Contains("Test", StringComparison.Ordinal) && Directory.Exists(Path.Combine(to, "empty folder")), "every file and folder is in the new place");
+			var moved = (JsonObject)JsonNode.Parse(File.ReadAllText(Path.Combine(to, "Runs", "2026-01-01 00-00-00 Test", "journal.json")))!;
+			Check(Files.SamePath(moved["SetupFile"]!.GetValue<string>(), Path.Combine(to, "Setups", "Test.json")) && moved["Other"]!.GetValue<string>() == @"D:\elsewhere\x.json",
+				"a path into the data folder follows it, any other path stays");
+			Check(DataFolder.Chosen(to) && !DataFolder.StandsIn(Path.GetDirectoryName(from)!, " Data"), "the next start finds no data beside the program and the new place marked as the player's choice");
+			// an app-data folder that only holds data (a copy that could not write beside itself kept it there) is no choice of the
+			// player's: a new copy elsewhere keeps its own folder beside it
+			var other = Path.Combine(root, "other appdata");
+			Directory.CreateDirectory(Path.Combine(other, "Runs"));
+			Check(DataFolder.HasData(other) && !DataFolder.Chosen(other), "data alone is not the player's choice");
+			// a copy of a move that was cut off before it counted (its mark names the folder it came from) is made again
+			var from2 = Path.Combine(root, "beside 2", Brand.Name + " Data");
+			var to2 = Path.Combine(root, "appdata 2", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from2, "Setups"));
+			File.WriteAllText(Path.Combine(from2, "Setups", "Two.json"), "{ \"name\": \"Two\" }");
+			Directory.CreateDirectory(to2);
+			File.WriteAllText(Path.Combine(to2, ".renamed from.txt"), from2);
+			File.WriteAllText(Path.Combine(to2, "half.json"), "{}");
+			Check(DataFolder.MoveTo(from2, to2) == null && File.Exists(Path.Combine(to2, "Setups", "Two.json")) && !File.Exists(Path.Combine(to2, "half.json")),
+				"a half copy of the same move is replaced by the whole one");
+			// a move that counted (the old folder's mark) is finished by the next start, whatever was left of it
+			var old3 = Path.Combine(root, "beside 3", Brand.Name + " Data");
+			var to3 = Path.Combine(root, "appdata 3", Brand.Name);
+			Directory.CreateDirectory(old3);
+			Directory.CreateDirectory(to3);
+			File.WriteAllText(Path.Combine(old3, DataFolder.MovedMark), to3);
+			Check(DataFolder.MovedTo(old3) is { } where && Files.SamePath(where, to3), "the mark names where the data went");
+			DataFolder.FinishMove(old3, to3);
+			Check(DataFolder.Chosen(to3) && !Directory.Exists(old3), "the new folder is the player's choice and the old one is gone");
+		} finally {
+			if (Directory.Exists(root)) {
+				Directory.Delete(root, true);
+			}
+		}
+	}
+
 	static void T_DataFolderWaitsForARunningOldCopy()
 	{
 		var parent = Path.Combine(Path.GetTempPath(), "SUP old copy " + Guid.NewGuid().ToString("N"));
@@ -6424,6 +6534,8 @@ public static class Program
 					File.Copy(f, Path.Combine(scratch, rel));
 				}
 			}
+			// its own data folder beside it before it starts: an app-data folder this PC chose for every copy never takes it
+			Directory.CreateDirectory(Path.Combine(scratch, Brand.Name + " Data"));
 			using var desk = new HiddenDesktop("SUP-test-windowless");
 			// a folder Windows refuses to make: the snapshot's first step throws
 			using var p = desk.Start($"\"{exe}\" --snapshot \"{Path.Combine(Path.GetTempPath(), "bad<name>")}\"", AppContext.BaseDirectory);
@@ -6597,45 +6709,6 @@ public static class Program
 		Check(at.Contains(@"C:\\Game", StringComparison.Ordinal) && !at.Contains("null", StringComparison.Ordinal), "the folder written, its backslashes escaped");
 		var own = "{ \"DataPathOverride\": \"E:\\\\Mine\" }";
 		Equal(own, SynthesisStep.WithDataFolder(own, @"C:\Other"), "a data folder the player set stays");
-	}
-
-	// ------------------------------------------------------------------ after the run: sleep or shut down (his checklist 461)
-	static void T_PowerAfterDecidesAndCanBeCancelled()
-	{
-		using var f = new FakeMo2();
-		var setup = f.WriteSetup(("pandora", new JsonObject()));
-		Equal(PowerAfter.Kind.None, PowerAfter.Read(setup), "off unless set");
-		Check(PowerAfter.OnlyFinished(setup), "only after a finished run, unless set");
-		setup.Root["afterRunPower"] = "shutdown";
-		Equal(PowerAfter.Kind.Shutdown, PowerAfter.Read(setup), "shut down");
-		Equal(PowerAfter.Kind.Shutdown, PowerAfter.Decide(PowerAfter.Kind.Shutdown, true, RunState.Finished), "a finished run");
-		Equal(PowerAfter.Kind.None, PowerAfter.Decide(PowerAfter.Kind.Shutdown, true, RunState.Failed), "a failed run keeps the PC on");
-		Equal(PowerAfter.Kind.Sleep, PowerAfter.Decide(PowerAfter.Kind.Sleep, false, RunState.Failed), "unless the setup says any run");
-		Equal(PowerAfter.Kind.None, PowerAfter.Decide(PowerAfter.Kind.Sleep, false, RunState.Stopped), "a run the player stopped never does");
-		// the notice: the window sees it, the action comes after it; a cancel stops it
-		var done = new List<PowerAfter.Kind>();
-		var waits = 0;
-		Check(PowerAfter.Carry(PowerAfter.Kind.Sleep, f.Data, RunLog.Null, done.Add, _ => {
-			if (waits++ == 0) {
-				Check(PowerAfter.Look(f.Data) is { Action: "Sleep" }, "the notice is there for the window");
-			}
-		}), "done after the notice");
-		Equal(1, done.Count, "the action once");
-		Equal(60, waits, "a minute of notice, a second at a time");
-		Equal<PowerAfter.Pending?>(null, PowerAfter.Look(f.Data), "the notice is gone");
-		done.Clear();
-		waits = 0;
-		Check(!PowerAfter.Carry(PowerAfter.Kind.Shutdown, f.Data, RunLog.Null, done.Add, _ => {
-			if (++waits == 10) {
-				PowerAfter.Cancel(f.Data);
-			}
-		}), "cancelled");
-		Equal(0, done.Count, "nothing done");
-		Check(!File.Exists(PowerAfter.CancelFile(f.Data)) && !File.Exists(PowerAfter.File(f.Data)), "nothing left behind");
-		// a cancel left from before never stops the next one
-		PowerAfter.Cancel(f.Data);
-		Check(PowerAfter.Carry(PowerAfter.Kind.Sleep, f.Data, RunLog.Null, done.Add, _ => { }), "an old cancel is not this one's");
-		Check(!PowerAfter.Carry(PowerAfter.Kind.None, f.Data, RunLog.Null, done.Add, _ => throw new InvalidOperationException("no wait for nothing")), "none does nothing");
 	}
 
 	// ------------------------------------------------------------------ each step's last run (his checklist 450)
@@ -6857,6 +6930,13 @@ public static class Program
 				log.Detail("a detail");
 				log.Simple("the simple line");
 			}
+			using (var marks = new RunLog(Path.Combine(dir, "marks"))) {
+				marks.Simple("a warning", Level.Warn);
+				marks.Simple("a failure", Level.Error);
+			}
+			var markLines = File.ReadAllLines(Path.Combine(dir, "marks", RunLog.SimpleName));
+			Check(markLines.Length == 2 && markLines[0].EndsWith("  ! a warning", StringComparison.Ordinal) && markLines[1].EndsWith("  !!! a failure", StringComparison.Ordinal),
+				"the simple log marks a warning and a failure as the detailed log does: " + string.Join(" | ", markLines));
 			var simple = File.ReadAllLines(Path.Combine(dir, RunLog.SimpleName));
 			var detailed = File.ReadAllText(Path.Combine(dir, "log.txt"));
 			Check(simple.Length == 1 && System.Text.RegularExpressions.Regex.IsMatch(simple[0], @"^\d\d:\d\d  the simple line$"), "the simple log holds only its own line, with the time: " + string.Join(" | ", simple));
@@ -6870,6 +6950,63 @@ public static class Program
 		}
 	}
 
+	// the log's colors: green as planned, yellow a warning, red a failure or what goes off plan - read off the marks both logs write
+	// A long run's log as the window takes it: lines added a few at a time, the oldest cut away past 200,000 characters (as the
+	// window does), every line one colored paragraph. What it keeps must be exactly the newest lines, and the time it takes is
+	// the test's own time in the log (no limit here but a generous one: a busy PC is no failure)
+	static void T_ALongLogIsAddedAndCutWhole()
+	{
+		Exception? failed = null;
+		var t = new Thread(() => {
+			try {
+				var box = new ToolRunner.App.LogView();
+				var added = 0;
+				var sw = Stopwatch.StartNew();
+				for (var batch = 0; batch < 3000; ++batch) {
+					var lines = string.Join("\n", Enumerable.Range(0, 3).Select(i => $"21:{batch % 60:00}:{i:00}  {(i == 1 ? "! " : i == 2 && batch % 50 == 0 ? "!!! " : "")}line {batch * 3 + i} of a long run's log, about as long as most")) + "\n";
+					box.AppendLines(lines);
+					added += lines.Length;
+					if (added > 200_000) {
+						box.KeepLast(150_000);
+						added = box.Length;
+					}
+				}
+				var took = sw.Elapsed;
+				var text = box.Text;
+				Check(text.Length <= 200_000 && text.EndsWith("line 8999 of a long run's log, about as long as most\n", StringComparison.Ordinal), $"the newest lines are kept ({text.Length} characters)");
+				Check(text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length == box.Document.Blocks.Count, "one paragraph for each line kept");
+				Check(text.StartsWith("21:", StringComparison.Ordinal), "the cut falls between whole lines");
+				Check(took < TimeSpan.FromSeconds(60), $"9,000 lines added in {took.TotalSeconds:0.0} s");
+				// a newest line longer than the whole budget: every line before it goes, and it stays whole
+				box.AppendLines(new string('x', 160_000) + "\n");
+				box.KeepLast(150_000);
+				Check(box.Document.Blocks.Count == 1 && box.Text.TrimEnd('\n').Length == 160_000, $"a line over the budget is kept alone and whole ({box.Document.Blocks.Count} lines, {box.Length} characters)");
+				Console.WriteLine($"      9,000 lines added and cut in {took.TotalMilliseconds:0} ms");
+			} catch (Exception e) {
+				failed = e;
+			}
+		});
+		t.SetApartmentState(ApartmentState.STA);
+		t.Start();
+		t.Join();
+		if (failed != null) {
+			throw failed;
+		}
+	}
+
+	static void T_TheLogIsColoredByWhatEachLineSays()
+	{
+		Equal("Good", ToolRunner.App.LogView.BrushKey("21:00:01  TexGen started"), "a line as planned (detailed)");
+		Equal("Good", ToolRunner.App.LogView.BrushKey("21:00:01    a detail"), "a detail");
+		Equal("Good", ToolRunner.App.LogView.BrushKey("21:00  1/3 TexGen started"), "a line as planned (simple)");
+		Equal("Warn", ToolRunner.App.LogView.BrushKey("21:00:02  ! a box is open - the game's notice"), "a warning (detailed)");
+		Equal("Warn", ToolRunner.App.LogView.BrushKey("21:00  ! Note: something worth a look"), "a warning (simple)");
+		Equal("Bad", ToolRunner.App.LogView.BrushKey("21:00:03  !!! the step failed"), "a failure (detailed)");
+		Equal("Bad", ToolRunner.App.LogView.BrushKey("21:00  !!! The game shows a message box this run cannot answer"), "what goes off plan (simple)");
+		Equal("Good", ToolRunner.App.LogView.BrushKey("21:00  a line that says ! somewhere"), "a mark only counts right after the time");
+		Equal("Text", ToolRunner.App.LogView.BrushKey(""), "an empty line has no color of its own");
+	}
+
 	static void T_FailedRunsSimpleLogSaysWhatToDo()
 	{
 		using var f = new FakeMo2();
@@ -6878,8 +7015,13 @@ public static class Program
 		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("pgpatcher", []));
 		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
 		Equal(RunState.Failed, r.State, "failed");
-		var simple = File.ReadAllLines(Path.Combine(r.Folder!, RunLog.SimpleName)).Select(l => l[7..]).ToList();
-		var all = string.Join(" | ", simple);
+		var marked = File.ReadAllLines(Path.Combine(r.Folder!, RunLog.SimpleName)).Select(l => l[7..]).ToList();
+		// (the lines of a failure carry the failure's mark, as in the detailed log - the window colors them red)
+		var simple = marked.Select(l => l.StartsWith("!!! ", StringComparison.Ordinal) ? l[4..] : l.StartsWith("! ", StringComparison.Ordinal) ? l[2..] : l).ToList();
+		var all = string.Join(" | ", marked);
+		Check(marked.Any(l => l == "!!! PGPatcher did not finish: A plugin needs a master plugin that is not loaded.") && marked[^1].StartsWith("!!! Failed: ", StringComparison.Ordinal),
+			"the failure and the verdict are marked as failures: " + all);
+		Check(marked[0].Contains("started: 2 step(s)", StringComparison.Ordinal) && !marked[0].StartsWith('!'), "a line as planned has no mark: " + all);
 		Check(simple[0].Contains("started: 2 step(s)", StringComparison.Ordinal), "the run's start: " + all);
 		Check(simple.Any(l => l.StartsWith("1/2 ", StringComparison.Ordinal) && l.EndsWith(" started", StringComparison.Ordinal)) &&
 			simple.Any(l => l == "2/2 PGPatcher started"), "each step's start, numbered: " + all);
@@ -6888,6 +7030,11 @@ public static class Program
 		Check(simple.Any(l => l.StartsWith("What to do: Install and tick the missing master", StringComparison.Ordinal)), "what to do: " + all);
 		Check(simple.Any(l => l == "The tool's own words: PGPatcher.esp requires master Gone.esm"), "the tool's own words: " + all);
 		Check(simple[^1].StartsWith("Failed: stopped at PGPatcher", StringComparison.Ordinal), "the verdict last: " + all);
+		// the summary above the verdict: its title and why the run ended in red, what to do in yellow, its other rows as planned
+		Check(marked.Any(l => l.StartsWith("!!! Stopped by a problem after ", StringComparison.Ordinal)) && marked.Any(l => l.StartsWith("!!!   Why: PGPatcher", StringComparison.Ordinal)),
+			"the summary says how the run ended in red: " + all);
+		Check(marked.Any(l => l.StartsWith("!   Next: ", StringComparison.Ordinal)) && marked.Any(l => l.StartsWith("  Steps: ", StringComparison.Ordinal)),
+			"what comes next in yellow, the steps as planned: " + all);
 		var detailed = File.ReadAllText(Path.Combine(r.Folder!, "log.txt"));
 		Check(detailed.Contains("! what it means: A plugin needs a master", StringComparison.Ordinal), "the detailed log says what it means too");
 	}
@@ -6992,6 +7139,8 @@ public static class Program
 		Equal("failed, PGPatcher.esp requires master Gone.esm", ToolRunner.App.A11y.StepStatus(true, false, StepState.Failed, "1m", "", "PGPatcher.esp requires master Gone.esm"), "a failure with its reason");
 		Equal("switched off, usually takes 24m", ToolRunner.App.A11y.StepStatus(false, false, null, "", "24m", ""), "a switched-off step");
 		Equal("left out for a new game", ToolRunner.App.A11y.StepStatus(true, true, null, "", "", ""), "a save step on a new game");
+		Equal("usually takes 7m, " + ToolRunner.App.MainViewModel.NoDevBench, ToolRunner.App.A11y.StepStatus(true, false, null, "", "7m", "", false, ToolRunner.App.MainViewModel.NoDevBench),
+			"a step DevBench is missing for says so to a screen reader too");
 		Equal("Bottled", new ToolRunner.App.SetupItem("Bottled", @"C:\Data\Setups\Bottled.json").ToString(), "a setup is read by its name, not its path");
 		var row = new ToolRunner.App.HistoryRow("Tue Oct 27  21:02", "Bottled", "1h 41m", "finished: 12 step(s)", true, @"C:\Runs\1").ToString();
 		Check(row.Contains("finished", StringComparison.Ordinal) && !row.Contains(@"C:\Runs", StringComparison.Ordinal), "a past run in words: " + row);
@@ -7617,7 +7766,7 @@ public static class Program
 	}
 
 	// the in-game steps with a character picked: that character's newest save even when another character played since, a save
-	// of another character never loaded (named or an earlier clean save), and the save to play starting from the picked one's
+	// of another character never loaded (named or an earlier clean save), and the final save starting from the picked one's
 	// (CodeRabbit on #25)
 	static void T_TheInGameStepsUseThePickedCharactersSaves()
 	{
@@ -7653,7 +7802,7 @@ public static class Program
 		Check(InGame.OldCleanSave(p, "Lydia") != null, "one of the picked character's is");
 		var player = InGame.NewestPlayerSave(p, null, "Björn");
 		Equal("Save2_Bjorn", InGame.PlaySaveFrom(null, null, InGame.OldCleanSave(p, "Björn"), player, InGame.SaveTime(p, player)).Save,
-			"the save to play starts from the picked character's save, not the newer clean save of another");
+			"the final save starts from the picked character's save, not the newer clean save of another");
 		// the steps themselves pass the picked character on - each case below stops before any game would start
 		var setup = f.WriteSetup(("cleansave", new JsonObject()), ("playsave", new JsonObject()));
 		setup.Root["character"] = "Björn";
@@ -7676,10 +7825,10 @@ public static class Program
 		}
 		var named = new StepSettings(new JsonObject { ["save"] = "Save3_Lydia" });
 		Check(Refused(() => InGame.Deactivate(ctx, named)).Contains("is Lydia's, not Björn's", StringComparison.Ordinal), "the clean save refuses a named save of another character");
-		Check(Refused(() => InGame.PlaySave(ctx, named)).Contains("is Lydia's, not Björn's", StringComparison.Ordinal), "so does the save to play");
+		Check(Refused(() => InGame.PlaySave(ctx, named)).Contains("is Lydia's, not Björn's", StringComparison.Ordinal), "so does the final save");
 		File.Delete(Path.Combine(saves, "Save2_Bjorn.ess"));
 		Equal("no save to load", Refused(() => InGame.PlaySave(ctx, new StepSettings(new JsonObject()))),
-			"with no save of the picked character, the save to play never falls back to another character's clean save");
+			"with no save of the picked character, the final save never falls back to another character's clean save");
 		// the clean save's own pick on the automatic route (DevBench ticked - a stand-in file, nothing runs): no save of the picked
 		// character is refused by name before anything starts, never another character's newest taken instead
 		var dev = Path.Combine(f.Mods, "DevBench", "SKSE", "Plugins");
@@ -9215,7 +9364,7 @@ public static class Program
 		Equal(before, f.Text("modlist.txt"), "nothing changed");
 	}
 
-	// "stop after this step" pressed during the last tool holds before the save to play too (it once started the game all the same)
+	// "stop after this step" pressed during the last tool holds before the final save too (it once started the game all the same)
 	static void T_StopAfterHoldsBeforeTheSaveToPlay()
 	{
 		using var f = new FakeMo2();
@@ -9229,8 +9378,8 @@ public static class Program
 		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("playsave", []));
 		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
 		Equal(RunState.Stopped, r.State, "stopped: " + r.Verdict);
-		Check(!played, "the game was not started for the save to play");
-		Check(r.Verdict.Contains("carry on from Save to play", StringComparison.Ordinal), "and it says where to carry on: " + r.Verdict);
+		Check(!played, "the game was not started for the final save");
+		Check(r.Verdict.Contains("carry on from Final save", StringComparison.Ordinal), "and it says where to carry on: " + r.Verdict);
 		Check(ProfileOf(f).IsOn("Output A"), "the finished output on");
 	}
 
@@ -9910,7 +10059,7 @@ public static class Program
 	}
 
 	// "run again from the failed step" is a new run: the place the player stood at before the clean save is taken from the run
-	// that made that save (without it the save to play was made in the test cell)
+	// that made that save (without it the final save was made in the test cell)
 	static void T_ARetryFindsThePlaceTheCleanSaveCameFrom()
 	{
 		using var f = new FakeMo2();
@@ -10711,6 +10860,8 @@ public static class Program
 					File.Copy(file, Path.Combine(scratch, rel));
 				}
 			}
+			// its own data folder beside it before it starts: an app-data folder this PC chose for every copy never takes it
+			Directory.CreateDirectory(Path.Combine(scratch, Brand.Name + " Data"));
 			(int Exit, string Out) Ask(params string[] a_args)
 			{
 				var psi = new ProcessStartInfo(Path.Combine(scratch, Brand.Name + ".exe")) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, WorkingDirectory = scratch };
@@ -10935,7 +11086,7 @@ public static class Program
 	{
 		var followed = ToolRunner.App.RunsWatch.Followed;
 		Check(followed.Contains("journal.json") && followed.Contains(Path.GetFileName(QueueRun.File("x"))) && followed.Contains(Path.GetFileName(QueueRun.LastFile("x"))) &&
-		      followed.Contains(Path.GetFileName(PowerAfter.File("x"))) && followed.Contains(Path.GetFileName(ToolRunner.App.Engine.RefusalFile)), "every file the window's look reads is followed");
+		      followed.Contains(Path.GetFileName(ToolRunner.App.Engine.RefusalFile)), "every file the window's look reads is followed");
 		var dir = Path.Combine(Path.GetTempPath(), "mo2 tool runner tests", "runs watch " + Guid.NewGuid().ToString("N")[..8]);
 		try {
 			using var woke = new ManualResetEventSlim();

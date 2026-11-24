@@ -20,6 +20,8 @@ public sealed partial class StepRow : Observable
 	public bool LeftOut { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(Status)); } }
 	// ticked and not run: the output its tool made before is used (the setup's "useOld", for a step that makes one)
 	public bool UsesOld { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(Status)); } }
+	// what the step is missing to run on its own ("" = nothing): DevBench for the steps in the game
+	public string Needs { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(Status)); } } = "";
 	// its last run in one line: when, how it ended, and whether its output is still current ("" = it never ran)
 	public string LastRun { get; set => Set(ref field, value); } = "";
 	public string LastKind { get; set => Set(ref field, value); } = "";
@@ -29,7 +31,7 @@ public sealed partial class StepRow : Observable
 	public bool DropBelow { get; set => Set(ref field, value); }
 
 	// the row in words for a screen reader (the glyph and its color say it to the eye)
-	public string Status => A11y.StepStatus(On, LeftOut, State, Elapsed, Usual, Note, UsesOld);
+	public string Status => A11y.StepStatus(On, LeftOut, State, Elapsed, Usual, Note, UsesOld, Needs);
 
 	public string Glyph => State switch {
 		StepState.Running => Theme.Glyph("Running"),
@@ -113,7 +115,7 @@ public sealed partial class MainViewModel : Observable
 	public StepRow? SelectedStep { get; set { if (Set(ref field, value)) { ShowLastCard(); OnPropertyChanged(nameof(UseOldLabel)); } } }
 
 	// the button under the steps and the right-click entry: what pressing it does for the selected step
-	public string UseOldLabel => SelectedStep?.UsesOld == true ? "Build it a_gain" : "Use o_ld output";
+	public string UseOldLabel => WindowWords.Word(SelectedStep?.UsesOld == true ? "Build it a_gain" : "Use o_ld output");
 	public bool Mo2Open { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(Mo2Text)); } }
 	public bool GameRunning { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(GameText)); } }
 	public string Mo2Text => Mo2Open ? "Mod Organizer open" : "Mod Organizer closed";
@@ -270,7 +272,6 @@ public sealed partial class MainViewModel : Observable
 	public Cmd RestoreCommand => field ??= new(() => _ = RunRestore());
 	public Cmd CheckCommand => field ??= new(() => _ = RunCheck());
 	public Cmd RetryCommand => field ??= new(() => _ = RunRetry());
-	public Cmd CancelPowerCommand => field ??= new(CancelPower);
 
 	// "A new version is out" (his checklist 471): the banner's text ("" = nothing to tell), its download page and "Not now"
 	public string NewVersion { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(CanInstallNew)); } } = "";
@@ -279,10 +280,8 @@ public sealed partial class MainViewModel : Observable
 	// (a Nexus download needs the player's own key - there the banner has only the download page)
 	public bool CanInstallNew => ProgramUpdate.Installs && _newVersion != "";
 	public Cmd OpenNewVersionCommand => field ??= new(() => {
-		try {
-			System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ProgramUpdate.Page) { UseShellExecute = true });
-		} catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) {
-			Say("The download page did not open: " + e.Message, "bad");
+		if (OpenPage(ProgramUpdate.Page) is { } why) {
+			Say("The download page did not open: " + why, "bad");
 		}
 	});
 	public Cmd SetAsideNewVersionCommand => field ??= new(() => {
@@ -310,8 +309,6 @@ public sealed partial class MainViewModel : Observable
 			NewVersion = $"{Brand.Name} {newer} is out (you have {a_current}). Its download page has what changed.";
 		}
 	}
-	// the PC about to sleep or shut down after a run ("" = nothing pending): the banner with its Cancel button
-	public string PowerText { get; set => Set(ref field, value); } = "";
 	Task RunRestore() => Restore();
 	Task RunCheck() => Check();
 
@@ -412,7 +409,7 @@ public sealed partial class MainViewModel : Observable
 		}
 		try {
 			Setup = Setup.Load(SelectedSetup.File);
-		} catch (Exception e) when (e is IOException or System.Text.Json.JsonException or InvalidDataException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException) {
 			Say("This setup does not read: " + e.Message, "bad");
 			return;
 		}
@@ -429,6 +426,32 @@ public sealed partial class MainViewModel : Observable
 		_everRan = History.Count > 0;
 		ShowGuide();
 		_ = LoadLastRuns();
+		_ = LookForDevBench();
+	}
+
+	// The clean save and the final save are carried out by DevBench in the game; without it ticked in the profile each one is done
+	// by hand, guided step by step. Their rows say so (the profile's mods are read off the window's thread)
+	public static readonly IReadOnlyList<string> DevBenchSteps = ["cleansave", "playsave"];
+	public const string NoDevBench = "DevBench is not enabled in this profile: you will be guided through this step by hand.";
+
+	async Task LookForDevBench()
+	{
+		if (Setup is not { } setup) {
+			return;
+		}
+		bool on;
+		try {
+			on = await Task.Run(() => DevBench.InProfile(new Profile(Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance), setup.Profile, () => false)));
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) {
+			return;
+		}
+		// another setup shown meanwhile: its own look answers for it
+		if (!ReferenceEquals(Setup, setup)) {
+			return;
+		}
+		foreach (var row in Steps.Where(r => DevBenchSteps.Contains(r.Key))) {
+			row.Needs = on ? "" : NoDevBench;
+		}
 	}
 
 	// each step's last run, worked out off the window's thread (old run logs and the profile's mod list are read); a newer load
@@ -493,7 +516,7 @@ public sealed partial class MainViewModel : Observable
 	}
 
 	// a new game (the dashboard's tick beside START, kept in the setup): no save of the player's to keep clean, so the clean
-	// save and the save to play are left out of every run while it is on
+	// save and the final save are left out of every run while it is on
 	public bool NewGame { get => Setup?.NewGame ?? false; set => _ = SetNewGame(value); }
 
 	async Task SetNewGame(bool a_on)
@@ -682,11 +705,11 @@ public sealed partial class MainViewModel : Observable
 		try {
 			do {
 				_pollAgain = false;
-				var (seen, runs, queue, power) = await Task.Run(() => {
+				var (seen, runs, queue) = await Task.Run(() => {
 					var runs = Engine.Runs();
-					return (Seen(), runs, QueueLook(runs), PowerAfter.Look(AppPaths.Data));
+					return (Seen(), runs, QueueLook(runs));
 				});
-				Poll(seen.Mo2, seen.Game, runs, queue, power);
+				Poll(seen.Mo2, seen.Game, runs, queue);
 			} while (_pollAgain);
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidOperationException) {
 			// a file or process that changed mid-read: the next look reads it again
@@ -699,12 +722,12 @@ public sealed partial class MainViewModel : Observable
 	{
 		var runs = Engine.Runs();
 		var (mo2, game) = Seen();
-		Poll(mo2, game, runs, QueueLook(runs), PowerAfter.Look(AppPaths.Data));
+		Poll(mo2, game, runs, QueueLook(runs));
 	}
 
 	// something is going that the window shows second by second (a run and its clock, a start being checked, a queue between two
-	// setups, the countdown before the PC sleeps); while nothing is, the window looks seldom
-	public bool Busy => IsRunning || Starting || _queueGoing || PowerText != "";
+	// setups); while nothing is, the window looks seldom
+	public bool Busy => IsRunning || Starting || _queueGoing;
 	bool _queueGoing;
 
 	// the queue going (its line for the window), else the last queue's summary while nothing has started since it ended
@@ -730,17 +753,10 @@ public sealed partial class MainViewModel : Observable
 		return new QueueSeen(null, "");
 	}
 
-	void Poll(bool a_mo2, bool a_game, List<Journal> a_runs, QueueSeen a_queue, PowerAfter.Pending? a_power)
+	void Poll(bool a_mo2, bool a_game, List<Journal> a_runs, QueueSeen a_queue)
 	{
 		Mo2Open = a_mo2;
 		GameRunning = a_game;
-		var power = a_power;
-		var newPower = power == null ? "" :
-			$"The PC will {(power.Action == nameof(PowerAfter.Kind.Sleep) ? "go to sleep" : "shut down")} in {Math.Max(0, (int)(power.At - DateTime.Now).TotalSeconds)} s, as this setup asks after a run.";
-		if (newPower != "" && PowerText == "") {
-			Alert?.Invoke("The PC is about to " + (power!.Action == nameof(PowerAfter.Kind.Sleep) ? "sleep" : "shut down"), newPower);
-		}
-		PowerText = newPower;
 		var runs = a_runs;
 		FollowStart(runs);
 		var active = Engine.Active(runs);
@@ -880,20 +896,6 @@ public sealed partial class MainViewModel : Observable
 	// a reminder is due once every a_everyMin minutes (0 or less = never)
 	public static bool ReminderDue(double a_everyMin, DateTime a_last, DateTime a_now) => a_everyMin > 0 && a_now - a_last >= TimeSpan.FromMinutes(a_everyMin);
 
-	void CancelPower()
-	{
-		try {
-			if (PowerAfter.Look(AppPaths.Data) == null) {
-				Say("Too late to cancel - Windows was already asked.", "warn");
-				return;
-			}
-			PowerAfter.Cancel(AppPaths.Data);
-			Say("Cancelled - the PC stays on.", "good");
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
-			Say("Could not cancel: " + e.Message, "bad");
-		}
-	}
-
 	// the watched run's newest record (the cache re-reads it only when its file changed)
 	static Journal Fresh(List<Journal> a_runs, Journal a_j) =>
 		a_runs.FirstOrDefault(j => string.Equals(j.Folder, a_j.Folder, StringComparison.OrdinalIgnoreCase)) ?? a_j;
@@ -990,6 +992,7 @@ public sealed partial class MainViewModel : Observable
 		NotYetSaved("started");
 
 	string? NotYetSaved(string a_done) =>
+		MovingData ? $"Not {a_done}: the program's data is being moved - it starts again when that is done." :
 		Renaming ? $"Not {a_done} yet: the setup is being renamed - try again in a moment." :
 		Saving ? $"Not {a_done} yet: the change before this one is still being saved - try again in a moment." : null;
 
@@ -1138,14 +1141,31 @@ public sealed partial class MainViewModel : Observable
 		// the engine checks everything first and may refuse: the next looks read its run record or its refusal
 		Say("Starting - checking every tool and setting ...", "");
 		_startAsked = DateTime.Now;
+		_startPid = int.TryParse(text, System.Globalization.NumberStyles.Integer, InvariantCulture, out var pid) ? pid : null;
 		_run = null;
 		WantsLook?.Invoke();
 	}
 
 	DateTime? _startAsked;
+	// the engine that start began, while it checks (a big profile, or a Mod Organizer it waits for, can take minutes)
+	int? _startPid;
 
 	// a start was asked and the engine has neither made its run record nor refused yet (it checks every tool first)
 	public bool Starting => _startAsked != null;
+
+	// the engine started at a_asked still runs (by its number and its start time: a number Windows gave out again is not it)
+	static bool EngineAlive(int? a_pid, DateTime a_asked)
+	{
+		if (a_pid is not { } pid) {
+			return false;
+		}
+		try {
+			using var p = Process.GetProcessById(pid);
+			return !p.HasExited && p.StartTime >= a_asked.AddSeconds(-5);
+		} catch (Exception e) when (e is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) {
+			return false;
+		}
+	}
 
 	// after Start: the run's own record appears (it started), or the engine's refusal (shown with its reason), or nothing
 	void FollowStart(List<Journal> a_runs)
@@ -1160,7 +1180,7 @@ public sealed partial class MainViewModel : Observable
 			// the engine's own words begin "not started: " already
 			Say("Not started: " + WithTodo(why.StartsWith("not started: ", StringComparison.Ordinal) ? why["not started: ".Length..] : why), "bad");
 			_startAsked = null;
-		} else if (DateTime.Now - asked > TimeSpan.FromSeconds(90)) {
+		} else if (DateTime.Now - asked > TimeSpan.FromSeconds(90) && (!EngineAlive(_startPid, asked) || DateTime.Now - asked > TimeSpan.FromMinutes(15))) {
 			Say("The run did not start and gave no reason - nothing was changed. Press Check (F5) to see what is wrong.", "bad");
 			_startAsked = null;
 		}
@@ -1266,6 +1286,7 @@ public sealed partial class MainViewModel : Observable
 		}
 		Say($"Queue of {a_files.Count} setups starting - checking the first one ...", "");
 		_startAsked = DateTime.Now;
+		_startPid = int.TryParse(started, System.Globalization.NumberStyles.Integer, InvariantCulture, out var queuePid) ? queuePid : null;
 		_run = null;
 		WantsLook?.Invoke();
 	}
@@ -1273,8 +1294,9 @@ public sealed partial class MainViewModel : Observable
 	void StopAfter()
 	{
 		if (Engine.Active() is { } j) {
-			Commands.Send(j.Folder, "stop after");
-			Say("It will stop when this step is done, and put your profile back.", "warn");
+			if (Send(j, "stop after")) {
+				Say("It will stop when this step is done, and put your profile back.", "warn");
+			}
 		} else {
 			Say("No run is going.", "");
 		}
@@ -1283,8 +1305,9 @@ public sealed partial class MainViewModel : Observable
 	void StopNow()
 	{
 		if (Engine.Active() is { } j) {
-			Commands.Send(j.Folder, "stop");
-			Say("Stopping now: the tool is closed and your profile put back.", "warn");
+			if (Send(j, "stop")) {
+				Say("Stopping now: the tool is closed and your profile put back.", "warn");
+			}
 		} else {
 			Say("No run is going.", "");
 		}
@@ -1293,10 +1316,43 @@ public sealed partial class MainViewModel : Observable
 	void Continue()
 	{
 		if (Engine.Active() is { } j) {
-			Commands.Send(j.Folder, "continue");
-			Waiting = "";
+			if (Send(j, "continue")) {
+				Waiting = "";
+			}
 		} else {
 			Say("No run is waiting for you.", "");
+		}
+	}
+
+	// the run reads its commands from a file in its folder; one that could not be written there is said, to press again
+	bool Send(Journal a_run, string a_command)
+	{
+		if (TrySend(a_run.Folder, a_command) is { } why) {
+			Say($"The run did not get \"{a_command}\": {why} - press it again.", "bad");
+			return false;
+		}
+		return true;
+	}
+
+	// null when the command is in the run's folder, else why not
+	public static string? TrySend(string a_runFolder, string a_command)
+	{
+		try {
+			Commands.Send(a_runFolder, a_command);
+			return null;
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			return e.Message;
+		}
+	}
+
+	// a web page in the player's browser; null when it opened, else why not
+	public static string? OpenPage(string a_url)
+	{
+		try {
+			Process.Start(new ProcessStartInfo(a_url) { UseShellExecute = true })?.Dispose();
+			return null;
+		} catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) {
+			return e.Message;
 		}
 	}
 
@@ -1336,7 +1392,7 @@ public sealed partial class MainViewModel : Observable
 		try {
 			var r = await Task.Run(() => Runner.Undo(Journal.Load(a_folder))).ConfigureAwait(true);
 			Say(r.Verdict, r.State == RunState.Restored ? "good" : "bad");
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or System.Text.Json.JsonException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or InvalidDataException or System.Text.Json.JsonException) {
 			Say("The run could not be undone: " + e.Message, "bad");
 		} finally {
 			Restoring = false;
@@ -1441,7 +1497,7 @@ public sealed partial class MainViewModel : Observable
 		if (Setup is not { } setup || setup.Root["steps"] is not JsonArray arr) {
 			return;
 		}
-		if (SetupInUse || Saving || Renaming) {
+		if (SetupInUse || Saving || Renaming || MovingData) {
 			a_row.On = !a_on;
 			Say(SetupInUse ? "Not changed: a run is using this setup right now." : NotYetSaved("changed")!, "bad");
 			return;
@@ -1500,7 +1556,7 @@ public sealed partial class MainViewModel : Observable
 		if (Setup is not { } setup || setup.Root["steps"] is not JsonArray arr) {
 			return;
 		}
-		if (SetupInUse || Saving || Renaming) {
+		if (SetupInUse || Saving || Renaming || MovingData) {
 			Say(SetupInUse ? "Not moved: a run is using this setup right now." : NotYetSaved("moved")!, "bad");
 			return;
 		}
@@ -1557,6 +1613,13 @@ public sealed partial class MainViewModel : Observable
 	// the setup shown is being renamed: its file moves, and no change or save may land in the old one meanwhile (CodeRabbit on
 	// pull request #38) - held from before the last save is waited for until the renamed setup is shown
 	public bool Renaming { get; set; }
+
+	// the program's data folder is being moved (Settings > Keep data through updates): no setup is written or started meanwhile,
+	// so nothing lands in the folder being copied
+	public bool MovingData { get; set; }
+
+	// why a setup may not be written or started at this moment (null: it may)
+	public string? WhyNotWriting(string a_done) => NotYetSaved(a_done);
 
 	// The write of a setup that is under way (finished when none is). A window that closes waits for it, and so does the
 	// program's end: a change the window took is in the file before the program is gone
@@ -1644,6 +1707,10 @@ public sealed partial class MainViewModel : Observable
 				s.State = StepState.Done;
 				s.Elapsed = Short(TimeSpan.FromMinutes(took));
 				Line(spent, $"=== {s.Name} ===");
+				if (s.Key == "cleansave") {
+					// a warning as the log shows one (the pictures show its color)
+					Line(spent + 2.1, RunLog.MarkOf(Level.Warn) + "your followers could not be read before the teleport: DevBench did not answer in time");
+				}
 				spent += took;
 				Line(spent, $"=== {s.Name} done in {took.ToString("0.0", InvariantCulture)} min ===");
 			} else if (i == cur) {
@@ -1735,7 +1802,8 @@ public sealed partial class MainViewModel : Observable
 		Mo2Open = GameRunning = false;
 		Guide = [];
 		ShowClose();
-		LogChanged?.Invoke(string.Join("\n", RunSummary.Of(j).Lines()) + "\n", false);
+		// written as the run's own log writes it: each line after its time, with its mark
+		LogChanged?.Invoke(string.Join("\n", RunSummary.Of(j).Marked().Select(l => $"{at:HH:mm}  {RunLog.MarkOf(l.Level)}{l.Text}")) + "\n", false);
 	}
 
 	// the off-screen pictures: the window as a first start shows it (no setup made yet)

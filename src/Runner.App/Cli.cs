@@ -109,8 +109,7 @@ public static class Cli
 		return 0;
 	}
 
-	// the newest run of the setup (or of any setup), zipped with its logs for a bug report; prints where the zip is
-	// his checklist 466: a copy of the setup another player can import - paths of this PC and its commands taken out
+	// a copy of the setup another player can import - paths of this PC and its commands taken out
 	static int ShareCmd(string[] a_args)
 	{
 		var file = Opt(a_args, "--setup") ?? throw new ArgumentException("--setup <file> is needed");
@@ -123,6 +122,7 @@ public static class Cli
 		return 0;
 	}
 
+	// the newest run of the setup (or of any setup), zipped with its logs for a bug report; prints where the zip is
 	static int BugReportCmd(string[] a_args)
 	{
 		var setup = Opt(a_args, "--setup") is { } s ? Path.GetFullPath(s) : null;
@@ -187,13 +187,8 @@ public static class Cli
 		foreach (var l in QueueRun.Summary(items)) {
 			Console.WriteLine(l);
 		}
-		// the first that did not finish names the queue's outcome, and judges the power setting of the last setup that ran
+		// the first that did not finish names the queue's outcome
 		var notFinished = items.Select(i => i.Outcome).FirstOrDefault(o => o != null && o.State != RunState.Finished);
-		// a Stop anywhere in the queue keeps the PC on, whatever came before it (the player is there)
-		var forPower = items.Any(i => i.Outcome?.State == RunState.Stopped) ? RunState.Stopped : notFinished?.State ?? RunState.Finished;
-		if (items.LastOrDefault(i => i.Outcome is { Folder: not null }) is { } lastRan) {
-			PowerAfterRun(lastRan.SetupFile, forPower);
-		}
 		return notFinished == null ? 0 : notFinished.State == RunState.Stopped ? 2 : 1;
 	}
 
@@ -225,10 +220,6 @@ public static class Cli
 				Console.WriteLine(line);
 			}
 		}
-		// a run that was refused (nothing changed) never shuts the PC down
-		if (outcome.Folder != null) {
-			PowerAfterRun(a_req.SetupFile, outcome.State, a_json);
-		}
 		if (outcome.Folder == null) {
 			WriteRefusal(outcome.Verdict);
 		}
@@ -245,43 +236,8 @@ public static class Cli
 		try {
 			Directory.CreateDirectory(AppPaths.Runs);
 			Files.WriteAtomic(Engine.RefusalFile, a_why);
-		} catch (IOException) {
-		}
-	}
-
-	// the setup's "after the run" power setting, with its minute of notice; a setup that does not read is left alone
-	// a_quiet: a script reads the output (--json) - the notice is in the window and in power.json, never between the lines it parses
-	static void PowerAfterRun(string a_setupFile, RunState a_state, bool a_quiet = false)
-	{
-		void Tell(string a_line)
-		{
-			if (!a_quiet) {
-				Console.WriteLine(a_line);
-			}
-		}
-		try {
-			var s = Setup.Load(a_setupFile);
-			var what = PowerAfter.Decide(PowerAfter.Read(s), PowerAfter.OnlyFinished(s), a_state);
-			if (what != PowerAfter.Kind.None) {
-				// the run lock through the notice: no run can start and then be cut off by the sleep or shut-down
-				using var hold = Runner.HoldIfFree();
-				if (hold == null) {
-					Tell("not sleeping or shutting down: another run started");
-					return;
-				}
-				var logDir = Path.Combine(AppPaths.Runs, "after run power");
-				Directory.CreateDirectory(logDir);
-				// one folder for every run's notice, added to each time: kept to a size
-				foreach (var name in new[] { "log.txt", RunLog.SimpleName }) {
-					Files.RollIfOver(Path.Combine(logDir, name), 256 * 1024);
-				}
-				using var log = new RunLog(logDir);
-				Tell($"the PC will {(what == PowerAfter.Kind.Sleep ? "go to sleep" : "shut down")} in {PowerAfter.Notice.TotalSeconds:0} s - cancel in the window, or with: stop");
-				PowerAfter.Carry(what, AppPaths.Data, log);
-			}
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException or
-		                            System.ComponentModel.Win32Exception or InvalidOperationException) {
-			Tell("the after-run power setting was not read: " + e.Message);
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			// (the reason was printed already; a window started later reads it as "no reason given")
 		}
 	}
 
@@ -552,11 +508,6 @@ public static class Cli
 
 	static int Stop(string a_what)
 	{
-		// a sleep or shut-down on its notice is cancelled too
-		if (PowerAfter.Look(AppPaths.Data) != null) {
-			PowerAfter.Cancel(AppPaths.Data);
-			Console.WriteLine("the sleep / shut-down after the run is cancelled");
-		}
 		var j = Engine.Active();
 		if (j == null) {
 			Console.WriteLine("no run is going");

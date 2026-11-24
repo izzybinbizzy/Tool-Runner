@@ -7,7 +7,7 @@
     "Colours are #RRGGBB, or #AARRGGBB where AA is opacity (00 see-through ... FF solid). Fonts are Windows font names, a fallback after a comma.",
     "Each \"where\" line says where on screen the value shows, so a theme can be judged without running the program.",
     "Rules a theme must keep: Text and Muted readable on Bg, Panel and Panel2 (contrast 4.5 : 1 or more); Good, Warn and Bad told apart",
-    "without colour alone being the only cue (each also has its own glyph); Accent readable on Panel2 (outlined buttons); the primary button's",
+    "without color alone being the only cue (each also has its own glyph); Accent readable on Panel2 (outlined buttons); the primary button's",
     "text readable on its gradient. The window layout (where things sit) is not part of a theme - only how they look."
   ],
   "name": {
@@ -113,7 +113,7 @@
     }
   },
   "windowsAccent": {
-    "where": "the colour Windows' own controls use (focused text boxes, drop-down highlights, selected list rows) - lightest to darkest",
+    "where": "the color Windows' own controls use (focused text boxes, drop-down highlights, selected list rows) - lightest to darkest",
     "Light3": "#7EB0EC",
     "Light2": "#5B9AE7",
     "Light1": "#3784E1",
@@ -168,7 +168,7 @@
     "IssueNote": "•"
   },
   "statusDots": {
-    "where": "the two dots in the status bar take their colours from the list above: Mod Organizer open = Warn, Skyrim running = Bad, either one closed = Muted",
+    "where": "the two dots in the status bar take their colors from the list above: Mod Organizer open = Warn, Skyrim running = Bad, either one closed = Muted",
     "Mo2Open": "Warn",
     "GameRunning": "Bad",
     "Closed": "Muted"

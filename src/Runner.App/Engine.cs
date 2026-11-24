@@ -14,9 +14,34 @@ public static class AppPaths
 	public static string Setups => Path.Combine(Data, "Setups");
 	public static string Runs => Runner.RunsDir(Data);
 
+	// Windows' own app-data folder for the program's data: where the player can keep it (Settings > Program), so a new version
+	// unzipped into any other folder finds the run history, the setups and the learned settings
+	public static string AppDataFolder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Brand.Name);
+
+	public static bool InAppData => Files.SamePath(Data, AppDataFolder);
+
+	// the player chose the app-data folder for every copy (Settings > Program)
+	public static bool AppDataChosen => DataFolder.Chosen(AppDataFolder);
+
 	static string Resolve()
 	{
 		try {
+			// a data folder beside the program whose data moved (Settings > Keep data through updates): the place it moved to,
+			// whatever is left of the old one removed
+			foreach (var name in Brand.AllNames) {
+				var old = Path.Combine(AppContext.BaseDirectory, name + " Data");
+				if (DataFolder.MovedTo(old) is { } moved) {
+					DataFolder.FinishMove(old, moved);
+					Directory.CreateDirectory(moved);
+					return moved;
+				}
+			}
+			// no data folder beside the program, and the player chose the app-data folder for every copy: that one
+			if (!DataFolder.StandsIn(AppContext.BaseDirectory, " Data") && DataFolder.Chosen(AppDataFolder)) {
+				var kept = DataFolder.Adopt(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "");
+				Directory.CreateDirectory(kept);
+				return kept;
+			}
 			if (Files.IsUnder(AppContext.BaseDirectory, Path.GetTempPath())) {
 				throw new UnauthorizedAccessException("a temporary folder");
 			}
@@ -83,7 +108,7 @@ public static class Engine
 	{
 		try {
 			return File.Exists(RefusalFile) && File.GetLastWriteTime(RefusalFile) >= a_since.AddSeconds(-5) ? Files.ReadSharedText(RefusalFile).Trim() : null;
-		} catch (IOException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			return null;
 		}
 	}
@@ -91,7 +116,7 @@ public static class Engine
 	// every run record, newest first (read again only where a record changed)
 	public static List<Journal> Runs() => Cache.Read();
 
-	// the run that is going: also one that has finished and is at its last chores (its game for the save to play, the setup's
+	// the run that is going: also one that has finished and is at its last chores (its game for the final save, the setup's
 	// after-run commands, packing the old outputs) - Stop and the close guard reach it until its engine has ended
 	public static Journal? Active(List<Journal>? a_runs = null) => (a_runs ?? Runs()).FirstOrDefault(j => j.Live && j.OwnerAlive);
 

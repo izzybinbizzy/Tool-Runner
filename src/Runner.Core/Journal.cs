@@ -139,7 +139,7 @@ public sealed class Journal
 
 	public int NextSeq() => ++LastSeq;
 
-	// the marker left where the player stood before the clean save's teleport (the save to play takes them back to it)
+	// the marker left where the player stood before the clean save's teleport (the final save takes them back to it)
 	public string? ReturnMarker { get; set; }
 	// How often the run changed the files the game lists (outputs switched off, a step that ended) since the game last made
 	// that list anew in this run; 0 = nothing changed since. Read by the step that starts the game next (Crdw)
@@ -234,7 +234,7 @@ public sealed class Journal
 
 	public bool Unfinished => State == RunState.Running || NeedsRestore || Undoing;
 
-	// the save to play is being made: the run's profile is already put back (it is not Unfinished - nothing to restore), but its
+	// the final save is being made: the run's profile is already put back (it is not Unfinished - nothing to restore), but its
 	// game still runs, so the window keeps it as the running run (Stop and the close guard reach it)
 	public bool InGameAfter { get; set; }
 

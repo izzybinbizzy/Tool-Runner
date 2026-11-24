@@ -92,6 +92,10 @@ public partial class MainWindow
 		if (_copying || _vm.IsRunning || _vm.SelectedSetup is not { } item) {
 			return;
 		}
+		if (_vm.MovingData) {
+			_vm.Say(_vm.WhyNotWriting("copied")!, "bad");
+			return;
+		}
 		var name = Ask.Input(this, "Copy this setup", $"A new setup with the steps and settings of \"{item.Name}\", and the settings its tools learned. Nothing of \"{item.Name}\" changes. The copy's name:",
 			SetupFiles.FreeCopyName(item.File), "Make the copy", n => SetupFiles.BadName(AppPaths.Setups, n));
 		if (name == null) {
@@ -122,6 +126,10 @@ public partial class MainWindow
 		// (a queue between two setups too: the next setup it starts is read by its file)
 		if (StillGoing() || _vm.IsRunning) {
 			_vm.Say("A run or a queue is going - rename the setup when it has ended.", "bad");
+			return;
+		}
+		if (_vm.MovingData) {
+			_vm.Say(_vm.WhyNotWriting("renamed")!, "bad");
 			return;
 		}
 		// Settings stands open on the setup's old file: its Save would write there - it closes first, asked about what is typed
@@ -174,39 +182,39 @@ public partial class MainWindow
 	public List<CommandBox.Item> CommandList()
 	{
 		var items = new List<CommandBox.Item> {
-			new("Start", () => _vm.StartCommand.Execute(null)),
-			new("Check", () => _vm.CheckCommand.Execute(null)),
-			new("Dry run", () => _vm.DryRunCommand.Execute(null)),
+			new(WindowWords.Word("Start"), () => _vm.StartCommand.Execute(null)),
+			new(WindowWords.Word("Check"), () => _vm.CheckCommand.Execute(null)),
+			new(WindowWords.Word("Dry run"), () => _vm.DryRunCommand.Execute(null)),
 		};
 		if (_vm.IsRunning) {
-			items.Add(new("Stop now", () => _vm.StopNowCommand.Execute(null)));
-			items.Add(new("Stop after this step", () => _vm.StopAfterCommand.Execute(null)));
+			items.Add(new(WindowWords.Word("Stop now"), () => _vm.StopNowCommand.Execute(null)));
+			items.Add(new(WindowWords.Word("Stop after this step"), () => _vm.StopAfterCommand.Execute(null)));
 		}
 		items.AddRange([
-			new("History", () => ShowPanel("history")),
-			new("MO2 Changelog", () => ShowPanel("changes")),
-			new("Settings", () => ShowPanel("settings")),
-			new("Themes", () => ShowPanel("themes")),
-			new("Tools - set up each tool", () => Tools_Click(this, new RoutedEventArgs())),
-			new("Queue of setups", () => Queue_Click(this, new RoutedEventArgs())),
-			new("New setup", () => NewSetup_Click(this, new RoutedEventArgs())),
-			new("Copy this setup", () => DuplicateSetup_Click(this, new RoutedEventArgs())),
-			new("Rename this setup", () => RenameSetup_Click(this, new RoutedEventArgs())),
-			new(_logWindow == null ? "Log in its own window" : "Log back in the main window", () => LogPop_Click(this, new RoutedEventArgs())),
-			new("Compact view", () => ShowCompact()),
+			new(WindowWords.Word("History"), () => ShowPanel("history")),
+			new(WindowWords.Word("MO2 Changelog"), () => ShowPanel("changes")),
+			new(WindowWords.Word("Settings"), () => ShowPanel("settings")),
+			new(WindowWords.Word("Themes"), () => ShowPanel("themes")),
+			new(WindowWords.Word("Tools - set up each tool"), () => Tools_Click(this, new RoutedEventArgs())),
+			new(WindowWords.Word("Queue of setups"), () => Queue_Click(this, new RoutedEventArgs())),
+			new(WindowWords.Word("New setup"), () => NewSetup_Click(this, new RoutedEventArgs())),
+			new(WindowWords.Word("Copy this setup"), () => DuplicateSetup_Click(this, new RoutedEventArgs())),
+			new(WindowWords.Word("Rename this setup"), () => RenameSetup_Click(this, new RoutedEventArgs())),
+			new(WindowWords.Word(_logWindow == null ? "Log in its own window" : "Log back in the main window"), () => LogPop_Click(this, new RoutedEventArgs())),
+			new(WindowWords.Word("Compact view"), () => ShowCompact()),
 		]);
 		foreach (var s in _vm.Setups.Where(s => !ReferenceEquals(s, _vm.SelectedSetup))) {
-			items.Add(new($"Show setup: {s.Name}", () => {
+			items.Add(new(WindowWords.Format("Show setup: {0}", s.Name), () => {
 				if (!_vm.IsRunning) {
 					_vm.SelectedSetup = s;
 				}
 			}));
 		}
 		foreach (var r in _vm.Steps) {
-			items.Add(new($"Settings of {r.Name}", () => OpenStepSettings(r)));
+			items.Add(new(WindowWords.Format("Settings of {0}", r.Name), () => OpenStepSettings(r)));
 		}
 		foreach (var r in _vm.Steps) {
-			items.Add(new($"Run only {r.Name}", () => StartFor(r, "only")));
+			items.Add(new(WindowWords.Format("Run only {0}", r.Name), () => StartFor(r, "only")));
 		}
 		return items;
 	}
