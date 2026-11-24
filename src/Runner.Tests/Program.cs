@@ -10003,7 +10003,7 @@ public static class Program
 				new JsonObject { ["step"] = AddOns.KeyPrefix + "Their Patcher", ["settings"] = new JsonObject { ["sha"] = "ABCD", ["output_mod"] = "Theirs" } }),
 		});
 		var gone = s.TakeOutWhatStartsPrograms();
-		Equal("", Setup.Str((JsonObject)s.Root["mo2"]!, "exe"), "Mod Organizer's program is the player's to set");
+		Equal("", s.Mo2Exe, "Mod Organizer's program is the player's to set");
 		Check(s.Root[AddOns.NoAskSetting] == null, "the add-on question is not switched off for them");
 		var steps = s.Steps;
 		Check(steps.All(st => Setup.Str(st.Settings, "exe") == null && Setup.Str(st.Settings, "fasterngio_exe") == null && Setup.Str(st.Settings, "launcher") == null), "no step starts a program it names");
