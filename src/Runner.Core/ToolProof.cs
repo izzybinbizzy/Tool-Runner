@@ -106,7 +106,7 @@ public static class ToolProof
 				buttons = [.. Uia.All(window, ControlType.Button).Select(b => (Uia.Name(b), Uia.AutomationId(b), Uia.Usable(b)))];
 				missing = Missing(a_look, buttons, others) ?? "";
 				if (missing != "") {
-					Thread.Sleep(1500);
+					a_ct.WaitHandle.WaitOne(1500);
 				}
 			} while (missing != "" && look.Elapsed < TimeSpan.FromSeconds(30));
 			return new Result(a_look.Step, missing == "", missing == "" ? $"{tool}: what a run presses is there" : $"{tool}: {missing}");

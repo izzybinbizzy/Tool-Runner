@@ -371,6 +371,19 @@ public static partial class ToolSettings
 		if (bad != null) {
 			throw new StepFailedException($"its learned settings name a file outside their folder ({bad.Stored}) - learn its settings again");
 		}
+		// ... and never writes one anywhere but where this tool's settings are learned from: the tool's own folder, Mod Organizer's
+		// overwrite, a folder the step names. A record that names another place (edited by hand, or learned before the tool moved)
+		// would put a file there on every run
+		var s = new StepSettings(a_ctx.Setup.StepSettings(a_step) ?? []);
+		var roots = new List<string> { a_ctx.Mo2.OverwriteDir };
+		if (s.Str("executable") is { } title && a_ctx.Mo2.Executable(title)?.Binary is { Length: > 0 } exe) {
+			roots.Add(Path.GetDirectoryName(exe)!);
+		}
+		roots.AddRange(s.List("settings_dirs"));
+		if (l.Files.FirstOrDefault(f => !roots.Any(r => Files.IsUnder(f.Live, r))) is { } outside) {
+			throw new StepFailedException($"its learned settings name a file outside their folder: {outside.Live} is in none of the folders this tool's settings are learned from " +
+				"(has the tool moved?) - learn its settings again");
+		}
 		foreach (var f in l.Files) {
 			StepKit.KeepFile(a_ctx, f.Live);
 			Directory.CreateDirectory(Path.GetDirectoryName(f.Live)!);
