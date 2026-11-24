@@ -1199,8 +1199,22 @@ public partial class MainWindow : Window
 		if (_installing) {
 			return;
 		}
-		if (_vm.IsRunning || _vm.Starting) {
-			_vm.Say("A run is going: install the new version when it is done.", "bad");
+		// a run, or the window's own work (a put-back, an undo, a tool's settings being learned): either may be using the
+		// program's files, so nothing is replaced under it - asked again after each wait below, where such work can begin
+		// (CodeRabbit on pull request #37)
+		bool Busy()
+		{
+			if (_vm.IsRunning || _vm.Starting) {
+				_vm.Say("A run is going: install the new version when it is done.", "bad");
+				return true;
+			}
+			if (_vm.InHand != "") {
+				_vm.Say($"Not now: {_vm.InHand}. Install the new version when that is done.", "bad");
+				return true;
+			}
+			return false;
+		}
+		if (Busy()) {
 			return;
 		}
 		_installing = true;
@@ -1212,13 +1226,16 @@ public partial class MainWindow : Window
 				_vm.Say($"The new version could not be looked up ({e.Message}) - its download page has it.", "bad");
 				return;
 			}
+			if (Busy()) {
+				return;
+			}
 			var folder = Path.GetDirectoryName(AppPaths.Exe) ?? AppContext.BaseDirectory;
 			if (!Ask.Show(this, $"Install {Brand.Name} {release.Version}?", InstallText(release, folder), "Download and install", "Not now")) {
 				return;
 			}
 			// settings typed and not saved are asked about now, before anything is taken down (the program closes at the end);
 			// on "leave" their window goes at once, so nothing more is typed into it meanwhile
-			if (!LeaveSettings()) {
+			if (!LeaveSettings() || Busy()) {
 				return;
 			}
 			CloseSettingsUnasked();

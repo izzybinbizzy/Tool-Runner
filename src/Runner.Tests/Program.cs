@@ -7141,6 +7141,25 @@ public static class Program
 			Check(File.Exists(Path.Combine(program, "README (old).txt")) && Directory.GetFiles(program, "*.new").Length == 0, "and so is each file it replaced; nothing half written is left");
 			Equal("{ \"name\": \"mine\" }", File.ReadAllText(Path.Combine(data, "Setups", "mine.json")), "the data folder beside the program was not touched");
 
+			// never beside a run, a put-back or another install (the lock Install takes): nothing removed, the record kept
+			using (var held = new ManualResetEventSlim(false))
+			using (var done = new ManualResetEventSlim(false)) {
+				var other = new Thread(() => {
+					using var hold = Runner.HoldIfFree();
+					held.Set();
+					done.Wait();
+				});
+				other.Start();
+				held.Wait();
+				try {
+					ProgramUpdate.CleanUp(data);
+				} finally {
+					done.Set();
+					other.Join();
+				}
+			}
+			Check(File.Exists(oldExe) && File.Exists(Path.Combine(program, "README (old).txt")) && File.Exists(zip), "a clean-up while the lock is held elsewhere removes nothing and keeps its record");
+
 			// the next start clears what the install set aside - one that will not go yet stays on record for the start after
 			using (File.Open(oldExe, FileMode.Open, FileAccess.Read, FileShare.None)) {
 				ProgramUpdate.CleanUp(data);

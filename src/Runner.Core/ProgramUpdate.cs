@@ -349,9 +349,16 @@ public static class ProgramUpdate
 	public sealed record Installed(List<string> Old, string Zip);
 
 	// After an install, at the next start: the files it set aside and its download are removed. One that will not go yet (the
-	// old program still ending) stays on record for the start after.
+	// old program still ending) stays on record for the start after. Under the lock Install takes: an install begun in the same
+	// moment sets the running program aside under the very "(old)" name this would remove, and its way back needs that file.
+	// Lock taken elsewhere (a run, a put-back, an install): nothing is removed and the record stays for the next start
+	// (CodeRabbit on pull request #37)
 	public static void CleanUp(string a_dataDir)
 	{
+		using var hold = Runner.HoldIfFree();
+		if (hold == null) {
+			return;
+		}
 		Installed? was;
 		try {
 			was = System.IO.File.Exists(Record(a_dataDir)) ? JsonSerializer.Deserialize<Installed>(Files.ReadShared(Record(a_dataDir))) : null;
