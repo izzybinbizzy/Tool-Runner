@@ -401,9 +401,11 @@ public static class StepKit
 		while (Ours().Count > 0 && sw.Elapsed < TimeSpan.FromSeconds(8)) {
 			Thread.Sleep(500);
 		}
-		// each by its number AND the start time on the run's record: one whose number changed hands since is no longer ours
+		// each by its number AND the start time on the run's record: one whose number changed hands since is no longer ours. The
+		// candidates are read first: a child that look puts on record is in the start times read after it
+		var candidates = Ours();
 		var at = a_control.Started.OwnedAt();
-		foreach (var pid in Ours()) {
+		foreach (var pid in candidates) {
 			if (at.TryGetValue(pid, out var started)) {
 				Procs.KillTree(pid, started);
 			}

@@ -316,7 +316,14 @@ public sealed class Journal
 	// The newest run's record when it cannot be read, with why (null: there is none, or it reads). An interrupted run is always
 	// the newest one - nothing starts after it - so a newest record that does not read may be exactly the run whose outputs are
 	// still off: a new run must not start over it as if there were none. (Older records that do not read are passed over.)
-	public static (string Folder, Exception Why)? NewestUnreadable(string a_runsDir)
+	public static (string Folder, Exception Why)? NewestUnreadable(string a_runsDir) => Unreadable(a_runsDir, true);
+
+	// The first run record of all that cannot be read, with why (null: every one reads). What deletes on the strength of the
+	// records - removing the program's data, pruning old backups - asks this first: a record passed over by All may be a run
+	// that still needs its profile put back or its backup for an undo.
+	public static (string Folder, Exception Why)? AnyUnreadable(string a_runsDir) => Unreadable(a_runsDir, false);
+
+	static (string Folder, Exception Why)? Unreadable(string a_runsDir, bool a_newestOnly)
 	{
 		if (!Directory.Exists(a_runsDir)) {
 			return null;
@@ -333,22 +340,35 @@ public sealed class Journal
 			}
 			try {
 				Exception? last = null;
-				for (var i = 0; i < 5; ++i) {
-					try {
-						Load(d);
-						return null;
-					} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
-						// held for a moment by another program: looked at again before it counts
-						last = e;
-						Thread.Sleep(200);
-					}
+				var read = false;
+				for (var i = 0; i < 5 && !read; ++i) {
+					read = Reads(d, out last);
 				}
-				return (d, last!);
+				if (!read) {
+					return (d, last!);
+				}
+				if (a_newestOnly) {
+					return null;
+				}
 			} catch (Exception e) when (e is JsonException or InvalidDataException) {
 				return (d, e);
 			}
 		}
 		return null;
+	}
+
+	// one try at reading a record: a file held for a moment by another program is looked at again before it counts
+	static bool Reads(string a_dir, out Exception? a_why)
+	{
+		try {
+			Load(a_dir);
+			a_why = null;
+			return true;
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			a_why = e;
+			Thread.Sleep(200);
+			return false;
+		}
 	}
 }
 

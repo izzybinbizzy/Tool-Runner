@@ -1031,6 +1031,11 @@ public static class Runner
 		if (a_keep <= 0) {
 			return removed;
 		}
+		// a record passed over as unreadable may be the run whose backup an undo or a put-back still needs: nothing is removed
+		if (Journal.AnyUnreadable(a_runsDir) is { } bad) {
+			a_log.Warn($"old run backups were not removed: the run record in \"{Path.GetFileName(bad.Folder)}\" could not be read ({bad.Why.Message})");
+			return removed;
+		}
 		var needed = Journal.All(a_runsDir).Where(j => j.Unfinished && !string.IsNullOrWhiteSpace(j.BackupDir)).Select(j => Path.GetFullPath(j.BackupDir)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 		if (a_current != null) {
 			needed.Add(Path.GetFullPath(a_current));

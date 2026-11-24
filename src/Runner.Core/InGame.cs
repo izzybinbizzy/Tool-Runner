@@ -819,10 +819,12 @@ public static partial class InGame
 		throw new StepFailedException("the new place did not finish loading within 5 minutes");
 	}
 
+	// false only when a list Windows gave shows the run's game gone: a list it would not give is no answer, and the game counts
+	// as still up (never "closed" on a failed look)
 	static bool GameUp(RunContext a_ctx)
 	{
 		using var g = Game(a_ctx);
-		return g != null;
+		return g != null || Procs.LookFailed;
 	}
 
 	// a step that only helps (the horse check, the marker removal, DynDOLOD back on): any DevBench failure is a warning, a real

@@ -102,18 +102,22 @@ public sealed partial class HiddenDesktop : IDisposable
 			while (!stop.IsCancellationRequested && Procs.Alive(a_root)) {
 				// a look that fails (a process gone mid-read) is tried again next time: an exception here would end the program
 				try {
-					var tree = Procs.Tree(a_root);
-					var starts = tree.Select(pid => (pid, Procs.StartTime(pid))).ToList();
-					var shown = OnPlayersDesktop(tree);
-					if (shown.Count > 0) {
-						_leak = "a window of the tool opened on the player's screen (" + string.Join(", ", shown.Select(h => "'" + Native.WindowText(h) + "'")) + ") - the tool was ended";
-						// each by its number AND the start time read with the list: one that ended and whose number another took is left
-						foreach (var (pid, began) in starts.AsEnumerable().Reverse()) {
-							if (began is { } at) {
+					// every process of the tree held from the moment it is listed: its number is nobody else's until it is let go
+					var tree = Procs.HeldTree(a_root);
+					try {
+						var shown = OnPlayersDesktop(tree.Select(t => t.Pid).ToList());
+						if (shown.Count > 0) {
+							_leak = "a window of the tool opened on the player's screen (" + string.Join(", ", shown.Select(h => "'" + Native.WindowText(h) + "'")) + ") - the tool was ended";
+							// each by its number AND the start time read through its hold, children first
+							foreach (var (pid, at, _) in tree.AsEnumerable().Reverse()) {
 								Procs.KillTree(pid, at);
 							}
+							return;
 						}
-						return;
+					} finally {
+						foreach (var (_, _, hold) in tree) {
+							hold.Dispose();
+						}
 					}
 				} catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception or ArgumentException) {
 				}
