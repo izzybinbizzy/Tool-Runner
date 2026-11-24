@@ -404,17 +404,19 @@ public static partial class Files
 }
 
 // A text file another program keeps adding to (a log), read whole as it grows: the first look reads all of it, each later one
-// only the whole lines added since - a log of megabytes is not read and decoded again every few seconds for the lines at its
-// start. A file that was replaced (another path, shorter, other first bytes) is read from its start again.
+// only what was added since - a log of megabytes is not read and decoded again every few seconds for the lines at its start.
+// Whole lines are kept; a line still being written is given with the rest and read again at the next look, so a letter cut in
+// two by the look is never kept. A file that was replaced (another path, shorter, other first bytes) is read from its start again.
 public sealed class GrowingText
 {
 	const int HeadSize = 64;
 
 	string? _path;
+	// the whole lines read so far, and where the next one starts in the file
+	string _lines = "";
 	long _pos;
 	byte[] _head = [];
 	Encoding _how = new UTF8Encoding(false);
-	string _text = "";
 
 	public string Read(string a_path)
 	{
@@ -424,34 +426,29 @@ public sealed class GrowingText
 		var same = Math.Min(headGot, _head.Length);
 		// (two bytes a letter: a line's end found byte by byte would cut a letter in two - such a file is read whole each time)
 		var wide = _how.CodePage is 1200 or 1201;
-		if (wide || _pos == 0 || !string.Equals(a_path, _path, StringComparison.OrdinalIgnoreCase) || fs.Length < _pos || same < _head.Length ||
-		    !head.AsSpan(0, same).SequenceEqual(_head.AsSpan(0, same))) {
-			fs.Position = 0;
-			var all = new byte[fs.Length];
-			var got = fs.ReadAtLeast(all, all.Length, false);
-			_path = a_path;
-			_text = Files.DecodeText(all[..got], out _how);
-			_pos = got;
-			_head = all[..Math.Min(HeadSize, got)];
-			return _text;
-		}
-		if (fs.Length == _pos) {
-			return _text;
-		}
-		fs.Position = _pos;
-		var added = new byte[fs.Length - _pos];
+		var whole = wide || _pos == 0 || !string.Equals(a_path, _path, StringComparison.OrdinalIgnoreCase) || fs.Length < _pos || same < _head.Length ||
+			!head.AsSpan(0, same).SequenceEqual(_head.AsSpan(0, same));
+		var from = whole ? 0 : _pos;
+		fs.Position = from;
+		var added = new byte[fs.Length - from];
 		var read = fs.ReadAtLeast(added, added.Length, false);
-		// a line still being written waits for the next look
-		var end = Array.LastIndexOf(added, (byte)'\n', Math.Max(0, read - 1)) + 1;
-		if (read == 0 || end == 0) {
-			return _text;
+		var end = read == 0 ? 0 : Array.LastIndexOf(added, (byte)'\n', read - 1) + 1;
+		if (whole) {
+			// its start says how it is written (a byte-order mark, or text that is no UTF-8)
+			var text = Files.DecodeText(added[..read], out _how);
+			var cut = text.LastIndexOf('\n') + 1;
+			_path = a_path;
+			_lines = text[..cut];
+			_pos = end;
+			_head = added[..Math.Min(HeadSize, read)];
+			return text;
 		}
-		_text += _how.GetString(added, 0, end);
+		_lines += _how.GetString(added, 0, end);
 		_pos += end;
 		// (a file that was shorter than the head kept of it has grown past it: the head is filled up, so a replaced file is told)
 		if (_head.Length < HeadSize) {
 			_head = head[..headGot];
 		}
-		return _text;
+		return end == read ? _lines : _lines + _how.GetString(added, end, read - end);
 	}
 }
