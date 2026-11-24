@@ -542,6 +542,7 @@ public static class Cli
 		}
 		var commands = s.TakeOutCommands();
 		var programs = s.TakeOutWhatStartsPrograms();
+		programs.AddRange(SetupShare.TakeOutPaths(s.Root));
 		Directory.CreateDirectory(AppPaths.Setups);
 		s.Save(dst);
 		Console.WriteLine("setup written: " + dst);

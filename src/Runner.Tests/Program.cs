@@ -1559,6 +1559,17 @@ public static class Program
 		File.WriteAllText(dll, "v2");
 		Check(a != ShaderStep.Fingerprint(mo2, c), "a new DLL = a new fingerprint");
 		Check(!ShaderStep.UpToDate(mo2, c), "no cache = not up to date");
+		// the shader mod's meta.ini counts by the version it names: what Mod Organizer writes there on its own (an update
+		// check, an endorsement) never makes the cache old - only the old way of reading a stamp counts the whole file
+		var meta = Path.Combine(f.Mods, "Shader Mod", "meta.ini");
+		File.WriteAllText(meta, "[General]\r\nmodid=192816\r\nversion=2.0.1\r\ninstallationFile=Shader Mod 2.0.1.7z\r\nlastNexusQuery=2026-11-01T10:00:00Z\r\nendorsed=0\r\n");
+		var queried = ShaderStep.Fingerprint(mo2, c);
+		var queriedOld = ShaderStep.Fingerprint(mo2, c, null, null, null, true, true, false);
+		File.WriteAllText(meta, "[General]\r\nmodid=192816\r\nversion=2.0.1\r\ninstallationFile=Shader Mod 2.0.1.7z\r\nlastNexusQuery=2026-11-24T15:00:00Z\r\nendorsed=1\r\n");
+		Equal(queried, ShaderStep.Fingerprint(mo2, c), "an update check or an endorsement leaves it as it was");
+		Check(queriedOld != ShaderStep.Fingerprint(mo2, c, null, null, null, true, true, false), "(the old way counted the whole file)");
+		File.WriteAllText(meta, "[General]\r\nmodid=192816\r\nversion=2.0.2\r\ninstallationFile=Shader Mod 2.0.2.7z\r\nlastNexusQuery=2026-11-24T15:00:00Z\r\nendorsed=1\r\n");
+		Check(queried != ShaderStep.Fingerprint(mo2, c), "a new version of the shader mod makes it new");
 		// with the profile: a feature mod's shader file changes it; what a generator writes (a plugin, a mesh) never does
 		var p = ProfileOf(f);
 		var feature = Path.Combine(f.Mods, "Base Mod", "Shaders", "Features", "Grass.ini");
@@ -1615,15 +1626,18 @@ public static class Program
 		Directory.CreateDirectory(cacheDir);
 		File.WriteAllText(Path.Combine(cacheDir, "a shader.bin"), "compiled");
 		var stamp = Path.Combine(f.Mods, "Cache Mod", Brand.Name + " cache.json");
-		File.WriteAllText(stamp, new JsonObject { ["fingerprint"] = set, ["files"] = 1, ["verified"] = true, ["winners"] = true, ["settings"] = "boot" }.ToJsonString());
+		File.WriteAllText(stamp, new JsonObject { ["fingerprint"] = set, ["files"] = 1, ["verified"] = true, ["winners"] = true, ["settings"] = "boot", ["meta"] = "version" }.ToJsonString());
 		Equal(null, ShaderStep.WhyStale(mo2, c, p), "a cache stamped the new way is current");
 		File.WriteAllText(settings, """{ "Presets": { "activePackId": "another" }, "Disable at Boot": { "Skylighting": true, "Grass Lighting": false } }""");
 		Check(ShaderStep.UpToDate(mo2, c, p), "and stays current when the game rewrites its settings");
 		File.WriteAllText(settings, """{ "Presets": { "activePackId": "another" }, "Disable at Boot": { "Skylighting": false, "Grass Lighting": false } }""");
 		Check((ShaderStep.WhyStale(mo2, c, p) ?? "").Contains("features switched off at the game's start", StringComparison.Ordinal),
 			"a feature switched at the game's start is another cache, and the reason is said: " + ShaderStep.WhyStale(mo2, c, p));
-		File.WriteAllText(stamp, new JsonObject { ["fingerprint"] = ShaderStep.Fingerprint(mo2, c, p, null, null, true, false), ["files"] = 1, ["verified"] = true, ["winners"] = true }.ToJsonString());
+		File.WriteAllText(stamp, new JsonObject { ["fingerprint"] = ShaderStep.Fingerprint(mo2, c, p, null, null, true, false, false), ["files"] = 1, ["verified"] = true, ["winners"] = true }.ToJsonString());
 		Equal(null, ShaderStep.WhyStale(mo2, c, p), "an older stamp (every value counted) is read the way it was written: no cache is built again for the change");
+		// one written while settings counted by their boot part but meta.ini whole: read that way too
+		File.WriteAllText(stamp, new JsonObject { ["fingerprint"] = ShaderStep.Fingerprint(mo2, c, p, null, null, true, true, false), ["files"] = 1, ["verified"] = true, ["winners"] = true, ["settings"] = "boot" }.ToJsonString());
+		Equal(null, ShaderStep.WhyStale(mo2, c, p), "a stamp from before meta.ini counted by its version is read the way it was written");
 		File.Delete(Path.Combine(cacheDir, "a shader.bin"));
 		Check((ShaderStep.WhyStale(mo2, c, p) ?? "").Contains("holds 0 shader(s)", StringComparison.Ordinal), "a cache that lost its shaders says so: " + ShaderStep.WhyStale(mo2, c, p));
 		File.Delete(stamp);
@@ -7022,6 +7036,15 @@ public static class Program
 			Check(File.Exists(oldExe) && !File.Exists(Path.Combine(program, "README (old).txt")) && !File.Exists(zip), "the first clean-up takes what it can (the old program is still ending)");
 			ProgramUpdate.CleanUp(data);
 			Check(!File.Exists(oldExe) && NothingLeft(), "the next takes the rest, and its own record");
+			// a record that names a file in a folder that holds no copy of this program removes nothing there
+			var elsewhere = Path.Combine(top, "elsewhere");
+			Directory.CreateDirectory(elsewhere);
+			var notMine = Path.Combine(elsewhere, "Notes (old).txt");
+			File.WriteAllText(notMine, "a file of someone else's");
+			Directory.CreateDirectory(ProgramUpdate.UpdatesDir(data));
+			File.WriteAllText(Path.Combine(ProgramUpdate.UpdatesDir(data), "installed.json"), System.Text.Json.JsonSerializer.Serialize(new ProgramUpdate.Installed([notMine], Path.Combine(top, "nowhere.zip"))));
+			ProgramUpdate.CleanUp(data);
+			Check(File.Exists(notMine), "a file outside the program's own folder is never removed by a clean-up");
 			Equal("the program, version 1.1", File.ReadAllText(started), "the program in place stays");
 
 			// what is new, said once: this version's own lines, and the setup keys read differently since the version before
@@ -9963,6 +9986,16 @@ public static class Program
 		Check(steps.Single(st => st.Key.StartsWith(AddOns.KeyPrefix, StringComparison.Ordinal)).Settings["sha"] == null, "the add-on is asked about again");
 		Check(steps.All(st => Setup.Str(st.Settings, "output_mod") != null) && Setup.Str(steps[0].Settings, "fasterngio_args") == "--world all", "what is no program stays");
 		Equal(6, gone.Count, "each named: " + string.Join(" | ", gone));
+		// and every folder or file of the PC it came from: a step empties its output folder into the run's backup, and on this PC
+		// that path could be any folder of the player's
+		var paths = Setup.FromJson(new JsonObject {
+			["backups"] = @"D:\Their\Backups",
+			["steps"] = new JsonArray(new JsonObject { ["step"] = "pandora", ["settings"] = new JsonObject { ["output_dir"] = @"C:\Users\them\Documents", ["output_mod"] = "Behaviours" } }),
+		});
+		var taken = SetupShare.TakeOutPaths(paths.Root);
+		Check(paths.Root["backups"] == null && Setup.Str(paths.Steps[0].Settings, "output_dir") == null && Setup.Str(paths.Steps[0].Settings, "output_mod") == "Behaviours",
+			"its folders are taken out, its mod names stay");
+		Check(taken.Count == 2 && taken.All(t => t.Contains("the PC it came from", StringComparison.Ordinal)), "each named: " + string.Join(" | ", taken));
 	}
 
 	// a whole number a setup gives is a number the program can hold, or it is not given

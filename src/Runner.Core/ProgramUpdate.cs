@@ -369,7 +369,9 @@ public static class ProgramUpdate
 			return;
 		}
 		// only what an install itself names "(old)" or keeps in Updates: a record edited by hand removes nothing else
-		var left = was.Old.Where(f => Path.GetFileNameWithoutExtension(f).EndsWith(" (old)", StringComparison.Ordinal)).ToList();
+		// - and only in a folder that holds this program: the record names files anywhere on the PC
+		var left = was.Old.Where(f => Path.GetFileNameWithoutExtension(f).EndsWith(" (old)", StringComparison.Ordinal) &&
+			Path.GetDirectoryName(f) is { Length: > 0 } dir && System.IO.File.Exists(Path.Combine(dir, ProgramFile))).ToList();
 		foreach (var f in left.ToList()) {
 			TryDelete(f);
 			if (!System.IO.File.Exists(f)) {
