@@ -3,7 +3,7 @@ using ToolRunner.Steps;
 
 namespace ToolRunner;
 
-// His checklist 460, an option: the in-game steps in a small, muted window that keeps running behind other windows, so the player can go on
+// An option: the in-game steps in a small, muted window that keeps running behind other windows, so the player can go on
 // using the PC. Their settings go back after each step, and after a crash through the run's put-back (StepKit.KeepFile). Windowed mode and
 // the size are also set in SSE Display Tweaks' file where a ticked mod ships one, because it overrides the game's own.
 public static class QuietGame

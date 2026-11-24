@@ -3,7 +3,7 @@ using ToolRunner.Steps;
 
 namespace ToolRunner;
 
-// His checklist 456: the tools' output plugins against the place each tool's OWN documents give them, and nothing else - a warning, never
+// The tools' output plugins against the place each tool's OWN documents give them, and nothing else - a warning, never
 // a refusal, naming the plugin that is in the way. LOOT sorts all of these by itself, so the advice is LOOT's.
 //   DynDOLOD.esm the ESM with the highest priority, DynDOLOD.esp and Occlusion.esp the last plugins, Occlusion.esp after DynDOLOD.esp
 //     (dyndolod.info/Help/Load-Overwrite-Orders);
