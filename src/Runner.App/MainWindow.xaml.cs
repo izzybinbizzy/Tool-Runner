@@ -899,10 +899,14 @@ public partial class MainWindow : Window
 			_historyView = a_which;
 		}
 		w.Head(a_which switch { "history" => "HISTORY", "changes" => "MO2 CHANGELOG", "themes" => "THEMES", _ => "SETTINGS" });
+		// while the setup is renamed its settings are not shown: what was typed there would belong to the old file, whose Save
+		// is refused once the rename is done. The rename shows them when it ends
+		var held = a_which == "settings" && _vm.Renaming;
 		w.Body = a_which switch {
 			"history" => WithSwitch(HistoryPanel(), a_which),
 			"changes" => WithSwitch(ChangesPanel(null), a_which),
 			"themes" => ThemeGallery.Build(this, _vm),
+			_ when held => RenameNotice(),
 			_ => SettingsPanel.Build(this, _vm),
 		};
 		if (w.Body is DependencyObject drawn) {
@@ -915,9 +919,16 @@ public partial class MainWindow : Window
 			Front(w);
 		}
 		if (!a_quiet || isNew) {
-			w.TakeKeyboard(a_which == "settings" ? SettingsPanel.FocusFind : null);
+			w.TakeKeyboard(a_which == "settings" && !held ? SettingsPanel.FocusFind : null);
 		}
 		return w;
+	}
+
+	TextBlock RenameNotice()
+	{
+		var t = new TextBlock { Text = "The setup is being renamed. Its settings show here as soon as that is done.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
+		t.SetResourceReference(TextBlock.ForegroundProperty, "Muted");
+		return t;
 	}
 
 	// Another setup was picked while Settings stands open: it shows that setup's settings from here - unless something typed

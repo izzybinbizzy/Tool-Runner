@@ -91,16 +91,30 @@ public static class SetupFiles
 		return to;
 	}
 
-	// A setup file that carries a name of its own ("name") and called itself after its file keeps doing so under the new name
-	static void NameInside(string a_file, string a_was, string a_name)
+	// A setup file that carries a name of its own ("name") and called itself after its file keeps doing so under the new name;
+	// true when that name was changed
+	static bool NameInside(string a_file, string a_was, string a_name)
 	{
 		// (a "name" that is no text is left as it is: it was never the file's name)
 		if (JsonNode.Parse(Files.ReadShared(a_file)) is not JsonObject root || root["name"] is not JsonValue v || !v.TryGetValue<string>(out var inside) ||
 		    !string.Equals(inside, Path.GetFileNameWithoutExtension(a_was), StringComparison.OrdinalIgnoreCase)) {
-			return;
+			return false;
 		}
 		root["name"] = a_name;
 		Files.WriteAtomic(a_file, JsonSerializer.SerializeToUtf8Bytes(root, new JsonSerializerOptions { WriteIndented = true }));
+		return true;
+	}
+
+	// a folder moved to another name, also to the same name in other letters (Windows moves a folder onto itself only by way of
+	// another name)
+	static void MoveFolder(string a_from, string a_to)
+	{
+		if (Files.SamePath(a_from, a_to)) {
+			var between = a_from + " (renaming)";
+			Directory.Move(a_from, between);
+			a_from = between;
+		}
+		Directory.Move(a_from, a_to);
 	}
 
 	static void CopyTree(string a_from, string a_to)
@@ -130,10 +144,12 @@ public static class SetupFiles
 		var runs = new List<Journal>();
 		if (Directory.Exists(a_runsDir)) {
 			foreach (var d in Directory.GetDirectories(a_runsDir)) {
-				if (!File.Exists(Path.Combine(d, "journal.json"))) {
-					continue;
-				}
 				try {
+					// a folder without a record is no run; a folder that cannot be looked into is not taken for one without
+					// (File.Exists says false for both - CodeRabbit on pull request #38)
+					if (!Directory.EnumerateFiles(d, "journal.json", SearchOption.TopDirectoryOnly).Any()) {
+						continue;
+					}
 					runs.Add(Journal.Load(d));
 				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidDataException) {
 					// A record that does not read may be an unfinished run's, whose put-back reads the setup by the file it names:
@@ -156,6 +172,7 @@ public static class SetupFiles
 		// the setup never stands half renamed (CodeRabbit on pull request #38: a name inside that did not write left both moved)
 		var origin = LearnedDir(a_file);
 		var folderMoved = false;
+		var nameChanged = false;
 		try {
 			if (Directory.Exists(learned) && !string.Equals(learned, learnedTo, StringComparison.Ordinal)) {
 				// the same name in other letters: Windows moves a folder onto itself only by way of another name
@@ -167,27 +184,61 @@ public static class SetupFiles
 				Directory.Move(learned, learnedTo);
 				folderMoved = true;
 			}
-			NameInside(to, a_file, a_name.Trim());
+			nameChanged = NameInside(to, a_file, a_name.Trim());
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException) {
 			// (a folder half way through a change of letters goes back to its old name too)
 			if (folderMoved && Directory.Exists(learnedTo) && !Directory.Exists(origin)) {
-				Directory.Move(learnedTo, origin);
+				MoveFolder(learnedTo, origin);
 			} else if (!string.Equals(learned, origin, StringComparison.Ordinal) && Directory.Exists(learned) && !Directory.Exists(origin)) {
 				Directory.Move(learned, origin);
 			}
 			File.Move(to, a_file);
 			throw new IOException($"it could not be renamed whole ({e.Message}) - the setup keeps its old name", e);
 		}
-		var moved = 0;
-		var notRepointed = new List<string>();
+		// every run record that names the setup follows it. One that cannot be written stops the rename: the records already
+		// written name the old file again and the setup goes back to its old name, so no run loses its setup in History
+		// (CodeRabbit on pull request #38)
+		var repointed = new List<Journal>();
 		foreach (var j in runs.Where(j => Files.SamePath(j.SetupFile, a_file))) {
 			j.SetupFile = to;
 			if (j.TrySave()) {
-				++moved;
-			} else {
-				notRepointed.Add(j.Folder);
+				repointed.Add(j);
+				continue;
 			}
+			j.SetupFile = a_file;
+			var stuck = new List<Journal>();
+			foreach (var back in repointed) {
+				back.SetupFile = a_file;
+				if (!back.TrySave()) {
+					back.SetupFile = to;
+					stuck.Add(back);
+				}
+			}
+			if (stuck.Count > 0) {
+				// a record written with the new name will not go back either: the rename stands, the others follow it again, and
+				// each record left with the old name is named (the window says it shows under no setup in History)
+				var notRepointed = new List<string> { j.Folder };
+				foreach (var again in repointed.Except(stuck)) {
+					again.SetupFile = to;
+					if (!again.TrySave()) {
+						notRepointed.Add(again.Folder);
+					}
+				}
+				return new Renamed(to, repointed.Count - (notRepointed.Count - 1), notRepointed);
+			}
+			try {
+				if (nameChanged) {
+					NameInside(to, to, Path.GetFileNameWithoutExtension(a_file));
+				}
+				if (folderMoved && Directory.Exists(learnedTo) && !Directory.Exists(origin)) {
+					MoveFolder(learnedTo, origin);
+				}
+				File.Move(to, a_file);
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) {
+				throw new IOException($"the run record in \"{j.Folder}\" could not be written, and the setup could not go back to its old name ({e.Message}) - it is \"{a_name.Trim()}\" now; rename it again once that record can be written", e);
+			}
+			throw new IOException($"the run record in \"{j.Folder}\" could not be written (is it open in another program?) - the setup keeps its old name; close what holds it, then rename again");
 		}
-		return new Renamed(to, moved, notRepointed);
+		return new Renamed(to, repointed.Count, []);
 	}
 }

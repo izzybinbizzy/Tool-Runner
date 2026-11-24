@@ -38,7 +38,9 @@ public partial class MainWindow
 			return;
 		}
 		ShowPanel("settings");
-		if (!SettingsPanel.ShowStep(a_row.Key)) {
+		if (_vm.Renaming) {
+			_vm.Say($"The setup is being renamed - open {a_row.Name}'s settings again when that is done.", "warn");
+		} else if (!SettingsPanel.ShowStep(a_row.Key)) {
 			_vm.Say($"{a_row.Name}'s settings could not be shown: the step open in Settings has a value to fix first.", "warn");
 		}
 	}
@@ -157,6 +159,10 @@ public partial class MainWindow
 		} finally {
 			_vm.Renaming = false;
 			_renaming = false;
+			// Settings opened while the rename went showed only a notice: now it shows the setup as it is named
+			if (_panels.ContainsKey("settings")) {
+				ShowPanel("settings", true, true);
+			}
 		}
 	}
 
@@ -257,8 +263,11 @@ public partial class MainWindow
 		var stop = new Button { Content = "Stop _now", Style = (Style)FindResource("Danger"), HorizontalAlignment = HorizontalAlignment.Left, Command = _vm.StopNowCommand,
 			ToolTip = "Closes the tool at once and puts your profile back" };
 		stop.SetBinding(IsEnabledProperty, nameof(MainViewModel.IsRunning));
-		var main = new Button { Content = "Main window", Style = (Style)FindResource("Ghost"), Margin = new Thickness(8, 0, 0, 0), ToolTip = "Brings the main window forward" };
-		main.Click += (_, _) => Front(this);
+		var main = new Button { Content = "Main window", Style = (Style)FindResource("Ghost"), Margin = new Thickness(8, 0, 0, 0), ToolTip = "Closes the compact view and brings the main window forward" };
+		main.Click += (_, _) => {
+			w.Close();
+			Front(this);
+		};
 		var buttons = new StackPanel { Orientation = Orientation.Horizontal };
 		buttons.Children.Add(stop);
 		buttons.Children.Add(main);

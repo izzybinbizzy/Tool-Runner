@@ -326,18 +326,17 @@ public sealed partial class MainViewModel : Observable
 	readonly LogTail _logTail = new();
 	Dictionary<string, TimeSpan> _usual = [];
 
-	// the usual step times of the setup a run is running (read once per setup: the picked setup's own when it is that one)
+	// the usual step times of the run shown, worked out again for each new run (a run of the same setup brings the times its
+	// earlier runs learned), from the records the look already read off the window's thread
 	string? _runUsualFor;
 	Dictionary<string, TimeSpan> _runUsual = [];
 
-	Dictionary<string, TimeSpan> RunUsual(string a_setupFile)
+	Dictionary<string, TimeSpan> RunUsual(Journal a_run, List<Journal> a_runs)
 	{
-		if (SelectedSetup is { } picked && string.Equals(picked.File, a_setupFile, StringComparison.OrdinalIgnoreCase)) {
-			return _usual;
-		}
-		if (!string.Equals(_runUsualFor, a_setupFile, StringComparison.OrdinalIgnoreCase)) {
-			_runUsualFor = a_setupFile;
-			_runUsual = Engine.UsualTimes(a_setupFile);
+		var key = a_run.SetupFile + "\n" + a_run.Id;
+		if (!string.Equals(_runUsualFor, key, StringComparison.OrdinalIgnoreCase)) {
+			_runUsualFor = key;
+			_runUsual = Engine.UsualTimes(a_run.SetupFile, a_runs);
 		}
 		return _runUsual;
 	}
@@ -785,7 +784,7 @@ public sealed partial class MainViewModel : Observable
 		var elapsed = (_run.Ended ?? DateTime.Now) - _run.Started;
 		Clock = Long(elapsed);
 		// the running setup's own usual times, whichever setup is picked in the list (CodeRabbit on pull request #38)
-		var usual = RunUsual(_run.SetupFile);
+		var usual = RunUsual(_run, runs);
 		var ahead = _run.Steps.Where(s => s.State is StepState.Pending or StepState.Running).ToList();
 		var leftT = ahead.Select(s => usual.TryGetValue(s.Key, out var t) ? (s.State == StepState.Running && s.Started != null ? Max(TimeSpan.Zero, t - (DateTime.Now - s.Started.Value)) : t) : TimeSpan.Zero)
 			.Aggregate(TimeSpan.Zero, (a, b) => a + b);

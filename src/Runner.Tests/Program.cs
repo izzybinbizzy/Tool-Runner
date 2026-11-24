@@ -2896,6 +2896,24 @@ public static class Program
 		Throws<InvalidOperationException>(() => SetupFiles.Rename(cased.File, "Later", runs), "a run record that does not read refuses a rename");
 		Check(File.Exists(cased.File) && !File.Exists(Path.Combine(setups, "Later.json")), "and nothing was renamed");
 		Directory.Delete(unread, true);
+		// CodeRabbit on pull request #38: a run record that cannot be written after others were - every record names the old file
+		// again and the setup keeps its old name, its name inside and its learned settings, so no run loses its setup in History
+		var first = Path.Combine(runs, "2026-01-04 00-00-00 Test");
+		var second = Path.Combine(runs, "2026-01-05 00-00-00 Test");
+		Directory.CreateDirectory(first);
+		Directory.CreateDirectory(second);
+		new Journal { Folder = first, SetupFile = cased.File, State = RunState.Finished }.Save();
+		new Journal { Folder = second, SetupFile = cased.File, State = RunState.Finished }.Save();
+		using (new FileStream(Path.Combine(second, "journal.json"), FileMode.Open, FileAccess.Read, FileShare.Read)) {
+			Throws<IOException>(() => SetupFiles.Rename(cased.File, "Later", runs), "a run record that cannot be written stops the rename");
+		}
+		Check(File.Exists(cased.File) && !File.Exists(Path.Combine(setups, "Later.json")) && Without(cased.File, out var keptName) == asItWas && keptName == "MAIN RUN",
+			"the setup keeps its old name, inside too");
+		Check(new[] { mine, first, second }.All(d => Files.SamePath(Journal.Load(d).SetupFile, cased.File)), "every run record names it, also those written before the one that would not be");
+		Check(Directory.Exists(Path.Combine(setups, "learned settings", "MAIN RUN", "texgen")) && !Directory.Exists(Path.Combine(setups, "learned settings", "Later")),
+			"its learned settings are where they were");
+		Directory.Delete(first, true);
+		Directory.Delete(second, true);
 		// a run that did not finish refuses it
 		new Journal { Folder = mine, SetupFile = cased.File, State = RunState.Running }.Save();
 		Throws<InvalidOperationException>(() => SetupFiles.Rename(cased.File, "Later", runs), "a run that did not finish refuses a rename");
