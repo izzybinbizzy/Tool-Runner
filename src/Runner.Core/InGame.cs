@@ -44,7 +44,7 @@ public static partial class InGame
 				throw new StepFailedException(unknown ? "Windows would not list the running programs, so it is not known whether Skyrim is running - start the run again in a moment" :
 					"Skyrim is already running - close it first");
 			}
-			Thread.Sleep(1000);
+			a_ctx.Pause(TimeSpan.FromSeconds(1));
 		}
 	}
 
@@ -524,7 +524,7 @@ public static partial class InGame
 				} catch (Exception e) when (e is HttpRequestException or TaskCanceledException or InvalidOperationException or FormatException or System.Text.Json.JsonException) {
 				}
 			}
-			Thread.Sleep(1000);
+			a_ctx.Pause(TimeSpan.FromSeconds(1));
 		}
 	}
 
@@ -1294,7 +1294,7 @@ public static partial class InGame
 			if (sw.Elapsed > TimeSpan.FromMinutes(10)) {
 				throw new StepFailedException($"the save at {a_path} kept changing for 10 minutes");
 			}
-			Thread.Sleep(1500);
+			a_ctx.Pause(TimeSpan.FromMilliseconds(1500));
 		}
 	}
 
@@ -1324,7 +1324,7 @@ public static partial class InGame
 					break;
 				}
 			} else {
-				Thread.Sleep(1000);
+				a_ctx.Pause(TimeSpan.FromSeconds(1));
 			}
 		}
 		a_ctx.Log.Detail($"saved \"{a_name}\" ({new FileInfo(path).Length / 1024} KB{(File.Exists(cosave) ? ", its SKSE co-save too" : "")})");
@@ -1374,7 +1374,7 @@ public static partial class InGame
 			if (sw.Elapsed > TimeSpan.FromMinutes(2)) {
 				throw new StepFailedException("the game is still running - quit it, then start the step again");
 			}
-			Thread.Sleep(1000);
+			a_ctx.Pause(TimeSpan.FromSeconds(1));
 		}
 		var save = NewestSave(a_ctx.Profile, before) ?? throw new StepFailedException("no new save was made");
 		a_ctx.Log.Detail($"your save: \"{save}\"");
@@ -1599,7 +1599,8 @@ public static partial class InGame
 			a_ctx.Journal.Save();
 			a_ctx.Log.Detail("the place you stood at before the clean save is taken from the run that made that save");
 		}
-		a_ctx.Control.Close();
+		// a Stop ends this wait too (a download can hold Mod Organizer open for half an hour)
+		a_ctx.Control.Close(null, a_ctx.Cancel);
 		if (!Auto(a_ctx)) {
 			GuidedSave(a_ctx, "playsave", a_s, $"In the game: load \"{from}\" and wait a full minute. Go back to the place you noted at the start" +
 				" (the console: coc <that place>) and let your followers catch up, check DynDOLOD is on in its menu (MCM), and save.");

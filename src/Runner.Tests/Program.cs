@@ -6924,6 +6924,9 @@ public static class Program
 			Throws<InvalidOperationException>(() => Latest(Answer(good, a_url: "https://example.com/Tool.Runner.1.1.zip")), "a download from anywhere but the program's own repository");
 			Throws<InvalidOperationException>(() => Latest(Answer(good, a_name: "Something else.zip")), "a release without the program's own zip");
 			Throws<InvalidOperationException>(() => Latest([]), "an answer with no release");
+			var noSum = Answer(good);
+			((JsonObject)((JsonArray)noSum["assets"]!)[1]!).Remove("digest");
+			Throws<InvalidOperationException>(() => Latest(noSum), "a download GitHub gives no check sum for: never installed from here");
 			// what is fetched and then refused: nothing of it stays
 			Throws<InvalidOperationException>(() => Download(Latest(Answer(good, a_sha: new string('0', 64)))), "a download whose check sum is not GitHub's");
 			Check(NothingLeft(), "and nothing of it is kept");

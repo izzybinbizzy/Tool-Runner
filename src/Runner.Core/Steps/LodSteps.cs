@@ -387,7 +387,16 @@ public static class Cli
 		// load every core
 		a_ctx.Control.Ours(p.Id);
 		p.StandardInput.Close();
-		var sb = new System.Text.StringBuilder();
+		// Its output goes into its file as it comes, every line; only its last lines are held here (a tool that prints a line per
+		// file it makes printed hundreds of megabytes, all of it held in memory for the step's life). The file stays readable
+		// while the tool runs. A file that cannot be written must not hide why the step ended: said, and the step goes on
+		var tail = new Queue<string>();
+		using var kept = OpenOutput(a_outFile, out var notKept);
+		if (notKept != null) {
+			a_ctx.Log.Warn($"{Path.GetFileName(a_exe)}'s output could not be kept in {a_outFile} ({notKept})");
+		}
+		// set once the step is done with the file: a line that comes after (a child that kept the pipe) is held, never written
+		var closed = false;
 		string? latest = null;
 		// each stream's end (its last line has arrived)
 		var outEnd = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -399,58 +408,87 @@ public static class Cli
 				a_end.TrySetResult();
 				return;
 			}
-			lock (sb) {
-				sb.AppendLine(a_line);
+			lock (tail) {
+				tail.Enqueue(a_line);
+				if (tail.Count > TailLines) {
+					tail.Dequeue();
+				}
 				latest = a_line;
-			}
-		}
-		p.OutputDataReceived += (_, e) => Add(e.Data, outEnd);
-		p.ErrorDataReceived += (_, e) => Add(e.Data, errEnd);
-		p.BeginOutputReadLine();
-		p.BeginErrorReadLine();
-		try {
-			Waits.Tool(a_ctx, a_step, p, a_deadline, () => {
-				string? line;
-				lock (sb) {
-					line = latest;
-					latest = null;
-				}
-				if (line != null) {
-					a_ctx.Activity(a_step, line.Length > 160 ? line[..160] : line);
-				}
 				try {
-					return p.HasExited ? Waits.Poll.Done : Waits.Poll.Wait;
-				} catch (InvalidOperationException) {
-					return Waits.Poll.Done;
+					if (!closed) {
+						kept?.WriteLine(a_line);
+					}
+				} catch (Exception e) when (e is IOException or ObjectDisposedException) {
+					// a disk that stopped taking it: the lines held here are what is left
 				}
-			});
-		} catch {
-			Procs.End(p);
-			throw;
-		} finally {
-			string text;
-			lock (sb) {
-				text = sb.ToString();
 			}
-			// a write that fails here must not hide why the step ended
+		}
+		string Tail()
+		{
+			lock (tail) {
+				return string.Join(Environment.NewLine, tail) + (tail.Count > 0 ? Environment.NewLine : "");
+			}
+		}
+		try {
+			p.OutputDataReceived += (_, e) => Add(e.Data, outEnd);
+			p.ErrorDataReceived += (_, e) => Add(e.Data, errEnd);
+			p.BeginOutputReadLine();
+			p.BeginErrorReadLine();
 			try {
-				Files.WriteAtomic(a_outFile, text);
-			} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
-				a_ctx.Log.Warn($"{Path.GetFileName(a_exe)}'s output could not be kept in {a_outFile} ({e.Message})");
+				Waits.Tool(a_ctx, a_step, p, a_deadline, () => {
+					string? line;
+					lock (tail) {
+						line = latest;
+						latest = null;
+					}
+					if (line != null) {
+						a_ctx.Activity(a_step, line.Length > 160 ? line[..160] : line);
+					}
+					try {
+						return p.HasExited ? Waits.Poll.Done : Waits.Poll.Wait;
+					} catch (InvalidOperationException) {
+						return Waits.Poll.Done;
+					}
+				});
+			} catch {
+				Procs.End(p);
+				throw;
+			}
+			// The last output lines: both streams read to their end (a wait on the process alone returns the moment it has ended,
+			// before its last lines have arrived - a finished tool's "Done" line was then missed). Never for long: a child process
+			// that kept the output pipe open would hold it
+			Task.WaitAll([outEnd.Task, errEnd.Task], TimeSpan.FromSeconds(30));
+		} finally {
+			lock (tail) {
+				closed = true;
+				try {
+					kept?.Flush();
+				} catch (IOException) {
+				}
 			}
 		}
-		// The last output lines: both streams read to their end (a wait on the process alone returns the moment it has ended,
-		// before its last lines have arrived - a finished tool's "Done" line was then missed). Never for long: a child process
-		// that kept the output pipe open would hold it
-		Task.WaitAll([outEnd.Task, errEnd.Task], TimeSpan.FromSeconds(30));
-		string all;
-		lock (sb) {
-			all = sb.ToString();
-		}
+		var all = Tail();
 		foreach (var ln in all.TrimEnd().Split('\n').TakeLast(10)) {
 			a_ctx.Log.Detail("| " + ln.TrimEnd());
 		}
 		return (p.ExitCode, all);
+	}
+
+	// how many of a tool's last lines are held to judge its end (its "Done" line is among its last)
+	const int TailLines = 500;
+
+	// the file a tool's output goes into as it comes, readable while the tool runs (null, and why, when it cannot be written)
+	static StreamWriter? OpenOutput(string a_path, out string? a_why)
+	{
+		a_why = null;
+		try {
+			Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(a_path))!);
+			return new StreamWriter(a_path, new System.Text.UTF8Encoding(false),
+				new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write, Share = FileShare.ReadWrite | FileShare.Delete });
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			a_why = e.Message;
+			return null;
+		}
 	}
 }
 

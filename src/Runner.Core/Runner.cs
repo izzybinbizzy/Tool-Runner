@@ -436,7 +436,8 @@ public static class Runner
 				if (!outputsOff && !lead.Contains(s.Key)) {
 					if (keys.Contains("cleansave")) {
 						RunPhase(ctx, "cleansave", "the clean save, first half: to QASmoke with the profile as it is", () => InGame.Deactivate(ctx, new StepSettings(s.Key == "cleansave" ? s.Settings : setup.StepSettings("cleansave")!)));
-						control.Close();
+						// a Stop ends this wait too (a download can hold Mod Organizer open for half an hour)
+						control.Close(null, cts.Token);
 					}
 					OutputsOff(ctx, todo);
 					outputsOff = true;
