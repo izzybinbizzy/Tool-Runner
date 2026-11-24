@@ -136,8 +136,6 @@ public sealed partial class Mo2Instance
 		return name;
 	}
 
-	// The instance of ModOrganizer.exe: a ModOrganizer.ini beside the exe (portable), else the global instance the exe last
-	// used (%LOCALAPPDATA%\ModOrganizer\<name>, named in its own ModOrganizer.ini by the user's pick - a_instance).
 	// its files in the game folder now? Root Builder keeps BuildData.json in its data folder from a build until its clear
 	public bool RootBuilderDeployed()
 	{
@@ -157,6 +155,8 @@ public sealed partial class Mo2Instance
 		}
 	}
 
+	// The instance of ModOrganizer.exe: the instance folder the setup names (a_instanceDir), else a ModOrganizer.ini beside the
+	// exe (portable)
 	public static Mo2Instance Load(string a_mo2Exe, string? a_instanceDir = null)
 	{
 		if (!File.Exists(a_mo2Exe)) {

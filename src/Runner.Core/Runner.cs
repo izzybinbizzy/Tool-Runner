@@ -236,7 +236,7 @@ public static class Runner
 		var journal = new Journal {
 			Id = id, Folder = Path.Combine(runs, id), SetupFile = Path.GetFullPath(a_req.SetupFile), SetupName = setup.Name, Profile = setup.Profile,
 			Mo2Exe = setup.Mo2Exe, Mo2Instance = setup.Mo2Instance, BackupDir = Path.Combine(setup.BackupDir, id), Pid = Environment.ProcessId,
-			PidStarted = Process.GetCurrentProcess().StartTime.ToUniversalTime(),
+			PidStarted = Procs.StartTime(Environment.ProcessId),
 			Started = DateTime.Now, State = RunState.Running,
 			Steps = todo.Select(s => new StepRecord { Key = s.Key, Name = StepCatalog.Name(s.Key), State = StepState.Pending, Output = new StepSettings(s.Settings).OutputMod }).ToList(),
 		};
@@ -953,8 +953,6 @@ public static class Runner
 		return outList;
 	}
 
-	// his checklist 270 ("all 3."): only the last few runs' backups are kept - the setup's "keepBackups" (default 5, 0 = keep
-	// all). Only THIS setup's run folders go, oldest first, never the running one or one an unfinished run still needs.
 	// a run that did not finish may leave the runner's own save (QASmoke, DynDOLOD off) as the newest one: said in its verdict
 	static void SaySaves(RunContext a_ctx)
 	{
@@ -965,6 +963,8 @@ public static class Runner
 		}
 	}
 
+	// only the last few runs' backups are kept - the setup's "keepBackups" (default 5, 0 = keep all). Only THIS setup's run
+	// folders go, oldest first, never the running one or one an unfinished run still needs
 	public static void PruneBackups(RunContext a_ctx)
 	{
 		// cleanup only: whatever goes wrong here is a warning, never a failed run
@@ -1756,9 +1756,12 @@ public static class Runner
 					File.SetLastWriteTimeUtc(k.Path, File.GetLastWriteTimeUtc(k.Backup));
 					log.Detail($"{Path.GetFileName(k.Path)}: back as it was before this run");
 				} else if (k.Backup == null && File.Exists(k.Path)) {
-					// a file this run made new, straight into a mod that holds other things: only that file goes
-					Files.Delete(k.Path);
-					log.Detail($"{Path.GetFileName(k.Path)}: taken out again (this run made it)");
+					// a file this run made new, straight into a mod that holds other things: only that file goes - set aside in the
+					// run's backup with the rest of what the undo took out, never erased (it may hold an edit the player made since)
+					var to = Files.FreeFile(Path.Combine(aside, "files", Path.GetFileName(k.Path)));
+					Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+					Files.Move(k.Path, to);
+					log.Detail($"{Path.GetFileName(k.Path)}: taken out again (this run made it) - set aside in the run's backup");
 				}
 			}
 			// only what had no old output: one that had came back above, and pressed again it holds that old output
@@ -2046,7 +2049,10 @@ public sealed class Commands(Journal a_journal, Action a_cancel) : IDisposable
 	bool _disposed;
 	volatile bool _continue;
 
-	public bool Stopped { get; private set; }
+	// set on the command watcher's timer thread, read on the run's own
+	volatile bool _stopped;
+
+	public bool Stopped => _stopped;
 
 	// what a Stop does at once, beside cancelling the run: ends the game and tools this run started (his 2026-11-06 find:
 	// "the stop now button does not work" - a cancel alone waited for the step's next look, and a game kept compiling)
@@ -2090,7 +2096,7 @@ public sealed class Commands(Journal a_journal, Action a_cancel) : IDisposable
 			return;
 		}
 		if (File.Exists(Path.Combine(d, "stop.txt")) && !Stopped) {
-			Stopped = true;
+			_stopped = true;
 			_cancel();
 			try {
 				OnStop?.Invoke();

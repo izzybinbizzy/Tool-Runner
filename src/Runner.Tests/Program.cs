@@ -9617,6 +9617,82 @@ public static class Program
 		return missing;
 	}
 
+	// FasterNGIO runs through a command line written from the setup: nothing in its program path or its arguments may be read
+	// there as a command of its own (a setup file can come from anyone)
+	static void T_TheGrassStepRunsNoCommandHiddenInItsSettings()
+	{
+		const string exe = @"C:\Tools\FasterNGIO\FasterNGIO.exe";
+		Equal<string?>(null, GrassStep.WrapperRefuses(exe, null), "no arguments: its own");
+		Equal<string?>(null, GrassStep.WrapperRefuses(exe, "--world all"), "plain arguments");
+		Equal<string?>(null, GrassStep.WrapperRefuses(exe, "--world \"Tamriel\""), "a quoted value is still an argument");
+		foreach (var bad in new[] { "--world all & calc", "--world all | more", "--world all > x.txt", "--world all < x", "--world ^all", "--world all\r\ndel x", "--world all\nx" }) {
+			Check(GrassStep.WrapperRefuses(exe, bad) is { } why && RunnerErrors.Find(why)?.Code == "TR-317", "refused, with what to do: " + bad.Replace("\r", "\\r", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal));
+		}
+		Check(GrassStep.WrapperRefuses(@"C:\Tools\Fast""&calc&"".exe", null) != null, "a program path that closes its own quotes");
+		Check(GrassStep.WrapperRefuses(@"C:\A & B\FasterNGIO.exe", null) != null, "a program path that holds a command mark");
+	}
+
+	// the setup's own name names its run's folder and its backup: one with a folder part never reaches them
+	static void T_ASetupNamedWithAFolderPartIsRefused()
+	{
+		var problems = Setup.FromJson(new JsonObject { ["name"] = @"..\..\Elsewhere" }).Problems();
+		Check(problems.FirstOrDefault(p => p.Contains("not a plain name", StringComparison.Ordinal)) is { } said && RunnerErrors.Find(said)?.Code == "TR-120", "refused by the setup's own check: " + string.Join(" | ", problems));
+		Check(!Setup.FromJson(new JsonObject { ["name"] = "My Profile - LOD" }).Problems().Any(p => p.Contains("not a plain name", StringComparison.Ordinal)), "a plain name passes");
+		using var f = new FakeMo2();
+		var setup = f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		setup.Root["name"] = @"..\..\Elsewhere";
+		setup.Save();
+		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+		Check(r.State == RunState.Failed && r.Folder == null && r.Verdict.Contains("not a plain name", StringComparison.Ordinal), "the run is refused before anything is made: " + r.Verdict);
+		Check(!Directory.EnumerateDirectories(f.Root, "*Elsewhere*", SearchOption.AllDirectories).Any(), "no folder of that name anywhere");
+	}
+
+	// a setup brought in from elsewhere starts no program of its own choosing and allows no add-on for the player
+	static void T_AnImportedSetupStartsNoProgramOfItsOwn()
+	{
+		var s = Setup.FromJson(new JsonObject {
+			["mo2"] = new JsonObject { ["exe"] = @"C:\Elsewhere\ModOrganizer.exe", ["profile"] = "Test" },
+			[AddOns.NoAskSetting] = true,
+			["steps"] = new JsonArray(
+				new JsonObject { ["step"] = "grass", ["settings"] = new JsonObject { ["fasterngio_exe"] = @"C:\Elsewhere\FasterNGIO.exe", ["fasterngio_args"] = "--world all", ["output_mod"] = "Grass" } },
+				new JsonObject { ["step"] = "acmos", ["settings"] = new JsonObject { ["exe"] = @"C:\Elsewhere\acmos.exe", ["output_mod"] = "Roads" } },
+				new JsonObject { ["step"] = "treelodgen", ["settings"] = new JsonObject { ["launcher"] = @"C:\Elsewhere\run.cmd", ["output_mod"] = "Trees" } },
+				new JsonObject { ["step"] = AddOns.KeyPrefix + "Their Patcher", ["settings"] = new JsonObject { ["sha"] = "ABCD", ["output_mod"] = "Theirs" } }),
+		});
+		var gone = s.TakeOutWhatStartsPrograms();
+		Equal("", Setup.Str((JsonObject)s.Root["mo2"]!, "exe"), "Mod Organizer's program is the player's to set");
+		Check(s.Root[AddOns.NoAskSetting] == null, "the add-on question is not switched off for them");
+		var steps = s.Steps;
+		Check(steps.All(st => Setup.Str(st.Settings, "exe") == null && Setup.Str(st.Settings, "fasterngio_exe") == null && Setup.Str(st.Settings, "launcher") == null), "no step starts a program it names");
+		Check(steps.Single(st => st.Key.StartsWith(AddOns.KeyPrefix, StringComparison.Ordinal)).Settings["sha"] == null, "the add-on is asked about again");
+		Check(steps.All(st => Setup.Str(st.Settings, "output_mod") != null) && Setup.Str(steps[0].Settings, "fasterngio_args") == "--world all", "what is no program stays");
+		Equal(6, gone.Count, "each named: " + string.Join(" | ", gone));
+	}
+
+	// a whole number a setup gives is a number the program can hold, or it is not given
+	static void T_ASetupNumberOutOfRangeIsNoNumber()
+	{
+		var o = new JsonObject { ["big"] = 1e12, ["small"] = -1e12, ["plain"] = 5.0, ["whole"] = 7 };
+		Equal<int?>(null, Setup.Int(o, "big"), "too big");
+		Equal<int?>(null, Setup.Int(o, "small"), "too small");
+		Equal<int?>(5, Setup.Int(o, "plain"), "a whole number written as 5.0");
+		Equal<int?>(7, Setup.Int(o, "whole"), "a whole number");
+	}
+
+	// Mod Organizer's own entries (the game's, a Creation Club file's) are in the list and are never switched: said so
+	static void T_ModOrganizersOwnEntriesAreNeverSwitched()
+	{
+		using var f = new FakeMo2();
+		var p = ProfileOf(f);
+		try {
+			p.SetMods(["DLC: Dawnguard"], []);
+			Check(false, "it was switched");
+		} catch (KeyNotFoundException e) {
+			Check(e.Message.Contains("Mod Organizer's own entries", StringComparison.Ordinal), "said as what it is, not as missing: " + e.Message);
+		}
+		Check(p.States()["DLC: Dawnguard"] == '*', "left as it was");
+	}
+
 	static void T_EveryRefusalIsInTheCatalog()
 	{
 		Equal(RunnerErrors.All.Count, RunnerErrors.All.Select(e => e.Code).Distinct().Count(), "one code per entry");

@@ -55,6 +55,8 @@ public static class RunnerErrors
 			"Open the setup file in a text editor and give each entry under \"placement\" two plugin names, like [\"MyPatch.esp\", \"Skyrim.esm\"], or take that entry out."),
 		E("TR-119", "the setup could not be saved after PGLite switched", "PGLite is ticked, so the PGPatcher step was switched off, and the setup file would not take that change.",
 			"Close any program that has the setup file open (an editor), make sure the data folder may be written, then start again."),
+		E("TR-120", "the setup's name is not a plain name", "The name inside the setup file holds a folder part or a character Windows does not allow in a folder name; the run's own folder is named after it.",
+			"Open Settings and give the setup a plain name, or bring a setup file from someone else in with the import command, which gives it one."),
 
 		// ---- the check before a run: the PC, Mod Organizer, the game
 		E("TR-201", "Mod Organizer has no profile", "The profile this setup was made for is no longer in Mod Organizer (renamed or deleted).",
@@ -112,6 +114,8 @@ public static class RunnerErrors
 			"Save a preset from DynDOLOD's own window and name it in Settings > Steps > DynDOLOD, or switch the step's terrain underside option off."),
 		E("TR-316", "AnvilLOD needs DynDOLOD's folder", "AnvilLOD reads DynDOLOD's rule files and does not know where DynDOLOD is.",
 			"Set DynDOLOD's folder in Settings > Steps > AnvilLOD."),
+		E("TR-317", "would read as a command of its own", "FasterNGIO runs through a command line, and its program path or its arguments hold a character that command line would read as a command of its own.",
+			"Take that character out of the grass step's arguments (Settings > Steps > Grass cache), or move FasterNGIO to a folder whose path has none of & | < > ^ \"."),
 		E("TR-310", "the PGPatcher settings set is missing|but the PGPatcher settings have PGLite Mode", "PGPatcher's saved settings do not match this profile.",
 			"Learn PGPatcher's settings again from its own window (Settings > Steps > PGPatcher > Learn its settings), or tick / untick PGLite in Mod Organizer to match."),
 		E("TR-311", "its add-on file is gone|its add-on file:|changed since you allowed it|the mod that holds it|its program could not be opened|its add-on file changed while it was being read","An add-on step's file is missing, changed, or its mod is switched off.",

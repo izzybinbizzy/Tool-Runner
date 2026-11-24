@@ -49,6 +49,8 @@ public sealed class GrassStep : IStep
 		if ((a_s.Str("by") ?? "fasterngio") == "fasterngio") {
 			if (a_s.Str("fasterngio_exe") is not { Length: > 0 } exe || !File.Exists(exe)) {
 				yield return new Issue(Key, true, "FasterNGIO's program is not found (set \"fasterngio_exe\")");
+			} else if (WrapperRefuses(exe, a_s.Str("fasterngio_args")) is { } refused) {
+				yield return new Issue(Key, true, refused);
 			}
 		} else if (Setup.Bool(a_c.Setup.Root, "gameFolderWrites") != true) {
 			yield return new Issue(Key, true, "the game route needs NGIO's PrecacheGrass.txt in the game folder, and this setup does not allow writing there");
@@ -71,6 +73,15 @@ public sealed class GrassStep : IStep
 	// the step failed with "exit code 1" and no cause)
 	// The exit code is kept first and a line break written before it: FasterNGIO's last line may end without one (a progress
 	// line), and the wrapper's own line glued to it would never be read as the end
+	// The program and its arguments go into the wrapper's command line as they are: a character there that cmd reads as a
+	// command of its own would run something else than FasterNGIO. Refused, never escaped - a setup file can come from anyone
+	public static string? WrapperRefuses(string a_exe, string? a_args) =>
+		a_exe.IndexOfAny(['&', '|', '<', '>', '^', '"', '\r', '\n']) >= 0
+			? "FasterNGIO's program path holds a character that the command line it runs through would read as a command of its own (& | < > ^ \" or a line break) - move FasterNGIO to a folder whose path has none"
+			: (a_args ?? "").IndexOfAny(['&', '|', '<', '>', '^', '\r', '\n']) >= 0
+				? "FasterNGIO's arguments hold a character that the command line it runs through would read as a command of its own (& | < > ^ or a line break) - take it out of the step's \"fasterngio_args\""
+				: null;
+
 	public static string WrapperText(string a_exe, string a_args, string a_outFile) =>
 		$"@echo off\r\nchcp 65001 >nul\r\necho started %DATE% %TIME% > \"{a_outFile}\"\r\n\"{a_exe.Replace("%", "%%", StringComparison.Ordinal)}\" {a_args} >> \"{a_outFile}\" 2>&1\r\n" +
 		$"set TRCODE=%ERRORLEVEL%\r\necho.>> \"{a_outFile}\"\r\necho exit code %TRCODE% >> \"{a_outFile}\"\r\n";
@@ -98,6 +109,9 @@ public sealed class GrassStep : IStep
 		var outFile = Path.Combine(work, "output.txt");
 		Files.TryDelete(outFile);
 		var cmd = Path.Combine(work, "run.cmd");
+		if (WrapperRefuses(exe, a_s.Str("fasterngio_args")) is { } refused) {
+			throw new StepFailedException(refused);
+		}
 		var args = (a_s.Str("fasterngio_args") ?? "--world all").Replace("%", "%%", StringComparison.Ordinal);
 		Files.WriteAtomic(cmd, WrapperText(exe, args, outFile), new System.Text.UTF8Encoding(false));
 		var image = Path.GetFileName(exe);
