@@ -26,6 +26,16 @@ public static class AppPaths
 	static string Resolve()
 	{
 		try {
+			// a data folder beside the program whose data moved (Settings > Keep data through updates): the place it moved to,
+			// whatever is left of the old one removed
+			foreach (var name in Brand.AllNames) {
+				var old = Path.Combine(AppContext.BaseDirectory, name + " Data");
+				if (DataFolder.MovedTo(old) is { } moved) {
+					DataFolder.FinishMove(old, moved);
+					Directory.CreateDirectory(moved);
+					return moved;
+				}
+			}
 			// no data folder beside the program, and the player chose the app-data folder for every copy: that one
 			if (!DataFolder.StandsIn(AppContext.BaseDirectory, " Data") && DataFolder.Chosen(AppDataFolder)) {
 				var kept = DataFolder.Adopt(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "");

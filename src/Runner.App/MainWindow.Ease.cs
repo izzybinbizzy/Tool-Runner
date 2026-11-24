@@ -92,6 +92,10 @@ public partial class MainWindow
 		if (_copying || _vm.IsRunning || _vm.SelectedSetup is not { } item) {
 			return;
 		}
+		if (_vm.MovingData) {
+			_vm.Say(_vm.WhyNotWriting("copied")!, "bad");
+			return;
+		}
 		var name = Ask.Input(this, "Copy this setup", $"A new setup with the steps and settings of \"{item.Name}\", and the settings its tools learned. Nothing of \"{item.Name}\" changes. The copy's name:",
 			SetupFiles.FreeCopyName(item.File), "Make the copy", n => SetupFiles.BadName(AppPaths.Setups, n));
 		if (name == null) {
@@ -120,6 +124,10 @@ public partial class MainWindow
 		// (a queue between two setups too: the next setup it starts is read by its file)
 		if (StillGoing() || _vm.IsRunning) {
 			_vm.Say("A run or a queue is going - rename the setup when it has ended.", "bad");
+			return;
+		}
+		if (_vm.MovingData) {
+			_vm.Say(_vm.WhyNotWriting("renamed")!, "bad");
 			return;
 		}
 		// Settings stands open on the setup's old file: its Save would write there - it closes first, asked about what is typed

@@ -5683,8 +5683,9 @@ public static class Program
 			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from, to), "a folder that holds files is refused");
 			Check(File.Exists(Path.Combine(from, "Setups", "Test.json")), "and the data stays where it was");
 			File.Delete(Path.Combine(to, "something.txt"));
-			DataFolder.MoveTo(from, to);
+			Check(DataFolder.MoveTo(from, to) == null, "nothing is left to do by hand");
 			Check(!Directory.Exists(from), "the old folder is gone");
+			Check(!File.Exists(Path.Combine(to, ".renamed from.txt")), "every path was repointed: the copy carries no mark of a move to finish");
 			Check(File.ReadAllText(Path.Combine(to, "Setups", "Test.json")).Contains("Test", StringComparison.Ordinal) && Directory.Exists(Path.Combine(to, "empty folder")), "every file and folder is in the new place");
 			var moved = (JsonObject)JsonNode.Parse(File.ReadAllText(Path.Combine(to, "Runs", "2026-01-01 00-00-00 Test", "journal.json")))!;
 			Check(Files.SamePath(moved["SetupFile"]!.GetValue<string>(), Path.Combine(to, "Setups", "Test.json")) && moved["Other"]!.GetValue<string>() == @"D:\elsewhere\x.json",
@@ -5695,6 +5696,25 @@ public static class Program
 			var other = Path.Combine(root, "other appdata");
 			Directory.CreateDirectory(Path.Combine(other, "Runs"));
 			Check(DataFolder.HasData(other) && !DataFolder.Chosen(other), "data alone is not the player's choice");
+			// a copy of a move that was cut off before it counted (its mark names the folder it came from) is made again
+			var from2 = Path.Combine(root, "beside 2", Brand.Name + " Data");
+			var to2 = Path.Combine(root, "appdata 2", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from2, "Setups"));
+			File.WriteAllText(Path.Combine(from2, "Setups", "Two.json"), "{ \"name\": \"Two\" }");
+			Directory.CreateDirectory(to2);
+			File.WriteAllText(Path.Combine(to2, ".renamed from.txt"), from2);
+			File.WriteAllText(Path.Combine(to2, "half.json"), "{}");
+			Check(DataFolder.MoveTo(from2, to2) == null && File.Exists(Path.Combine(to2, "Setups", "Two.json")) && !File.Exists(Path.Combine(to2, "half.json")),
+				"a half copy of the same move is replaced by the whole one");
+			// a move that counted (the old folder's mark) is finished by the next start, whatever was left of it
+			var old3 = Path.Combine(root, "beside 3", Brand.Name + " Data");
+			var to3 = Path.Combine(root, "appdata 3", Brand.Name);
+			Directory.CreateDirectory(old3);
+			Directory.CreateDirectory(to3);
+			File.WriteAllText(Path.Combine(old3, DataFolder.MovedMark), to3);
+			Check(DataFolder.MovedTo(old3) is { } where && Files.SamePath(where, to3), "the mark names where the data went");
+			DataFolder.FinishMove(old3, to3);
+			Check(DataFolder.Chosen(to3) && !Directory.Exists(old3), "the new folder is the player's choice and the old one is gone");
 		} finally {
 			if (Directory.Exists(root)) {
 				Directory.Delete(root, true);
@@ -6442,6 +6462,8 @@ public static class Program
 					File.Copy(f, Path.Combine(scratch, rel));
 				}
 			}
+			// its own data folder beside it before it starts: an app-data folder this PC chose for every copy never takes it
+			Directory.CreateDirectory(Path.Combine(scratch, Brand.Name + " Data"));
 			using var desk = new HiddenDesktop("SUP-test-windowless");
 			// a folder Windows refuses to make: the snapshot's first step throws
 			using var p = desk.Start($"\"{exe}\" --snapshot \"{Path.Combine(Path.GetTempPath(), "bad<name>")}\"", AppContext.BaseDirectory);
@@ -6872,6 +6894,10 @@ public static class Program
 				Check(text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length == box.Document.Blocks.Count, "one paragraph for each line kept");
 				Check(text.StartsWith("21:", StringComparison.Ordinal), "the cut falls between whole lines");
 				Check(took < TimeSpan.FromSeconds(60), $"9,000 lines added in {took.TotalSeconds:0.0} s");
+				// a newest line longer than the whole budget: every line before it goes, and it stays whole
+				box.AppendLines(new string('x', 160_000) + "\n");
+				box.KeepLast(150_000);
+				Check(box.Document.Blocks.Count == 1 && box.Text.TrimEnd('\n').Length == 160_000, $"a line over the budget is kept alone and whole ({box.Document.Blocks.Count} lines, {box.Length} characters)");
 				Console.WriteLine($"      9,000 lines added and cut in {took.TotalMilliseconds:0} ms");
 			} catch (Exception e) {
 				failed = e;
@@ -7030,6 +7056,8 @@ public static class Program
 		Equal("failed, PGPatcher.esp requires master Gone.esm", ToolRunner.App.A11y.StepStatus(true, false, StepState.Failed, "1m", "", "PGPatcher.esp requires master Gone.esm"), "a failure with its reason");
 		Equal("switched off, usually takes 24m", ToolRunner.App.A11y.StepStatus(false, false, null, "", "24m", ""), "a switched-off step");
 		Equal("left out for a new game", ToolRunner.App.A11y.StepStatus(true, true, null, "", "", ""), "a save step on a new game");
+		Equal("usually takes 7m, " + ToolRunner.App.MainViewModel.NoDevBench, ToolRunner.App.A11y.StepStatus(true, false, null, "", "7m", "", false, ToolRunner.App.MainViewModel.NoDevBench),
+			"a step DevBench is missing for says so to a screen reader too");
 		Equal("Bottled", new ToolRunner.App.SetupItem("Bottled", @"C:\Data\Setups\Bottled.json").ToString(), "a setup is read by its name, not its path");
 		var row = new ToolRunner.App.HistoryRow("Tue Oct 27  21:02", "Bottled", "1h 41m", "finished: 12 step(s)", true, @"C:\Runs\1").ToString();
 		Check(row.Contains("finished", StringComparison.Ordinal) && !row.Contains(@"C:\Runs", StringComparison.Ordinal), "a past run in words: " + row);
@@ -10459,6 +10487,8 @@ public static class Program
 					File.Copy(file, Path.Combine(scratch, rel));
 				}
 			}
+			// its own data folder beside it before it starts: an app-data folder this PC chose for every copy never takes it
+			Directory.CreateDirectory(Path.Combine(scratch, Brand.Name + " Data"));
 			(int Exit, string Out) Ask(params string[] a_args)
 			{
 				var psi = new ProcessStartInfo(Path.Combine(scratch, Brand.Name + ".exe")) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, WorkingDirectory = scratch };

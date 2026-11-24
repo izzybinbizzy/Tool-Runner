@@ -571,7 +571,8 @@ public partial class MainWindow : Window
 			Into(outBox, _followOut?.IsChecked == true);
 		}
 		if (trim) {
-			_logChars = 150_000;
+			// what the box kept, whole lines only, is the count from here
+			_logChars = LogBox.Length;
 		}
 	}
 
@@ -1203,6 +1204,10 @@ public partial class MainWindow : Window
 	void NewSetup_Click(object a_s, RoutedEventArgs a_e)
 	{
 		if (_vm.IsRunning) {
+			return;
+		}
+		if (_vm.MovingData) {
+			_vm.Say(_vm.WhyNotWriting("made")!, "bad");
 			return;
 		}
 		var made = NewSetupDialog.Run(this);

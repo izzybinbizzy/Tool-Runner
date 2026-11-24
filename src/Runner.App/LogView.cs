@@ -29,6 +29,7 @@ public sealed class LogView : RichTextBox
 
 	public string Text => _all.ToString();
 
+	// how many characters it holds now (counted, never by copying the text out)
 	public int Length => _all.Length;
 
 	// where the last search found its words (-1: nowhere yet): the next search goes on after it
@@ -78,6 +79,11 @@ public sealed class LogView : RichTextBox
 		}
 		var cut = _all.Length - a_chars;
 		var first = _lines.FindIndex(l => l.Start >= cut);
+		// no line begins inside the budget (the newest one alone is longer): every line before the newest goes - a line is
+		// never cut in two
+		if (first < 0) {
+			first = _lines.Count - 1;
+		}
 		if (first <= 0) {
 			return;
 		}

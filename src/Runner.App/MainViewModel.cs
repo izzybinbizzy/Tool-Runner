@@ -31,7 +31,7 @@ public sealed partial class StepRow : Observable
 	public bool DropBelow { get; set => Set(ref field, value); }
 
 	// the row in words for a screen reader (the glyph and its color say it to the eye)
-	public string Status => A11y.StepStatus(On, LeftOut, State, Elapsed, Usual, Note, UsesOld);
+	public string Status => A11y.StepStatus(On, LeftOut, State, Elapsed, Usual, Note, UsesOld, Needs);
 
 	public string Glyph => State switch {
 		StepState.Running => Theme.Glyph("Running"),
@@ -981,6 +981,7 @@ public sealed partial class MainViewModel : Observable
 		NotYetSaved("started");
 
 	string? NotYetSaved(string a_done) =>
+		MovingData ? $"Not {a_done}: the program's data is being moved - it starts again when that is done." :
 		Renaming ? $"Not {a_done} yet: the setup is being renamed - try again in a moment." :
 		Saving ? $"Not {a_done} yet: the change before this one is still being saved - try again in a moment." : null;
 
@@ -1274,6 +1275,7 @@ public sealed partial class MainViewModel : Observable
 		}
 		Say($"Queue of {a_files.Count} setups starting - checking the first one ...", "");
 		_startAsked = DateTime.Now;
+		_startPid = int.TryParse(started, System.Globalization.NumberStyles.Integer, InvariantCulture, out var queuePid) ? queuePid : null;
 		_run = null;
 		WantsLook?.Invoke();
 	}
@@ -1484,7 +1486,7 @@ public sealed partial class MainViewModel : Observable
 		if (Setup is not { } setup || setup.Root["steps"] is not JsonArray arr) {
 			return;
 		}
-		if (SetupInUse || Saving || Renaming) {
+		if (SetupInUse || Saving || Renaming || MovingData) {
 			a_row.On = !a_on;
 			Say(SetupInUse ? "Not changed: a run is using this setup right now." : NotYetSaved("changed")!, "bad");
 			return;
@@ -1543,7 +1545,7 @@ public sealed partial class MainViewModel : Observable
 		if (Setup is not { } setup || setup.Root["steps"] is not JsonArray arr) {
 			return;
 		}
-		if (SetupInUse || Saving || Renaming) {
+		if (SetupInUse || Saving || Renaming || MovingData) {
 			Say(SetupInUse ? "Not moved: a run is using this setup right now." : NotYetSaved("moved")!, "bad");
 			return;
 		}
@@ -1600,6 +1602,13 @@ public sealed partial class MainViewModel : Observable
 	// the setup shown is being renamed: its file moves, and no change or save may land in the old one meanwhile (CodeRabbit on
 	// pull request #38) - held from before the last save is waited for until the renamed setup is shown
 	public bool Renaming { get; set; }
+
+	// the program's data folder is being moved (Settings > Keep data through updates): no setup is written or started meanwhile,
+	// so nothing lands in the folder being copied
+	public bool MovingData { get; set; }
+
+	// why a setup may not be written or started at this moment (null: it may)
+	public string? WhyNotWriting(string a_done) => NotYetSaved(a_done);
 
 	// The write of a setup that is under way (finished when none is). A window that closes waits for it, and so does the
 	// program's end: a change the window took is in the file before the program is gone

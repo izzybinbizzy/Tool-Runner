@@ -586,7 +586,7 @@ public static class Runner
 			journal.Ended = DateTime.Now;
 			journal.TrySave();
 			log.Error(journal.Verdict);
-			log.Simple("The run " + journal.Verdict + (left.Count == 0 ? ". Nothing in Mod Organizer was changed." : ". Your mods are as they were."));
+			log.Simple("The run " + journal.Verdict + (left.Count == 0 ? ". Nothing in Mod Organizer was changed." : ". Your mods are as they were."), state == RunState.Stopped ? Level.Warn : Level.Error);
 			return new RunOutcome(state, journal.Verdict, journal.Folder);
 		} catch (Exception e) when (finished) {
 			// after the put-back of a finished run (the final save's own ending, a record the disk refused): the run stays finished
@@ -1205,7 +1205,7 @@ public static class Runner
 					a_ctx.Journal.Notes.Add(lost);
 					a_ctx.Journal.TrySave();
 					a_ctx.Log.Error(lost);
-					a_ctx.Log.Simple("Note: " + lost, Level.Warn);
+					a_ctx.Log.Simple("Note: " + lost, Level.Error);
 					continue;
 				}
 				p.Returning = true;

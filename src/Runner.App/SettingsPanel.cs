@@ -536,8 +536,8 @@ public static class SettingsPanel
 								a_vm.Say("A run is using this setup: add it when the run is done.", "warn");
 								return;
 							}
-							if (a_vm.Saving || a_vm.Renaming) {
-								a_vm.Say("The setup is still being saved or renamed - add it again in a moment.", "warn");
+							if (a_vm.WhyNotWriting("added") is { } notNow) {
+								a_vm.Say(notNow, "warn");
 								return;
 							}
 							var before = (JsonObject)current.Root.DeepClone();
@@ -941,7 +941,7 @@ public static class SettingsPanel
 			keep.Click += async (_, _) => {
 				keep.IsEnabled = false;
 				try {
-					await MoveDataToAppData(a_w, errors);
+					await MoveDataToAppData(a_w, a_vm, errors);
 				} finally {
 					keep.IsEnabled = true;
 				}
@@ -951,13 +951,16 @@ public static class SettingsPanel
 			// the data is there already (this copy could not write beside itself): only a new copy elsewhere would not find it yet
 			var keep = new Button { Content = "Keep data through updates", Style = (Style)a_w.FindResource("Ghost"), Margin = new Thickness(10, 0, 0, 0),
 				ToolTip = "Every copy of Tool Runner on this PC uses this data folder from now on, also a new version unzipped into another folder" };
-			keep.Click += (_, _) => {
+			keep.Click += async (_, _) => {
+				keep.IsEnabled = false;
 				try {
-					DataFolder.Choose(AppPaths.Data);
+					await Task.Run(() => DataFolder.Choose(AppPaths.Data));
 					bar.Children.Remove(keep);
 					a_w.Say("Every copy of Tool Runner on this PC uses this data folder from now on.");
 				} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 					errors.Text = "Not kept: " + e.Message;
+				} finally {
+					keep.IsEnabled = true;
 				}
 			};
 			bar.Children.Add(keep);
@@ -1175,10 +1178,9 @@ public static class SettingsPanel
 		}
 	}
 
-	// everything the program keeps to the Recycle Bin, after a plain list of what goes and what stays; the window closes after,
-	// since the folder it writes into is gone. Refused while a run goes or one still needs its profile put back.
-	// the slow parts (listing every backup folder, recycling) run off the window's thread; the button stays off meanwhile
-	static async Task MoveDataToAppData(MainWindow a_w, TextBlock a_errors)
+	// the program's data into Windows' app-data folder (DataFolder.MoveTo), with the run lock held and no setup written meanwhile;
+	// the program closes after, and starts again on the new folder
+	static async Task MoveDataToAppData(MainWindow a_w, MainViewModel a_vm, TextBlock a_errors)
 	{
 		if (HasChanges && !Ask.Show(a_w, "Settings not saved", "You changed settings and did not press Save. Go on without saving them?", "Go on", "Keep editing")) {
 			return;
@@ -1190,21 +1192,38 @@ public static class SettingsPanel
 			return;
 		}
 		using var hand = a_w.Working("the program's data is being moved");
+		// from here no setup is written, copied or started (MovingData); a change already on its way into its file lands first
+		a_vm.MovingData = true;
+		string? leftOver;
 		try {
-			await Task.Run(() => {
+			while (!MainViewModel.PendingSetupSave.IsCompleted || a_vm.Saving) {
+				try {
+					await MainViewModel.PendingSetupSave.ConfigureAwait(true);
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) {
+				}
+				await Task.Yield();
+			}
+			leftOver = await Task.Run(() => {
 				using var hold = Runner.HoldIfFree() ?? throw new InvalidOperationException("a run is going - move the data when it has ended");
+				string? left = null;
 				// what the window keeps goes along (its sizes and flags), and what it writes from here on goes to the new place
-				UiState.MoveWith(() => DataFolder.MoveTo(AppPaths.Data, to), to);
+				UiState.MoveWith(() => left = DataFolder.MoveTo(AppPaths.Data, to), to);
+				return left;
 			});
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) {
+			a_vm.MovingData = false;
 			a_errors.Text = "Not moved: " + e.Message;
 			return;
 		}
+		// moved: the program runs on the new folder from its next start, so nothing is written here again before it closes
 		HasChanges = false;
-		Ask.Tell(a_w, "Moved", $"Your data is now in {to}. Tool Runner closes now; start it again.", "Close");
+		Ask.Tell(a_w, "Moved", $"Your data is now in {to}." + (leftOver == null ? "" : $"\n\n{leftOver}") + " Tool Runner closes now; start it again.", "Close");
 		Application.Current.Shutdown();
 	}
 
+	// everything the program keeps to the Recycle Bin, after a plain list of what goes and what stays; the window closes after,
+	// since the folder it writes into is gone. Refused while a run goes or one still needs its profile put back.
+	// the slow parts (listing every backup folder, recycling) run off the window's thread; the button stays off meanwhile
 	static async Task RemoveData(MainWindow a_w, TextBlock a_errors)
 	{
 		if (HasChanges && !Ask.Show(a_w, "Settings not saved", "You changed settings and did not press Save. Go on without saving them?", "Go on", "Keep editing")) {
@@ -1324,9 +1343,17 @@ public static class SettingsPanel
 			var browse = new Button { Content = "Browse ...", Style = (Style)Application.Current.FindResource("Ghost"), Margin = new Thickness(8, 0, 0, 0),
 				ToolTip = pick == PathPick.Folder ? "Choose the folder" : "Choose the program" };
 			System.Windows.Automation.AutomationProperties.SetName(browse, "Browse for " + a_label);
-			browse.Click += (_, _) => {
-				if (Browse(Window.GetWindow(browse), pick, pathBox.Text.Trim(), a_label) is { } chosen) {
-					pathBox.Text = chosen;
+			browse.Click += async (_, _) => {
+				browse.IsEnabled = false;
+				try {
+					var now = pathBox.Text.Trim();
+					// (a folder on a network share that is gone can take a while to answer: never on the window's thread)
+					var start = await Task.Run(() => StartFolder(pick, now));
+					if (Browse(Window.GetWindow(browse), pick, start, a_label) is { } chosen) {
+						pathBox.Text = chosen;
+					}
+				} finally {
+					browse.IsEnabled = true;
 				}
 			};
 			var both = new DockPanel();
@@ -1356,13 +1383,21 @@ public static class SettingsPanel
 		_ => null,
 	};
 
-	// Windows' own folder or file picker, opened where the setting points now; the path chosen, or null when it was cancelled
-	static string? Browse(Window? a_owner, PathPick a_pick, string a_now, string a_label)
+	// the folder the picker opens in: where the setting points now, when that folder is there (null: Windows' own choice)
+	static string? StartFolder(PathPick a_pick, string a_now)
 	{
-		var start = a_now == "" ? null : a_pick == PathPick.Folder ? a_now : Path.GetDirectoryName(a_now);
-		if (start != null && !Directory.Exists(start)) {
-			start = null;
+		try {
+			var start = a_now == "" ? null : a_pick == PathPick.Folder ? a_now : Path.GetDirectoryName(a_now);
+			return start != null && Directory.Exists(start) ? start : null;
+		} catch (Exception e) when (e is ArgumentException or PathTooLongException or NotSupportedException) {
+			return null;
 		}
+	}
+
+	// Windows' own folder or file picker, opened in a_start; the path chosen, or null when it was cancelled
+	static string? Browse(Window? a_owner, PathPick a_pick, string? a_start, string a_label)
+	{
+		var start = a_start;
 		if (a_pick == PathPick.Folder) {
 			var d = new Microsoft.Win32.OpenFolderDialog { Title = a_label, InitialDirectory = start ?? "" };
 			return (a_owner == null ? d.ShowDialog() : d.ShowDialog(a_owner)) == true ? d.FolderName : null;
