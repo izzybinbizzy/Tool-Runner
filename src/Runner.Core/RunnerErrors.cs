@@ -51,6 +51,10 @@ public static class RunnerErrors
 			"Open Settings > Run (the commands before and after a run), run that command yourself in a command window to see what it says, and fix or remove it."),
 		E("TR-117", "stopped before anything was changed", "The run stopped before it switched anything: your mods are as they were.",
 			"Read the reason after it. Nothing needs putting back - fix that and start again."),
+		E("TR-118", "holds an entry that is not [plugin, after this plugin]", "The setup file's list of plugin places has an entry without both of its two plugin names.",
+			"Open the setup file in a text editor and give each entry under \"placement\" two plugin names, like [\"MyPatch.esp\", \"Skyrim.esm\"], or take that entry out."),
+		E("TR-119", "the setup could not be saved after PGLite switched", "PGLite is ticked, so the PGPatcher step was switched off, and the setup file would not take that change.",
+			"Close any program that has the setup file open (an editor), make sure the data folder may be written, then start again."),
 
 		// ---- the check before a run: the PC, Mod Organizer, the game
 		E("TR-201", "Mod Organizer has no profile", "The profile this setup was made for is no longer in Mod Organizer (renamed or deleted).",

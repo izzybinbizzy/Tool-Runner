@@ -75,6 +75,11 @@ public static class Runner
 				}
 				held.Add(m);
 			}
+		} catch (UnauthorizedAccessException) {
+			// a lock made by a copy started as administrator cannot be opened from here: that copy holds it, and the lock is not
+			// free - said as for any run that is going, never an error out of every caller
+			new Held(held).Dispose();
+			return null;
 		} catch {
 			// a lock that would not open (access, a bad name) never leaves the ones already taken held
 			new Held(held).Dispose();
@@ -168,7 +173,8 @@ public static class Runner
 		Mo2Instance mo2;
 		try {
 			mo2 = c.Mo2 = Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance);
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) {
+			// (ArgumentException: a folder in Mod Organizer's settings file that is no path Windows takes)
 			return c.No(e.Message);
 		}
 		string? pgNote = null;
@@ -179,7 +185,12 @@ public static class Runner
 		}
 		if (pgNote != null) {
 			if (a_keep) {
-				setup.Save();
+				try {
+					setup.Save();
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+					// the PGPatcher step's switch would hold for this run only and come back at the next: refused, in words
+					return c.No("the setup could not be saved after PGLite switched the PGPatcher step: " + e.Message);
+				}
 			}
 			try {
 				c.Todo = Plan(setup, a_req.Only, a_req.From, a_req.Until);
@@ -1020,6 +1031,11 @@ public static class Runner
 		if (a_keep <= 0) {
 			return removed;
 		}
+		// a record passed over as unreadable may be the run whose backup an undo or a put-back still needs: nothing is removed
+		if (Journal.AnyUnreadable(a_runsDir) is { } bad) {
+			a_log.Warn($"old run backups were not removed: the run record in \"{Path.GetFileName(bad.Folder)}\" could not be read ({bad.Why.Message})");
+			return removed;
+		}
 		var needed = Journal.All(a_runsDir).Where(j => j.Unfinished && !string.IsNullOrWhiteSpace(j.BackupDir)).Select(j => Path.GetFullPath(j.BackupDir)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 		if (a_current != null) {
 			needed.Add(Path.GetFullPath(a_current));
@@ -1576,14 +1592,14 @@ public static class Runner
 		Setup setup;
 		try {
 			setup = Setup.Load(a_j.SetupFile);
-		} catch (Exception e) when (e is IOException or System.Text.Json.JsonException or InvalidDataException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException) {
 			return new RunOutcome(RunState.Failed, "the setup does not read: " + e.Message, a_j.Folder);
 		}
 		// a Mod Organizer that moved, a run folder that cannot be written: said in words, never a crash of the command line
 		Mo2Instance mo2;
 		try {
 			mo2 = Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance);
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) {
 			return new RunOutcome(RunState.Failed, "could not put the profile back: " + e.Message, a_j.Folder);
 		}
 		using var opened = OpenLog(a_j.Folder, out var noLog);
@@ -1630,7 +1646,7 @@ public static class Runner
 			a_j.NeedsRestore = true;
 			a_j.Verdict = "put back except " + string.Join(", ", notBack.Concat(filesNotBack.Select(Path.GetFileName)).OfType<string>().Concat(LinesLeftWords(ctx.LinesLeft))) +
 				(notBack.Count > 0 || filesNotBack.Count > 0 ? " (kept off / in the backup)" : "") + " - press \"Put my profile back\" again once the files are free";
-			a_j.Save();
+			a_j.TrySave();
 			log.Error(a_j.Verdict);
 			return new RunOutcome(RunState.Failed, a_j.Verdict, a_j.Folder);
 		}
@@ -1648,7 +1664,9 @@ public static class Runner
 		a_j.NeedsRestore = false;
 		a_j.Ended ??= DateTime.Now;
 		a_j.Verdict = "put back after an interrupted run - the profile is as it was, with the outputs that finished on" + LostNote(a_j);
-		a_j.Save();
+		if (!a_j.TrySave()) {
+			log.Warn("the profile is back, but the run's record could not be written just now (is the disk full?) - it may still offer to put the profile back");
+		}
 		log.Say(a_j.Verdict);
 		return new RunOutcome(RunState.Restored, a_j.Verdict, a_j.Folder);
 	}
@@ -1669,13 +1687,13 @@ public static class Runner
 		Setup setup;
 		try {
 			setup = Setup.Load(a_j.SetupFile);
-		} catch (Exception e) when (e is IOException or System.Text.Json.JsonException or InvalidDataException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException) {
 			return new RunOutcome(a_j.State, "the setup does not read: " + e.Message, a_j.Folder);
 		}
 		Mo2Instance mo2;
 		try {
 			mo2 = Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance);
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) {
 			return new RunOutcome(a_j.State, "nothing was undone: " + e.Message, a_j.Folder);
 		}
 		using var opened = OpenLog(a_j.Folder, out var noLog);
@@ -1771,7 +1789,10 @@ public static class Runner
 				a_j.State = RunState.Failed;
 				a_j.Verdict = "the undo stopped half way (" + Plain(e) + ") - undo this run again once that is free";
 			}
-			a_j.Save();
+			// (a record the disk refuses here - often the very reason the undo stopped - is said, never a second error)
+			if (!a_j.TrySave()) {
+				log.Warn("the run's record could not be written just now (is the disk full?)");
+			}
 			return new RunOutcome(RunState.Failed, "the run could not be undone whole: " + Plain(e) + " - " + left, a_j.Folder);
 		}
 		a_j.Undone = true;
@@ -1780,7 +1801,9 @@ public static class Runner
 		a_j.UndoMarks = null;
 		a_j.State = RunState.Restored;
 		a_j.Verdict = "undone - your outputs and your mod and plugin lists are as they were before this run (the mods you ticked, unticked or installed since stay as you left them; this run's outputs are in its backup, under \"undone\")";
-		a_j.Save();
+		if (!a_j.TrySave()) {
+			log.Warn("everything is undone, but the run's record could not be written just now (is the disk full?) - it may still read as not undone");
+		}
 		log.Say(a_j.Verdict);
 		if (data != null) {
 			NoteChanges(mo2, data, "undoing " + RunWho(a_j), log);
@@ -1981,7 +2004,12 @@ public static class Runner
 				try {
 					p.WaitForExitAsync(limit.Token).GetAwaiter().GetResult();
 				} catch (OperationCanceledException) {
-					Procs.KillTree(p.Id);
+					// through the handle this run holds: never by its number alone, which may be somebody else's by now
+					try {
+						p.Kill(true);
+					} catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException) {
+						// it had ended already, or one of the programs under it would not go
+					}
 					a_ct.ThrowIfCancellationRequested();
 					throw new StepFailedException(hurried ? $"the {a_when} command did not end within {Said(HookHurry)} of Stop and was ended: {a_command}"
 						: $"the {a_when} command did not end within {Said(HookLimit)}: {a_command}");
@@ -2043,7 +2071,9 @@ public sealed class Commands(Journal a_journal, Action a_cancel) : IDisposable
 	{
 		try {
 			PollOnce();
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ObjectDisposedException) {
+		} catch (Exception) {
+			// this is a timer thread: whatever left it would end the whole program, and a run that ends that way never puts the profile
+			// back. A look that failed is made again at the next beat
 		} finally {
 			lock (_gate) {
 				if (!_disposed) {

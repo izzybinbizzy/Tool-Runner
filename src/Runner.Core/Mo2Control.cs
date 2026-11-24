@@ -156,6 +156,9 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 
 	public List<string> DownloadsInProgress(CancellationToken a_ct = default) => Downloads(Mo2.DownloadsDir, a_ct).Active;
 
+	// what stands for the downloads when their folder could not be looked into
+	public const string UnreadDownloads = "its downloads folder could not be read, so a download may be going";
+
 	// a download MO2 finished but whose "<file>.unfinished" stayed beside it, byte for byte the same: MO2 cannot finish it and
 	// resumes it at every start, so it is no download in progress (one held a whole evening's game line, 2026-11-02) - named,
 	// never deleted (the player removes it, or its row in MO2's Downloads tab)
@@ -164,17 +167,26 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	{
 		var active = new List<string>();
 		var stale = new List<string>();
+		if (string.IsNullOrEmpty(a_dir)) {
+			return (active, stale);
+		}
 		try {
-			if (!Directory.Exists(a_dir)) {
+			string[] stubs;
+			try {
+				stubs = Directory.GetFiles(a_dir, "*.unfinished");
+			} catch (DirectoryNotFoundException) {
+				// truly no folder: nothing downloads (Directory.Exists says "no" for a folder it may not read as well)
 				return (active, stale);
 			}
-			foreach (var stub in Directory.GetFiles(a_dir, "*.unfinished")) {
+			foreach (var stub in stubs) {
 				a_ct.ThrowIfCancellationRequested();
 				var done = stub[..^".unfinished".Length];
 				(File.Exists(done) && SameBytes(stub, done, a_ct) ? stale : active).Add(Path.GetFileName(stub));
 			}
-		} catch (IOException) {
-		} catch (UnauthorizedAccessException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			// a folder that could not be looked into is no answer: "nothing downloads" is not known, and Mod Organizer is never
+			// closed under a download - it counts as one, by its reason
+			active.Add(UnreadDownloads);
 		}
 		return (active, stale);
 	}
@@ -879,13 +891,31 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	// A process just seen starting, held for the step. One that ended in the moment between (a missing DLL, a console tool that
 	// prints how to use it and ends) is said in words - it used to reach the player as .NET's own "Process with an Id of 4412 is
 	// not running"
+	// The process held open from here on: Procs.End ends it through this one handle, so a number that changes hands after it
+	// ended never leads to another program
 	public static Process Open(int a_pid, string a_what)
 	{
+		Process p;
 		try {
-			return Process.GetProcessById(a_pid);
+			p = Process.GetProcessById(a_pid);
 		} catch (ArgumentException) {
 			throw new StepFailedException($"{a_what} started and ended at once - start it yourself once to see what it says");
 		}
+		bool ended;
+		try {
+			_ = p.SafeHandle;
+			ended = p.HasExited;
+		} catch (System.ComponentModel.Win32Exception e) {
+			p.Dispose();
+			throw new StepFailedException($"{a_what} could not be held by this program ({e.Message}) - it may run as administrator while this program does not");
+		} catch (InvalidOperationException) {
+			ended = true;
+		}
+		if (ended) {
+			p.Dispose();
+			throw new StepFailedException($"{a_what} started and ended at once - start it yourself once to see what it says");
+		}
+		return p;
 	}
 
 	// his checklist 479: the tools at a lower priority (the setup's "lowerPriority") - the PC stays smooth while they work; the

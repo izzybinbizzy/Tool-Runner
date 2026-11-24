@@ -202,12 +202,12 @@ public sealed class GrassStep : IStep
 							still.Restart();
 						}
 						if (!File.Exists(flag) && still.Elapsed > TimeSpan.FromMinutes(1)) {
-							Procs.KillTree(g.Id);
+							Procs.End(g);
 							break;
 						}
 						if (File.Exists(flag) && still.Elapsed > TimeSpan.FromMinutes(20)) {
 							a_ctx.Log.Detail("no new grass file for 20 minutes - the game is stuck, starting it again");
-							Procs.KillTree(g.Id);
+							Procs.End(g);
 							break;
 						}
 						a_ctx.Pause(TimeSpan.FromSeconds(10));
@@ -767,7 +767,7 @@ public sealed class ShaderStep : IStep
 						if (!sane && sw.Elapsed > TimeSpan.FromSeconds(45)) {
 							var bad = Regex.Match(text, @"^.*(Incompatible DLL|Remove it to use|disabled itself|will not run).*$", RegexOptions.Multiline);
 							if (bad.Success) {
-								Procs.KillTree(g.Id);
+								Procs.End(g);
 								throw new StepFailedException("the shader mod stood down at start - nothing will compile: " + bad.Value.Trim());
 							}
 							if (n > atLaunch || logFresh && Regex.IsMatch(text, "Loading Settings Complete|Loaded theme|Shader compilation started|ShaderTiming")) {
@@ -780,7 +780,7 @@ public sealed class ShaderStep : IStep
 							} else if (sw.Elapsed > TimeSpan.FromMinutes(a_s.Int("sanity_min", 3))) {
 								// never blamed on the shader mod while something else holds the game: what is on screen is named
 								var shows = InGame.WhatTheGameShows(a_ctx, started);
-								Procs.KillTree(g.Id);
+								Procs.End(g);
 								throw new StepFailedException(shows != "" ?
 									$"the game stopped at something this step does not know - {shows}. Answer or close it in game once (or turn off the mod that shows it), then run again from this step" :
 									$"the shader mod gave no sign of running in {a_s.Int("sanity_min", 3)} minutes (no log, no shaders written) - is it ticked and loading?");
@@ -815,7 +815,7 @@ public sealed class ShaderStep : IStep
 							break;
 						}
 						if (total.Elapsed > a_s.Deadline(180)) {
-							Procs.KillTree(g.Id);
+							Procs.End(g);
 							throw new StepFailedException($"the shader cache passed its {a_s.Deadline(180).TotalMinutes:0} minute limit");
 						}
 						// a Stop ends the wait at once (the game is ended by the stop itself)
@@ -857,8 +857,13 @@ public sealed class ShaderStep : IStep
 			StepKit.MarkReplaced(a_ctx, c.OutputMod);
 		}
 		// stamped against the profile as it is put back, the state the next freshness check reads - never the compile's own switches
-		Files.WriteAtomic(StampFile(a_ctx.Mo2, c), new JsonObject { ["fingerprint"] = Fingerprint(a_ctx.Mo2, c, a_ctx.Profile, a_otherCaches, a_b.Layers), ["built"] = DateTime.Now.ToString("O"), ["files"] = count,
-			["verified"] = verified, ["winners"] = true, ["settings"] = StampSettings }.ToJsonString());
+		// the cache is built and kept by now: a stamp that cannot be written only means it is built again next time
+		try {
+			Files.WriteAtomic(StampFile(a_ctx.Mo2, c), new JsonObject { ["fingerprint"] = Fingerprint(a_ctx.Mo2, c, a_ctx.Profile, a_otherCaches, a_b.Layers), ["built"] = DateTime.Now.ToString("O"), ["files"] = count,
+				["verified"] = verified, ["winners"] = true, ["settings"] = StampSettings }.ToJsonString());
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			a_ctx.Log.Warn($"the {c.ShaderMod} cache is built, but its record could not be written ({e.Message}) - the next run builds it again");
+		}
 		a_ctx.Note($"shaders ({c.OutputMod}): {result}");
 	}
 }

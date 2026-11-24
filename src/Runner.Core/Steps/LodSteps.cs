@@ -425,14 +425,19 @@ public static class Cli
 				}
 			});
 		} catch {
-			Procs.KillTree(p.Id);
+			Procs.End(p);
 			throw;
 		} finally {
 			string text;
 			lock (sb) {
 				text = sb.ToString();
 			}
-			Files.WriteAtomic(a_outFile, text);
+			// a write that fails here must not hide why the step ended
+			try {
+				Files.WriteAtomic(a_outFile, text);
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+				a_ctx.Log.Warn($"{Path.GetFileName(a_exe)}'s output could not be kept in {a_outFile} ({e.Message})");
+			}
 		}
 		// The last output lines: both streams read to their end (a wait on the process alone returns the moment it has ended,
 		// before its last lines have arrived - a finished tool's "Done" line was then missed). Never for long: a child process

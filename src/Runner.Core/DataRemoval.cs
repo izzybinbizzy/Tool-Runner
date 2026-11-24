@@ -15,7 +15,8 @@ public static class DataRemoval
 	{
 		var all = Journal.All(Runner.RunsDir(a_dataDir)).ToList();
 		return all.Any(j => j.Live && j.OwnerAlive) || QueueRun.Read(a_dataDir) != null ? "a run is going - wait for it to end" :
-			all.Any(j => j.Unfinished) ? "a run did not finish - put your profile back first, or its switched-off outputs stay off" : null;
+			all.Any(j => j.Unfinished) ? "a run did not finish - put your profile back first, or its switched-off outputs stay off" :
+			Journal.AnyUnreadable(Runner.RunsDir(a_dataDir)) is { } bad ? $"the run record in \"{Path.GetFileName(bad.Folder)}\" could not be read ({bad.Why.Message}) - it may be a run that still needs your profile put back" : null;
 	}
 
 	public static Plan Make(string a_dataDir, bool a_keepSetups)

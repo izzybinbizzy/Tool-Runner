@@ -692,8 +692,9 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 					if (!mastersCache.TryGetValue(full, out var ms)) {
 						try {
 							ms = Plugins.Masters(full);
-						} catch (IOException) {
-							ms = [];
+						} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+							// a plugin whose masters are not known may need one that goes off: it is never left on as if it needed none
+							throw new IOException($"the plugin {p} of the mod {name} could not be read to see which plugins it needs ({e.Message}) - close whatever holds it, then start again", e);
 						}
 						mastersCache[full] = ms;
 					}

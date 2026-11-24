@@ -51,8 +51,15 @@ public sealed class Setup
 		new Dictionary<string, string>();
 
 	public IReadOnlyList<Profile.PlaceRule> Placement =>
-		(Root["placement"] as JsonArray)?.OfType<JsonArray>().Where(a => a.Count >= 2)
+		// (a setup file comes from anywhere: an entry whose two names are not both given is no rule - a null there threw at the
+		// end of the put-back, the one place this is read; the check names such an entry)
+		(Root["placement"] as JsonArray)?.OfType<JsonArray>().Where(IsPlace)
 			.Select(a => new Profile.PlaceRule(a[0]!.ToString(), a[1]!.ToString(), a.Count > 2 && a[2]?.ToString() == "active")).ToList() ?? [];
+
+	// a plugin place: two plugin names, each a string with something in it (a number, a true or "" names no plugin)
+	static bool IsPlace(JsonArray a_entry) => a_entry.Count >= 2 && PluginName(a_entry[0]) && PluginName(a_entry[1]);
+
+	static bool PluginName(JsonNode? a_n) => a_n is JsonValue v && v.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s);
 
 	// UseOld: the step is not run and the output it made before is used (OldOutput) - it counts only for a step that is on
 	public sealed record StepEntry(string Key, bool On, JsonObject Settings, bool UseOld = false);
@@ -202,6 +209,9 @@ public sealed class Setup
 		// a line put into the mod list and everything in that folder moved into the run's backup. Only a plain folder name is a mod
 		foreach (var (where, name) in ModNames().Where(m => !PlainName(m.Name)).DistinctBy(m => m.Name).Take(5)) {
 			p.Add($"{where} is not a mod's name (one plain folder name: no \\ / : and no \"..\"): {name}");
+		}
+		if (Root["placement"] is JsonArray places && places.Any(e => e is not JsonArray a || !IsPlace(a))) {
+			p.Add("the setup's \"placement\" holds an entry that is not [plugin, after this plugin]");
 		}
 		return p;
 	}

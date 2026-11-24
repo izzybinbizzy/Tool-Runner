@@ -373,6 +373,63 @@ public static partial class Procs
 		return outList;
 	}
 
+	// The same tree, each process held open from the moment it is listed, with the start time read through that hold: while
+	// the holds stand no number of it can change hands, so whoever ends them by number and start time ends these very
+	// processes. A number another process took between the list and its hold is left out - listed again with the holds in
+	// place, it no longer stands under the parent it was listed under. The caller lets every hold go.
+	public static List<(int Pid, DateTime Started, IDisposable Hold)> HeldTree(int a_root)
+	{
+		var before = Snapshot().ToDictionary(e => e.Pid, e => e.Parent);
+		var held = new Dictionary<int, (DateTime Started, IDisposable Hold)>();
+		try {
+			foreach (var pid in Tree(a_root)) {
+				if (Hold(pid) is { } h) {
+					held[pid] = h;
+				}
+			}
+			var after = Snapshot().ToDictionary(e => e.Pid, e => e.Parent);
+			var kept = new List<(int, DateTime, IDisposable)>();
+			if (!held.TryGetValue(a_root, out var root)) {
+				return kept;
+			}
+			kept.Add((a_root, root.Started, root.Hold));
+			var keptPids = new HashSet<int> { a_root };
+			// parents before children: a child stays only under a parent that stayed, listed under it both times, started after it
+			for (var grew = true; grew;) {
+				grew = false;
+				foreach (var (pid, (started, hold)) in held) {
+					if (keptPids.Contains(pid) || !before.TryGetValue(pid, out var parent) || !after.TryGetValue(pid, out var parentNow) ||
+					    parent != parentNow || !keptPids.Contains(parent) || started < held[parent].Started) {
+						continue;
+					}
+					kept.Add((pid, started, hold));
+					keptPids.Add(pid);
+					grew = true;
+				}
+			}
+			foreach (var (_, (_, hold)) in held.Where(h => !keptPids.Contains(h.Key))) {
+				hold.Dispose();
+			}
+			return kept;
+		} catch {
+			foreach (var (_, hold) in held.Values) {
+				hold.Dispose();
+			}
+			throw;
+		}
+	}
+
+	// a process held open with its start time read through the hold (null: gone, ended, or closed to this user)
+	static (DateTime Started, IDisposable Hold)? Hold(int a_pid)
+	{
+		var h = new Microsoft.Win32.SafeHandles.SafeProcessHandle(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, false, (uint)a_pid), true);
+		if (!h.IsInvalid && WaitForSingleObject(h.DangerousGetHandle(), 0) != 0 && GetProcessTimes(h.DangerousGetHandle(), out var created, out _, out _, out _)) {
+			return (DateTime.FromFileTimeUtc(created), h);
+		}
+		h.Dispose();
+		return null;
+	}
+
 	public static TimeSpan Cpu(int a_pid)
 	{
 		try {
@@ -420,6 +477,20 @@ public static partial class Procs
 	// how much CPU the children used since the last reading (a new child counts whole)
 	public static TimeSpan CpuGain(IReadOnlyDictionary<int, TimeSpan> a_before, IReadOnlyDictionary<int, TimeSpan> a_now) =>
 		a_now.Aggregate(TimeSpan.Zero, (sum, kv) => sum + (kv.Value - a_before.GetValueOrDefault(kv.Key) is { Ticks: > 0 } d ? d : TimeSpan.Zero));
+
+	// A process this run holds the Process of, ended through that handle with all it started: its number may be another's by
+	// now, the handle is not
+	public static void End(Process a_p)
+	{
+		try {
+			a_p.Kill(true);
+			a_p.WaitForExit(10000);
+		} catch (InvalidOperationException) {
+		} catch (Win32Exception) {
+		} catch (AggregateException) {
+			// the process itself is ended first; one of the programs under it would not go
+		}
+	}
 
 	public static void KillTree(int a_root)
 	{
