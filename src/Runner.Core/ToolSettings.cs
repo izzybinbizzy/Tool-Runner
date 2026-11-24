@@ -220,6 +220,13 @@ public static partial class ToolSettings
 	// the mod "Learn its settings" switched on for the tool's window, named until it is off again: a crash in between leaves this for the next look
 	public static string SwitchRecord(Setup a_setup) => a_setup.File + ".tool on";
 
+	// The mod switched on for the tool's window stays on after a Stop only while the tool may be open under it: once the tool
+	// was started. A Stop before that puts it back
+	public static bool KeepsModOn(bool a_toolStarted, bool a_stopped) => a_toolStarted && a_stopped;
+
+	// how long putting that mod back may wait for Mod Organizer to close after a Stop (the offline tests shorten it)
+	public static TimeSpan PutBackWait { get; set; } = TimeSpan.FromSeconds(30);
+
 	// what a record holds: the mod, then the Mod Organizer and the profile it was switched on in (an older record holds the mod
 	// alone - it is its own setup's)
 	public static string SwitchText(string a_mod, Mo2Instance a_mo2, string a_profile) => a_mod + "\n" + a_mo2.BaseDir + "\n" + a_profile;
@@ -324,8 +331,10 @@ public static partial class ToolSettings
 			Files.WriteAtomic(SwitchRecord(a_setup), SwitchText(toolMod, mo2, a_setup.Profile));
 			profile.SetMods([toolMod], [], a_log);
 		}
+		var started = false;
 		try {
 			using var proc = control.RunExecutable(title, image, null, a_ct, TimeSpan.FromMinutes(5));
+			started = true;
 			a_log.Say($"{tool} is open - set it up as you want it, save, and close it");
 			a_opened?.Invoke();
 			while (!proc.HasExited) {
@@ -340,16 +349,19 @@ public static partial class ToolSettings
 			}
 		} finally {
 			try {
-				if (toolMod != null && a_ct.IsCancellationRequested) {
+				if (toolMod != null && KeepsModOn(started, a_ct.IsCancellationRequested)) {
 					// the player stopped waiting: closing Mod Organizer now would wait on the very tool still open under it. The
 					// mod stays on record (SwitchRecord) and the next run, or the next tool set up, switches it off
 					a_log.Warn($"the mod \"{toolMod}\" stays on until the next run or the next tool set up here - or untick it in Mod Organizer");
 					a_stillOn?.Invoke(toolMod);
 				} else if (toolMod != null) {
-					// one that cannot go back is named, never left unsaid. A Stop pressed during this close ends its wait (a game or a
-					// download can hold it for half an hour): the mod stays on record, as above (CodeRabbit on pull request #39)
+					// One that cannot go back is named, never left unsaid. A Stop pressed during this close ends its wait (a game or a
+					// download can hold it for half an hour): the mod stays on record, as above. A Stop that came before the tool was
+					// up leaves nothing open that needs the mod: it goes back with a wait of its own, PutBackWait at most, so the
+					// Stop is never held up by Mod Organizer
+					using var quick = a_ct.IsCancellationRequested ? new CancellationTokenSource(PutBackWait) : null;
 					try {
-						control.Close(null, a_ct);
+						control.Close(quick == null ? null : PutBackWait, quick?.Token ?? a_ct);
 						profile.SetMods([], [toolMod], a_log);
 						Files.Delete(SwitchRecord(a_setup));
 					} catch (OperationCanceledException) {

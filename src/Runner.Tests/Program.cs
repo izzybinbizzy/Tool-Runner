@@ -8271,6 +8271,10 @@ public static class Program
 		Check(!ProfileOf(f).IsOn("Replaced"), "off again, and it stays off after the put-back");
 		Check(!File.Exists(ToolSettings.SwitchRecord(setup)), "the record is gone");
 		Check(ProfileOf(f).IsOn("Base Mod"), "nothing else moved");
+		// a Stop while the tool may be open under the mod keeps it on; a Stop before the tool was started, or no Stop, puts it back
+		Check(ToolSettings.KeepsModOn(true, true), "stopped with the tool started: the mod stays on, on record");
+		Check(!ToolSettings.KeepsModOn(false, true), "stopped before the tool was started: the mod goes back");
+		Check(!ToolSettings.KeepsModOn(true, false) && !ToolSettings.KeepsModOn(false, false), "no Stop: the mod goes back");
 	}
 
 	static void T_TheSavesAreCopiedBeforeAnInGameStep()
