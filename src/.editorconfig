@@ -1,4 +1,4 @@
-# The resource rules a long-running Windows program lives by (the memory audit of 2026-11-07): an object that holds a Windows
+# The resource rules a long-running Windows program lives by: an object that holds a Windows
 # handle, a file, a process or a COM reference is disposed on every path, a type that owns one is disposable itself and
 # releases it, and Dispose follows the standard pattern. TreatWarningsAsErrors turns each into a build error.
 root = true

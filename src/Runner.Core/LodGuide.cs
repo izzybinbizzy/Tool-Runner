@@ -1,8 +1,7 @@
 namespace ToolRunner;
 
-// His lesson of 2026-10-27 (checklist 271, the grass LOD of a run looked too bright): "it needs to be able to tell what the proper
-// settings are per mod, maybe linking to the modpage or whatever page hosts the most accurate/up to date lod information (it can
-// vary wildly by mod so that needs to be accounted for)". The runner never guesses another author's values: it finds the ticked
+// The right LOD settings differ from mod to mod, and each mod's own page says them (LOD built with the wrong ones comes out too
+// bright, too dark or missing). The runner never guesses another author's values: it finds the ticked
 // mods whose plugins change what a LOD tool builds from (grass, trees, landscape textures - read off each plugin's own record
 // groups) and points the player at each one's own page, and at the LOD tool's own documentation, before its settings are set.
 public static class LodGuide
@@ -16,14 +15,14 @@ public static class LodGuide
 	};
 
 	// the kinds each LOD step builds from: where grass grows is a landscape texture's own grass list (LTEX), so a mod that only
-	// edits those changes the grass too (the fourth review, L4). A cell's landscape (LAND) is left out of the grass steps: nearly
+	// edits those changes the grass too. A cell's landscape (LAND) is left out of the grass steps: nearly
 	// every worldspace mod has one, and listing them all would hide the grass mods
 	static readonly Dictionary<string, string[]> ForStep = new(StringComparer.Ordinal) {
 		["grass"] = ["GRAS", "LTEX"], ["texgen"] = ["GRAS", "TREE"], ["dyndolod"] = ["GRAS", "LTEX", "TREE"], ["anvillod"] = ["GRAS", "LTEX", "TREE"],
 		["treelodgen"] = ["TREE"], ["xlodgen"] = ["LTEX", "LAND"],
 	};
 
-	// the LOD tools' own documentation (read 2026-10-27)
+	// the LOD tools' own documentation
 	public static readonly Dictionary<string, (string Title, string Url)[]> Docs = new(StringComparer.Ordinal) {
 		["grass"] = [("DynDOLOD's help on grass LOD", "https://dyndolod.info/Help/Grass-LOD")],
 		["texgen"] = [("DynDOLOD's help on grass LOD", "https://dyndolod.info/Help/Grass-LOD"), ("DynDOLOD's generation instructions", "https://dyndolod.info/Generation-Instructions")],
@@ -43,8 +42,8 @@ public static class LodGuide
 		new Profile(a_mo2, a_setup.Profile, () => false).States().Any(kv => kv.Value == '+' &&
 			File.Exists(Path.Combine(a_mo2.ModDir(kv.Key), "SKSE", "Plugins", "CommunityShaders.dll")));
 
-	// the step's help pages for THIS setup: on a Community Shaders setup DynDOLOD's own page for it comes first (mo2-setup's
-	// finding 2026-10-27: there the far grass is made from DynDOLOD's Grass Optimizations assets, not grass LOD billboards)
+	// the step's help pages for THIS setup: on a Community Shaders setup DynDOLOD's own page for it comes first (there the
+	// far grass is made from DynDOLOD's Grass Optimizations assets, not grass LOD billboards)
 	public static List<(string Title, string Url)> DocsFor(Setup a_setup, Mo2Instance a_mo2, string a_step)
 	{
 		var outList = Docs.GetValueOrDefault(a_step, []).ToList();

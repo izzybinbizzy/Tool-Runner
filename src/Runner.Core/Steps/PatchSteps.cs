@@ -105,7 +105,7 @@ public abstract class LauncherStep : IStep
 	protected virtual string? OutputPlugin => null;
 
 	// the names its start button may carry: its own words in every language it ships ("run" > "generate" in each translation file
-	// - his checklist 439: a tool set to another language is understood too), then the English ones
+	// - a tool set to another language is understood too), then the English ones
 	public static List<string> StartButtonNames(string? a_translations, IEnumerable<string> a_english)
 	{
 		var names = new List<string>();
@@ -196,7 +196,7 @@ public abstract class LauncherStep : IStep
 				}
 				a_ctx.Activity(Key, name + " is patching");
 				// done = its button usable again (its run ended) or it closed; a box during a run is none it shows on its own way, so
-				// it is named and left for the player (his 2026-11-06 rule: an unknown box is never read as something known)
+				// it is named and left for the player (an unknown box is never read as something known)
 				Waits.Tool(a_ctx, Key, proc, a_s.Deadline(60), () => {
 					UnknownBox(name, image);
 					return Exited(proc) || Uia.Usable(go) ? Waits.Poll.Done : Waits.Poll.Wait;
@@ -408,7 +408,7 @@ public sealed class SynthesisStep : IStep
 				Press(a_ctx, Win, proc);
 				a_ctx.Activity(Key, "Synthesis is running its patchers");
 				// judged by its window (its timers and patcher states change while it works), never by its CPU alone; a patcher
-				// that failed is read off Synthesis's own log the moment its run ends (2026-10-27: one failed, no Synthesis.esp)
+				// that failed is read off Synthesis's own log the moment its run ends (one failed, no Synthesis.esp)
 				DateTime? exitedAt = null;
 				Waits.Tool(a_ctx, Key, proc, a_s.Deadline(90), () => {
 					var fresh = new[] { espOw, espMod }.FirstOrDefault(p => File.Exists(p) && File.GetLastWriteTimeUtc(p) > t0);
@@ -466,7 +466,7 @@ public sealed class SynthesisStep : IStep
 
 	public const string GoRx = @"^GoButton|\bRun\b|RunPatchers";
 
-	// its Run button: an enabled one on screen (it has two "GoButton"s - 2026-10-27 the first one pressed nothing and the window
+	// its Run button: an enabled one on screen (it has two "GoButton"s - the first one pressed nothing and the window
 	// sat on its main screen), pressed, and the run proven started by its window changing; else the other one, else the step fails
 	// naming what the window shows - never a window left open doing nothing
 	static void Press(RunContext a_ctx, Func<System.Windows.Automation.AutomationElement> a_w, System.Diagnostics.Process a_proc)
@@ -500,7 +500,7 @@ public sealed class SynthesisStep : IStep
 			go = Buttons();
 		}
 		foreach (var b in go) {
-			// the whole window, so a change far down a big pipeline still counts as the start (the fifth review, N3)
+			// the whole window, so a change far down a big pipeline still counts as the start
 			var before = Uia.TextOf(a_w(), int.MaxValue);
 			if (!Uia.Press(b)) {
 				continue;
@@ -572,7 +572,7 @@ public sealed class SynthesisStep : IStep
 		}
 	}
 
-	// Synthesis shows a blocking error for a few seconds while it loads its settings (2026-10-27 19:29: "no enabled groups to run",
+	// Synthesis shows a blocking error for a few seconds while it loads its settings ("no enabled groups to run",
 	// then "No global error" 5 s later), so only one that stays 30 s is real
 	public static bool StillBlocked(ref DateTime? a_since, bool a_blockedNow, DateTime a_now)
 	{
@@ -618,7 +618,7 @@ public sealed class SynthesisStep : IStep
 }
 
 // Pandora Behaviour Engine+ through MO2 with --auto_run --auto_close. Its command line's output option was never read (4.4,
-// read in its source 2026-10-06): the output folder is games.SkyrimSE.outputPath in the Settings.json MO2 shows it (the
+// read in its source): the output folder is games.SkyrimSE.outputPath in the Settings.json MO2 shows it (the
 // overwrite copy wins), so that file points at an empty folder for the run and goes back byte for byte after.
 public sealed class PandoraStep : IStep
 {

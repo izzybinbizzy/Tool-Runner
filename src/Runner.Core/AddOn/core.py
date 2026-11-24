@@ -43,8 +43,8 @@ def is_preset_file(rel_lower):
 
 
 # ENB's own program files (and the ini it writes for itself on its first start). One of these turning up in overwrite\Root
-# for a profile that deploys no ENB is never that profile's change: 2026-10-08 22:32 an ENB TEST run's leftovers were swept in
-# while the RELight profile ran and were filed into "Root Changes - RELight - Spell Addon", which then started ENB on RELight.
+# for a profile that deploys no ENB is never that profile's change: a test run's ENB leftovers were once swept in
+# while another profile ran and were filed into that profile's own mod, which then started ENB there.
 ENB_FILES = {"d3d11.dll", "dxgi.dll", "d3dcompiler_46e.dll", "enbhost.exe", "enblocal.ini"}
 LEFTOVERS = "Root Leftovers"   # one mod, ticked nowhere; its files sit OUTSIDE Root\ so Root Builder never deploys them
 
@@ -63,16 +63,16 @@ def path_safe(text):
 
 
 # A run of Tool Runner holds this lock: it may go on with nobody at the PC, and a question here would stop it.
-SUP_RUN_LOCK = "Local\\Tool Runner run"
+RUN_LOCK = "Local\\Tool Runner run"
 
 
-def sup_running():
+def runner_running():
     kernel32 = ctypes.WinDLL("kernel32")
     kernel32.OpenMutexW.restype = wintypes.HANDLE
     kernel32.OpenMutexW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     synchronize = 0x00100000
-    handle = kernel32.OpenMutexW(synchronize, False, SUP_RUN_LOCK)
+    handle = kernel32.OpenMutexW(synchronize, False, RUN_LOCK)
     if handle:
         kernel32.CloseHandle(handle)
         return True
@@ -138,7 +138,7 @@ def remove_empty_dirs(root, keep_root=True):
 
 
 # While any of these runs, the game folder holds a live deploy (Root Builder's Clear cannot remove a DLL the game
-# still has loaded - 2026-10-06 20:05 it cleared with SkyrimSE.exe alive and d3d11.dll, d3dcompiler_46e.dll and
+# still has loaded - it once cleared with SkyrimSE.exe alive and d3d11.dll, d3dcompiler_46e.dll and
 # KiLoaderSatelliteENB.dllplugin stayed behind, which the check then called strays).
 GAME_IMAGES = ("SkyrimSE.exe", "skse64_loader.exe")
 
@@ -264,7 +264,7 @@ class Core:
             return "Root Builder has a build deployed"
         if self.running():
             return "the game is running"
-        if sup_running():
+        if runner_running():
             return "a Tool Runner run is going"
         return None
 
@@ -286,7 +286,7 @@ class Core:
 
     # ---- 1: after a run, overwrite\Root -> the profile's own mod -----------------------------
     def leftover_reason(self, rel, path, ticked_mods, own_mod):
-        """Why a new overwrite\\Root file is NOT this profile's change, or None (1.2.0, 2026-10-08). `ticked_mods` None =
+        """Why a new overwrite\\Root file is NOT this profile's change, or None (1.2.0). `ticked_mods` None =
         unknown: only the copy rule applies."""
         low = rel.lower()
         for mod_dir in self.mods.iterdir() if self.mods.is_dir() else ():
@@ -438,9 +438,9 @@ class Core:
     def copies_of_mod_roots(self, files):
         """{rel: mod name} for the game-folder files that are byte copies of a file at the same place in ANY mod's Root
         folder, ticked or not (1.3.0). Such a file is a deploy Root Builder could not clear - a game that was killed held it
-        open - never a preset placed by hand. 2026-10-12 02:16: a stopped test left DXVK's d3d11.dll + dxgi.dll (an unticked
+        open - never a preset placed by hand. A stopped test once left DXVK's d3d11.dll + dxgi.dll (an unticked
         test mod's Root files) in the game folder; this add-on offered them as a preset, they were moved into a new mod and
-        ticked in the playing profile, and every start of it then loaded DXVK (the frame generation of his shader mod could
+        ticked in the playing profile, and every start of it then loaded DXVK (the frame generation of the shader mod could
         not start and the game closed)."""
         out = {}
         mod_dirs = [d for d in self.mods.iterdir() if d.is_dir() and d.name != LEFTOVERS] if self.mods.is_dir() else []

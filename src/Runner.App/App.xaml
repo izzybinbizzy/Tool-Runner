@@ -10,7 +10,7 @@
       <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="pack://application:,,,/Tool Runner;component/AccentLight.xaml"/>
       </ResourceDictionary.MergedDictionaries>
-      <!-- the default look, Daylight (white and blue - his pick); every color is a token a theme may change. These values are
+      <!-- the default look, Daylight (white and blue); every color is a token a theme may change. These values are
            Themes\Daylight.json's: a test holds the two equal -->
       <Color x:Key="BgColor">#E9EEF5</Color>
       <Color x:Key="PanelColor">#FFFFFF</Color>
@@ -222,7 +222,7 @@
       <Style x:Key="Danger" TargetType="Button" BasedOn="{StaticResource Ghost}">
         <Setter Property="Foreground" Value="{DynamicResource Bad}"/>
       </Style>
-      <!-- a scroll bar BESIDE what it scrolls, never over it (his catch 2026-11-22: the Fluent theme lays its scroll bar over a
+      <!-- a scroll bar BESIDE what it scrolls, never over it (the Fluent theme lays its scroll bar over a
            list's rows). The bar keeps its own look; its strip keeps one width, so a bar that widens under the pointer does not
            move the rows, and a list with nothing to scroll has no strip at all -->
       <Style TargetType="ScrollViewer">

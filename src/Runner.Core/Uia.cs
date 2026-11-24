@@ -10,7 +10,7 @@ public static class Uia
 
 	// an element that went away while it was read: UI Automation says so with ElementNotAvailableException, or - while a
 	// window is being destroyed - with a raw COM error (xLODGen's options window closing after Generate threw E_UNEXPECTED
-	// at the real-MO2 trial of 2026-10-27 20:26, and the step failed on it)
+	// in a real run, and the step failed on it)
 	// - only the COM errors that mean "that window / element is gone"; any other provider failure is a real fault and is reported
 	public static bool Gone(Exception a_e) => a_e is ElementNotAvailableException ||
 		a_e is System.Runtime.InteropServices.COMException c && GoneCodes.Contains(unchecked((uint)c.HResult));
@@ -95,7 +95,7 @@ public static class Uia
 	}
 
 	// a real button with one of these names (never the title bar's Close / Minimize - pressing a progress box's title-bar Close
-	// every 5 s was a 2026-09-30 bug)
+	// every 5 s closed the box under its tool)
 	public static AutomationElement? Button(AutomationElement a_root, params string[] a_names)
 	{
 		var buttons = All(a_root, ControlType.Button).Where(b => !InTitleBar(b)).ToList();
@@ -210,7 +210,7 @@ public static class Uia
 	}
 
 	// a Win32 button gets a posted click message (Invoke can wait inside a click handler that runs a modal loop, and is refused
-	// on a hidden desktop - measured 2026-10-27); any other button Invoke, else the message. Never the real mouse.
+	// on a hidden desktop - measured); any other button Invoke, else the message. Never the real mouse.
 	public static bool Press(AutomationElement a_e)
 	{
 		try {
@@ -290,7 +290,7 @@ public static class Uia
 			var cls = Native.ClassName(h);
 			// Only a window that can be a box, or hold one, becomes a UI Automation element: the message-box classes, and Qt
 			// windows (a Qt box shows inside its window's tree). Every other window is left out, a tool's main window and the
-			// windows it owns alike: .NET's UI Automation client keeps every element it ever made (measured 2026-11-07: about
+			// windows it owns alike: .NET's UI Automation client keeps every element it ever made (measured: about
 			// 1 KB a call, growing without end, when every window of a tool was read every two seconds). An owned window used to
 			// be let in here and then never became a box (a box is told by its class below), so each look made its element for
 			// nothing - OwnedWindows names those without one

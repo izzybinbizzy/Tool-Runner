@@ -193,7 +193,7 @@ public sealed partial class MainViewModel : Observable
 	public string RetryText => RetryFrom == "" ? "" : "Run _again from " + StepCatalog.Name(RetryFrom);
 	// a queue of setups going: which one runs ("" = none)
 	public string QueueText { get; set => Set(ref field, value); } = "";
-	// his checklist 450: the picked step's last run and what it did, and the steps out of date (hidden while a run goes - the log
+	// the picked step's last run and what it did, and the steps out of date (hidden while a run goes - the log
 	// is what matters then)
 	public string LastCardTitle { get; set => Set(ref field, value); } = "";
 	public string LastCardText => IsRunning ? "" : _lastCard;
@@ -273,7 +273,7 @@ public sealed partial class MainViewModel : Observable
 	public Cmd CheckCommand => field ??= new(() => _ = RunCheck());
 	public Cmd RetryCommand => field ??= new(() => _ = RunRetry());
 
-	// "A new version is out" (his checklist 471): the banner's text ("" = nothing to tell), its download page and "Not now"
+	// "A new version is out": the banner's text ("" = nothing to tell), its download page and "Not now"
 	public string NewVersion { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(CanInstallNew)); } } = "";
 	string _newVersion = "";
 	// the program can take that version and install it itself: while its newest version comes from its own GitHub release
@@ -810,7 +810,7 @@ public sealed partial class MainViewModel : Observable
 		};
 		var elapsed = (_run.Ended ?? DateTime.Now) - _run.Started;
 		Clock = Long(elapsed);
-		// the running setup's own usual times, whichever setup is picked in the list (CodeRabbit on pull request #38)
+		// the running setup's own usual times, whichever setup is picked in the list
 		var usual = RunUsual(_run, runs);
 		var ahead = _run.Steps.Where(s => s.State is StepState.Pending or StepState.Running).ToList();
 		var leftT = ahead.Select(s => usual.TryGetValue(s.Key, out var t) ? (s.State == StepState.Running && s.Started != null ? Max(TimeSpan.Zero, t - (DateTime.Now - s.Started.Value)) : t) : TimeSpan.Zero)
@@ -858,7 +858,7 @@ public sealed partial class MainViewModel : Observable
 			Alert?.Invoke(WaitingTitle, Waiting);
 			_remindedAt = DateTime.Now;
 		} else if (Waiting != "" && ReminderDue(ReminderMinutes(_run), _remindedAt, DateTime.Now)) {
-			// his checklist 463: the same step still waits - said again, every so many minutes as the setup asks
+			// the same step still waits - said again, every so many minutes as the setup asks
 			Alert?.Invoke(WaitingInGame ? "Still your turn in the game" : "The run still waits for you", Waiting);
 			_remindedAt = DateTime.Now;
 		}
@@ -922,13 +922,13 @@ public sealed partial class MainViewModel : Observable
 	// ---------------------------------------------------------------- actions
 	void Start() => _ = StartWith(null, null, null);
 
-	// his checklist 270: what the run will do, shown before anything changes (the setup's "previewBeforeRun", on unless switched
+	// what the run will do, shown before anything changes (the setup's "previewBeforeRun", on unless switched
 	// off); the window answers it (true = start). Title, text, and the button that starts - null when the start would be refused:
 	// the box then only tells
 	public Func<string, string, string?, bool>? ConfirmRun { get; set; }
 	bool _previewing;
 
-	// His word of 2026-11-21: before a setup's first run the player is shown its tools, each to set up by hand in its own
+	// Before a setup's first run the player is shown its tools, each to set up by hand in its own
 	// window. The window answers it (true = go on to the run, false = not now).
 	public Func<Setup, IReadOnlyList<ToolSettings.ToSet>, bool>? OfferTools { get; set; }
 
@@ -1046,7 +1046,7 @@ public sealed partial class MainViewModel : Observable
 			Setup setup;
 			try {
 				// the preview is built from the file's bytes as read now - the very bytes compared before the start (the
-				// window's own copy can be older than the file - the fourth review, M4)
+				// window's own copy can be older than the file)
 				shown = Files.ReadShared(file);
 				setup = Setup.Parse(shown, file);
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException) {
@@ -1380,7 +1380,7 @@ public sealed partial class MainViewModel : Observable
 		LoadHistory();
 	}
 
-	// his checklist 454: the setup's last run undone, from the History drawer (its own copy of the record, as Restore)
+	// the setup's last run undone, from the History drawer (its own copy of the record, as Restore)
 	public async Task Undo(string a_folder)
 	{
 		if (Restoring) {
@@ -1432,7 +1432,7 @@ public sealed partial class MainViewModel : Observable
 			_checkedClean = blocks == 0;
 			ShowGuide();
 			Say(blocks > 0 ? $"{blocks} thing(s) would stop the run." : found.Count > 0 ? "Ready - with notes." : "Ready - everything checks out.", blocks > 0 ? "bad" : "good");
-			// his list of 2026-11-16: the check also looks for updates - each tool's and the program's own. Their pages are
+			// the check also looks for updates - each tool's and the program's own. Their pages are
 			// asked only on this press; a setup can switch it off (Settings > Tools)
 			if (!App.Headless && ToolRunner.Setup.Bool(setup.Root, "checkUpdates") != false) {
 				await LookForUpdates(setup, edits);
@@ -1610,8 +1610,8 @@ public sealed partial class MainViewModel : Observable
 	// a change to the setup shown is on its way into its file (the next change waits for it: NotNow)
 	public bool Saving { get; private set; }
 
-	// the setup shown is being renamed: its file moves, and no change or save may land in the old one meanwhile (CodeRabbit on
-	// pull request #38) - held from before the last save is waited for until the renamed setup is shown
+	// the setup shown is being renamed: its file moves, and no change or save may land in the old one meanwhile - held
+	// from before the last save is waited for until the renamed setup is shown
 	public bool Renaming { get; set; }
 
 	// the program's data folder is being moved (Settings > Keep data through updates): no setup is written or started meanwhile,

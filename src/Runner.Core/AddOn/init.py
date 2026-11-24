@@ -19,7 +19,7 @@ except ImportError:
     from PyQt5.QtCore import QCoreApplication, QTimer
     from PyQt5.QtWidgets import QInputDialog, QLineEdit, QMessageBox
 
-from .core import Core, Refused, rb_data_dir, sup_running
+from .core import Core, Refused, rb_data_dir, runner_running
 
 NAME = "RootBuilderProfiles"
 TITLE = "Root Builder Profiles"
@@ -169,7 +169,7 @@ class RootBuilderProfiles(mobase.IPluginTool):
     def _tick_owed(self):
         owed = self._core.tick_owed()
         # a run's lists are its own until it ends: the tick waits, and it comes at the next look after that
-        if not owed or sup_running():
+        if not owed or runner_running():
             return
         profile, mod = owed
         if not (Path(self._org.modsPath()) / mod).is_dir():
@@ -211,7 +211,7 @@ class RootBuilderProfiles(mobase.IPluginTool):
             return
         state = self._core.load_state() or {}
         # 1.3.0: copies of a mod's own Root files (a deploy Root Builder could not clear - a killed game held them) are never
-        # offered as a preset: 2026-10-12 a stopped test's DXVK files were adopted that way and ticked in the playing profile
+        # offered as a preset: a stopped test's DXVK files were once adopted that way and ticked in the playing profile
         copies = self._core.copies_of_mod_roots(files)
         if copies:
             ckey = ["copies"] + sorted(k.lower() for k in copies)

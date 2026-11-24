@@ -37,7 +37,7 @@ public partial class MainWindow : Window
 	// the main window is closing: its panels go with it and ask nothing more
 	bool _closingAll;
 
-	// his version scheme is two parts (1.0, 1.1)
+	// the version is written in two parts (1.0, 1.1)
 	public static string AppVersion => typeof(App).Assembly.GetName().Version?.ToString(2) ?? "";
 
 	public MainWindow()
@@ -101,10 +101,10 @@ public partial class MainWindow : Window
 		if (_vm.Setups.Count == 0) {
 			_vm.Say("No setup yet: press New setup and pick your Mod Organizer and profile.", "warn");
 		}
-		// what changes on its own is said to a screen reader (his checklist 490) - once the window is up, so the first look at the
+		// what changes on its own is said to a screen reader - once the window is up, so the first look at the
 		// last run is not read out as news
 		Loaded += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => _vm.PropertyChanged += Announce);
-		// his checklist 471: once the window is up, at most once a day, whether a newer version of the program is out
+		// once the window is up, at most once a day, whether a newer version of the program is out
 		// (never for the off-screen pictures: no web question, no file written into that data folder, no banner in a picture)
 		Loaded += async (_, _) => {
 			if (!App.Headless) {
@@ -292,7 +292,7 @@ public partial class MainWindow : Window
 		a_e.Handled = true;
 	}
 
-	// ---------------------------------------------------------------- alerts (his pick: notification + sound on, flash off by default)
+	// ---------------------------------------------------------------- alerts (notification + sound on, flash off by default)
 	void Notify(string a_title, string a_text)
 	{
 		var s = _vm.Setup;
@@ -348,7 +348,7 @@ public partial class MainWindow : Window
 		_ = _vm.StartWith(a_how == "only" ? a_row.Key : null, a_how == "from" ? a_row.Key : null, a_how == "until" ? a_row.Key : null);
 	}
 
-	// His word of 2026-11-21: a step may use the output its tool made before - behind a box that says exactly what that means
+	// A step may use the output its tool made before - behind a box that says exactly what that means
 	// for this tool, now. Pressed for a step that is set so already, it is built again from the next run on, with no box
 	bool _oldAsked;
 
@@ -430,7 +430,7 @@ public partial class MainWindow : Window
 		}
 	}
 
-	// his rule: players may reorder, behind a warning window saying things could go wrong out of order - the buttons, the
+	// players may reorder, behind a warning window saying things could go wrong out of order - the buttons, the
 	// keys and a drag all come through here
 	async void MoveTo(StepRow a_row, int a_to)
 	{
@@ -448,7 +448,7 @@ public partial class MainWindow : Window
 	}
 
 	// ---------------------------------------------------------------- a step dragged to another place
-	// His list of 2026-11-16: a step is dragged in the list to wherever the player wants it. The handlers sit on the list
+	// A step is dragged in the list to wherever the player wants it. The handlers sit on the list
 	// itself (never in its row template: WPF numbers handlers wrongly there). A press on a row's tick box, or a move shorter
 	// than Windows' own drag distance, is no drag; nothing moves while a run goes.
 	const string DragFormat = "ToolRunner.Step";
@@ -597,8 +597,8 @@ public partial class MainWindow : Window
 
 	bool LogHere => LogBox.Visibility == Visibility.Visible;
 
-	// The log shown in the main window, or hidden there (his list of 2026-11-16: "the progress box above should fill the
-	// space if the log box is minimized"). Hidden, its row gives its room to the cards above: the run's card grows into
+	// The log shown in the main window, or hidden there. Hidden, its row gives its room to the cards above: the run's card
+	// grows into
 	// what the other cards leave, and its lists lose the heights they were held to so the log kept its room.
 	void ShowLogHere(bool a_show)
 	{
@@ -676,8 +676,8 @@ public partial class MainWindow : Window
 		}
 	}
 
-	// The log in a window of its own (his list: "popped out and expanded so users can fully read and scroll through it in a
-	// new window"): sized and moved as the player likes, on another screen too. The log hides in the main window while it is
+	// The log in a window of its own, where it can be read and scrolled in full: sized and moved as the player likes, on another
+	// screen too. The log hides in the main window while it is
 	// out and comes back as it was when that window closes.
 	public PanelWindow PopLog()
 	{
@@ -713,7 +713,7 @@ public partial class MainWindow : Window
 		foreach (var c in new UIElement[] { detailed, follow, wrap, copy }) {
 			bar.Children.Add(c);
 		}
-		// his checklist 635: search the log, and jump to the first line the run marked as a problem (Follow lets go, so the line
+		// search the log, and jump to the first line the run marked as a problem (Follow lets go, so the line
 		// found stays in view while the run writes on)
 		var find = new TextBox { MinWidth = 200, Margin = new Thickness(0, 0, 8, 0), VerticalContentAlignment = VerticalAlignment.Center, ToolTip = "Find in the log (Enter: the next one)" };
 		AutomationPropertiesName(find, "Find in the log");
@@ -751,7 +751,7 @@ public partial class MainWindow : Window
 		}
 		problem.Click += (_, _) => {
 			// the simple log marks no line (only the detailed one says "!" and "!!!"): the detailed log is shown first, and the
-			// search runs once its text is in (CodeRabbit on pull request #38)
+			// search runs once its text is in
 			if (!_vm.DetailedLog) {
 				_vm.DetailedLog = true;
 				Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, ShowFirstProblem);
@@ -883,8 +883,8 @@ public partial class MainWindow : Window
 
 	public void DemoHistory(IEnumerable<HistoryRow> a_rows) => _vm.DemoHistory(a_rows);
 
-	// History, Settings and Themes each open in a window of their own (his list of 2026-11-16: "pop out boxes like queue is
-	// instead of stuck to the right of the app", resizable). The History window has two views, the runs and the MO2
+	// History, Settings and Themes each open in a window of their own, resizable. The History window has two views, the runs
+	// and the MO2
 	// Changelog. Pressing a panel's button again brings its window forward as it is; a_fresh builds its content anew (Save,
 	// Undo changes). The main window stays usable beside them.
 	// a_quiet: an open panel's content is made anew where it stands - it is not brought forward and does not take the keyboard
@@ -1082,7 +1082,7 @@ public partial class MainWindow : Window
 			Foreground = Brushes2.Get("Text"), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
 		AutomationPropertiesName(log, "The run's log");
 		var open = new Button { Content = "Open folder", Style = (Style)FindResource("Ghost"), Margin = new Thickness(0, 0, 8, 0), ToolTip = "This run's folder: its logs and its record" };
-		// his checklist 482: one zip for a bug report, names masked; made on the player's press, never sent anywhere
+		// one zip for a bug report, names masked; made on the player's press, never sent anywhere
 		var report = new Button { Content = "Bug report ...", Style = (Style)FindResource("Ghost"),
 			ToolTip = "Puts this run's logs, its setup and the versions of everything into one zip, with your Windows name and PC name masked - for a GitHub issue" };
 		report.Click += async (_, _) => {
@@ -1105,7 +1105,7 @@ public partial class MainWindow : Window
 				report.IsEnabled = true;
 			}
 		};
-		// his checklist 454: asked first; the box names what it does, and a run that cannot be undone says why
+		// asked first; the box names what it does, and a run that cannot be undone says why
 		var undo = new Button { Content = "Undo this run ...", Style = (Style)FindResource("Ghost"), Margin = new Thickness(8, 0, 0, 0),
 			ToolTip = "Puts each output and your mod and plugin lists back as they were before this run - only the last run on that profile" };
 		undo.Click += async (_, _) => {
@@ -1194,7 +1194,7 @@ public partial class MainWindow : Window
 
 	static void AutomationPropertiesName(DependencyObject a_o, string a_name) => System.Windows.Automation.AutomationProperties.SetName(a_o, a_name);
 
-	// his word of 2026-11-21: each tool of the setup set up by hand in its own window, whenever wanted
+	// each tool of the setup set up by hand in its own window, whenever wanted
 	bool _toolsAsked;
 
 	async void Tools_Click(object a_s, RoutedEventArgs a_e)
@@ -1266,7 +1266,7 @@ public partial class MainWindow : Window
 	public Window DemoInstallBox() => Ask.Make(this, $"Install {Brand.Name} 1.1?",
 		InstallText(new ProgramUpdate.Release("1.1", $"{Brand.Name} 1.1.zip", "", 1_290_000, null), Path.Combine("D:", "Modding", "Tools", Brand.Name)), "Download and install", "Not now", _ => { });
 
-	// His list of 2026-11-16, point 1: a new version taken and installed from inside the program. Only from the program's own
+	// A new version taken and installed from inside the program. Only from the program's own
 	// GitHub release, checked before anything is replaced, and never while a run goes. The data folder is no part of it.
 	bool _installing;
 
@@ -1277,7 +1277,6 @@ public partial class MainWindow : Window
 		}
 		// a run, or the window's own work (a put-back, an undo, a tool's settings being learned): either may be using the
 		// program's files, so nothing is replaced under it - asked again after each wait below, where such work can begin
-		// (CodeRabbit on pull request #37)
 		bool Busy()
 		{
 			if (_vm.IsRunning || _vm.Starting) {
@@ -1368,7 +1367,7 @@ public partial class MainWindow : Window
 		ClosePanels();
 		await Task.Run(UiState.Save);
 		// a write that failed is tried once more; still not written, the new version is not started from here: this window's
-		// own write as it closed would put the old values back over the new version's (CodeRabbit on pull request #37)
+		// own write as it closed would put the old values back over the new version's
 		if (UiState.Unsaved) {
 			await Task.Run(UiState.Save);
 		}
@@ -1426,10 +1425,10 @@ public partial class MainWindow : Window
 	bool _closeNow;
 	bool _closeWhenFree;
 
-	// the window goes once the run has stopped and put the profile back; a run that does not stop in 10 minutes keeps the window
 	// a run going, a start not yet answered (the engine still checking, no run record yet), or a queue between two setups
 	bool StillGoing() => Engine.Active() is not null || QueueRun.Read(AppPaths.Data) != null || _vm.Starting;
 
+	// the window goes once the run has stopped and put the profile back; a run that does not stop in 10 minutes keeps the window
 	async Task CloseWhenStopped(Journal? a_run)
 	{
 		var until = DateTime.Now.AddMinutes(10);
@@ -1499,7 +1498,7 @@ public partial class MainWindow : Window
 			_closeWhenFree = true;
 			a_e.Cancel = true;
 		} else if (!_closeNow && StillGoing()) {
-			// a run never goes on unseen behind a closed window (it closed his Mod Organizer a minute after the window went), not
+			// a run never goes on unseen behind a closed window (it would close Mod Organizer a minute after the window went), not
 			// even one still starting: closing stops it - the tool closed, the profile put back - or the window stays open
 			var run = Engine.Active();
 			if (_stopping) {

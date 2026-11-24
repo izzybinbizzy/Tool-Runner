@@ -41,10 +41,10 @@ public static class StepRegistry
 public static class StepKit
 {
 	// a tool whose program lives inside a mod switched off in this profile: Mod Organizer cannot start it from there (it hands the
-	// start to a copy of itself, which ends with -1, and nothing runs - measured on Landscape Fixer 2026-11-08), so that mod is
+	// start to a copy of itself, which ends with -1, and nothing runs - measured on Landscape Fixer), so that mod is
 	// switched on for the tool's run and put back after. One that holds a plugin is never switched on by the run (it would change
 	// the load order): the step stops and names it for the player. The list goes into the step's own switch, which is undone only
-	// after the tool is closed (undone before, Mod Organizer's close waited on the tool still open - the trial of 2026-11-08 04:51)
+	// after the tool is closed (undone before, Mod Organizer's close waited on the tool still open - seen in a real run)
 	public static List<string> ToolMods(RunContext a_ctx, StepSettings a_s)
 	{
 		var title = a_s.Req("executable");

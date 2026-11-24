@@ -175,7 +175,7 @@ public sealed class GrassStep : IStep
 	}
 
 	// the old route: NGIO's PrecacheGrass.txt in the game folder, the game started until the cache is complete; a crash is resumed
-	// by starting again. His numbers (2026-09-30): a first start that dies within 5 minutes is a broken setup; after that short
+	// by starting again. The limits: a first start that dies within 5 minutes is a broken setup; after that short
 	// crashes are normal, but more than 15 restarts, or 3 in a row that add no grass file, stop the step.
 	void ByGame(RunContext a_ctx, StepSettings a_s)
 	{
@@ -271,7 +271,7 @@ public sealed class GrassStep : IStep
 // mod, its output mod, an optional settings mod). The cache the profile itself runs is built first, with every ticked shader
 // mod on as the game loads them; a shader mod that is switched off gets one only when the setup asks (Plan). A cache is rebuilt
 // only when what it is built from changed since it was made (Fingerprint: the shader mod, the shader files, the features
-// switched off at the game's start, the game's version) - the setup's "shaderRebuild" (his "configurable").
+// switched off at the game's start, the game's version) - the setup's "shaderRebuild".
 public sealed class ShaderStep : IStep
 {
 	public string Key => "shaders";
@@ -314,8 +314,7 @@ public sealed class ShaderStep : IStep
 	// what the cache depends on: the shader mod's DLL(s), its version and its settings files - hashed
 	// what the cache is built from: the shader mod (its DLLs, meta.ini, settings), its settings mod and - with the profile - every
 	// shader file a ticked mod ships (a Community Shaders feature can be its own mod) and the game's version. Nothing a generator
-	// writes (plugins, meshes, textures, LOD, grass, animations) is in it: those never make the cache stale (his question
-	// 2026-10-27, "can you confirm rebuilding another tool wont cause shaders to need to be rebuilt")
+	// writes (plugins, meshes, textures, LOD, grass, animations) is in it: those never make the cache stale
 	public static readonly string[] ShaderFileKinds = [".hlsl", ".hlsli", ".ini", ".json", ".fx", ".fxh", ".csh", ".vsh", ".psh"];
 
 	// the part of a Community Shaders settings file that names the features left out when the game starts: a feature switched
@@ -323,7 +322,7 @@ public sealed class ShaderStep : IStep
 	public const string BootKey = "Disable at Boot";
 
 	// a_otherCaches: the mods of the setup's OTHER caches (shader, output and settings mod) - left out, so switching the tick
-	// between two shader mods or updating one never makes the other's cache stale (the fourth review, M1)
+	// between two shader mods or updating one never makes the other's cache stale
 	// a_layers: the other ticked shader mods this cache is built together with - part of it, hashed with it (none = the
 	// fingerprint a cache had before layers were known, so an older stamp still reads)
 	// a_winners: false = the fingerprint as it was before it knew which mod wins a shader file two mods ship (an older stamp)
@@ -347,7 +346,7 @@ public sealed class ShaderStep : IStep
 		}
 		// A settings file counts by the one part of it that says what is built: the features it switches off at the game's
 		// start (BootKey). Its other values are not part of the cache, and the game rewrites them by itself: in a real run
-		// (2026-11-21) it changed three preset fields at a start, the file no longer matched, and the next run built the whole
+		// it changed three preset fields at a start, the file no longer matched, and the next run built the whole
 		// cache again - twenty minutes for nothing, at every run. What the shader mod itself decides to compile again at a
 		// start, the run waits for before it loads a save (InGame.WaitCompile) and says in its notes.
 		void AddSettings(string a_file)
@@ -553,9 +552,9 @@ public sealed class ShaderStep : IStep
 
 	// What a run builds, in order. The profile's own shader setup first: every TICKED shader mod together, as the game loads
 	// them, into the cache of the one that wins (the first in modlist.txt = the lowest in Mod Organizer's left pane). A shader
-	// mod that is switched off gets its cache only when the setup asks ("build_for_off"), after that one, alone. (His run of
-	// 2026-11-10 built the cache of a shader mod the profile does not run first, then tried a ticked layer without the shader
-	// mod under it.)
+	// mod that is switched off gets its cache only when the setup asks ("build_for_off"), after that one, alone. (A run once
+	// built the cache of a shader mod the profile does not run first, then tried a ticked layer without the shader mod under
+	// it.)
 	public static (List<Build> Builds, List<string> Notes) Plan(IReadOnlyList<Cache> a_all, IReadOnlyDictionary<string, char> a_states, IReadOnlyList<string> a_order,
 		bool a_buildForOff, IReadOnlyList<string> a_enable, IReadOnlyList<string> a_disable)
 	{
@@ -708,7 +707,7 @@ public sealed class ShaderStep : IStep
 		return null;
 	}
 
-	// The game ended before the compile did (his run of 2026-11-10: a crash was logged as "the game stopped ... start 2" and the
+	// The game ended before the compile did (a crash was logged as "the game stopped ... start 2" and the
 	// game simply started again). It is named for what it was, with the crash report the game wrote, and never restarted
 	// silently: the setup's "on_crash" is "ask" (the default: the player presses Done to carry on, or Stop; nobody there for
 	// "crash_wait_min" stops the step), "restart" (carry on at once, for a run nobody watches) or "stop".
@@ -807,9 +806,9 @@ public sealed class ShaderStep : IStep
 						var logFresh = log != null && File.GetLastWriteTimeUtc(log) >= started.AddSeconds(-5);
 						var text = logFresh ? grown.Read(log!) : "";
 						var n = Files.CountFiles(owCache);
-						// the shader mod must show it runs within a few minutes (it stands down beside a DLL it refuses - 2026-10-09).
+						// the shader mod must show it runs within a few minutes (it stands down beside a DLL it refuses).
 						// Shaders arriving in the cache ARE that sign: a log can be elsewhere (SKSE's log folder moved) or late - a
-						// player's run of 2026-11-04 failed here with 101 shaders already written
+						// player's run failed here with 101 shaders already written
 						if (!sane && sw.Elapsed > TimeSpan.FromSeconds(45)) {
 							var bad = Regex.Match(text, @"^.*(Incompatible DLL|Remove it to use|disabled itself|will not run).*$", RegexOptions.Multiline);
 							if (bad.Success) {

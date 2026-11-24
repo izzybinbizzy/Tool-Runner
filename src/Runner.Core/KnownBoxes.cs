@@ -20,7 +20,7 @@ public enum BoxMove
 public sealed record BoxVerdict(BoxMove Move, string? Button, string Note);
 
 // The boxes the runner knows, in one place. A box of the game that is not here and has more than one button is closed by
-// the button that takes nothing on (DevBench.CloseIndex) and named - his word of 2026-11-21: whatever the box is, it is
+// the button that takes nothing on (DevBench.CloseIndex) and named: whatever the box is, it is
 // closed at once. A setup may say such a box is the player's own to answer (InGame.ClosesUnknown): then it is never
 // guessed at, and the step stops naming it when nobody answers.
 public static class KnownBoxes

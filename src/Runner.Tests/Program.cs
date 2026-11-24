@@ -7,8 +7,8 @@ using ToolRunner.Steps;
 
 namespace ToolRunner.Tests;
 
-// The offline tests: every edge case of the audit proven against a fake Mod Organizer setup in a scratch folder (no real MO2,
-// no game, nothing of his touched). Exit 0 = every test passed.
+// The offline tests: every edge case proven against a fake Mod Organizer setup in a scratch folder (no real MO2, no game,
+// nothing of the PC's own touched). Exit 0 = every test passed.
 //   Runner.Tests.exe [<filter>]
 public static class Program
 {
@@ -21,7 +21,7 @@ public static class Program
 			return FakeAcmos(a_args);
 		}
 		var filter = a_args.Length > 0 ? a_args[0] : "";
-		// a game another session runs on this PC is not this test's business
+		// a game that runs on this PC is not this test's business
 		Preflight.GameCheck = () => [];
 		// a real run of the program on this PC holds the real run lock
 		Runner.LockScope = " tests " + Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -121,7 +121,7 @@ public static class Program
 
 		public FakeMo2(string a_nl = "\r\n", string a_deeper = "")
 		{
-			Top = Path.Combine(Path.GetTempPath(), "mo2 tool runner tests", OddFolder + " " + Guid.NewGuid().ToString("N")[..8]);
+			Top = Path.Combine(Path.GetTempPath(), "Tool Runner tests", OddFolder + " " + Guid.NewGuid().ToString("N")[..8]);
 			Root = Path.Combine(Top, a_deeper);
 			Directory.CreateDirectory(Path.Combine(Game, "Data"));
 			Directory.CreateDirectory(ProfileDir);
@@ -262,17 +262,17 @@ public static class Program
 		Equal(@"-o:""D:\LOD\"" -x \\srv\share", ini["customExecutables"]["1\\arguments"], "quotes and backslashes unescaped once");
 	}
 
-	// a real Mod Organizer, read only: SUP_REAL_MO2 = its ModOrganizer.exe, SUP_REAL_BASE = its instance folder (skipped
+	// a real Mod Organizer, read only: ToolRunnerRealMo2 = its ModOrganizer.exe, ToolRunnerRealBase = its instance folder (skipped
 	// when unset - a build machine has none)
 	static void T_RealIniReads()
 	{
-		var exe = Environment.GetEnvironmentVariable("SUP_REAL_MO2");
+		var exe = Environment.GetEnvironmentVariable("ToolRunnerRealMo2");
 		if (exe == null || !File.Exists(exe)) {
-			Console.WriteLine("      (skipped: SUP_REAL_MO2 not set)");
+			Console.WriteLine("      (skipped: ToolRunnerRealMo2 not set)");
 			return;
 		}
 		var mo2 = Mo2Instance.Load(exe);
-		if (Environment.GetEnvironmentVariable("SUP_REAL_BASE") is { } b) {
+		if (Environment.GetEnvironmentVariable("ToolRunnerRealBase") is { } b) {
 			Equal(b, mo2.BaseDir, "the instance folder");
 		}
 		Check(mo2.Executables.Any(e => e.Title == "SKSE"), "an SKSE entry");
@@ -425,7 +425,7 @@ public static class Program
 		Throws<ArgumentException>(() => Runner.Plan(s, "dyndolod", null, null), "a step the setup does not have");
 	}
 
-	// his ask 2026-11-03: a new game has no save to keep clean - the clean save and the final save are left out while it is on
+	// a new game has no save to keep clean - the clean save and the final save are left out while it is on
 	static void T_PgLiteUnticksPgPatcherUntilThePlayerTicksIt()
 	{
 		using var f = new FakeMo2();
@@ -457,7 +457,7 @@ public static class Program
 		Check(Runner.PgLiteTicked(profile), "ticked under another folder name: found by its plugin");
 	}
 
-	// his rule of 2026-11-13: every box of every process the run started is seen the whole run, named, answered when the
+	// every box of every process the run started is seen the whole run, named, answered when the
 	// runner knows it, and one of the game's that nobody can answer stops the step with its words
 	static void T_EveryBoxIsNamedAndTheKnownOnesAnswered()
 	{
@@ -508,7 +508,7 @@ public static class Program
 		}
 		Equal(BoxMove.Press, KnownBoxes.Judge(new BoxSeen("SkyrimSE.exe", true, "Cache Recursive Directory Walk", "Do you want to generate CRDW cache files?", ["Yes", "No"])).Move, "the run's own game's is answered");
 		Equal(BoxMove.Name, KnownBoxes.Judge(new BoxSeen("SkyrimSE.exe", false, "Cache Recursive Directory Walk", "Do you want to generate CRDW cache files?", ["Yes", "No"])).Move, "the player's game's is only named");
-		// a box of the run's game that nothing here knows: closed by the button that takes nothing on (his word of 2026-11-21),
+		// a box of the run's game that nothing here knows: closed by the button that takes nothing on,
 		// unless the setup leaves such boxes to the player
 		var notKnown = new BoxSeen("SkyrimSE.exe", true, "Some Mod", "Reset all of its settings?", ["Yes", "No"]);
 		Equal(BoxMove.Stop, KnownBoxes.Judge(notKnown).Move, "left to the player where the setup says so: never guessed at");
@@ -684,8 +684,8 @@ public static class Program
 		Check(Crdw.AfterRun(blind, false, false, false, true)?.Contains("command after the run", StringComparison.Ordinal) == true, "also after a run that changed nothing itself");
 		Check(Crdw.AfterRun(blind, true, false, false, false)?.Contains("older than what this run changed", StringComparison.Ordinal) == true, "a list the run itself left old is said as that, command or no command");
 		Equal(null, Crdw.AfterRun(asks, true, false, true, true), "with its question on, the mod asks at the next game start itself");
-		// when the run has it make a new list: his answer ("mod makes a new list when files are changed during the run") is
-		// the rule for a setup that says nothing
+		// when the run has it make a new list: a new list when files changed during the run is the rule for a setup that says
+		// nothing
 		Equal(Crdw.Renew.Changed, Crdw.When(Setup.FromJson(new JsonObject())), "a setup that says nothing: a new list when the run changed files");
 		Equal(Crdw.Renew.Always, Crdw.When(Setup.FromJson(new JsonObject { [Crdw.SettingName] = "always" })), "at every game start, when the setup says so");
 		Equal(Crdw.Renew.Never, Crdw.When(Setup.FromJson(new JsonObject { [Crdw.SettingName] = "Never" })), "or never");
@@ -770,7 +770,7 @@ public static class Program
 			Crdw.StepEnded(ctx, true, true);
 			Equal(1, ctx.Journal.FilesChanged, "what a step wrote after its own game start counts as changed again");
 			Equal(0, StepKit.PutFilesBack(ctx).Count, "and its file goes back as well");
-			// A game step that switches a mod off for its game start (CodeRabbit on pull request #35): the list the game makes
+			// A game step that switches a mod off for its game start: the list the game makes
 			// then is of the mods as they are switched. With the mod back, that list is old again - also when the step itself
 			// writes nothing, where it once stayed "current" and no later game start made a new one
 			ctx.Journal.FilesChanged = 0;
@@ -1072,8 +1072,8 @@ public static class Program
 		}
 	}
 
-	// CodeRabbit's first round on 1.0 (pull request 32): the points a test can hold
-	static void T_TheReviewOfOnePointZero()
+	// work cut off part way (a park, a put-back, a file written in place) loses nothing, and a few small rules of the same kind
+	static void T_WorkCutOffPartWayLosesNothing()
 	{
 		using var f = new FakeMo2();
 		f.WriteSetup(("landscapefixer", []));
@@ -1255,7 +1255,7 @@ public static class Program
 		Equal(("answered YES", 0), DevBench.DecideBox("Some content is missing. Continue loading?", ["Yes", "No"], 2), "continue -> Yes");
 		Equal(("acknowledged", 0), DevBench.DecideBox("Perks reset", ["Ok"], 1), "one button");
 		Equal<string?>(null, DevBench.DecideBox("Delete your save?", ["Yes", "No"], 2).Answer, "an unknown question is not answered");
-		// ... it is CLOSED (his word of 2026-11-21: whatever the box is, it is closed at once) - by the button that takes nothing on
+		// ... it is CLOSED (whatever the box is, it is closed at once) - by the button that takes nothing on
 		Equal(1, DevBench.CloseIndex(["Yes", "No"], -1, 2), "a box the run does not know: the button that declines");
 		Equal(2, DevBench.CloseIndex(["Enable", "Disable", "Ask me later"], 2, 3), "the button the game itself marks as the box's cancel comes first");
 		Equal(0, DevBench.CloseIndex(["Cancel", "Delete everything"], -1, 2), "a declining button wherever it stands");
@@ -1275,8 +1275,7 @@ public static class Program
 		var going = InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":true,"totalTasks":3201,"completedTasks":40,"diskHitTasks":40}""")!.AsObject())!;
 		Check(!going.Over, "still at it: not over");
 		// ... and while it is still at it, what it has not done yet says nothing: 40 done, all 40 from the cache, is none
-		// compiled so far - never 3,161 (a wait that can no longer ask it once took that for a cache out of date - CodeRabbit
-		// on pull request #35)
+		// compiled so far - never 3,161 (a wait that can no longer ask it once took that for a cache out of date)
 		Equal<long?>(0, going.CompiledSoFar, "a pass still going that has read every shader so far from its cache has compiled none");
 		Equal<long?>(10, InGame.ReadShaderPass(JsonNode.Parse("""{"compiling":true,"totalTasks":3201,"completedTasks":50,"diskHitTasks":40}""")!.AsObject())!.CompiledSoFar,
 			"one that has done more than it read from its cache has compiled the rest of what it did");
@@ -1384,8 +1383,7 @@ public static class Program
 		}
 	}
 
-	// His word of 2026-11-21: "the tool is not catching pop up boxes in game ... it needs to be externally found no matter
-	// what the box could potentially be and immediately closed." Against a local stand-in for DevBench that shows one box
+	// A pop-up in the game is found and closed whatever it is. Against a local stand-in for DevBench that shows one box
 	// after another: the ones the run knows get their answer, one it does not know is closed by the button that takes
 	// nothing on and goes into the run's notes, a setup may leave such a box to the player, and one that will not close is
 	// not answered for ever.
@@ -1534,7 +1532,7 @@ public static class Program
 				}
 				Check(InGame.LookAtGameBox(ctx, out var known, true) != null && known == null && accepted.Count == 1, "a box the run knows is answered all the same");
 			}
-			// The watch's own look answers only while the run holds the watch (CodeRabbit on pull request #35): a look that was
+			// The watch's own look answers only while the run holds the watch: a look that was
 			// still reading when the run let go sends no answer into a game the run has left. A step's own look answers as ever
 			ctx = StepContext(f, "cleansave", new DevBench($"http://localhost:{port}/api/tool/"), CancellationToken.None);
 			using (ctx.Log) {
@@ -1669,8 +1667,8 @@ public static class Program
 		Equal(apart, ShaderStep.Fingerprint(mo2, c, p), "an order that changes no winner leaves the fingerprint, and the cache, as they were");
 
 		// The shader mod's settings file counts by the features it switches off at the game's start and by nothing else in it:
-		// the game rewrites the rest by itself (a real run, 2026-11-21: three preset fields changed at a start, and the next
-		// run built the whole cache again for it)
+		// the game rewrites the rest by itself (three preset fields changed at a start, and the next run built the whole cache
+		// again for it)
 		var settings = Path.Combine(f.Mods, "Shader Mod", "SKSE", "Plugins", "CommunityShaders", "SettingsUser.json");
 		Directory.CreateDirectory(Path.GetDirectoryName(settings)!);
 		f.Mod("Cache Mod");
@@ -1715,7 +1713,7 @@ public static class Program
 		Check(unread != ShaderStep.Fingerprint(mo2, c, p), "a settings file that does not read counts with all of it");
 	}
 
-	// the fourth review, M1: his Bottled profile keeps a cache for each of two shader mods - switching the tick between them, or
+	// a profile may keep a cache for each of two shader mods - switching the tick between them, or
 	// updating one, must leave the other's cache current
 	static void T_TwoShaderCachesStayApart()
 	{
@@ -1742,7 +1740,7 @@ public static class Program
 		Check(aTicked != ShaderStep.Fingerprint(mo2, a, p, notA), "its own shader files changed (ticked or not): A's cache is stale");
 	}
 
-	// the fourth review, H1: the final save never starts from an old clean save when the player played after it
+	// the final save never starts from an old clean save when the player played after it
 	static void T_SaveToPlayStartsFromTheRightSave()
 	{
 		var mon = new DateTime(2026, 10, 26, 3, 0, 0, DateTimeKind.Utc);
@@ -1763,14 +1761,14 @@ public static class Program
 		var times = InGame.GameTimes(steps, mon.AddMinutes(40)).ToList();
 		Equal(2, times.Count, "the clean save and the final save");
 		Check(!times.Any(t => mon.AddMinutes(15) >= t.From && mon.AddMinutes(15) <= t.To), "a save made during DynDOLOD is the player's");
-		// the fifth review, N1: a run that died in a game step - its open step ends where its record stopped, so a save made a
+		// a run that died in a game step - its open step ends where its record stopped, so a save made a
 		// day later is still the player's
 		var died = InGame.GameTimes([new StepRecord { Key = "cleansave", Started = mon, Ended = null }], mon.AddMinutes(3)).Single();
 		Check(!(thu >= died.From && thu <= died.To), "a save three days after a crashed run is the player's");
 		Equal(mon.AddMinutes(3), died.To, "the open step ends where the dead run's record stopped");
 	}
 
-	// the fourth review, M2: a patcher's CPU counts per child process - one that ends never makes it fall, a new one counts whole
+	// a patcher's CPU counts per child process - one that ends never makes it fall, a new one counts whole
 	static void T_ChildCpuGain()
 	{
 		var before = new Dictionary<int, TimeSpan> { [1] = TimeSpan.FromSeconds(5), [2] = TimeSpan.FromSeconds(9) };
@@ -1779,7 +1777,7 @@ public static class Program
 		Equal(TimeSpan.Zero, Procs.CpuGain(now, now), "nothing used: no gain");
 	}
 
-	// the fourth review, L5 / M4 / L6: a form id read either way, a setup read from bytes, a task's own setup file
+	// a form id read either way, a setup read from bytes, a task's own setup file
 	static void T_SmallReadsFromTheReview()
 	{
 		Equal("0x0000003B", DevBench.FormKey(JsonValue.Create("0x3B")), "0x is hex");
@@ -1820,7 +1818,7 @@ public static class Program
 
 	// A whole run with the directory cache mod loading its cache blind: the final save makes the game's list anew after
 	// everything the run changed, so nothing is left to say - and a command of the setup that runs after it counts as a
-	// change again, said with what to do if it changes game files (CodeRabbit on pull request #35)
+	// change again, said with what to do if it changes game files
 	static void T_ACommandAfterTheRunCountsAsAChange()
 	{
 		using var f = new FakeMo2();
@@ -1886,7 +1884,7 @@ public static class Program
 		Check(packed.Entries.Any(e => e.Name == "OutA.esp"), "the old output is in it");
 	}
 
-	// His word of 2026-11-21: a step may use the output its tool made before. Its tool does not run; the old output goes off with
+	// A step may use the output its tool made before. Its tool does not run; the old output goes off with
 	// the others before the first tool, comes back on at the step's own place - so the tool before it never reads it and the tool
 	// after it does -, is on after the run, untouched, and the run says so in its record, its log and its summary
 	static void T_AStepThatUsesItsOldOutputIsNotRunAndItsOutputComesBackAtItsPlace()
@@ -2023,8 +2021,8 @@ public static class Program
 		Check(none.Problems().Any(x => x.Contains("uses its old output - nothing would run", StringComparison.Ordinal) && RunnerErrors.Find(x)?.Code == "TR-112"), "a setup where every step uses its old output has nothing to run: " + string.Join(" | ", none.Problems()));
 	}
 
-	// A master of an old output's plugin is judged by what the run switches, not by what is ticked now (CodeRabbit on pull
-	// request #35): one in a mod the run replaces is gone for good; one that is off while a tool works after the old output's
+	// A master of an old output's plugin is judged by what the run switches, not by what is ticked now:
+	// one in a mod the run replaces is gone for good; one that is off while a tool works after the old output's
 	// place stops that tool; one that is only off for the run, with no tool after the place, harms nothing
 	static void T_AnOldOutputsMastersAreJudgedByWhatTheRunSwitches()
 	{
@@ -2142,7 +2140,7 @@ public static class Program
 
 		// ... and when the one that is needed was in the mod list, switched off, and the other had no line at all: the put-back
 		// brings one back still off and the other switched on - their plugins get their places in master order all the same,
-		// in one pass (CodeRabbit on pull request #35: in two, the master was listed after the plugin that needs it)
+		// in one pass (in two, the master was listed after the plugin that needs it)
 		using var g2 = new FakeMo2();
 		g2.Mod("Base Out", ("BaseOut.esp", false, []));
 		g2.Mod("Patch On Base", ("PatchOnBase.esp", false, ["BaseOut.esp"]));
@@ -2187,7 +2185,7 @@ public static class Program
 
 		// ... and when one of them cannot be switched on at its place after all (its line taken out of the mod list while the
 		// run gave the other its line), none is carried out: the run stops there, and the put-back leaves both as the profile
-		// had them (CodeRabbit on pull request #35)
+		// had them
 		using var g4 = new FakeMo2();
 		g4.Mod("Base Out", ("BaseOut.esp", false, []));
 		g4.Mod("Patch On Base", ("PatchOnBase.esp", false, ["BaseOut.esp"]));
@@ -2258,8 +2256,7 @@ public static class Program
 			"and the run's notes say why: " + string.Join(" | ", Journal.Load(ran.Folder!).Notes));
 
 		// A master's mod switched on with that plugin unticked in the plugin list loads no master: at its place, with a tool
-		// after it, the old output that needs it is refused - a master counts only while its plugin is ticked (CodeRabbit on
-		// pull request #35)
+		// after it, the old output that needs it is refused - a master counts only while its plugin is ticked
 		using var p3 = new FakeMo2();
 		p3.Mod("Old Patch", ("OldPatch.esp", false, ["BaseMod.esp"]));
 		var p3Plugins = Path.Combine(p3.ProfileDir, "plugins.txt");
@@ -2274,8 +2271,8 @@ public static class Program
 		Check(!ProfileOf(p3).IsOn("Old Patch") && !ProfileOf(p3).ActivePlugins().Contains("OldPatch.esp", StringComparer.OrdinalIgnoreCase), "the old output is not switched on");
 
 		// An old output whose mod the player switches on in Mod Organizer while an earlier tool works, its plugin left unticked:
-		// at its place its plugin is ticked all the same - the tool after it finds the plugin it was promised (CodeRabbit on
-		// pull request #35: only a mod that was off had its plugins ticked)
+		// at its place its plugin is ticked all the same - the tool after it finds the plugin it was promised
+		// (only a mod that was off had its plugins ticked)
 		using var p4 = new FakeMo2();
 		p4.Mod("Kept", ("Kept.esp", false, []));
 		ProfileOf(p4).EnsureMod("Kept");
@@ -2301,7 +2298,7 @@ public static class Program
 
 		// Plugins whose masters lie in each other's mods: "Mod A" holds ABase.esp and APatch.esp, "Mod B" holds B.esp; APatch.esp
 		// needs B.esp, and B.esp needs ABase.esp. Mod by mod, either order lists a plugin before its master - plugin by plugin,
-		// never (CodeRabbit on pull request #35)
+		// never
 		using var po = new FakeMo2();
 		po.Mod("Mod A", ("ABase.esp", false, []), ("APatch.esp", false, ["B.esp"]));
 		po.Mod("Mod B", ("B.esp", false, ["ABase.esp"]));
@@ -2318,7 +2315,7 @@ public static class Program
 
 		// The put-back never switches on a mod a later step of the run replaced for good - also not one the run had switched on
 		// as an old output before that step - and an old output whose master is in such a mod is left off, and said
-		// (CodeRabbit on pull request #35: the masters were judged by the profile as it stood before those mods went off)
+		// (the masters were judged by the profile as it stood before those mods went off)
 		using var pr = new FakeMo2();
 		pr.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
 		pr.Mod("Old Patch", ("OldPatch.esp", false, ["BaseMod.esp"]));
@@ -2343,9 +2340,9 @@ public static class Program
 
 		// An old output that was switched on before the run gets its ticks back as they were, and the put-back ticks none of its
 		// plugins: a master in that same mod counts only while its plugin is ticked. Unticked, the patch would be on with its
-		// master off - the old output is left off and said. Ticked, it stays on (CodeRabbit on pull request #35)
+		// master off - the old output is left off and said. Ticked, it stays on
 		// (and with both unticked - an optional patch and its optional master left off by the player - the mod's other plugin
-		// that is ticked keeps it on: a plugin that stays unticked needs nothing, CodeRabbit's seventh round)
+		// that is ticked keeps it on: a plugin that stays unticked needs nothing)
 		foreach (var (masterTicked, patchTicked) in new[] { (false, true), (true, true), (false, false) }) {
 			using var ps = new FakeMo2();
 			ps.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
@@ -2381,7 +2378,7 @@ public static class Program
 
 		// A master the player unticks while the run waits for Mod Organizer to close at the old output's place - after the old
 		// output was looked at, before its plugins are ticked: looked at again there, the run stops, nothing of it ticked or
-		// carried out, and the tool after it never runs (CodeRabbit's seventh round; the mod list's line is given in that wait,
+		// carried out, and the tool after it never runs (the mod list's line is given in that wait,
 		// which is where this test unticks the master)
 		using var pw = new FakeMo2();
 		pw.Mod("Old Patch", ("OldPatch.esp", false, ["BaseMod.esp"]));
@@ -2423,7 +2420,7 @@ public static class Program
 		Equal("texgen", string.Join(",", ToolSettings.ToSetUp(tools).Select(x => x.Step)), "a step that uses its old output is switched on: its tool is in the box that sets tools up, one that is switched off is not");
 	}
 
-	// The record of an old output that is used, and what a put-back makes of it (CodeRabbit on pull request #35). Nothing is
+	// The record of an old output that is used, and what a put-back makes of it. Nothing is
 	// written for it before its place: a mod the list does not name gets its line there, once the run's record names it, and a
 	// run that fails earlier leaves the mod list as it was. One that is gone by then stops the run before the tools after it.
 	// And a put-back switches on only a use that was carried out, never a mod whose files are still in the run's backup
@@ -2569,7 +2566,6 @@ public static class Program
 		// A run that lists one output's line, and then meets the mod list held by another program - its next line cannot be
 		// written, nor the first one taken out again - stops at the start with the put-back ON OFFER: the line it wrote is
 		// still there. Once the list is free, "Put my profile back" takes the line out, and the mod's folder is as it was
-		// (CodeRabbit on pull request #35)
 		using var k3 = new FakeMo2();
 		k3.Mod("Shared", ("Shared.esp", false, []));
 		k3.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Shared" }), ("texgen", new JsonObject { ["output_mod"] = "Output New" }));
@@ -2743,10 +2739,10 @@ public static class Program
 
 	// A change of several fields of the run's record made as one is written whole: a save on another thread (the run's box
 	// watch saves the record too) waits until the whole change is made. Written half way, a crash right then left half of a
-	// group of old outputs carried out (CodeRabbit on pull request #35)
+	// group of old outputs carried out
 	static void T_AChangeOfTheRunsRecordIsWrittenWhole()
 	{
-		var dir = Path.Combine(Path.GetTempPath(), "mo2 tool runner tests", "record " + Guid.NewGuid().ToString("N")[..8]);
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "record " + Guid.NewGuid().ToString("N")[..8]);
 		Directory.CreateDirectory(dir);
 		// (the worker's own failure is kept and said here: one left to its thread would end the whole test run)
 		Thread? other = null;
@@ -2796,7 +2792,7 @@ public static class Program
 		}
 	}
 
-	// CodeRabbit's seventh round on pull request #35: a mod list in the PC's own code page cannot hold every name - one it would
+	// A mod list in the PC's own code page cannot hold every name - one it would
 	// write as "?" is refused and nothing is written; a name it can hold goes in as before. And several new plugins placed
 	// after one anchor keep their master order in both plugin files
 	static void T_TheModListRefusesANameItCannotHold()
@@ -2837,7 +2833,7 @@ public static class Program
 		}
 	}
 
-	// His checklist 635: a setup copied keeps the first as it was and takes the settings its tools learned along; renamed, its run
+	// A setup copied keeps the first as it was and takes the settings its tools learned along; renamed, its run
 	// records and learned settings go with it (History, the last runs and Undo find a setup by its file); a name that cannot be a
 	// file, or is taken, is refused in words; a run that did not finish refuses a rename and nothing moves
 	static void T_ASetupIsCopiedAndRenamedWithWhatIsItsOwn()
@@ -2904,7 +2900,7 @@ public static class Program
 		Directory.CreateDirectory(Path.Combine(setups, "learned settings", "Leftover", "texgen"));
 		Throws<ArgumentException>(() => SetupFiles.Duplicate(cased.File, "Leftover"), "a copy onto leftover learned settings is refused");
 		Check(!File.Exists(Path.Combine(setups, "Leftover.json")), "and no copy is left");
-		// CodeRabbit on pull request #38: leftover learned settings refuse a copy also of a setup that has learned none
+		// Leftover learned settings refuse a copy also of a setup that has learned none
 		Directory.CreateDirectory(Path.Combine(setups, "learned settings", "Named 3", "texgen"));
 		Throws<ArgumentException>(() => SetupFiles.Duplicate(named, "Named 3"), "a copy of a setup without learned settings onto leftover ones is refused");
 		Check(!File.Exists(Path.Combine(setups, "Named 3.json")), "and no copy is left");
@@ -2934,7 +2930,7 @@ public static class Program
 		Throws<InvalidOperationException>(() => SetupFiles.Rename(cased.File, "Later", runs), "a run record that does not read refuses a rename");
 		Check(File.Exists(cased.File) && !File.Exists(Path.Combine(setups, "Later.json")), "and nothing was renamed");
 		Directory.Delete(unread, true);
-		// CodeRabbit on pull request #38: a run record that cannot be written after others were - every record names the old file
+		// A run record that cannot be written after others were - every record names the old file
 		// again and the setup keeps its old name, its name inside and its learned settings, so no run loses its setup in History
 		var first = Path.Combine(runs, "2026-01-04 00-00-00 Test");
 		var second = Path.Combine(runs, "2026-01-05 00-00-00 Test");
@@ -2958,7 +2954,7 @@ public static class Program
 		Check(File.Exists(cased.File) && !File.Exists(Path.Combine(setups, "Later.json")), "and nothing was renamed");
 	}
 
-	// His checklist 635: the log window's search goes on from where it stands and from the top again; "first problem" is the first
+	// The log window's search goes on from where it stands and from the top again; "first problem" is the first
 	// line the run marked as a failure, else the first it marked as a warning
 	static void T_TheLogWindowFindsTheNextAndTheFirstProblem()
 	{
@@ -2973,7 +2969,7 @@ public static class Program
 		Equal(-1, ToolRunner.App.LogSearch.Next(log, "", 0), "nothing typed finds nothing");
 	}
 
-	// His checklist 635: the command box keeps what holds every word typed, what starts with it first
+	// The command box keeps what holds every word typed, what starts with it first
 	static void T_TheCommandBoxMatchesTheWordsTyped()
 	{
 		string[] items = ["Start", "Settings", "Settings of TexGen", "Run only TexGen", "Dry run"];
@@ -2986,7 +2982,7 @@ public static class Program
 	}
 
 	// A mod list that begins with a UTF-8 mark keeps it: a line written into it and taken out again leaves the file byte for
-	// byte as it was - what the put-back of a run that only listed a mod must leave (CodeRabbit on pull request #35)
+	// byte as it was - what the put-back of a run that only listed a mod must leave
 	static void T_TheModListKeepsHowItIsWritten()
 	{
 		using var f = new FakeMo2();
@@ -3006,7 +3002,7 @@ public static class Program
 		Check(Profile.KeepAdded(before, new Dictionary<string, char>(), ["New One"]).AsSpan().StartsWith(mark), "a saved list put back with a line kept for a mod keeps its mark too");
 	}
 
-	// his checklist 454: a finished run's old outputs are packed, its folder gone; undoing the run puts each output and the lists back,
+	// a finished run's old outputs are packed, its folder gone; undoing the run puts each output and the lists back,
 	// sets the new outputs aside (never erased), takes out an output the run made new, keeps what the player changed; it can be done once,
 	// only to the last run on that profile and those outputs; a switched-off pack keeps the folder
 	static void T_TheLastRunCanBeUndone()
@@ -3361,7 +3357,7 @@ public static class Program
 		public void Dispose() => GivenUp = true;
 	}
 
-	// Two looks at once - the watch's beat and a Stop's (CodeRabbit on pull request #35). A look reads which numbers are held
+	// Two looks at once - the watch's beat and a Stop's. A look reads which numbers are held
 	// open as it begins and counts on that to its end. A second look on another thread that found the parent ended gave its
 	// hold up under the first: from then on the number could change hands while the first still read every child under it as
 	// the run's own. Looks take turns: the second begins only when the first is done, and no hold is given up under a look.
@@ -3431,8 +3427,8 @@ public static class Program
 		letItEnd.Set();
 		Check(look.Wait(TimeSpan.FromSeconds(10)) && release.Wait(TimeSpan.FromSeconds(10)) && late.Held == 0, "they are once it is done");
 		// ... and once they are given up nothing takes a new one: a look that comes late (the watch's last beat, when its
-		// thread was slow to end) or a process put on record after it - nothing would ever give such a hold up (CodeRabbit
-		// on pull request #35). What is on record can still be asked
+		// thread was slow to end) or a process put on record after it - nothing would ever give such a hold up.
+		// What is on record can still be asked
 		var taken = new System.Collections.Concurrent.ConcurrentBag<Hold>();
 		var over = new StartedSet(p => world.GetValueOrDefault(p), (_, _) => {
 			var hold = new Hold();
@@ -3540,7 +3536,7 @@ public static class Program
 		set.Release();
 		Check(set.Held == 0 && holds.All(h => h.GivenUp), "and the rest when the run is over");
 
-		// The number that changes hands twice between two looks (CodeRabbit on pull request #35): parent 30 starts child 31 in
+		// The number that changes hands twice between two looks: parent 30 starts child 31 in
 		// the very tick of a look and ends, so it is kept for the next look; before that look a stranger gets the number 30,
 		// starts 32 and ends. Nothing is left of the stranger - only 32, with "30" as its parent.
 		void TwiceBetweenLooks(StartedSet a_set, Dictionary<int, DateTime?> a_world)
@@ -3629,7 +3625,7 @@ public static class Program
 		Check(Procs.KillTree(bystander.Id, began) && bystander.WaitForExit(5000), "the very process on record is");
 
 		// ... and ended ALONE: what it started keeps running (the game ended over a box it cannot have answered takes nothing
-		// under it with it that the run has no record of - CodeRabbit on pull request #35)
+		// under it with it that the run has no record of)
 		using var parent = Process.Start(new ProcessStartInfo("cmd.exe", "/d /c \"ping -n 30 127.0.0.1 >nul\"") { UseShellExecute = false, CreateNoWindow = true })!;
 		using var endParent = new StandIn(parent);
 		var parentBegan = Procs.StartTime(parent.Id) ?? throw new InvalidOperationException("the stand-in's start time could not be read");
@@ -3839,7 +3835,7 @@ public static class Program
 		}
 	}
 
-	// ------------------------------------------------------------------ what MO2 changed (his ask 2026-10-27)
+	// ------------------------------------------------------------------ what MO2 changed
 	static void T_Mo2ChangesReadThePaneTopDown()
 	{
 		// the file lists the pane bottom-up: a separator sits AFTER its mods; "*" lines are MO2's own, not mods
@@ -4125,7 +4121,7 @@ public static class Program
 	}
 
 	// the put-back after a crash keeps what the player changed in Mod Organizer while the run went on and after it was cut off -
-	// the run's last expectation is read back from its folder (CodeRabbit on #24); the run's own switches are still undone
+	// the run's last expectation is read back from its folder; the run's own switches are still undone
 	static void T_RestoreKeepsThePlayersChanges()
 	{
 		using var f = new FakeMo2();
@@ -4464,9 +4460,8 @@ public static class Program
 		Equal("theirs, changed since", File.ReadAllText(elsewhere), "and the file elsewhere is as it was");
 	}
 
-	// His report of 2026-11-22: "if clicking set it up in tools while another game/mo2 is open, tool runner doesn't open the new
-	// screen and greys out it's own interface. closing the pop up doesn't work". What holds Mod Organizer is now asked about
-	// before anything waits, the wait says what it is on, and it can always be stopped.
+	// With a game or another Mod Organizer open, what holds Mod Organizer is asked about before anything waits, the wait says
+	// what it is on, and it can always be stopped.
 	static void T_AToolThatCannotOpenYetIsAskedAboutAndItsWaitStops()
 	{
 		// the words for what holds Mod Organizer open
@@ -4589,7 +4584,7 @@ public static class Program
 		}
 	}
 
-	// his word of 2026-11-21: each patcher set up by hand before a setup's first run, and again whenever wanted - the box
+	// each patcher set up by hand before a setup's first run, and again whenever wanted - the box
 	// lists the setup's tools that have a window of their own, and shows by itself once, before the first run only
 	static void T_TheToolsOfASetupAreOfferedBeforeItsFirstRun()
 	{
@@ -4631,7 +4626,7 @@ public static class Program
 		Equal("not set up: Mod Organizer has no executable called \"TexGen\"", ToolRunner.App.ToolsDialog.AfterItsWindow("TexGen", null, "Mod Organizer has no executable called \"TexGen\""),
 			"any other reason is said as it is");
 		// the mod a tool's window was started from, when it could not be switched off again: named on the tool's row, where the
-		// player looks (the box shows no log) - CodeRabbit on pull request #35
+		// player looks (the box shows no log)
 		Equal("", ToolRunner.App.ToolsDialog.StillOn(null), "nothing is added when the mod went off again, or there was none");
 		var left = ToolRunner.App.ToolsDialog.StillOn("TexGen in a mod");
 		Check(left.Contains("\"TexGen in a mod\"", StringComparison.Ordinal) && left.Contains("untick it in Mod Organizer", StringComparison.Ordinal), "a mod left switched on is named, with what to do: " + left);
@@ -4697,7 +4692,7 @@ public static class Program
 		Equal(RunState.Finished, r.State, "the guided step went on after Done: " + r.Verdict);
 	}
 
-	// His checklist 650 ("user choice."): a run that starts at a later step leaves the earlier steps' outputs on - the setup's
+	// A run that starts at a later step leaves the earlier steps' outputs on - the setup's
 	// "keepEarlierOutputs", on unless it says off - and the whole run, its preview and its checks use the same list
 	static void T_ARunFromALaterStepKeepsTheEarlierOutputs()
 	{
@@ -4898,7 +4893,7 @@ public static class Program
 	}
 
 	// a command whose program path is quoted (a path with spaces) runs as written - cmd's own quoting, not Windows' escaping
-	// (2026-10-27: the trial's after-run command failed with '\"C:\...python.exe\"' is not recognized)
+	// (a real run's after-run command failed with '\"C:\...python.exe\"' is not recognized)
 	static void T_CommandWithAQuotedPathRuns()
 	{
 		using var f = new FakeMo2();
@@ -4915,7 +4910,7 @@ public static class Program
 	}
 
 	// a tool driven through its window whose window never changes is idle, whatever CPU its window uses drawing itself - the
-	// step fails naming what the window shows (2026-10-27: Synthesis sat on its main screen 4 min, its window using CPU)
+	// step fails naming what the window shows (Synthesis sat on its main screen 4 min, its window using CPU)
 	static void T_AWindowThatNeverChangesIsIdle()
 	{
 		using var f = new FakeMo2();
@@ -4940,7 +4935,7 @@ public static class Program
 		}
 	}
 
-	// a Synthesis patcher that failed is named off Synthesis's own log once its run ends (2026-10-27: a patcher
+	// a Synthesis patcher that failed is named off Synthesis's own log once its run ends (a patcher
 	// could not write a compressed record, no Synthesis.esp, and the step only said "sat idle")
 	static void T_SynthesisPatcherFailureIsNamed()
 	{
@@ -4956,7 +4951,7 @@ public static class Program
 		Equal<string?>(null, SynthesisStep.Failure("[INF] [T2] Starting Patcher A Run\n[INF] [T2] Finished patcher run\n"), "a clean run is no failure");
 	}
 
-	// the trial of 2026-10-27 20:26: a window being destroyed answers UI Automation with a raw COM error - a "gone" element, never
+	// seen in a real run: a window being destroyed answers UI Automation with a raw COM error - a "gone" element, never
 	// a failed step
 	static void T_AWindowGoingAwayIsNotAFailure()
 	{
@@ -4966,7 +4961,7 @@ public static class Program
 		Check(!Uia.Gone(new InvalidOperationException()), "anything else is a real fault");
 	}
 
-	// the trial of 2026-10-27 21:36: xLODGen wrote where MO2's entry for it said (-o:), not into the step's output folder
+	// seen in a real run: xLODGen wrote where MO2's entry for it said (-o:), not into the step's output folder
 	static void T_XLodGenWritesWhereTheStepSays()
 	{
 		var mo2Args = Mo2Instance.Unescape(@"-o:\""D:\\Modding\\Old Scratch\\Terrain LOD\"" -sse");
@@ -4979,11 +4974,11 @@ public static class Program
 		Equal(@"-sse -d:""E:\Mine""", XLodGenStep.WithData(@"-sse -d:""E:\Mine""", @"C:\Game Copy"), "a data folder the player set stays");
 	}
 
-	// the trial of 2026-10-31: xLODGen had moved its output into its own mod, so ACMOS read an empty scratch folder
+	// seen in a real run: xLODGen had moved its output into its own mod, so ACMOS read an empty scratch folder
 	// ("Invalid Path to LOD") - ACMOS paints the terrain LOD wherever it is
 	static void T_AcmosFindsTheTerrainLodWhereItIs()
 	{
-		var dir = Path.Combine(Path.GetTempPath(), "SUP acmos " + Guid.NewGuid().ToString("N"));
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner test acmos " + Guid.NewGuid().ToString("N"));
 		var scratch = Path.Combine(dir, "Terrain LOD");
 		var mod = Path.Combine(dir, "mods", "SSELODGen_Output - X");
 		try {
@@ -5060,7 +5055,7 @@ public static class Program
 			Equal("plain", File.ReadAllText(Path.Combine(tex, "c.dds")), "the one that could not be replaced stays plain");
 			ctx2.Log.Dispose();
 
-			// "hidden" switched off for the step (his rule: a setting lets players turn it off): the tool is started in the open - no
+			// "hidden" switched off for the step (a setting lets players turn it off): the tool is started in the open - no
 			// hidden desktop, and so no guard that looks over the player's screen for it
 			var looks = 0;
 			HiddenDesktop.OnPlayersDesktop = _ => {
@@ -5122,7 +5117,7 @@ public static class Program
 		return 0;
 	}
 
-	// both trials of 2026-10-27 ticked xLODGen's LOD levels, the first list in its options, instead of its worldspaces
+	// real runs ticked xLODGen's LOD levels, the first list in its options, instead of its worldspaces
 	static void T_TheWorldspaceListIsTheOneWithNames()
 	{
 		IReadOnlyList<string> levels = ["", "4", "8", "16", "32"];
@@ -5375,7 +5370,7 @@ public static class Program
 	// a finished download MO2 left as "<file>.unfinished" beside the same bytes is no download in progress; a real one still is
 	static void T_StaleUnfinishedDownloadIsNotInProgress()
 	{
-		var d = Path.Combine(Path.GetTempPath(), "mo2 tool runner tests", "dl " + Guid.NewGuid().ToString("N")[..8]);
+		var d = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "dl " + Guid.NewGuid().ToString("N")[..8]);
 		Directory.CreateDirectory(d);
 		try {
 			File.WriteAllText(Path.Combine(d, "Done.zip"), "same bytes");
@@ -5692,7 +5687,7 @@ public static class Program
 		Equal("mine=1", File.ReadAllText(live), "the player's file untouched");
 	}
 
-	// his checklist 270: the preview names the tools, what goes off and why, and what is replaced for good - and changes nothing
+	// the preview names the tools, what goes off and why, and what is replaced for good - and changes nothing
 	static void T_PreviewSaysWhatARunDoes()
 	{
 		using var f = new FakeMo2();
@@ -5716,7 +5711,7 @@ public static class Program
 		Check(!Directory.Exists(Runner.RunsDir(f.Data)) || Directory.GetDirectories(Runner.RunsDir(f.Data)).Length == 0, "no run record made");
 	}
 
-	// his checklist 270: only the last few runs' backups stay - this setup's oldest go, another setup's never
+	// only the last few runs' backups stay - this setup's oldest go, another setup's never
 	static void T_OnlyTheLastBackupsAreKept()
 	{
 		using var f = new FakeMo2();
@@ -5741,7 +5736,7 @@ public static class Program
 		Check(left.Contains("2026-01-01 00-00-00 Other") && left.Contains("my own folder"), "another setup's and a folder not of a run stay");
 	}
 
-	// the rename (his order 2026-11-03): saves, tasks and stamps made under the old name are still the runner's own
+	// the rename: saves, tasks and stamps made under the old name are still the runner's own
 	static void T_OldNameIsStillOurs()
 	{
 		Check(Brand.Made(InGame.SaveClean), "a new save of ours");
@@ -5751,7 +5746,7 @@ public static class Program
 		Check(Brand.AllNames.First() == Brand.Name && Brand.AllNames.Contains("MO2 Tool Runner"), "both names known, the new one first");
 	}
 
-	// runs at a set time are gone (his checklist answer 451): only a task an older version made is recognised, and removed
+	// runs at a set time are gone: only a task an older version made is recognised, and removed
 	static void T_OldTimedRunsAreClearedAway()
 	{
 		Check(Schedule.IsOurs("Tool Runner - Bottled Shaders 1A2B3C"), "a task of ours");
@@ -5763,7 +5758,7 @@ public static class Program
 		Check(Schedule.StartsOurs("<Exec><Command>C:\\x\\Tool Runner.exe</Command></Exec>"), "or the new one");
 		Check(!Schedule.StartsOurs("<Exec><Command>cmd.exe</Command></Exec>"), "a task of the player's own that only shares the name");
 		// Windows itself, only where asked (harmless tasks a year ahead, removed at once)
-		if (Environment.GetEnvironmentVariable("SUP_SCHEDULE_PROBE") != "1") {
+		if (Environment.GetEnvironmentVariable("ToolRunnerScheduleProbe") != "1") {
 			return;
 		}
 		const string probe = "MO2 Tool Runner - zz offline leftover", theirs = "MO2 Tool Runner - zz offline not ours";
@@ -5782,11 +5777,11 @@ public static class Program
 		}
 	}
 
-	// His 675 ("Yes; a"): the data kept in Windows' app-data folder - copied whole, its paths repointed, the old folder gone; never
+	// The data kept in Windows' app-data folder - copied whole, its paths repointed, the old folder gone; never
 	// over a folder that holds anything, and a copy that fails leaves the data where it was
 	static void T_TheDataMovesWholeToTheAppDataFolder()
 	{
-		var root = Path.Combine(Path.GetTempPath(), "mo2 tool runner tests", "data move " + Guid.NewGuid().ToString("N")[..8]);
+		var root = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "data move " + Guid.NewGuid().ToString("N")[..8]);
 		var from = Path.Combine(root, "beside", Brand.Name + " Data");
 		var to = Path.Combine(root, "appdata", Brand.Name);
 		try {
@@ -5849,7 +5844,7 @@ public static class Program
 	// the old name keeps the old folder where it is; once it ends, the folder is taken over
 	static void T_DataFolderWaitsForARunningOldCopy()
 	{
-		var parent = Path.Combine(Path.GetTempPath(), "SUP old copy " + Guid.NewGuid().ToString("N"));
+		var parent = Path.Combine(Path.GetTempPath(), "Tool Runner test old copy " + Guid.NewGuid().ToString("N"));
 		var fake = Path.Combine(parent, "bin", Brand.OldNames[0] + ".exe");
 		Directory.CreateDirectory(Path.Combine(parent, Brand.OldNames[0] + " Data", "Setups"));
 		Directory.CreateDirectory(Path.GetDirectoryName(fake)!);
@@ -5860,8 +5855,8 @@ public static class Program
 			Check(!Directory.Exists(Path.Combine(parent, Brand.Name + " Data")), "nothing moved");
 			p.Kill();
 			p.WaitForExit();
-			// the check looks at the whole PC: 2026-11-04 a full run failed here once while the test alone passed - most likely
-			// another old-name program for a moment (a second test run beside this one; not measured) - waited for up to 10 s
+			// the check looks at the whole PC: another old-name program may run for a moment (a second test run beside this one)
+			// - waited for up to 10 s
 			var now = Path.Combine(parent, Brand.Name + " Data");
 			var got = DataFolder.Adopt(parent, " Data");
 			for (var i = 0; i < 20 && got != now; i++) {
@@ -5882,7 +5877,7 @@ public static class Program
 	// an apostrophe in the path never matter, a sibling folder sharing the name is left, a cut-off repoint is finished
 	static void T_DataFolderTakenOverUnderTheNewName()
 	{
-		var parent = Path.Combine(Path.GetTempPath(), "SUP adopt " + Guid.NewGuid().ToString("N"), "Bob's José");
+		var parent = Path.Combine(Path.GetTempPath(), "Tool Runner test adopt " + Guid.NewGuid().ToString("N"), "Bob's José");
 		try {
 			string Old(string a_rest = "") => Path.Combine(parent, Brand.OldNames[0] + " Data") + a_rest;
 			string New(string a_rest = "") => Path.Combine(parent, Brand.Name + " Data") + a_rest;
@@ -5954,7 +5949,7 @@ public static class Program
 		Check(after != null, "free again once the old copy let go");
 	}
 
-	// his lesson 2026-10-27 (checklist 271): the mods a LOD step builds from are found off their plugins' record groups, each with
+	// the mods a LOD step builds from are found off their plugins' record groups, each with
 	// its own page; the setup's own outputs (made from them) are left out
 	static void T_LodGuideFindsTheModsItBuildsFrom()
 	{
@@ -6029,7 +6024,7 @@ public static class Program
 	}
 
 	// TexGen / DynDOLOD keep their window's values in no file, but write them into their debug log: learned from there, and a
-	// later run that used other values is named in the run's notes (mo2-setup's finding 2026-10-27)
+	// later run that used other values is named in the run's notes
 	static void T_ToolWindowValuesReadOffItsLog()
 	{
 		using var f = new FakeMo2();
@@ -6377,9 +6372,9 @@ public static class Program
 	}
 
 	// the window's pictures read the way the window reads them: an Icon.ico WPF could not decode crashed the program at start
-	// (2026-11-03) - a picture like that fails here, never on a player's screen. Covered: every picture compiled into the program
+	// - a picture like that fails here, never on a player's screen. Covered: every picture compiled into the program
 	// and every picture App.xaml's resources make; NOT a picture a window names by its own address (use the Logo resource way)
-	// the template's rules for a theme, held for every theme the program ships (his order 2026-11-10: more themes, each one checked):
+	// the template's rules for a theme, held for every theme the program ships (more themes, each one checked):
 	// text and its quieter kind readable on every panel, the outlined and the primary button's text readable, the three states
 	// readable and apart, borders visible. The work folder's "make themes.py" checks the same before it writes a theme
 	static void T_EveryShippedThemeKeepsTheRules()
@@ -6476,7 +6471,7 @@ public static class Program
 		var read = new List<string>();
 		Exception? failed = null;
 		// every pixel copied out, past the size in its header (a PNG merely cut short is NOT refused - WPF draws what it has,
-		// measured 2026-11-03 - so that is no crash and not what this catches)
+		// measured - so that is no crash and not what this catches)
 		static void Whole(System.Windows.Media.Imaging.BitmapSource a_b, string a_what)
 		{
 			Check(a_b.PixelWidth > 0 && a_b.PixelHeight > 0, a_what + " has a size");
@@ -6564,16 +6559,16 @@ public static class Program
 	}
 
 	// a start with no window of its own that hits an error ends with exit 1 and its error in crash.txt - no window and no box of
-	// it ever shows (2026-11-03: two snapshot tries put a crash box on his screen and waited on it forever). The real program,
+	// it ever shows (a crash box of a start with no window would sit on the screen and be waited on forever). The real program,
 	// built beside the tests, is started on a hidden desktop so even a broken build never reaches the player's screen; its
-	// leak guard watches his screen too
+	// leak guard watches the player's screen too
 	static void T_AWindowlessErrorShowsNothing()
 	{
 		Check(File.Exists(Path.Combine(AppContext.BaseDirectory, Brand.Name + ".exe")), "the program sits beside the tests");
 		// a copy of the built program in a scratch folder of this test's own: its data folder (and the crash.txt it writes) is the
-		// copy's, removed after - nothing is left in a folder that outlives the test (CodeRabbit on PR #22)
+		// copy's, removed after - nothing is left in a folder that outlives the test
 		// never under the temp folder: a program there keeps its data in local app data (AppPaths), so its crash.txt would be elsewhere
-		var scratch = Path.Combine(Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory))!, "SUP windowless " + Guid.NewGuid().ToString("N"));
+		var scratch = Path.Combine(Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory))!, "Tool Runner test windowless " + Guid.NewGuid().ToString("N"));
 		var exe = Path.Combine(scratch, Brand.Name + ".exe");
 		var crash = Path.Combine(scratch, Brand.Name + " Data", "crash.txt");
 		var keep = HiddenDesktop.GuardPoll;
@@ -6589,11 +6584,11 @@ public static class Program
 			}
 			// its own data folder beside it before it starts: an app-data folder this PC chose for every copy never takes it
 			Directory.CreateDirectory(Path.Combine(scratch, Brand.Name + " Data"));
-			using var desk = new HiddenDesktop("SUP-test-windowless");
+			using var desk = new HiddenDesktop("Tool-Runner-test-windowless");
 			// a folder Windows refuses to make: the snapshot's first step throws
 			using var p = desk.Start($"\"{exe}\" --snapshot \"{Path.Combine(Path.GetTempPath(), "bad<name>")}\"", AppContext.BaseDirectory);
 			// each window named the moment it is seen (gone by the time a message is written); one with no size is Windows' own
-			// input helper (UAC_InputIndicatorOverlayWnd, 0x0 - measured 2026-11-04), nothing a player can see
+			// input helper (UAC_InputIndicatorOverlayWnd, 0x0 - measured), nothing a player can see
 			var shown = new Dictionary<nint, string>();
 			var sw = Stopwatch.StartNew();
 			while (!p.HasExited && sw.Elapsed < TimeSpan.FromSeconds(30)) {
@@ -6627,7 +6622,7 @@ public static class Program
 		}
 	}
 
-	// ------------------------------------------------------------------ his finds 2026-11-06
+	// ------------------------------------------------------------------ a run never fights the player
 	// a failed run left its outputs sitting empty in Mod Organizer: an output this tool made that holds only its meta.ini leaves the
 	// mod list and its folder moves into the run's backup; one with files, or a mod the tool did not make, stays
 	static void T_AnEmptyOutputLeavesTheModList()
@@ -6650,7 +6645,7 @@ public static class Program
 		Check(File.Exists(Path.Combine(park, "empty outputs", "Empty Out", "meta.ini")), "its folder is in the run's backup, never erased");
 		Check(!p.Added.Contains("Empty Out") && p.Added.Contains("Full Out"), "it is no longer kept as an added mod");
 		// a folder that cannot move (a file of it held open) keeps its line too - never a folder Mod Organizer would list as new;
-		// and a take-out cut off after its folder moved finishes by taking out the line that was left (CodeRabbit on #24)
+		// and a take-out cut off after its folder moved finishes by taking out the line that was left
 		p.EnsureMod("Held Out");
 		using (new FileStream(Path.Combine(f.Mods, "Held Out", "meta.ini"), FileMode.Open, FileAccess.Read, FileShare.Read)) {
 			var held = false;
@@ -6714,7 +6709,7 @@ public static class Program
 		Check(!p.ChangedByOthers().ContainsKey("Folder Mod Organizer Found"), "a folder Mod Organizer lists as off by itself is not the player's change");
 	}
 
-	// his order 2026-11-07: only Landscape Fixer - a setup still naming SnowFixer or AutoBlend is told so in plain words
+	// only Landscape Fixer - a setup still naming SnowFixer or AutoBlend is told so in plain words
 	static void T_OnlyLandscapeFixerIsSupported()
 	{
 		using var f = new FakeMo2();
@@ -6734,7 +6729,7 @@ public static class Program
 		Equal(@"C:\M\mods\Out", (string?)at["OutputLocation"], "this run's output");
 		Equal("system", (string?)at["UiTheme"], "the player's other settings stay");
 		Equal("Test", (string?)System.Text.Json.Nodes.JsonNode.Parse(ToolRunner.Steps.LauncherStep.PointedAt(null, @"C:\M", "Test", @"C:\G", @"C:\O"))!["Mo2ProfileName"], "a tool never run before");
-		// Its author's word (Landscape Fixer, 2026-11-22): its settings file is no stable contract. A file it wrote that no longer
+		// Its author's word (Landscape Fixer): its settings file is no stable contract. A file it wrote that no longer
 		// holds a field this program points it with (renamed in a newer version) is not written over: the step stops, names
 		// the field, and says the fault is Tool Runner's to report - never the tool author's
 		Equal<string?>(null, LauncherStep.MissingField("{ \"Mo2InstancePath\": \"C:\\\\M\", \"Mo2ProfileName\": \"A\", \"GameLocation\": \"C:\\\\G\", \"OutputLocation\": \"C:\\\\O\" }"), "all four fields there");
@@ -6743,7 +6738,7 @@ public static class Program
 		Equal("Mo2InstancePath", LauncherStep.MissingField("[1, 2]"), "a file that holds no settings object holds none of them");
 		Throws<System.Text.Json.JsonException>(() => LauncherStep.MissingField("{ not settings"), "a file that does not read is said, never taken as complete");
 		Equal("OutputLocation", LauncherStep.MissingField("{ \"Mo2InstancePath\": \"C:\\\\M\", \"Mo2ProfileName\": \"A\", \"GameLocation\": \"C:\\\\G\", \"OutputFolder\": \"C:\\\\O\" }"), "a renamed field is found");
-		// the game's folder is one of them (CodeRabbit on pull request #38)
+		// the game's folder is one of them
 		Equal("GameLocation", LauncherStep.MissingField("{ \"Mo2InstancePath\": \"C:\\\\M\", \"Mo2ProfileName\": \"A\", \"GameDirectory\": \"C:\\\\G\", \"OutputLocation\": \"C:\\\\O\" }"), "the game's folder under another name is found too");
 		Check(LauncherStep.OursToFix("Landscape Fixer").Contains("Tool Runner's GitHub page, never on Landscape Fixer's own page", StringComparison.Ordinal), "and the report goes to Tool Runner");
 		// what the step itself stops on, before anything is changed: a file that is there but blank stops it as well
@@ -6764,7 +6759,7 @@ public static class Program
 		Equal(own, SynthesisStep.WithDataFolder(own, @"C:\Other"), "a data folder the player set stays");
 	}
 
-	// ------------------------------------------------------------------ each step's last run (his checklist 450)
+	// ------------------------------------------------------------------ each step's last run
 	static StepRecord Ran(string a_key, StepState a_state, DateTime? a_started, int a_minutes = 5, string a_note = "") => new() {
 		Key = a_key, Name = StepCatalog.Name(a_key), State = a_state, Started = a_started, Ended = a_started?.AddMinutes(a_minutes), Note = a_note,
 	};
@@ -6821,7 +6816,7 @@ public static class Program
 			"a tick not undone still counts");
 		Equal("1 added, 1 moved, 1 removed", LastRuns.Counted(changes), "counted by kind");
 		Equal<IReadOnlyList<(string, string)>?>(null, LastRuns.ChangesSince(rows, null, "Test", since, watched, _ => false), "a mod list that could not be read now: not known, never \"current\"");
-		// the history's edges (CodeRabbit on #24): watched only since after it finished, or the kept rows cut short after it
+		// the history's edges: watched only since after it finished, or the kept rows cut short after it
 		// finished - not known; a mod removed and installed again is a new copy (it counts), one installed and removed again is not
 		Equal<IReadOnlyList<(string, string)>?>(null, LastRuns.ChangesSince(rows, [], "Test", since, since.AddMinutes(1), _ => false),
 			"Mod Organizer watched only since after it finished: not known");
@@ -6976,7 +6971,7 @@ public static class Program
 
 	static void T_RunLogKeepsASimpleLogBesideTheDetailedOne()
 	{
-		var dir = Path.Combine(Path.GetTempPath(), "SUP simple log " + Guid.NewGuid().ToString("N"));
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner test simple log " + Guid.NewGuid().ToString("N"));
 		try {
 			using (var log = new RunLog(dir)) {
 				log.Say("the detailed line");
@@ -7092,7 +7087,7 @@ public static class Program
 		Check(detailed.Contains("! what it means: A plugin needs a master", StringComparison.Ordinal), "the detailed log says what it means too");
 	}
 
-	// ------------------------------------------------------------------ CodeRabbit on PR #24
+	// ------------------------------------------------------------------ Synthesis' and Landscape Fixer's own files
 	// Synthesis is pointed at the game MO2 runs in every profile whose data folder is unset - null or left out - while a folder the
 	// player set is kept, and its type marker stays first (Synthesis's reader needs it there)
 	static void T_SynthesisDataFolderIsSetWhereverItIsUnset()
@@ -7115,7 +7110,7 @@ public static class Program
 	// a translation file of another shape (a list, a plain value, "run" not an object) is passed over, never stopping the step
 	static void T_LandscapeFixerSkipsOddTranslationFiles()
 	{
-		var dir = Path.Combine(Path.GetTempPath(), "SUP odd translations " + Guid.NewGuid().ToString("N"));
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner test odd translations " + Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(dir);
 		try {
 			File.WriteAllText(Path.Combine(dir, "list.json"), "[1, 2]");
@@ -7131,7 +7126,7 @@ public static class Program
 		}
 	}
 
-	// ------------------------------------------------------------------ the audit of 2026-11-07
+	// ------------------------------------------------------------------ boxes, the window's own work, the checks before a run
 	// the boxes Mod Organizer shows while closing are answered: its quit question and notices by their words (whole words, so a
 	// player's box about "disclosure" is not one), and its one-button notice in any language; another box of the player's is left
 	static void T_Mo2CloseBoxesAreKnownByWordsOrOneButton()
@@ -7147,7 +7142,7 @@ public static class Program
 	// player who runs it in German is understood too; a broken file or no folder falls back to the English names
 	static void T_LandscapeFixerKnowsItsButtonInEveryLanguage()
 	{
-		var dir = Path.Combine(Path.GetTempPath(), "SUP translations " + Guid.NewGuid().ToString("N"));
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner test translations " + Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(dir);
 		try {
 			File.WriteAllText(Path.Combine(dir, "en.json"), "{ \"run\": { \"generate\": \"Generate\" } }");
@@ -7167,7 +7162,7 @@ public static class Program
 	// warnings / errors, go into the failure (never the older part of its log)
 	static void T_Mo2LogLinesSinceTheRequestAreNamed()
 	{
-		var file = Path.Combine(Path.GetTempPath(), "SUP mo2 log " + Guid.NewGuid().ToString("N") + ".log");
+		var file = Path.Combine(Path.GetTempPath(), "Tool Runner test mo2 log " + Guid.NewGuid().ToString("N") + ".log");
 		try {
 			File.WriteAllText(file, "12:00:00.000 [W] an old warning\nLandscapeFixer old line\n");
 			var from = new FileInfo(file).Length;
@@ -7183,7 +7178,7 @@ public static class Program
 		}
 	}
 
-	// his checklist 490: a screen reader hears each step whole in words (its glyph and color say it to the eye), and list rows by
+	// a screen reader hears each step whole in words (its glyph and color say it to the eye), and list rows by
 	// their words - never a type's name or a file path
 	static void T_ScreenReadersHearEachStepInWords()
 	{
@@ -7211,7 +7206,7 @@ public static class Program
 		Check(said[1].Item1.Length < 620, "a long text is cut for the reader");
 	}
 
-	// his checklist 484: a clean removal sends only the program's own data and its own run backups to the Recycle Bin; setups stay
+	// a clean removal sends only the program's own data and its own run backups to the Recycle Bin; setups stay
 	// when asked; nothing goes while a run did not finish
 	static void T_CleanRemovalTakesOnlyItsOwn()
 	{
@@ -7242,7 +7237,7 @@ public static class Program
 		Check(DataRemoval.Make(f.Data, true).Remove.Contains(work, StringComparer.OrdinalIgnoreCase), "its ProgramData work folder goes too");
 		Check(!DataRemoval.Make(f.Data, true).Remove.Any(p => p.EndsWith("not there", StringComparison.Ordinal)), "a work folder that does not exist is not listed");
 		// a setup deleted since: its run record still names its backup, which goes too - a record pointing at a folder not named
-		// like a run backup removes nothing (CodeRabbit on #24)
+		// like a run backup removes nothing
 		var goneBackup = Path.Combine(setup.BackupDir, "2026-10-30 19-00-00 Gone Setup");
 		Directory.CreateDirectory(Path.Combine(goneBackup, "profile Test"));
 		// named like a run backup but holding no copy of a profile: not one, never taken
@@ -7299,7 +7294,7 @@ public static class Program
 		Check(threw, "carrying a refused plan says why and sends nothing");
 	}
 
-	// his checklist 482: the bug-report zip holds the run's logs, its setup and the versions, with the player's names masked
+	// the bug-report zip holds the run's logs, its setup and the versions, with the player's names masked
 	// everywhere (paths included) - and a name inside an ordinary word is left alone
 	static void T_BugReportMasksThePlayersNames()
 	{
@@ -7349,7 +7344,7 @@ public static class Program
 		}
 	}
 
-	// his checklist 478: a setup's run backups are listed newest first with their size, and the clean-up keeps the newest few -
+	// a setup's run backups are listed newest first with their size, and the clean-up keeps the newest few -
 	// never another setup's folder or one an unfinished run still needs
 	static void T_BackupCleanUpKeepsTheNewest()
 	{
@@ -7379,13 +7374,12 @@ public static class Program
 		Equal(0, Runner.PruneBackupsOf(setup, Runner.RunsDir(f.Data), null, 0, RunLog.Null).Count, "0 = keep them all");
 	}
 
-	// his checklist 475: each step's help is its tool's own page (never a guess), and the save steps get DynDOLOD's clean-save help
-	// his checklist 471: a newer version of the program is told at most once a day (one look on the web, then the remembered answer),
+	// a newer version of the program is told at most once a day (one look on the web, then the remembered answer),
 	// a version set aside with "Not now" is not told again but the next newer one is, the switch turns the look off, and a look that
 	// fails stays quiet
 	static void T_ANewVersionIsToldOnceADay()
 	{
-		var dir = Path.Combine(Path.GetTempPath(), "SUP new version " + Guid.NewGuid().ToString("N"));
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner test new version " + Guid.NewGuid().ToString("N"));
 		var looks = 0;
 		var newest = "1.1";
 		var fail = false;
@@ -7416,7 +7410,7 @@ public static class Program
 			Equal(null, Ask("1.0", now.AddDays(4).AddHours(3)), "still nothing the same day");
 			Equal(afterFail, looks, "a failed look counts as the day's look - never asked again each start");
 			Check(ProgramUpdate.Page.StartsWith("https://", StringComparison.Ordinal), "its download page is a web address");
-			// switched off while a look is out on the web: the look's answer neither undoes the switch nor is told (CodeRabbit on #25)
+			// switched off while a look is out on the web: the look's answer neither undoes the switch nor is told
 			fail = false;
 			newest = "1.3";
 			ProgramUpdate.Probe = _ => {
@@ -7435,13 +7429,13 @@ public static class Program
 		}
 	}
 
-	// His list of 2026-11-16, point 1: a new version is taken from the program's own GitHub release and put in place of the one
+	// A new version is taken from the program's own GitHub release and put in place of the one
 	// that runs. The download is checked before anything is replaced (GitHub's check sum of it, plain file names only, the
 	// program inside it at the version asked for), each new file is read back, the old ones are set aside and removed at the
 	// next start, a step that fails takes every step before it back, and the data folder beside the program is no part of it.
 	static void T_ANewVersionIsDownloadedCheckedAndPutInPlace()
 	{
-		var top = Path.Combine(Path.GetTempPath(), "SUP install " + Guid.NewGuid().ToString("N"));
+		var top = Path.Combine(Path.GetTempPath(), "Tool Runner test install " + Guid.NewGuid().ToString("N"));
 		var program = Path.Combine(top, "program");
 		var data = Path.Combine(program, "Tool Runner Data");
 		var web = Path.Combine(top, "web");
@@ -7671,7 +7665,7 @@ public static class Program
 		public override void Write(byte[] a_buffer, int a_offset, int a_count) => throw new NotSupportedException();
 	}
 
-	// CodeRabbit on pull request #37: the client's own timeout covers only an answer's headers. A server on this PC that sends its
+	// The client's own timeout covers only an answer's headers. A server on this PC that sends its
 	// headers and then nothing is ended after the quiet stretch, and one that keeps sending a byte now and then by the deadline
 	static void T_ADownloadThatStopsComingIsEnded()
 	{
@@ -7732,7 +7726,7 @@ public static class Program
 		}
 	}
 
-	// his checklist 466: a shared setup keeps its steps and options and loses everything of this PC - its Mod Organizer, backup
+	// a shared setup keeps its steps and options and loses everything of this PC - its Mod Organizer, backup
 	// folder, every value holding a path, and the commands it runs before and after a run; it names what the other player sets
 	static void T_ASharedSetupCarriesNothingOfThisPc()
 	{
@@ -7755,13 +7749,13 @@ public static class Program
 		Check(r.Removed.Any(x => x.Contains("before", StringComparison.Ordinal)) && r.Removed.Any(x => x.Contains("tool_writes", StringComparison.Ordinal)),
 			"what was taken out is named: " + string.Join("; ", r.Removed));
 		Check((r.Setup["shared"]?["setYourself"] as JsonArray)?.Count == r.Removed.Count, "the copy itself says what to set");
-		// CodeRabbit on #25: more path forms, names masked in values only, the file name masked, never written over its source,
+		// More path forms, names masked in values only, the file name masked, never written over its source,
 		// and a PGPatcher settings set named as the other player's to make
 		foreach (var p in new[] { @"%ProgramFiles(x86)%\Tool", "//nas/private/tool", @"\\nas\lod\x" }) {
 			Check(SetupShare.HoldsPath(p), "a path of this PC: " + p);
 		}
 		Check(!SetupShare.HoldsPath("https://www.nexusmods.com/skyrimspecialedition/mods/32382") && !SetupShare.HoldsPath("Tamriel"), "a web address or a word is no path");
-		var dir = Path.Combine(Path.GetTempPath(), "SUP share " + Guid.NewGuid().ToString("N"));
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner test share " + Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(dir);
 		try {
 			var source = Path.Combine(dir, "Steps Of Izzy (shared).json");
@@ -7793,11 +7787,11 @@ public static class Program
 		}
 	}
 
-	// his checklist 457: a save's character is read off the start of its header (the UESP layout), every character with a save is
+	// a save's character is read off the start of its header (the UESP layout), every character with a save is
 	// listed most recently played first, and a picked character limits the in-game steps to that character's saves
 	static void T_TheCharacterIsReadOffTheSave()
 	{
-		var dir = Path.Combine(Path.GetTempPath(), "SUP saves " + Guid.NewGuid().ToString("N"));
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner test saves " + Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(dir);
 		try {
 			void Save(string a_file, string a_name, DateTime a_at)
@@ -7832,7 +7826,6 @@ public static class Program
 
 	// the in-game steps with a character picked: that character's newest save even when another character played since, a save
 	// of another character never loaded (named or an earlier clean save), and the final save starting from the picked one's
-	// (CodeRabbit on #25)
 	static void T_TheInGameStepsUseThePickedCharactersSaves()
 	{
 		using var f = new FakeMo2();
@@ -7906,10 +7899,10 @@ public static class Program
 	}
 
 	// the log box: only whole new lines, a letter never cut in two, a big log only its last part, and a replaced log started over
-	// even when the new one has already grown past where the last look stopped (CodeRabbit on #24)
+	// even when the new one has already grown past where the last look stopped
 	static void T_TheLogBoxFollowsAReplacedLog()
 	{
-		var dir = Path.Combine(Path.GetTempPath(), "SUP log tail " + Guid.NewGuid().ToString("N"));
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner test log tail " + Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(dir);
 		var log = Path.Combine(dir, "log.txt");
 		try {
@@ -7941,10 +7934,10 @@ public static class Program
 
 	// the run's command watcher let go of while its look is still going (a Stop's OnStop ending a slow tool): Dispose returns after
 	// its wait, the look finishes later and sets the wait's event on the timer's thread - which must still be there (a released
-	// event would throw on that thread and end the program), and the look arms no new look (CodeRabbit on #24)
+	// event would throw on that thread and end the program), and the look arms no new look
 	static void T_TheCommandWatcherLetsGoWhileALookIsHeld()
 	{
-		var dir = Path.Combine(Path.GetTempPath(), "SUP commands " + Guid.NewGuid().ToString("N"));
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner test commands " + Guid.NewGuid().ToString("N"));
 		var keep = Commands.DisposeWait;
 		Commands.DisposeWait = TimeSpan.FromMilliseconds(200);
 		using var entered = new ManualResetEventSlim();
@@ -7983,7 +7976,7 @@ public static class Program
 	}
 
 	// the settings search names the other steps whose settings hold its word - in a setting's name, its label or its value, a list's
-	// items too - never the step already open (CodeRabbit on #24)
+	// items too - never the step already open
 	static void T_TheSettingsSearchNamesOtherSteps()
 	{
 		var steps = new List<JsonObject> {
@@ -8001,8 +7994,8 @@ public static class Program
 		Equal("ACMOS Road Generator", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "nameless", -1)), "a setting with an empty name is still searched");
 	}
 
-	// his list of 2026-11-16: a step dragged to any place, a check that also looks for updates, windows that keep their size
-	static void T_TheWindowListOfNovember()
+	// a step dragged to any place, a check that also looks for updates, windows that keep their size
+	static void T_StepsAreDraggedAndWindowsKeepTheirSize()
 	{
 		// where a dragged row lands: its place in the list afterwards (taking it out first moves the rows after it up by one)
 		Equal(0, ToolRunner.App.MainWindow.DropPlace(3, 0, false), "on the first row's upper half: it becomes the first");
@@ -8065,7 +8058,7 @@ public static class Program
 			ToolRunner.App.UiState.Save();
 			Equal(stamp, File.GetLastWriteTimeUtc(kept), "with nothing new kept, nothing is written");
 			// a write the disk refuses (here: a folder stands where the file goes) is not counted as written: the next write
-			// takes it along (CodeRabbit on pull request #35)
+			// takes it along
 			File.Delete(kept);
 			Directory.CreateDirectory(kept);
 			ToolRunner.App.UiState.Set("test.width", 900);
@@ -8075,8 +8068,7 @@ public static class Program
 			ToolRunner.App.UiState.Save();
 			Check(!ToolRunner.App.UiState.Unsaved && JsonNode.Parse(File.ReadAllText(kept))!["test.width"]!.GetValue<double>() == 900, "and the next write puts it in the file");
 			// The closing window's last write is made on a worker: tried, and tried once more when the disk refused. After it
-			// the program's end leaves the file alone - its own write would be made on the window's thread (CodeRabbit on
-			// pull request #35)
+			// the program's end leaves the file alone - its own write would be made on the window's thread
 			Check(!ToolRunner.App.UiState.WrittenAtClose, "(no window has made its last write yet)");
 			File.Delete(kept);
 			Directory.CreateDirectory(kept);
@@ -8130,7 +8122,7 @@ public static class Program
 	}
 
 	// A setup's file is written with the file as it stood copied aside first - disk work alone, which the window does away
-	// from its own thread (CodeRabbit on pull request #35). A write that cannot be made says why and changes nothing
+	// from its own thread. A write that cannot be made says why and changes nothing
 	static void T_ASetupIsWrittenWithACopyOfHowItStood()
 	{
 		using var f = new FakeMo2();
@@ -8173,7 +8165,7 @@ public static class Program
 		Check(keptNow.Contains($"v{Setup.CopiesKept + 1}") && keptNow.Contains($"v{Setup.CopiesKept}") && !keptNow.Contains("v0") && !keptNow.Contains("v1"),
 			"the version each save replaced has its copy, the last one too; the oldest two went: " + string.Join(",", keptNow.Order(StringComparer.Ordinal)));
 		// The PC's clock set back: every copy there reads newer than the one this save makes. That one still stays - the
-		// version a save replaced always has its copy - with the newest of the others (CodeRabbit on pull request #35)
+		// version a save replaced always has its copy - with the newest of the others
 		var back = Path.Combine(f.Root, "Clock backups");
 		Directory.CreateDirectory(back);
 		for (var i = 0; i < Setup.CopiesKept; ++i) {
@@ -8190,7 +8182,7 @@ public static class Program
 	// the whole log when it was started again meanwhile, the last lines only when there are many
 	static void T_AFailedStartKeepsMo2sWholeLog()
 	{
-		var file = Path.Combine(Path.GetTempPath(), "SUP mo2 log " + Guid.NewGuid().ToString("N") + ".log");
+		var file = Path.Combine(Path.GetTempPath(), "Tool Runner test mo2 log " + Guid.NewGuid().ToString("N") + ".log");
 		try {
 			File.WriteAllText(file, "[I] before the request\r\n");
 			var at = new FileInfo(file).Length;
@@ -8205,7 +8197,7 @@ public static class Program
 	}
 
 	// a tool whose program lives in a mod switched off in the profile (Mod Organizer cannot start it from there - measured on
-	// Landscape Fixer 2026-11-08): that mod is switched on for the tool's run and off again after; one holding a plugin is left to
+	// Landscape Fixer): that mod is switched on for the tool's run and off again after; one holding a plugin is left to
 	// the player and named; a program outside the mods folder, or in a mod that is on, changes nothing
 	static void T_AToolInASwitchedOffModIsSwitchedOnForItsRun()
 	{
@@ -8248,7 +8240,7 @@ public static class Program
 			"a mod the setup itself names for the step is its own choice, plugin or not - and still switched on, for the steps that do not read that list");
 	}
 
-	// his checklist 464: before the first step that loads a save the player's saves are copied into the run's backup - saves and co-saves,
+	// before the first step that loads a save the player's saves are copied into the run's backup - saves and co-saves,
 	// nothing else, once a run, the original untouched; the setup can switch it off; no room, no folder, a Stop or a copy that cannot be
 	// made never stops the run or leaves a part behind
 	// a save unchanged since the last run's copy shares that copy's file; a changed one gets its own
@@ -8350,11 +8342,11 @@ public static class Program
 		Check(Files.ReadSharedText(log.TextPath!).Contains("no saves folder", StringComparison.Ordinal), "and the log says so");
 	}
 
-	// his checklist 438: Steam's own record of the game says whether it is updating it (refused), has an update waiting (a warning)
+	// Steam's own record of the game says whether it is updating it (refused), has an update waiting (a warning)
 	// or is done (nothing); a copy outside a steamapps folder, or with no record, has nothing to read
 	static void T_SteamUpdatingTheGameIsSeen()
 	{
-		var root = Path.Combine(Path.GetTempPath(), "SUP steam " + Guid.NewGuid().ToString("N"));
+		var root = Path.Combine(Path.GetTempPath(), "Tool Runner test steam " + Guid.NewGuid().ToString("N"));
 		var game = Path.Combine(root, "steamapps", "common", "Skyrim Special Edition");
 		Directory.CreateDirectory(game);
 		var manifest = Path.Combine(root, "steamapps", "appmanifest_489830.acf");
@@ -8382,7 +8374,7 @@ public static class Program
 		}
 	}
 
-	// his checklist 458: what holds a teleport - a beast form or a mount that cannot be left stops the step in the end; a kill move, a
+	// what holds a teleport - a beast form or a mount that cannot be left stops the step in the end; a kill move, a
 	// conversation, a menu or a scene are waited out and go on, so a wrong reading never fails a run; nothing held = no wait
 	static void T_WhatHoldsATeleportIsKnown()
 	{
@@ -8443,11 +8435,11 @@ public static class Program
 
 	static void T_TheRealGameArchiveHoldsItsWords()
 	{
-		if (Environment.GetEnvironmentVariable("SUP_REAL_MO2") is not { Length: > 0 } exe) {
-			Console.WriteLine("      (skipped: SUP_REAL_MO2 not set)");
+		if (Environment.GetEnvironmentVariable("ToolRunnerRealMo2") is not { Length: > 0 } exe) {
+			Console.WriteLine("      (skipped: ToolRunnerRealMo2 not set)");
 			return;
 		}
-		var game = Mo2Instance.Load(exe, Environment.GetEnvironmentVariable("SUP_REAL_BASE")).GameDir;
+		var game = Mo2Instance.Load(exe, Environment.GetEnvironmentVariable("ToolRunnerRealBase")).GameDir;
 		var texts = GameWords.TranslationsIn(Path.Combine(game, "Data", "Skyrim - Interface.bsa"));
 		Check(texts.Count >= 8, $"every language's file: {texts.Count}");
 		var w = GameWords.Of(texts, []);
@@ -8455,7 +8447,7 @@ public static class Program
 		Check(w.AsksNo("You can also search for missing content in the Creations menu."), "a box's own English text, off that file");
 	}
 
-	// his checklist 459: a save that did not happen is said in the player's words, and names the way forward (the real proof of the force
+	// a save that did not happen is said in the player's words, and names the way forward (the real proof of the force
 	// is in-game, on the full run's list)
 	static void T_ASaveThatDidNotHappenIsSaid()
 	{
@@ -8472,7 +8464,7 @@ public static class Program
 	// leaves the marker
 	static void T_OldTimedRunsAreLookedForOnce()
 	{
-		var dir = Path.Combine(Path.GetTempPath(), "SUP once " + Guid.NewGuid().ToString("N"));
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner test once " + Guid.NewGuid().ToString("N"));
 		var looks = 0;
 		try {
 			Schedule.RemoveLeftoversOnce(dir, () => { ++looks; return false; });
@@ -8493,7 +8485,7 @@ public static class Program
 		}
 	}
 
-	// his checklist 456: only what each tool's own document says - DynDOLOD.esp and Occlusion.esp last, Occlusion.esp after DynDOLOD.esp,
+	// only what each tool's own document says - DynDOLOD.esp and Occlusion.esp last, Occlusion.esp after DynDOLOD.esp,
 	// PG_1.esp last but for those, DynDOLOD.esm the last master; Synthesis, PGPatcher.esp and Landscape Fixer have no documented place;
 	// always a warning
 	static void T_OutputPluginsAreCheckedAgainstTheirDocuments()
@@ -8513,7 +8505,7 @@ public static class Program
 		Equal(0, C("Early.esm", "DynDOLOD.esm", "Some.esp").Count, "plugins after DynDOLOD.esm are fine");
 	}
 
-	// his checklist 439: a standard Windows button by its control id, a Qt box's by where it stands; a Mod Organizer in another language
+	// a standard Windows button by its control id, a Qt box's by where it stands; a Mod Organizer in another language
 	// answers only what came after the close request
 	static void T_ButtonsAreKnownByWhatTheyDo()
 	{
@@ -8540,7 +8532,7 @@ public static class Program
 		Check(Mo2Control.IsJava("javaw.exe") && !Mo2Control.IsJava("xEdit.exe"), "Java is any Java program's");
 	}
 
-	// his checklist 439: the game's own words for its load boxes, from a game archive laid out as the game's is
+	// the game's own words for its load boxes, from a game archive laid out as the game's is
 	static void T_GameBoxesAreReadInItsOwnLanguage()
 	{
 		const string German = "$Yes\tJa\r\n$No\tNein\r\n$SaveGameMissingContentActivate\tJetzt aktivieren?\r\n$SaveGameInactiveContent\tDieser Spielstand braucht inaktive Inhalte:\r\n$Other\tEtwas anderes\r\n$SaveGameUnownedContinue\t\r\n";
@@ -8551,7 +8543,7 @@ public static class Program
 		Equal<string?>(null, DevBench.DecideBox("Dieser Spielstand braucht fehlende Inhalte. Weiter laden?", ["Oui", "Non"], 2, w).Answer, "nor one whose buttons it cannot read");
 		Equal(("answered NO", 1), DevBench.DecideBox("Some content is missing, search the Creations menu?", ["Yes", "No"], 2, w), "English still reads");
 		Equal(0, GameWords.Of([], []).HasAskYes, "nothing read: nothing known");
-		var dir = Path.Combine(Path.GetTempPath(), "SUP words " + Guid.NewGuid().ToString("N"));
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner test words " + Guid.NewGuid().ToString("N"));
 		try {
 			Directory.CreateDirectory(Path.Combine(dir, "Data"));
 			var other = "something else"u8.ToArray();
@@ -8596,7 +8588,7 @@ public static class Program
 		}
 	}
 
-	// his checklist 443 / 492: Root Builder setups are waited for, and our add-on goes in beside Root Builder, never without it
+	// Root Builder setups are waited for, and our add-on goes in beside Root Builder, never without it
 	static void T_RootBuilderIsWaitedFor()
 	{
 		using var f = new FakeMo2();
@@ -8646,7 +8638,7 @@ public static class Program
 		Equal(RootBuilderAddOn.State.Current, RootBuilderAddOn.StateOf(mo2), "and brought level");
 	}
 
-	// his checklist 467: the tools on the PC named against Mod Organizer's list, the found ones added to it with every other line left alone
+	// the tools on the PC named against Mod Organizer's list, the found ones added to it with every other line left alone
 	static void T_TheFirstStartHelperFindsTools()
 	{
 		using var f = new FakeMo2();
@@ -8683,7 +8675,7 @@ public static class Program
 		Check(read["General"]["x"] == "1" && read["customExecutables"]["size"] == "1" && read["customExecutables"][@"1\title"] == "A", "a list that was not there is made: " + made);
 	}
 
-	// his checklist 468: the Tools menu entry points at the program that added it, and a run never waits for that program under Mod Organizer
+	// the Tools menu entry points at the program that added it, and a run never waits for that program under Mod Organizer
 	static void T_TheToolsMenuEntryOpensThisProgram()
 	{
 		using var f = new FakeMo2();
@@ -8701,7 +8693,7 @@ public static class Program
 		Check(!Mo2Control.IsThisProgram("SSEEdit.exe"), "another program is");
 	}
 
-	// his checklist 460: the settings of the small, muted window, for the step only: back after it, after a failure too; off, nothing changes
+	// the settings of the small, muted window, for the step only: back after it, after a failure too; off, nothing changes
 	static void T_TheQuietGameWindowGoesBack()
 	{
 		const string Prefs = "[AudioMenu]\r\nfAudioMasterVolume=1.0000\r\nfVal=1\r\n[Display]\r\nbBorderless=1\r\nbFull Screen=1\r\niSize H=1080\r\niSize W=1920\r\nother=keep\r\n[General]\r\nsLanguage=ENGLISH\r\n";
@@ -8770,7 +8762,7 @@ public static class Program
 		Equal(TweaksBefore, File.ReadAllText(tweakFile), "the mod's as well");
 	}
 
-	// his checklist 433-435: an add-on file is read and checked in plain words, goes where it says in the order, and a file changed since is asked about
+	// an add-on file is read and checked in plain words, goes where it says in the order, and a file changed since is asked about
 	static void T_AnAddOnFileIsCheckedAndPlaced()
 	{
 		const string Good = """
@@ -8877,7 +8869,7 @@ public static class Program
 		Check(File.Exists(Path.Combine(f.Mods, "Output A", "MyPatch.esp")), "and the output stays");
 	}
 
-	// his checklist 445: a tool newer than this release was proven with is a note, never a stop; what a run presses is looked for by its name, or its id
+	// a tool newer than this release was proven with is a note, never a stop; what a run presses is looked for by its name, or its id
 	static void T_AToolsWindowIsCheckedAgainstWhatARunPresses()
 	{
 		Equal<ToolRunner.Steps.Issue?>(null, ToolProof.Newer("synthesis", "0.36.6.0"), "the version it was proven with");
@@ -8899,7 +8891,7 @@ public static class Program
 		Check(ToolProof.Looks.All(l => StepCatalog.Known(l.Step)), "every look is at a step");
 	}
 
-	// his checklist 476: a language file's words reach what no binding fills, what it leaves out stays English, and one that does not read changes nothing
+	// a language file's words reach what no binding fills, what it leaves out stays English, and one that does not read changes nothing
 	static void T_TheWindowCanBeTranslated()
 	{
 		Exception? failed = null;
@@ -8946,7 +8938,7 @@ public static class Program
 		Equal("Starten", ToolRunner.App.WindowWords.Read("{ \"Start\": \"Starten\", }", out _)?["Start"], "a file a person wrote reads");
 	}
 
-	// his checklist 477: a question and its answer as files; no answer is said in time and leaves nothing behind
+	// a question and its answer as files; no answer is said in time and leaves nothing behind
 	static void T_TheCompanionAnswersOrIsPassedOver()
 	{
 		using var f = new FakeMo2();
@@ -8982,6 +8974,7 @@ public static class Program
 		Check(!control.HeldOpen, "Mod Organizer is not held open unless asked");
 	}
 
+	// each step's help is its tool's own page (never a guess), and the save steps get DynDOLOD's clean-save help
 	static void T_EveryToolStepHasItsHelpPage()
 	{
 		foreach (var s in StepCatalog.All.Where(s => s.Key is not ("shaders" or "xlodgen"))) {
@@ -8991,7 +8984,7 @@ public static class Program
 		Equal("https://dyndolod.info/Help/Clean-Save", ToolRunner.App.SettingsPanel.HelpPage("cleansave")?.Url, "the clean save's help");
 	}
 
-	// his checklist 470: a game that closed under an in-game step names the crash log written since the run began - Crash Logger's
+	// a game that closed under an in-game step names the crash log written since the run began - Crash Logger's
 	// and Trainwreck's in the SKSE folder, .NET Script Framework's in overwrite - and never an older one
 	static void T_AGameCrashNamesItsCrashLog()
 	{
@@ -9020,10 +9013,10 @@ public static class Program
 		Check(InGame.CrashNote(skse, f.Overwrite, since).Contains(tw, StringComparison.Ordinal), "and the other crash logger's beside it");
 	}
 
-	// ---- his run of 2026-11-10 on Lumina (the shader step's seven faults) ----
+	// ---- the shader step on a profile with several shader mods ----
 
 	// The cache the profile runs comes first, built with every ticked shader mod on; one that is switched off only when the
-	// setup asks. His setup: Bottled Shaders off, a test layer and Open Shaders both ticked (the layer lower in the pane).
+	// setup asks. The case: Bottled Shaders off, a test layer and Open Shaders both ticked (the layer lower in the pane).
 	static void T_TheProfilesOwnShaderCacheComesFirst()
 	{
 		var bottled = new ShaderStep.Cache("Bottled Shaders", "Cache - Bottled", null);
@@ -9060,7 +9053,7 @@ public static class Program
 		Check(none.Count == 0 && why.Any(n => n.Contains("no shader mod is ticked", StringComparison.Ordinal)), "nothing ticked: nothing built, and said");
 	}
 
-	// The end of a compile. His run: the shader log was never found and, found, its last line read "remaining=549" five minutes
+	// The end of a compile. In a real run the shader log was never found and, found, its last line read "remaining=549" five minutes
 	// before the real end (Bottled Shaders writes that line only for a slow shader) - so the game itself is read.
 	static void T_ACompileEndsWhenTheGameGoesQuiet()
 	{
@@ -9096,7 +9089,7 @@ public static class Program
 		Check(ShaderStep.IdleLine(13.2) == 2.0 && Math.Abs(ShaderStep.IdleLine(4.0) - 1.4) < 1e-9 && ShaderStep.IdleLine(1.0) == 0.75, "low = a third of the game's own peak, never above two cores");
 	}
 
-	// SKSE's log folder shown elsewhere by a Mod Organizer file-mapper plugin (his: a path with an apostrophe in a Python raw
+	// SKSE's log folder shown elsewhere by a Mod Organizer file-mapper plugin (a path with an apostrophe in a Python raw
 	// string): the shader log and the crash logs are read where they really are
 	static void T_LogsMappedElsewhereAreFound()
 	{
@@ -9135,7 +9128,7 @@ public static class Program
 		public void Ask(string a_step, string a_text, CancellationToken a_ct) => a_ask(a_text, a_ct);
 	}
 
-	// A crash while compiling is named as a crash with its report (his: Tullius CTD Logger's, in overwrite), and the game is
+	// A crash while compiling is named as a crash with its report (Tullius CTD Logger's, in overwrite), and the game is
 	// never started again silently: asked (the default), restarted or stopped as the setup says
 	static void T_ACrashWhileCompilingIsNamedNeverRestartedSilently()
 	{
@@ -9196,7 +9189,7 @@ public static class Program
 		stopped.Log.Dispose();
 	}
 
-	// A failed step takes out of overwrite only what it made. A path new to overwrite with a date from before the step (his: a
+	// A failed step takes out of overwrite only what it made. A path new to overwrite with a date from before the step (a
 	// crash logger renaming its own older logs) stays, and a crash report that goes to the backup is named with its new place.
 	static void T_AFailedStepTakesOnlyItsOwnFilesOutOfOverwrite()
 	{
@@ -9235,7 +9228,7 @@ public static class Program
 		Check(log.Contains("left where they are (not this run's): Helper.previous.2.log", StringComparison.Ordinal), "and names what it left");
 	}
 
-	// A step that makes several outputs keeps the finished one on when a later part fails (his: the first cache's fate hung on
+	// A step that makes several outputs keeps the finished one on when a later part fails (the first cache's fate hung on
 	// the second's)
 	static void T_AFinishedPartStaysOnWhenTheStepFailsLater()
 	{
@@ -9258,8 +9251,8 @@ public static class Program
 		Check(File.Exists(Path.Combine(f.Mods, "Part One", "made.txt")), "its files stay");
 	}
 
-	// Stop is seen by every wait of a put-back. His run: pressed during Root Builder's three-minute wait (a close with no
-	// cancellation of its own), seen only after Mod Organizer had been started again - and then the put-back met that fresh
+	// Stop is seen by every wait of a put-back. Pressed during Root Builder's three-minute wait (a close with no
+	// cancellation of its own), it was seen only after Mod Organizer had been started again - and then the put-back met that fresh
 	// Mod Organizer and the step read FAILED "Mod Organizer is open".
 	static void T_StopIsSeenByAPutBacksWaits()
 	{
@@ -9341,7 +9334,7 @@ public static class Program
 			Check(f.Text("modlist.txt").Contains("-Replaced", StringComparison.Ordinal) && f.Text("modlist.txt").Contains("+Base Mod", StringComparison.Ordinal),
 				"what the player changed in the Mod Organizer that came up is kept, and the step's own switch is back: " + f.Text("modlist.txt").Replace("\r\n", " "));
 			// the step's own switch is taken back and counts for nothing; the mod the player switched stands otherwise than
-			// before the step, so the game finds other files than its list names (CodeRabbit on pull request #35)
+			// before the step, so the game finds other files than its list names
 			Equal(countedBefore + 1, ctx.Journal.FilesChanged, "what the player switched during the step counts as a change to the game's files");
 			// the same switch, still standing at the next step, was counted: it is not counted at every step again
 			var third = new Toggle(changed, [], ["Base Mod"], "a test");
@@ -9359,7 +9352,7 @@ public static class Program
 			Equal(1, ctx.Journal.FilesChanged, "a mod the player switched after the game made its list leaves that list old: counted once, after the step called it current");
 			// The player takes that switch back, and no step's own switching ends before the next game start: the look
 			// right before the start knows it as taken back (the game makes its list with the mod on). The same switch made
-			// again after that start counts again - against the state the list was made from (CodeRabbit on pull request #35)
+			// again after that start counts again - against the state the list was made from
 			File.WriteAllText(listFile, File.ReadAllText(listFile).Replace("-Master Mod", "+Master Mod", StringComparison.Ordinal));
 			Crdw.Apply(changed);
 			Equal(2, ctx.Journal.FilesChanged, "a switch taken back before a game start is seen right before that start");
@@ -9375,12 +9368,12 @@ public static class Program
 		}
 	}
 
-	// ------------------------------------------------------------------ the engine audit of 2026-11-10
+	// ------------------------------------------------------------------ the engine's edge cases
 	// A file another program holds for a moment (an antivirus, the indexer) is tried again, a write over a read-only file keeps
 	// it read-only, a write that fails leaves no temp file, and text that is not UTF-8 is read in the PC's own code page
 	static void T_AFileHeldForAMomentIsTriedAgain()
 	{
-		var dir = Path.Combine(Path.GetTempPath(), "mo2 tool runner tests", "held " + Guid.NewGuid().ToString("N")[..8]);
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "held " + Guid.NewGuid().ToString("N")[..8]);
 		Directory.CreateDirectory(dir);
 		try {
 			var path = Path.Combine(dir, "record.json");
@@ -9433,7 +9426,7 @@ public static class Program
 	// a log line the disk will not take never throws (lines stand in front of the work on every put-back path) and is owed
 	static void T_ALogLineTheDiskRefusesIsOwedNeverThrown()
 	{
-		var dir = Path.Combine(Path.GetTempPath(), "mo2 tool runner tests", "log " + Guid.NewGuid().ToString("N")[..8]);
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "log " + Guid.NewGuid().ToString("N")[..8]);
 		try {
 			var log = new RunLog(dir);
 			log.Say("written");
@@ -10274,8 +10267,6 @@ public static class Program
 		Equal("short\n", Files.ReadSharedTailText(brief, 4096), "a short one is read whole");
 	}
 
-	// The guard for "pressing stop now still doesn't stop it" (his finds of 2026-11-04, 11-06 and 11-10): no wait of the engine
-	// longer than a moment may be a plain sleep - a step waits with RunContext.Pause / Waits.Pause, which a Stop ends at once.
 	// ------------------------------------------------------------------ Tool Runner 1.0: rotation, the forecast, the catalog, the dry run, the summary, status, JSON
 	// a file the program only ever adds to (its crash notes) is kept to a size: the older lines move beside it, the one before that goes
 	static void T_AFileThatOnlyGrowsIsRolled()
@@ -10773,7 +10764,7 @@ public static class Program
 	// ... and that guard is a real one: a planted refusal nobody put in the catalog is caught, a note and a known one are not
 	static void T_ARefusalWithoutAnEntryIsCaught()
 	{
-		var dir = Path.Combine(Path.GetTempPath(), "mo2 tool runner tests", "refusals " + Guid.NewGuid().ToString("N")[..8]);
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "refusals " + Guid.NewGuid().ToString("N")[..8]);
 		Directory.CreateDirectory(dir);
 		try {
 			File.WriteAllText(Path.Combine(dir, "Planted.cs"), """
@@ -10818,7 +10809,7 @@ public static class Program
 		Check(lines.Count == 2 && lines[1].StartsWith("  What to do: ", StringComparison.Ordinal) && lines[1].EndsWith("[TR-211]", StringComparison.Ordinal), "as lines for a person: " + string.Join(" | ", lines));
 	}
 
-	// what the review before 1.0 found: the program's own small files beside the setups are no setups; an output two steps name is
+	// the program's own small files beside the setups are no setups; an output two steps name is
 	// counted once; a shader cache (most runs build none) never refuses a start; a tool's own words are never taken for the runner's
 	static void T_TheReviewBeforeOnePointZero()
 	{
@@ -10844,7 +10835,7 @@ public static class Program
 		Equal("TR-112", RunnerErrors.Find("the setup has no steps")?.Code, "the setup's own are");
 	}
 
-	// what the review of the engine's fixes found, each held here: a kept file whose backup is on a drive that is not there is asked
+	// a kept file whose backup is on a drive that is not there is asked
 	// again; a folder half moved into the backup gets its part back beside what stayed; the cache that stood in overwrite never
 	// comes back over a new cache; the grass wrapper's exit line stands alone; the window says a run ended only once it is over
 	static void T_TheReviewOfTheEngineFixes()
@@ -11129,7 +11120,7 @@ public static class Program
 	{
 		Check(File.Exists(Path.Combine(AppContext.BaseDirectory, Brand.Name + ".exe")), "the program sits beside the tests");
 		// a copy with a data folder of its own beside it (never under the temp folder: there its data would be elsewhere - AppPaths)
-		var scratch = Path.Combine(Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory))!, "SUP json " + Guid.NewGuid().ToString("N"));
+		var scratch = Path.Combine(Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory))!, "Tool Runner test json " + Guid.NewGuid().ToString("N"));
 		try {
 			foreach (var file in Directory.GetFiles(AppContext.BaseDirectory, "*", SearchOption.AllDirectories)) {
 				var rel = Path.GetRelativePath(AppContext.BaseDirectory, file);
@@ -11216,6 +11207,8 @@ public static class Program
 		Check(dried.Take(3).All(r => r.Kind == "good") && dried[3].Kind == "" && dried[3].Mark == "4", "all but the start done");
 	}
 
+	// No wait of the engine longer than a moment may be a plain sleep: a step waits with RunContext.Pause / Waits.Pause, which a
+	// Stop ends at once
 	static void T_NoStepWaitIsBlindToStop() => NoBlindSleeps(SourceDir());
 
 	static string SourceDir([System.Runtime.CompilerServices.CallerFilePath] string a_here = "") => Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(a_here)!)!, "Runner.Core");
@@ -11248,7 +11241,7 @@ public static class Program
 	// ... and the guard is a real one: a planted long sleep is caught, a pause and a short poll are not
 	static void T_ABlindSleepIsCaught()
 	{
-		var dir = Path.Combine(Path.GetTempPath(), "mo2 tool runner tests", "sleeps " + Guid.NewGuid().ToString("N")[..8]);
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "sleeps " + Guid.NewGuid().ToString("N")[..8]);
 		Directory.CreateDirectory(dir);
 		try {
 			File.WriteAllText(Path.Combine(dir, "Good.cs"), "a_ctx.Pause(TimeSpan.FromSeconds(30));\nThread.Sleep(500);\nThread.Sleep(Poll);\n");
@@ -11291,7 +11284,7 @@ public static class Program
 		Equal(alone, ShaderStep.Fingerprint(mo2, c, p, ShaderStep.OtherCacheMods([c, under], c)), "while a cache that does not include it is untouched");
 	}
 
-	// his checklist 455: an older output of the same tool still ticked would win over the fresh one (a new output sits at the bottom
+	// an older output of the same tool still ticked would win over the fresh one (a new output sits at the bottom
 	// of the left pane) - named before the run; once the step replaces it (kept off by the run) it is no longer named
 	static void T_ASecondOutputOfTheSameToolIsNamed()
 	{
@@ -11317,9 +11310,9 @@ public static class Program
 		Equal<string?>(null, Duplicates.Holds(Path.Combine(f.Mods, "Old DynDOLOD"), "pandora"), "a step with no own file is never guessed");
 	}
 
-	// the window knows a run is alive by its engine's process name: since the rename of 2026-11-03 it knew only the old names, so
-	// every real run read as dead - Stop now, Stop after, a guided step's Done and the close guard did nothing (his finds of
-	// 2026-11-04). The tests' own process matched, which hid it: here the real names are asked, and the program's name is held
+	// the window knows a run is alive by its engine's process name: after a rename it knew only the old names, so every real run
+	// read as dead - Stop now, Stop after, a guided step's Done and the close guard did nothing. The tests' own process
+	// matched, which hid it: here the real names are asked, and the program's name is held
 	// to its exe's name so a future rename cannot split them again
 	static void T_TheEngineIsKnownByItsRealName()
 	{
@@ -11365,7 +11358,7 @@ public static class Program
 		var followed = ToolRunner.App.RunsWatch.Followed;
 		Check(followed.Contains("journal.json") && followed.Contains(Path.GetFileName(QueueRun.File("x"))) && followed.Contains(Path.GetFileName(QueueRun.LastFile("x"))) &&
 		      followed.Contains(Path.GetFileName(ToolRunner.App.Engine.RefusalFile)), "every file the window's look reads is followed");
-		var dir = Path.Combine(Path.GetTempPath(), "mo2 tool runner tests", "runs watch " + Guid.NewGuid().ToString("N")[..8]);
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "runs watch " + Guid.NewGuid().ToString("N")[..8]);
 		try {
 			using var woke = new ManualResetEventSlim();
 			using var watch = new ToolRunner.App.RunsWatch(dir, woke.Set);
@@ -11502,13 +11495,13 @@ public static class Program
 		return (kept, me.HandleCount, GetGuiResources(me.Handle, 0), GetGuiResources(me.Handle, 1));
 	}
 
-	// the memory audit of 2026-11-07: every hot path a long run and the open window loop over (the process looks, the window and
+	// every hot path a long run and the open window loop over (the process looks, the window and
 	// box reads through UI Automation, the run records, a process tree's CPU, the run's command watcher) run thousands of times;
 	// what the process holds afterwards must come back to where it started - a leak of a handle, a GDI / USER object or managed
-	// memory shows here as growth that a collection does not take back. Set SUP_SOAK=<rounds> for a longer soak.
+	// memory shows here as growth that a collection does not take back. Set ToolRunnerSoak=<rounds> for a longer soak.
 	static void T_HotPathsLeakNothing()
 	{
-		var rounds = int.TryParse(Environment.GetEnvironmentVariable("SUP_SOAK"), out var r) && r > 0 ? r : 600;
+		var rounds = int.TryParse(Environment.GetEnvironmentVariable("ToolRunnerSoak"), out var r) && r > 0 ? r : 600;
 		using var f = new FakeMo2();
 		var runs = Runner.RunsDir(f.Data);
 		for (var i = 0; i < 40; ++i) {
@@ -11546,7 +11539,7 @@ public static class Program
 		}
 		// Explorer's own dialogs that stand open on this PC right now (a Properties window, a copy in progress). Each look
 		// makes UI Automation elements for those - that is what the look is for - and .NET's client keeps a little of every
-		// element it makes (measured 2026-11-21: about 10 KB a look for one Properties window, 6 MB over this soak, where the
+		// element it makes (measured: about 10 KB a look for one Properties window, 6 MB over this soak, where the
 		// same code kept nothing an hour earlier with no dialog open). They are the PC's state, not the program's: the
 		// path's allowance grows with them, so the test judges the same thing on every PC - and still fails when elements
 		// are made for windows that are no boxes (that keeps tens of megabytes over the soak).
