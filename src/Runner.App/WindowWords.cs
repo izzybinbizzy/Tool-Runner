@@ -68,6 +68,17 @@ public static class WindowWords
 	// a text the code shows in a list (not one the window's walk reaches) in the language in use
 	public static string Word(string a_english) => s_words.TryGetValue(a_english, out var w) ? w : a_english;
 
+	// a text with names put into it ("Run only {0}"): the language's own form of it, the names as they are; a translation whose
+	// places do not fit falls back to the English form
+	public static string Format(string a_english, params object[] a_args)
+	{
+		try {
+			return string.Format(System.Globalization.CultureInfo.CurrentCulture, Word(a_english), a_args);
+		} catch (FormatException) {
+			return string.Format(System.Globalization.CultureInfo.CurrentCulture, a_english, a_args);
+		}
+	}
+
 	public static void Use(IReadOnlyDictionary<string, string> a_words)
 	{
 		s_words = a_words.Where(p => !string.IsNullOrWhiteSpace(p.Value)).ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);

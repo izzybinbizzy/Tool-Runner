@@ -4787,6 +4787,31 @@ public static class Program
 		}
 	}
 
+	// what the window shows only once it is used - the step editor's labels, the settings choices not picked, the command box's
+	// entries - is in every shipped language as well, not only what a picture of the window showed
+	static void T_EveryShippedLanguageHasTheSettingsTexts()
+	{
+		string[] more = ["{0} (default {1})", "Show setup: {0}", "Settings of {0}", "Run only {0}", "Most recent save (any character)",
+			"leave it to me (unanswered, the step stops)", "every run", "never", "skip it during the run (it asks in my own game)",
+			"new cache at every game start", "leave it alone - warn me only", "off", "on", "none", "the step's own", "Data folder (setups, runs, backups): {0}", ToolRunner.App.MainWindow.FooterText, "Data folder: {0}"];
+		var must = ToolRunner.App.SettingsPanel.StepLabels.Concat(more).ToList();
+		Check(must.Count >= 55, $"the texts looked for ({must.Count})");
+		foreach (var name in ToolRunner.App.WindowWords.Shipped()) {
+			var words = ToolRunner.App.WindowWords.Read(ToolRunner.App.WindowWords.ShippedText(name)!, out _)!;
+			var missing = must.Where(m => !words.ContainsKey(m)).ToList();
+			Check(missing.Count == 0, $"{name} lacks {missing.Count}: {string.Join(" | ", missing.Take(5))}");
+		}
+		// a text with a name put into it: the language's own form, and English when a translation's places do not fit
+		try {
+			ToolRunner.App.WindowWords.Use(new Dictionary<string, string> { ["Run only {0}"] = "Nur {0} ausführen" });
+			Equal("Nur xLODGen ausführen", ToolRunner.App.WindowWords.Format("Run only {0}", "xLODGen"), "the language's own form");
+			ToolRunner.App.WindowWords.Use(new Dictionary<string, string> { ["Run only {0}"] = "Nur {1} ausführen" });
+			Equal("Run only xLODGen", ToolRunner.App.WindowWords.Format("Run only {0}", "xLODGen"), "a translation whose places do not fit: English");
+		} finally {
+			ToolRunner.App.WindowWords.Use(new Dictionary<string, string>());
+		}
+	}
+
 	static void T_ALanguageFileCannotHarmTheWindow()
 	{
 		ToolRunner.App.WindowWords.Use(new Dictionary<string, string> { ["Start"] = "Starten", ["Empty"] = null!, ["Blank"] = "  " });

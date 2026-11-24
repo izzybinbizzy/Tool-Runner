@@ -53,7 +53,11 @@ public static class SettingsPanel
 		["max_restarts"] = "Restarts allowed",
 		["build_min"] = "Patcher build limit (minutes)",
 		["extra_args"] = "Extra arguments (one per line)",
+		["stall_min"] = "Give up when nothing moves for (minutes)",
 	};
+
+	// every label the step editor can show for a known setting (a shipped language must hold each)
+	public static IReadOnlyCollection<string> StepLabels => [.. Labels.Values.Distinct(StringComparer.Ordinal)];
 
 	// an edit not saved yet (the window asks before the drawer closes over it)
 	public static bool HasChanges { get; private set; }
@@ -821,8 +825,10 @@ public static class SettingsPanel
 			}
 			foreach (var (key, kind, def) in Known.GetValueOrDefault(stepKey, []).Append((Key: "deadline_min", Kind: JsonValueKind.Number, Default: "the step's own"))
 				         .Where(k => !o.ContainsKey(k.Key))) {
-				Field(stepHost, stepApply, $"{Label(key)} (default {def})", o, key, kind, def == "on");
+				Field(stepHost, stepApply, WindowWords.Format("{0} (default {1})", WindowWords.Word(Label(key)), WindowWords.Word(def)), o, key, kind, def == "on");
 			}
+			// drawn after Settings opened (another step picked): into the window's language like the rest of it
+			WindowWords.Tree(stepHost);
 		};
 		stack.Children.Add(pick);
 		stack.Children.Add(stepHost);
@@ -966,7 +972,7 @@ public static class SettingsPanel
 			bar.Children.Add(keep);
 		}
 		bar.Children.Add(remove);
-		var where = new TextBlock { Text = "Data folder (setups, runs, backups): " + AppPaths.Data, Style = (Style)a_w.FindResource("MutedText"),
+		var where = new TextBlock { Text = WindowWords.Format("Data folder (setups, runs, backups): {0}", AppPaths.Data), Style = (Style)a_w.FindResource("MutedText"),
 			TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0) };
 		var dock = new DockPanel();
 		DockPanel.SetDock(where, Dock.Bottom);
@@ -1419,7 +1425,7 @@ public static class SettingsPanel
 		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 		row.Children.Add(new TextBlock { Text = label, Foreground = Brushes2.Get("Accent"), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) });
 		var current = Setup.Str(a_obj, "character");
-		var names = new List<string> { AnyCharacter };
+		var names = new List<string> { WindowWords.Word(AnyCharacter) };
 		if (current != null) {
 			names.Add(current);
 		}
@@ -1460,7 +1466,7 @@ public static class SettingsPanel
 			// the player may have picked meanwhile: that pick stays picked
 			var picked = box.SelectedIndex > 0 ? box.SelectedItem as string : null;
 			var found = t.Result;
-			var list = new List<string> { AnyCharacter };
+			var list = new List<string> { WindowWords.Word(AnyCharacter) };
 			list.AddRange(found);
 			if (current != null && !found.Contains(current, StringComparer.OrdinalIgnoreCase)) {
 				list.Add(current + NoSaves);
@@ -1482,7 +1488,8 @@ public static class SettingsPanel
 		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(230) });
 		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 		row.Children.Add(new TextBlock { Text = a_label, Foreground = Brushes2.Get("Accent"), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) });
-		var box = new ComboBox { ItemsSource = a_options.Select(o => o.Text).ToList() };
+		// shown in the window's language; what is saved is still each choice's own value, by its place in the list
+		var box = new ComboBox { ItemsSource = a_options.Select(o => WindowWords.Word(o.Text)).ToList() };
 		var cur = Setup.Str(a_obj, a_key);
 		box.SelectedIndex = Math.Max(0, Array.FindIndex(a_options, o => string.Equals(o.Value, cur, StringComparison.OrdinalIgnoreCase)));
 		// (the choice in whole words on hover: a box made narrow cuts a long one off)

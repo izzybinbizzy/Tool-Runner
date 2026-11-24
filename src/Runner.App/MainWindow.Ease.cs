@@ -200,17 +200,17 @@ public partial class MainWindow
 			new(WindowWords.Word("Compact view"), () => ShowCompact()),
 		]);
 		foreach (var s in _vm.Setups.Where(s => !ReferenceEquals(s, _vm.SelectedSetup))) {
-			items.Add(new($"Show setup: {s.Name}", () => {
+			items.Add(new(WindowWords.Format("Show setup: {0}", s.Name), () => {
 				if (!_vm.IsRunning) {
 					_vm.SelectedSetup = s;
 				}
 			}));
 		}
 		foreach (var r in _vm.Steps) {
-			items.Add(new($"Settings of {r.Name}", () => OpenStepSettings(r)));
+			items.Add(new(WindowWords.Format("Settings of {0}", r.Name), () => OpenStepSettings(r)));
 		}
 		foreach (var r in _vm.Steps) {
-			items.Add(new($"Run only {r.Name}", () => StartFor(r, "only")));
+			items.Add(new(WindowWords.Format("Run only {0}", r.Name), () => StartFor(r, "only")));
 		}
 		return items;
 	}

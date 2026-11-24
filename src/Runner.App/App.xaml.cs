@@ -444,22 +444,6 @@ public partial class App : Application
 		}
 		Theme.Apply(Theme.Default, false);
 		Pump(w, 400);
-		// the window in a shipped language whose words run long: nothing may be cut off or overlap
-		if (WindowWords.ShippedText("Deutsch") is { } de && WindowWords.Read(de, out _) is { } german) {
-			WindowWords.Use(german);
-			w.Demo(false);
-			// (a text the code gives a button is worked out again: the old-output button's words)
-			w.DemoUsesOld("dyndolod", false);
-			WindowWords.Tree(w);
-			Pump(w, 600);
-			Save("10 a run going - Deutsch");
-			var deSettings = w.ShowPanel("settings", true);
-			WindowWords.Tree(deSettings);
-			Pump(w, 600);
-			Save("10b settings - Deutsch", deSettings);
-			w.ClosePanels();
-			WindowWords.Use(new Dictionary<string, string>());
-		}
 		w.Demo(true);
 		Pump(w, 300);
 		// the run waits on the player's own Mod Organizer: its band without a Done button
@@ -502,6 +486,32 @@ public partial class App : Application
 		Pump(dryBox, 600);
 		Save("7b a dry run that would be refused", dryBox);
 		dryBox.Close();
+		// the window in a shipped language whose words run long: nothing may be cut off or overlap. Taken last: the labels it
+		// sets stay German, and no English picture or window word may come after it
+		if (WindowWords.ShippedText("Deutsch") is { } de && WindowWords.Read(de, out _) is { } german) {
+			WindowWords.Use(german);
+			// the first start's picture emptied the step list: the setup's steps read again, as picking it does
+			(w.DataContext as MainViewModel)?.LoadSteps();
+			// (a text the code gives a button is worked out again: the old-output button's words - before the made-up run, since
+			// working it out shows the card as ready)
+			w.DemoUsesOld("dyndolod", false);
+			w.Demo(false);
+			w.SayFooter();
+			WindowWords.Tree(w);
+			Pump(w, 600);
+			Save("10 a run going - Deutsch");
+			var deSettings = w.ShowPanel("settings", true);
+			WindowWords.Tree(deSettings);
+			Pump(w, 600);
+			Save("10b settings - Deutsch", deSettings);
+			// a step's settings picked after Settings opened (drawn then, so walked into the language then): labels, defaults
+			if (SettingsPanel.ShowStep("dyndolod")) {
+				Pump(w, 600);
+				Save("10c settings, a step - Deutsch", deSettings);
+			}
+			w.ClosePanels();
+			WindowWords.Use(new Dictionary<string, string>());
+		}
 		w.Close();
 		File.WriteAllText(Path.Combine(a_dir, "window words.json"), System.Text.Json.JsonSerializer.Serialize(words.ToDictionary(k => k, _ => ""),
 			new System.Text.Json.JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));

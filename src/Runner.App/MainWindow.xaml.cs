@@ -91,8 +91,7 @@ public partial class MainWindow : Window
 		if (!App.Headless) {
 			_watch = new RunsWatch(AppPaths.Runs, Wake);
 		}
-		Footer.Text = $"Ctrl+K commands  ·  Ctrl+Enter start  ·  F5 check  ·  Ctrl+D dry run  ·  Ctrl+H history  ·  Ctrl+L log  ·  Ctrl+J compact  ·  Ctrl+T themes  ·  Ctrl+, settings   ·   version {AppVersion}";
-		Footer.ToolTip = "Data folder: " + AppPaths.Data;
+		SayFooter();
 		PreviewKeyDown += OnKeys;
 		// a mod ticked in Mod Organizer while the window was in the background: each step's last run is worked out again
 		Activated += async (_, _) => {
@@ -120,6 +119,15 @@ public partial class MainWindow : Window
 	}
 
 	public void Say(string a_text) => _vm.Say(a_text, "warn");
+
+	// the keys line at the foot and its tip, in the window's language (the version and the data folder put into them)
+	public const string FooterText = "Ctrl+K commands  ·  Ctrl+Enter start  ·  F5 check  ·  Ctrl+D dry run  ·  Ctrl+H history  ·  Ctrl+L log  ·  Ctrl+J compact  ·  Ctrl+T themes  ·  Ctrl+, settings   ·   version {0}";
+
+	public void SayFooter()
+	{
+		Footer.Text = WindowWords.Format(FooterText, AppVersion);
+		Footer.ToolTip = WindowWords.Format("Data folder: {0}", AppPaths.Data);
+	}
 
 	// nothing moves in a window nobody sees (minimized, or put away while a run goes) - unless the compact view shows the run:
 	// it is for exactly the time the main window is minimized
