@@ -109,8 +109,7 @@ public static class Cli
 		return 0;
 	}
 
-	// the newest run of the setup (or of any setup), zipped with its logs for a bug report; prints where the zip is
-	// his checklist 466: a copy of the setup another player can import - paths of this PC and its commands taken out
+	// a copy of the setup another player can import - paths of this PC and its commands taken out
 	static int ShareCmd(string[] a_args)
 	{
 		var file = Opt(a_args, "--setup") ?? throw new ArgumentException("--setup <file> is needed");
@@ -123,6 +122,7 @@ public static class Cli
 		return 0;
 	}
 
+	// the newest run of the setup (or of any setup), zipped with its logs for a bug report; prints where the zip is
 	static int BugReportCmd(string[] a_args)
 	{
 		var setup = Opt(a_args, "--setup") is { } s ? Path.GetFullPath(s) : null;
@@ -236,7 +236,8 @@ public static class Cli
 		try {
 			Directory.CreateDirectory(AppPaths.Runs);
 			Files.WriteAtomic(Engine.RefusalFile, a_why);
-		} catch (IOException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			// (the reason was printed already; a window started later reads it as "no reason given")
 		}
 	}
 
