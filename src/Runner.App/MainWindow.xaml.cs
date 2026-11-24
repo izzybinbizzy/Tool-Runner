@@ -902,7 +902,8 @@ public partial class MainWindow : Window
 			_panels[group] = w;
 			w.PreviewKeyDown += OnKeys;
 			w.Closing += (_, e) => {
-				if (group == "settings" && !_closingAll && !LeaveSettings()) {
+				// (a tool opened from it to learn its settings is stopped first, or the window stays - never left with nothing to stop it)
+				if (group == "settings" && ((!_closingAll && !LeaveSettings()) || !SettingsPanel.LeaveLearning(Over("settings")))) {
 					e.Cancel = true;
 				}
 			};

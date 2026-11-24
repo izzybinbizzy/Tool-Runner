@@ -154,12 +154,13 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		HeldOpen = false;
 	}
 
-	public List<string> DownloadsInProgress() => Downloads(Mo2.DownloadsDir).Active;
+	public List<string> DownloadsInProgress(CancellationToken a_ct = default) => Downloads(Mo2.DownloadsDir, a_ct).Active;
 
 	// a download MO2 finished but whose "<file>.unfinished" stayed beside it, byte for byte the same: MO2 cannot finish it and
 	// resumes it at every start, so it is no download in progress (one held a whole evening's game line, 2026-11-02) - named,
 	// never deleted (the player removes it, or its row in MO2's Downloads tab)
-	public static (List<string> Active, List<string> Stale) Downloads(string a_dir)
+	// a_ct: a Stop ends the look (a pair being compared counts as neither: OperationCanceledException leaves it)
+	public static (List<string> Active, List<string> Stale) Downloads(string a_dir, CancellationToken a_ct = default)
 	{
 		var active = new List<string>();
 		var stale = new List<string>();
@@ -168,8 +169,9 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 				return (active, stale);
 			}
 			foreach (var stub in Directory.GetFiles(a_dir, "*.unfinished")) {
+				a_ct.ThrowIfCancellationRequested();
 				var done = stub[..^".unfinished".Length];
-				(File.Exists(done) && SameBytes(stub, done) ? stale : active).Add(Path.GetFileName(stub));
+				(File.Exists(done) && SameBytes(stub, done, a_ct) ? stale : active).Add(Path.GetFileName(stub));
 			}
 		} catch (IOException) {
 		} catch (UnauthorizedAccessException) {
@@ -182,7 +184,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	static readonly System.Collections.Concurrent.ConcurrentDictionary<(string, long, DateTime, DateTime), bool> s_same = new();
 	const int SameKept = 256;
 
-	static bool SameBytes(string a_a, string a_b)
+	static bool SameBytes(string a_a, string a_b, CancellationToken a_ct = default)
 	{
 		try {
 			FileInfo fa = new(a_a), fb = new(a_b);
@@ -192,16 +194,27 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 			if (s_same.Count > SameKept) {
 				s_same.Clear();
 			}
-			return s_same.GetOrAdd((a_a.ToLowerInvariant(), fa.Length, fa.LastWriteTimeUtc, fb.LastWriteTimeUtc), _ => {
-				using var x = File.OpenRead(a_a);
-				using var y = File.OpenRead(a_b);
-				return System.Security.Cryptography.SHA256.HashData(x).AsSpan().SequenceEqual(System.Security.Cryptography.SHA256.HashData(y));
-			});
+			// (a comparison a Stop cut off is not kept: the next look compares the pair again)
+			return s_same.GetOrAdd((a_a.ToLowerInvariant(), fa.Length, fa.LastWriteTimeUtc, fb.LastWriteTimeUtc), _ => Hash(a_a, a_ct).AsSpan().SequenceEqual(Hash(a_b, a_ct)));
 		} catch (IOException) {
 			return false;
 		} catch (UnauthorizedAccessException) {
 			return false;
 		}
+	}
+
+	// a file's SHA-256, a Stop looked at between its parts
+	static byte[] Hash(string a_file, CancellationToken a_ct)
+	{
+		using var f = File.OpenRead(a_file);
+		using var h = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+		var part = new byte[1 << 20];
+		int n;
+		while ((n = f.Read(part, 0, part.Length)) > 0) {
+			a_ct.ThrowIfCancellationRequested();
+			h.AppendData(part, 0, n);
+		}
+		return h.GetHashAndReset();
 	}
 
 	// a program still running from Mod Organizer's own folders while MO2 is closed (a crash dumper of a game that died, kept
@@ -553,6 +566,38 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		return found;
 	}
 
+	// Why Mod Organizer may not be closed right now (null: nothing holds it), looked at once: a download, the game, Faster
+	// Archives' repack, a program the player started under it. A close waits on any of these; a box that opens a tool through
+	// Mod Organizer asks this first, so the player is told what holds it instead of a window that waits without a word.
+	// A list of processes Windows would not give is no answer: neither "no game runs" nor "no repack does" nor "nothing of yours
+	// runs under Mod Organizer" was learned, and Mod Organizer ends what runs under it when it closes.
+	public string? WhyNotClosable(CancellationToken a_ct = default)
+	{
+		var dl = DownloadsInProgress(a_ct);
+		a_ct.ThrowIfCancellationRequested();
+		var game = GameRunning();
+		var blind = GameProbe == GameLook && Procs.LookFailed;
+		List<(int Pid, string Image)> theirs;
+		if (ForeignProbe != null) {
+			theirs = ForeignProbe();
+		} else {
+			theirs = ForeignChildren(true);
+			blind |= ForeignBlind;
+		}
+		var repack = (RepackProbe ?? Repackers)();
+		blind |= repack == null;
+		return WhyBusy(dl, game, theirs.Select(t => t.Image).ToList(), repack, blind);
+	}
+
+	// the words for what holds Mod Organizer open (null: nothing does)
+	public static string? WhyBusy(IReadOnlyList<string> a_downloads, IReadOnlyList<string> a_game, IReadOnlyList<string> a_theirs, IReadOnlyList<int>? a_repack, bool a_blind) =>
+		a_downloads.Count > 0 ? "Mod Organizer is downloading (" + string.Join(", ", a_downloads.Take(3)) + ")" :
+		a_game.Count > 0 ? "the game is running (" + string.Join(", ", a_game) + ")" :
+		a_repack is { Count: > 0 } ? "Faster Archives' own program is still open (it repacks the game's archives, or waits for a choice in its window)" :
+		a_theirs.Count > 0 ? "a program you started runs under Mod Organizer (" + string.Join(", ", a_theirs.Distinct()) + ")" :
+		a_blind || a_repack == null ? "Windows would not list the running programs, so a game, a repack or a program of yours may run under Mod Organizer" :
+		null;
+
 	public void Close(TimeSpan? a_timeout = null, CancellationToken a_ct = default)
 	{
 		if (!IsRunning()) {
@@ -579,29 +624,9 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		var told = false;
 		while (true) {
 			a_ct.ThrowIfCancellationRequested();
-			var dl = DownloadsInProgress();
-			var game = GameRunning();
-			// A list of processes Windows would not give is no answer: neither "no game runs" nor "no repack does" nor "nothing of
-			// yours runs under Mod Organizer" was learned, and Mod Organizer ends what runs under it when it closes. Each look
-			// is judged right after it; the close waits and looks again.
-			var blind = GameProbe == GameLook && Procs.LookFailed;
-			List<(int Pid, string Image)> theirs;
-			if (ForeignProbe != null) {
-				theirs = ForeignProbe();
-			} else {
-				theirs = ForeignChildren(true);
-				blind |= ForeignBlind;
-			}
-			var repack = (RepackProbe ?? Repackers)();
-			blind |= repack == null;
-			if (dl.Count == 0 && game.Count == 0 && theirs.Count == 0 && repack is { Count: 0 } && !blind) {
+			if (WhyNotClosable(a_ct) is not { } why) {
 				break;
 			}
-			var why = dl.Count > 0 ? "Mod Organizer is downloading (" + string.Join(", ", dl.Take(3)) + ")" :
-				game.Count > 0 ? "the game is running (" + string.Join(", ", game) + ")" :
-				repack is { Count: > 0 } ? "Faster Archives' own program is still open (it repacks the game's archives, or waits for a choice in its window)" :
-				theirs.Count > 0 ? "a program you started runs under Mod Organizer (" + string.Join(", ", theirs.Select(t => t.Image).Distinct()) + ")" :
-				"Windows would not list the running programs, so a game, a repack or a program of yours may run under Mod Organizer";
 			if (waited.Elapsed > BusyWait) {
 				throw new Mo2BusyException($"{why} for {BusyWait.TotalMinutes:0} minutes - Mod Organizer is never closed under it");
 			}
@@ -636,7 +661,10 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		var sw = Stopwatch.StartNew();
 		var limit = a_timeout ?? TimeSpan.FromMinutes(5);
 		var lastPost = TimeSpan.FromSeconds(-30);
+		// a Stop ends this wait too (the tools box's Stop reaches it while Mod Organizer stays open); a close made without one -
+		// the put-back's - waits as before
 		while (IsRunning() && sw.Elapsed < limit) {
+			a_ct.ThrowIfCancellationRequested();
 			if (sw.Elapsed - lastPost > TimeSpan.FromSeconds(20)) {
 				var h = MainWindow();
 				if (h != 0) {
@@ -645,7 +673,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 				lastPost = sw.Elapsed;
 			}
 			AnswerCloseBoxes();
-			Thread.Sleep(700);
+			Waits.Pause(TimeSpan.FromMilliseconds(700), a_ct);
 		}
 		if (IsRunning()) {
 			// said with its cause: the box it shows that this run does not answer (the player's own work in it) holds it open

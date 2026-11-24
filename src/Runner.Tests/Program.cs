@@ -4185,6 +4185,36 @@ public static class Program
 		}
 	}
 
+	// a Mod Organizer that does not close: a Stop ends the wait for it within a moment, not at the close's five-minute limit
+	// (the tools box's Stop reaches this wait). The Stop comes only once the close's own wait has begun - the second look at
+	// whether Mod Organizer runs is that wait's first - so the checks before it cannot end the test early
+	static void T_AStopEndsTheWaitForModOrganizerToClose()
+	{
+		using var f = new FakeMo2();
+		var mo2 = Mo2Instance.Load(f.Exe, f.Instance);
+		var game = Mo2Control.GameProbe;
+		Mo2Control.GameProbe = () => [];
+		try {
+			using var cts = new CancellationTokenSource();
+			var looks = 0;
+			var c = new Mo2Control(mo2, "Test", RunLog.Null) {
+				RunningProbe = () => {
+					if (++looks == 2) {
+						cts.Cancel();
+					}
+					return true;
+				},
+				ForeignProbe = () => [], RepackProbe = () => [],
+			};
+			var sw = Stopwatch.StartNew();
+			Throws<OperationCanceledException>(() => c.Close(null, cts.Token), "a Stop while Mod Organizer will not close");
+			Check(looks >= 2, $"the Stop came inside the close's own wait ({looks} look(s))");
+			Check(sw.Elapsed < TimeSpan.FromSeconds(10), $"and it ended the wait at once ({sw.Elapsed.TotalSeconds:0.0} s)");
+		} finally {
+			Mo2Control.GameProbe = game;
+		}
+	}
+
 	// a run record whose PID now belongs to another program (after a crash and a restart) is not "alive"
 	static void T_ReusedPidIsNotTheRun()
 	{
@@ -4324,6 +4354,131 @@ public static class Program
 
 	// his word of 2026-11-21: each patcher set up by hand before a setup's first run, and again whenever wanted - the box
 	// lists the setup's tools that have a window of their own, and shows by itself once, before the first run only
+	// His report of 2026-11-22: "if clicking set it up in tools while another game/mo2 is open, tool runner doesn't open the new
+	// screen and greys out it's own interface. closing the pop up doesn't work". What holds Mod Organizer is now asked about
+	// before anything waits, the wait says what it is on, and it can always be stopped.
+	static void T_AToolThatCannotOpenYetIsAskedAboutAndItsWaitStops()
+	{
+		// the words for what holds Mod Organizer open
+		Check(Mo2Control.WhyBusy([], [], [], [], false) == null, "nothing holds it: no words, the tool opens at once");
+		Equal("the game is running (SkyrimSE.exe)", Mo2Control.WhyBusy([], ["SkyrimSE.exe"], [], [], false), "the game");
+		Check(Mo2Control.WhyBusy(["a mod.7z"], ["SkyrimSE.exe"], [], [], false)!.StartsWith("Mod Organizer is downloading", StringComparison.Ordinal), "a download first");
+		Check(Mo2Control.WhyBusy([], [], ["xEdit.exe", "xEdit.exe"], [], false) == "a program you started runs under Mod Organizer (xEdit.exe)", "a program of the player's, named once");
+		Check(Mo2Control.WhyBusy([], [], [], null, false)!.StartsWith("Windows would not list", StringComparison.Ordinal), "a look Windows refused is never 'nothing'");
+		Check(Mo2Control.WhyBusy([], [], [], [], true)!.StartsWith("Windows would not list", StringComparison.Ordinal), "nor is a blind one");
+
+		var setup = Setup.FromJson(new JsonObject { ["name"] = "Test", ["steps"] = new JsonArray() }, "Test.json");
+		var lookWas = ToolOpen.BusyLook;
+		var learnWas = ToolOpen.LearnWith;
+		try {
+			var learnedCalls = 0;
+			ToolOpen.BusyLook = (_, _) => "the game is running (SkyrimSE.exe)";
+			ToolOpen.LearnWith = (_, _, _, _, _, _) => {
+				++learnedCalls;
+				return new ToolSettings.Learned { Step = "texgen", Tool = "TexGen" };
+			};
+			// "Not now": nothing waits and nothing opens
+			string? asked = null;
+			using (var o = new ToolOpen()) {
+				var r = o.Go(setup, "texgen", why => {
+					asked = why;
+					return false;
+				}, _ => { }).GetAwaiter().GetResult();
+				Check(r.How == ToolOpen.Ending.NotNow && learnedCalls == 0, "the player chose not to wait: nothing was opened or waited on");
+				Equal("the game is running (SkyrimSE.exe)", asked, "and they were told what holds it");
+				Check(ToolRunner.App.ToolsDialog.Outcome("TexGen", r).Contains("the game is running", StringComparison.Ordinal), "the tool's row says why: " + ToolRunner.App.ToolsDialog.Outcome("TexGen", r));
+			}
+			// "Wait for it", the wait stopped before the tool's window is up: it ends at once, and nothing was opened
+			ToolOpen.LearnWith = (_, _, log, ct, _, _) => {
+				log.Warn("the game is running (SkyrimSE.exe) - waiting for it to end before closing Mod Organizer (up to 30 minutes)");
+				ct.WaitHandle.WaitOne(TimeSpan.FromSeconds(30));
+				ct.ThrowIfCancellationRequested();
+				return new ToolSettings.Learned { Step = "texgen", Tool = "TexGen" };
+			};
+			using (var o = new ToolOpen()) {
+				var heard = new List<string>();
+				var going = o.Go(setup, "texgen", _ => true, line => {
+					lock (heard) {
+						heard.Add(line);
+					}
+				});
+				for (var w = System.Diagnostics.Stopwatch.StartNew(); w.Elapsed < TimeSpan.FromSeconds(10) && heard.Count == 0;) {
+					Thread.Sleep(20);
+				}
+				Check(heard.Any(h => h.Contains("waiting for it to end", StringComparison.Ordinal)), "the wait says what it is on, where the player looks");
+				var clock = System.Diagnostics.Stopwatch.StartNew();
+				o.Stop();
+				var r = going.GetAwaiter().GetResult();
+				Check(r.How == ToolOpen.Ending.Stopped && !o.Opened && clock.Elapsed < TimeSpan.FromSeconds(5), $"the wait stopped at once ({clock.Elapsed.TotalSeconds:0.0} s)");
+				Check(r.Why!.Contains("not opened", StringComparison.Ordinal), "and says nothing was opened: " + r.Why);
+			}
+			// the tool's window already up, the wait stopped on the player's word: it ends, and says the window stays open
+			ToolOpen.BusyLook = (_, _) => null;
+			ToolOpen.LearnWith = (_, _, _, ct, _, opened) => {
+				opened();
+				ct.WaitHandle.WaitOne(TimeSpan.FromSeconds(30));
+				ct.ThrowIfCancellationRequested();
+				return new ToolSettings.Learned();
+			};
+			using (var o = new ToolOpen()) {
+				var asks = 0;
+				var going = o.Go(setup, "texgen", _ => {
+					++asks;
+					return true;
+				}, _ => { });
+				for (var w = System.Diagnostics.Stopwatch.StartNew(); w.Elapsed < TimeSpan.FromSeconds(10) && !o.Opened;) {
+					Thread.Sleep(20);
+				}
+				// once its window is up, a stop is never made without the player's word
+				Check(!o.StopIfNotOpen() && !o.Stopping, "an open tool is not stopped without asking");
+				o.Stop();
+				var r = going.GetAwaiter().GetResult();
+				Check(asks == 0, "nothing holding Mod Organizer: no question, the tool opens");
+				Check(r.How == ToolOpen.Ending.Stopped && o.Opened && r.Why!.Contains("stays open", StringComparison.Ordinal), "stopped after its window was up: " + r.Why);
+			}
+			// nothing in the way: the settings are kept as before
+			ToolOpen.LearnWith = (_, _, _, _, _, opened) => {
+				opened();
+				return new ToolSettings.Learned { Step = "texgen", Tool = "TexGen", Files = [new() { Live = "a.ini", Stored = "a.ini" }] };
+			};
+			using (var o = new ToolOpen()) {
+				var r = o.Go(setup, "texgen", _ => true, _ => { }).GetAwaiter().GetResult();
+				Check(r.How == ToolOpen.Ending.Learned && r.Learned!.Files.Count == 1, "a tool set up and closed: its settings kept");
+			}
+			// stopped while it still looked at what holds Mod Organizer (the box closed then): nothing is asked, nothing opened
+			using (var looking = new ManualResetEventSlim(false))
+			using (var o = new ToolOpen()) {
+				var go = new ManualResetEventSlim(false);
+				// (a look that a Stop ends where it stands, as the real one now does)
+				ToolOpen.BusyLook = (_, stop) => {
+					looking.Set();
+					go.Wait(TimeSpan.FromSeconds(10), stop);
+					return "the game is running (SkyrimSE.exe)";
+				};
+				var asks = 0;
+				var going = o.Go(setup, "texgen", _ => {
+					++asks;
+					return true;
+				}, _ => { });
+				looking.Wait(TimeSpan.FromSeconds(10));
+				o.Stop();
+				go.Set();
+				var r = going.GetAwaiter().GetResult();
+				Check(r.How == ToolOpen.Ending.Stopped && asks == 0 && !o.Opened, "stopped during the look: no question, nothing opened");
+				go.Dispose();
+			}
+			// a look that fails is said, never a wait
+			ToolOpen.BusyLook = (_, _) => throw new IOException("the Mod Organizer folder does not read");
+			using (var o = new ToolOpen()) {
+				var r = o.Go(setup, "texgen", _ => true, _ => { }).GetAwaiter().GetResult();
+				Check(r.How == ToolOpen.Ending.Failed && r.Why!.Contains("does not read", StringComparison.Ordinal), "a look that failed is said as it is");
+			}
+		} finally {
+			ToolOpen.BusyLook = lookWas;
+			ToolOpen.LearnWith = learnWas;
+		}
+	}
+
 	static void T_TheToolsOfASetupAreOfferedBeforeItsFirstRun()
 	{
 		using var f = new FakeMo2();
