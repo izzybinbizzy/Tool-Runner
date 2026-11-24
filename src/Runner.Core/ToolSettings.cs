@@ -339,13 +339,13 @@ public static partial class ToolSettings
 			a_opened?.Invoke();
 			while (!proc.HasExited) {
 				a_ct.ThrowIfCancellationRequested();
-				Thread.Sleep(1000);
+				a_ct.WaitHandle.WaitOne(1000);
 			}
 			// a packed tool keeps its window in a child after its launcher ends: wait for the launcher's whole tree
 			var root = proc.Id;
 			while (Procs.Tree(root).Any(pid => pid != root && Procs.StartTime(pid) != null)) {
 				a_ct.ThrowIfCancellationRequested();
-				Thread.Sleep(1000);
+				a_ct.WaitHandle.WaitOne(1000);
 			}
 		} finally {
 			try {

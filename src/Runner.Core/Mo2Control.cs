@@ -262,7 +262,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		var sw = Stopwatch.StartNew();
 		while (sw.Elapsed < LeftoverWait) {
 			a_ct.ThrowIfCancellationRequested();
-			Thread.Sleep(Poll);
+			a_ct.WaitHandle.WaitOne(Poll);
 			if ((left = probe()).Count == 0) {
 				return;
 			}
@@ -475,14 +475,14 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 				_log.Detail("a second copy of Mod Organizer, started at the same moment, said one is already running - answered OK (it ends)");
 				PressBox(s.Box);
 				quietSince = null;
-				Thread.Sleep(Poll);
+				a_ct.WaitHandle.WaitOne(Poll);
 				continue;
 			}
 			if (answer) {
 				_log.Detail("Mod Organizer said it lost a request from a second copy of itself - answered OK");
 				PressBox(s.Box!);
 				quietSince = null;
-				Thread.Sleep(Poll);
+				a_ct.WaitHandle.WaitOne(Poll);
 				continue;
 			}
 			var busy = lastAt is not { } t || (s.Cpu - lastCpu).TotalMilliseconds > QuietShare * Math.Max(1, (now - t).TotalMilliseconds);
@@ -501,7 +501,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 			if (now > ReadyLimit) {
 				throw new StepFailedException($"Mod Organizer was not ready after {ReadyLimit.TotalMinutes:0.#} minutes - {why}");
 			}
-			Thread.Sleep(Poll);
+			a_ct.WaitHandle.WaitOne(Poll);
 		}
 	}
 
@@ -607,7 +607,9 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		if (RunningProbe == null) {
 			// one this run started a moment ago becomes readable within seconds: only one that stays unreadable is somebody else's
 			for (var w = Stopwatch.StartNew(); OwnStarting() && Pids().Count == 0 && w.Elapsed < StartingGrace;) {
-				Thread.Sleep(250);
+				if (a_ct.WaitHandle.WaitOne(250)) {
+					break;
+				}
 			}
 			if (Unreadable().Count > 0) {
 				throw new Mo2BusyException("a Mod Organizer runs that this program cannot read (started as administrator?) - close it yourself, then start again");
@@ -683,7 +685,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 				(open != null ? "it shows a box only you can answer: " + Trim(open) : "it shows no box this program knows; close it yourself, then start again"));
 		}
 		_log.Detail($"Mod Organizer closed after {sw.Elapsed.TotalSeconds:0} s");
-		Thread.Sleep(800);
+		a_ct.WaitHandle.WaitOne(800);
 	}
 
 	// his checklist 443: Mod Organizer closed before Root Builder's clear would leave its files in the game folder
@@ -1071,7 +1073,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 					return pid;
 				}
 				lost = (ReadyProbe ?? ReadNow)().Box?.Contains(SecondaryBox, StringComparison.OrdinalIgnoreCase) == true;
-				Thread.Sleep(Poll);
+				a_ct.WaitHandle.WaitOne(Poll);
 			}
 			if (!lost) {
 				return null;
@@ -1154,7 +1156,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 			if (sw.Elapsed > SteamWait) {
 				throw new StepFailedException($"Steam did not start within {SteamWait.TotalMinutes:0} minutes - start it, then start the run again");
 			}
-			Thread.Sleep(Poll);
+			a_ct.WaitHandle.WaitOne(Poll);
 		}
 		a_ct.WaitHandle.WaitOne(SteamSettle);
 		a_ct.ThrowIfCancellationRequested();

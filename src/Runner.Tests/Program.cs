@@ -4133,8 +4133,6 @@ public static class Program
 		Equal(l.Files.Count, 2, "(learned set)");
 	}
 
-	// his word of 2026-11-21: each patcher set up by hand before a setup's first run, and again whenever wanted - the box
-	// lists the setup's tools that have a window of their own, and shows by itself once, before the first run only
 	// His report of 2026-11-22: "if clicking set it up in tools while another game/mo2 is open, tool runner doesn't open the new
 	// screen and greys out it's own interface. closing the pop up doesn't work". What holds Mod Organizer is now asked about
 	// before anything waits, the wait says what it is on, and it can always be stopped.
@@ -4260,6 +4258,8 @@ public static class Program
 		}
 	}
 
+	// his word of 2026-11-21: each patcher set up by hand before a setup's first run, and again whenever wanted - the box
+	// lists the setup's tools that have a window of their own, and shows by itself once, before the first run only
 	static void T_TheToolsOfASetupAreOfferedBeforeItsFirstRun()
 	{
 		using var f = new FakeMo2();
