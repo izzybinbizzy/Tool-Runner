@@ -1094,7 +1094,7 @@ public partial class MainWindow : Window
 				    "versions of Windows, Mod Organizer, the game and each tool. Your Windows user name and your PC's name are masked. Nothing was sent anywhere.\n\n" +
 				    "To report the bug: open an issue on the program's GitHub page, say what happened and what you expected, and attach this zip.",
 				    "Show the zip and open the issue page", "Close")) {
-					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{zip}\"") { UseShellExecute = true });
+					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{zip}\"") { UseShellExecute = true })?.Dispose();
 					if (MainViewModel.OpenPage(BugReport.Issues) is { } why) {
 						_vm.Say("The issue page did not open: " + why, "bad");
 					}
