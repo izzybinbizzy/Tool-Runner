@@ -6,8 +6,7 @@ using System.Windows.Media.Imaging;
 
 namespace ToolRunner.App;
 
-// Themes (his ask 2026-10-27, "a full template of all features that can be redesigned ... so i can have it create some themes for
-// the runner"): a theme is a copy of "Theme template.json" with new values, kept in the data folder's "Themes"; the one picked
+// Themes: a theme is a copy of "Theme template.json" with new values, kept in the data folder's "Themes"; the one picked
 // in Settings is applied to the window at once (every themeable value is read live - DynamicResource) and kept for the next
 // start. A key left out keeps the default; a value that does not read is named, and its default kept.
 public static class Theme
