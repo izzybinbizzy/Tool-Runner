@@ -10630,10 +10630,21 @@ public static class Program
 		File.WriteAllText(grownLog, "[10:00] Loading Settings Complete\n[10:01] Shader compilation started\n");
 		Equal(File.ReadAllText(grownLog), grown.Read(grownLog), "the first look: all of it");
 		File.AppendAllText(grownLog, "[10:02] remaining=12 (ünïcode)\n[10:03] half a li");
-		Equal("[10:00] Loading Settings Complete\n[10:01] Shader compilation started\n[10:02] remaining=12 (ünïcode)\n", grown.Read(grownLog), "what was added, to its last whole line");
+		Equal(File.ReadAllText(grownLog), grown.Read(grownLog), "what was added, a line still being written with it");
 		File.AppendAllText(grownLog, "ne\n");
-		Equal(File.ReadAllText(grownLog), grown.Read(grownLog), "the line once it is whole");
+		Equal(File.ReadAllText(grownLog), grown.Read(grownLog), "the line once it is whole, once");
 		Equal(File.ReadAllText(grownLog), grown.Read(grownLog), "nothing added: the same text");
+		// a look that falls in the middle of a letter: the letter is whole at the next look
+		var letter = Encoding.UTF8.GetBytes("é");
+		using (var cutFile = new FileStream(grownLog, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) {
+			cutFile.Write(Encoding.UTF8.GetBytes("[10:04] caf"));
+			cutFile.Write(letter, 0, 1);
+			cutFile.Flush();
+			Check(grown.Read(grownLog).Contains("[10:04] caf", StringComparison.Ordinal), "half a letter at the end of a look");
+			cutFile.Write(letter, 1, 1);
+			cutFile.Write("\n"u8);
+		}
+		Equal(File.ReadAllText(grownLog), grown.Read(grownLog), "the letter whole at the next look");
 		File.WriteAllText(grownLog, "[11:00] another start's log, longer than the first one was, so its length alone would not tell that it is new\n[11:01] Shader compilation completed\n" + new string('x', 200) + "\n");
 		Equal(File.ReadAllText(grownLog), grown.Read(grownLog), "a file that was replaced is read from its start");
 
