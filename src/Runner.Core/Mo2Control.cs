@@ -647,8 +647,8 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		var sw = Stopwatch.StartNew();
 		var limit = a_timeout ?? TimeSpan.FromMinutes(5);
 		var lastPost = TimeSpan.FromSeconds(-30);
-		// a Stop ends this wait too (the tools box's Stop reaches it while Mod Organizer stays open - CodeRabbit on pull request #39);
-		// a close made without one - the put-back's - waits as before
+		// a Stop ends this wait too (the tools box's Stop reaches it while Mod Organizer stays open); a close made without one -
+		// the put-back's - waits as before
 		while (IsRunning() && sw.Elapsed < limit) {
 			a_ct.ThrowIfCancellationRequested();
 			if (sw.Elapsed - lastPost > TimeSpan.FromSeconds(20)) {

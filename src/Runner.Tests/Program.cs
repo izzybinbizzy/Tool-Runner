@@ -3967,7 +3967,8 @@ public static class Program
 	}
 
 	// a Mod Organizer that does not close: a Stop ends the wait for it within a moment, not at the close's five-minute limit
-	// (the tools box's Stop reaches this wait - CodeRabbit on pull request #39)
+	// (the tools box's Stop reaches this wait). The Stop comes only once the close's own wait has begun - the second look at
+	// whether Mod Organizer runs is that wait's first - so the checks before it cannot end the test early
 	static void T_AStopEndsTheWaitForModOrganizerToClose()
 	{
 		using var f = new FakeMo2();
@@ -3975,11 +3976,20 @@ public static class Program
 		var game = Mo2Control.GameProbe;
 		Mo2Control.GameProbe = () => [];
 		try {
-			var c = new Mo2Control(mo2, "Test", RunLog.Null) { RunningProbe = () => true, ForeignProbe = () => [], RepackProbe = () => [] };
 			using var cts = new CancellationTokenSource();
-			cts.CancelAfter(TimeSpan.FromMilliseconds(400));
+			var looks = 0;
+			var c = new Mo2Control(mo2, "Test", RunLog.Null) {
+				RunningProbe = () => {
+					if (++looks == 2) {
+						cts.Cancel();
+					}
+					return true;
+				},
+				ForeignProbe = () => [], RepackProbe = () => [],
+			};
 			var sw = Stopwatch.StartNew();
 			Throws<OperationCanceledException>(() => c.Close(null, cts.Token), "a Stop while Mod Organizer will not close");
+			Check(looks >= 2, $"the Stop came inside the close's own wait ({looks} look(s))");
 			Check(sw.Elapsed < TimeSpan.FromSeconds(10), $"and it ended the wait at once ({sw.Elapsed.TotalSeconds:0.0} s)");
 		} finally {
 			Mo2Control.GameProbe = game;

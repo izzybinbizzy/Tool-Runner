@@ -782,15 +782,14 @@ public static class SettingsPanel
 						$"Its settings were learned {learned.At.ToLocalTime().ToString("MMM d HH:mm", InvariantCulture)} ({learned.Files.Count} file(s)) - every run uses them." };
 				var learn = new Button { Content = "Learn its settings (opens its own window)", Style = (Style)a_w.FindResource("Ghost"),
 					HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 12) };
-				// while a tool is being opened (or is open) to learn its settings, this button stops that wait instead (his report of
-				// 2026-11-22: a wait on Mod Organizer under a running game went on with nothing said and nothing to stop it). The
-				// wait outlives this step's view - another step picked, Save, Undo - so every learn button stops the one that is
-				// going, and none starts a second (CodeRabbit on pull request #39)
+				// while a tool is being opened (or is open) to learn its settings, this button stops that wait instead. The wait
+				// outlives this step's view - another step picked, Save, Undo - so every learn button stops the one that is going,
+				// and none starts a second
 				var learnText = learn.Content;
 				void ShowLearn()
 				{
 					if (s_learning is { } going) {
-						learn.Content = s_learningStep == stepKey ? "Stop waiting" : $"Stop waiting for {s_learningName}";
+						learn.Content = LearningHere(setupNow, stepKey) ? "Stop waiting" : $"Stop waiting for {s_learningName}";
 						learn.IsEnabled = !going.Stopping;
 					} else {
 						learn.Content = learnText;
@@ -798,7 +797,7 @@ public static class SettingsPanel
 					}
 				}
 				// the step whose tool is open: this view's line now says how it goes
-				if (s_learning is { } still && s_learningStep == stepKey) {
+				if (s_learning is { } still && LearningHere(setupNow, stepKey)) {
 					s_learningSays = t => status.Text = t;
 					status.Text = still.Opened ? $"{name} is open - set it up, save, and close it ..." : $"waiting to open {name} ...";
 				}
@@ -818,6 +817,7 @@ public static class SettingsPanel
 					}
 					using var now = new ToolOpen();
 					s_learning = now;
+					s_learningSetup = setupNow.File;
 					s_learningStep = stepKey;
 					s_learningName = name;
 					s_learningSays = t => status.Text = t;
@@ -1006,13 +1006,18 @@ public static class SettingsPanel
 	static TextBlock? s_errors;
 
 	// A tool opened to learn its settings, while the wait for it goes (one at a time): it outlives the step view that started it
-	// and the settings window, so it can always be stopped (CodeRabbit on pull request #39). s_learningSays: the line of the view
-	// that shows that step now; s_showLearn: the learn button of the view drawn last
+	// and the settings window, so it can always be stopped. s_learningSays: the line of the view that shows that step of that
+	// setup now; s_showLearn: the learn button of the view drawn last
 	static ToolOpen? s_learning;
+	static string s_learningSetup = "";
 	static string s_learningStep = "";
 	static string s_learningName = "";
 	static Action<string>? s_learningSays;
 	static Action? s_showLearn;
+
+	// the tool being learned is this setup's own step (another setup's step of the same tool learns into that setup only)
+	static bool LearningHere(Setup a_setup, string a_step) =>
+		s_learningStep == a_step && string.Equals(s_learningSetup, a_setup.File, StringComparison.OrdinalIgnoreCase);
 
 	static bool AskStopLearning(Window a_over) =>
 		Ask.Show(a_over, $"Stop waiting for {s_learningName}?", $"{s_learningName} is open. Its settings are kept once you save and close it there.\n\n" +
