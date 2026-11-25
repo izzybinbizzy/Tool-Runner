@@ -358,10 +358,19 @@ public sealed partial class MainViewModel : Observable
 
 	public void LoadSetups(string? a_select = null)
 	{
-		Directory.CreateDirectory(AppPaths.Setups);
 		var keep = a_select ?? SelectedSetup?.File;
+		// A Setups folder that cannot be made or listed (its disk gone, no permission) shows as no setups, with why: the window
+		// still opens and says it - at the first start this runs before there is a window to say anything
+		string[] files;
+		try {
+			Directory.CreateDirectory(AppPaths.Setups);
+			files = Directory.GetFiles(AppPaths.Setups, "*.json");
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			files = [];
+			Say("The setups could not be listed: " + e.Message, "bad");
+		}
 		Setups.Clear();
-		foreach (var f in Directory.GetFiles(AppPaths.Setups, "*.json").Where(f => !ToolRunner.Setup.IsStore(f)).Order(StringComparer.OrdinalIgnoreCase)) {
+		foreach (var f in files.Where(f => !ToolRunner.Setup.IsStore(f)).Order(StringComparer.OrdinalIgnoreCase)) {
 			Setups.Add(new SetupItem(Path.GetFileNameWithoutExtension(f), f));
 		}
 		SelectedSetup = Setups.FirstOrDefault(s => string.Equals(s.File, keep, StringComparison.OrdinalIgnoreCase)) ?? Setups.FirstOrDefault();
@@ -647,9 +656,24 @@ public sealed partial class MainViewModel : Observable
 		EstimateText = total == TimeSpan.Zero ? "" : $"about {Long(total)}{(unknown > 0 ? $" + {unknown} step(s) never timed" : "")}";
 	}
 
-	public static string Short(TimeSpan a_t) => a_t.TotalMinutes < 1 ? $"{a_t.TotalSeconds:0}s" : a_t.TotalMinutes < 60 ? $"{a_t.TotalMinutes:0}m" : $"{(int)a_t.TotalHours}h {a_t.Minutes:00}m";
+	// A time for the eye. It is rounded to whole minutes before the hour is split off (59.6 minutes is an hour, never "60m"),
+	// and one that came out below nothing - the PC's clock was set back meanwhile - shows as none
+	public static string Short(TimeSpan a_t)
+	{
+		if (a_t.TotalSeconds < 59.5) {
+			return $"{Math.Max(0, a_t.TotalSeconds):0}s";
+		}
+		var minutes = WholeMinutes(a_t);
+		return minutes < 60 ? $"{minutes}m" : $"{minutes / 60}h {minutes % 60:00}m";
+	}
 
-	public static string Long(TimeSpan a_t) => a_t.TotalMinutes < 60 ? $"{Math.Max(1, (int)Math.Round(a_t.TotalMinutes))} min" : $"{(int)a_t.TotalHours} h {a_t.Minutes:00} min";
+	public static string Long(TimeSpan a_t)
+	{
+		var minutes = Math.Max(1, WholeMinutes(a_t));
+		return minutes < 60 ? $"{minutes} min" : $"{minutes / 60} h {minutes % 60:00} min";
+	}
+
+	static long WholeMinutes(TimeSpan a_t) => (long)Math.Round(Math.Max(0, a_t.TotalMinutes), MidpointRounding.AwayFromZero);
 
 	void LoadHistory()
 	{
@@ -1038,10 +1062,15 @@ public sealed partial class MainViewModel : Observable
 				return;
 			}
 		}
-		if ((a_dryOnly || Setup.Bool(Setup!.Root, "previewBeforeRun") != false) && ConfirmRun != null) {
+		// (the tools box waited on the player: the setup may have stopped reading meanwhile, and is then no longer shown)
+		if (Setup is not { } shownNow || SelectedSetup is not { } pickedNow) {
+			Say("Not started: the setup is no longer shown - pick it and press Start again.", "warn");
+			return;
+		}
+		if ((a_dryOnly || Setup.Bool(shownNow.Root, "previewBeforeRun") != false) && ConfirmRun != null) {
 			_previewing = true;
 			Say(a_dryOnly ? "Dry run: going through everything a start would meet ..." : "Working out what the run will do ...", "");
-			var file = SelectedSetup!.File;
+			var file = pickedNow.File;
 			byte[] shown;
 			Setup setup;
 			try {
@@ -1669,7 +1698,7 @@ public sealed partial class MainViewModel : Observable
 		return why == null;
 	}
 
-	// each step's usual minutes (the old updater's own logs, 30 Sep - 26 Oct 2026) - the made-up run of the pictures only
+	// each step's usual minutes - the made-up run of the pictures only
 	internal static readonly Dictionary<string, double> DemoMinutes = new() {
 		["shaders"] = 28, ["cleansave"] = 7.5, ["synthesis"] = 1.3, ["landscapefixer"] = 9, ["pgpatcher"] = 4,
 		["xlodgen"] = 17.5, ["acmos"] = 1.5, ["grass"] = 0.8, ["treelodgen"] = 2.3, ["texgen"] = 5.5, ["dyndolod"] = 24, ["anvillod"] = 24,
@@ -1870,10 +1899,17 @@ public sealed partial class MainViewModel : Observable
 		}
 	}
 
-	public static void OpenFolder(string a_dir)
+	// a folder shown in Explorer; why not, when it is not there or Windows did not open it (null: it opened)
+	public static string? OpenFolder(string a_dir)
 	{
-		if (Directory.Exists(a_dir)) {
+		if (!Directory.Exists(a_dir)) {
+			return "it is not there yet: " + a_dir;
+		}
+		try {
 			Process.Start(new ProcessStartInfo("explorer.exe", "\"" + a_dir + "\"") { UseShellExecute = true })?.Dispose();
+			return null;
+		} catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) {
+			return e.Message;
 		}
 	}
 }

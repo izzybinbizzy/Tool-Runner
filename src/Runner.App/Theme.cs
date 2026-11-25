@@ -212,7 +212,9 @@ public static class Theme
 				var name = (o?["name"] as JsonObject)?["value"]?.ToString() ?? o?["name"]?.ToString();
 				// a theme named like a built-in look (by its name or its file name) gets "(file)" added, so both can be picked
 				var shown = string.IsNullOrWhiteSpace(name) || name == Default || BuiltIns.Contains(name) ? Path.GetFileNameWithoutExtension(f) : name;
-				outList.Add((shown == Default || BuiltIns.Contains(shown) ? shown + " (file)" : shown, f));
+				shown = shown == Default || BuiltIns.Contains(shown) ? shown + " (file)" : shown;
+				// two files that carry one name inside: the later one says which file it is, so each can be picked
+				outList.Add((outList.Any(t => t.Item1 == shown) ? $"{shown} ({Path.GetFileName(f)})" : shown, f));
 			} catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException) {
 				outList.Add((Path.GetFileNameWithoutExtension(f) + " (does not read)", f));
 			}
@@ -266,14 +268,30 @@ public static class Theme
 	public sealed record Look(string Name, string? File, string About, bool Dark, Color Bg, Color Panel, Color Panel2, Color Line, Color Accent, Color AccentLight,
 		Color Text, Color Muted, Color Good, Color Warn, Color Bad, Color OnAccent, Color BarFrom, Color BarTo, double Corner, string? Problem);
 
-	static Color ColorOr(JsonObject? a_colors, string a_key, Color a_else)
+	// A color is "#" and 3, 4, 6 or 8 hex digits, or a color's name. Windows Presentation Foundation's own reader takes more -
+	// among it a color profile named by a file, a share or an address, which it then opens: a theme file that comes from
+	// someone else would have the window read from wherever it names. Anything that is not one of the two plain forms is no
+	// color here, and the reader never sees it
+	public static bool PlainColor(string a_text)
 	{
+		var t = a_text.Trim();
+		return t.Length > 0 && (t[0] == '#' ? t.Length is 4 or 5 or 7 or 9 && t.Skip(1).All(Uri.IsHexDigit) : t.All(char.IsAsciiLetter));
+	}
+
+	// null: no color (ReadColor says so where a theme is applied; a card in the gallery shows the default's instead)
+	static Color? ColorOf(string? a_text)
+	{
+		if (a_text == null || !PlainColor(a_text)) {
+			return null;
+		}
 		try {
-			return Value(a_colors?[a_key]) is { Length: > 0 } text ? (Color)ColorConverter.ConvertFromString(text.Trim()) : a_else;
+			return (Color)ColorConverter.ConvertFromString(a_text.Trim());
 		} catch (FormatException) {
-			return a_else;
+			return null;
 		}
 	}
+
+	static Color ColorOr(JsonObject? a_colors, string a_key, Color a_else) => ColorOf(Value(a_colors?[a_key])) ?? a_else;
 
 	// what a theme looks like, for its card in the gallery; a key it leaves out shows the default's value, as applying it would
 	public static Look LookOf(string a_name, string? a_file)
@@ -293,12 +311,9 @@ public static class Theme
 		}
 		(Color From, Color To) Bar(JsonObject? a_t)
 		{
-			if (((a_t?["gradients"] as JsonObject)?["PrimaryAndProgress"] as JsonObject)?["stops"] is JsonArray { Count: >= 2 } stops) {
-				try {
-					return ((Color)ColorConverter.ConvertFromString(stops[0]!["color"]!.ToString()), (Color)ColorConverter.ConvertFromString(stops[^1]!["color"]!.ToString()));
-				} catch (Exception e) when (e is FormatException or NullReferenceException or InvalidOperationException) {
-					// (InvalidOperationException: a stop that is plain text, not an object - one such file kept the whole gallery from filling)
-				}
+			if (((a_t?["gradients"] as JsonObject)?["PrimaryAndProgress"] as JsonObject)?["stops"] is JsonArray { Count: >= 2 } stops &&
+			    ColorOf((stops[0] as JsonObject)?["color"]?.ToString()) is { } first && ColorOf((stops[^1] as JsonObject)?["color"]?.ToString()) is { } last) {
+				return (first, last);
 			}
 			return (Pick("Accent"), Pick("Accent"));
 		}
@@ -360,7 +375,12 @@ public static class Theme
 		if (BuiltIns.Contains(a_name)) {
 			return new(BuiltIn(a_name), Folder, null);
 		}
-		var file = List().FirstOrDefault(t => t.Name == a_name).File;
+		string? file;
+		try {
+			file = List().FirstOrDefault(t => t.Name == a_name).File;
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			return new(null, null, $"the Themes folder could not be read ({e.Message}) - the built-in theme is used");
+		}
 		if (file == null) {
 			return new(null, null, $"no theme called \"{a_name}\" in the Themes folder - the built-in one is used");
 		}
@@ -454,12 +474,11 @@ public static class Theme
 			if (string.IsNullOrWhiteSpace(a_text)) {
 				return null;
 			}
-			try {
-				return (Color)ColorConverter.ConvertFromString(a_text.Trim());
-			} catch (FormatException) {
-				a_problems.Add($"{a_where}: \"{a_text}\" is not a color (#RRGGBB or #AARRGGBB)");
-				return null;
+			if (ColorOf(a_text) is { } color) {
+				return color;
 			}
+			a_problems.Add($"{a_where}: \"{a_text}\" is not a color (#RRGGBB or #AARRGGBB)");
+			return null;
 		}
 		if (Value(a_t["windowsMode"]) is { } mode) {
 			if (mode is "Dark" or "Light") {

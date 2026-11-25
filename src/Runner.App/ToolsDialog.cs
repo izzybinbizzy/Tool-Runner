@@ -192,8 +192,8 @@ public static class ToolsDialog
 			var learned = result.Learned;
 			if (learned != null) {
 				a_r.SetUp = true;
-				a_r.Open.Content = "Set up again";
-				System.Windows.Automation.AutomationProperties.SetName(a_r.Open, $"Set up again: {a_r.Name}");
+				a_r.Open.Content = WindowWords.Word("Set up again");
+				System.Windows.Automation.AutomationProperties.SetName(a_r.Open, $"{a_r.Open.Content}: {a_r.Name}");
 			}
 			A11y.Say(w, $"{a_r.Name}: {a_r.State.Text}");
 			toolOpen = false;
@@ -216,7 +216,7 @@ public static class ToolsDialog
 		turn.Click += async (_, _) => {
 			if (walking) {
 				stopWalk = true;
-				turn.Content = "Stops after this one ...";
+				turn.Content = WindowWords.Word("Stops after this one ...");
 				Buttons();
 				return;
 			}
@@ -227,7 +227,7 @@ public static class ToolsDialog
 			}
 			walking = true;
 			stopWalk = false;
-			turn.Content = "_Stop after this one";
+			turn.Content = WindowWords.Word("Stop _after this one");
 			foreach (var r in todo) {
 				if (stopWalk) {
 					break;
@@ -235,7 +235,7 @@ public static class ToolsDialog
 				await SetUp(r);
 			}
 			walking = false;
-			turn.Content = "Set up each in _turn";
+			turn.Content = WindowWords.Word("Set up each in _turn");
 			status.Text = stopWalk ? "Stopped. The tools left are as they were." : "That was the last one.";
 			A11y.Say(w, status.Text);
 			Buttons();

@@ -61,7 +61,9 @@ public partial class MainWindow
 				_vm.Say($"{row.Name}'s output \"{mod}\" is not there yet - its first run makes it.", "warn");
 				return;
 			}
-			MainViewModel.OpenFolder(dir);
+			if (MainViewModel.OpenFolder(dir) is { } why) {
+				_vm.Say($"{row.Name}'s output folder did not open: {why}", "warn");
+			}
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or InvalidDataException) {
 			_vm.Say("Mod Organizer could not be read: " + e.Message, "bad");
 		}
@@ -87,7 +89,11 @@ public partial class MainWindow
 	// the copy is made on a worker (a slow disk never holds the window), one at a time
 	async void DuplicateSetup_Click(object a_s, RoutedEventArgs a_e)
 	{
-		if (_copying || _vm.IsRunning || _vm.SelectedSetup is not { } item) {
+		if (_copying || _vm.SelectedSetup is not { } item) {
+			return;
+		}
+		if (_vm.IsRunning) {
+			_vm.Say("A run is going - copy the setup when it has ended.", "bad");
 			return;
 		}
 		if (_vm.MovingData) {
@@ -201,12 +207,15 @@ public partial class MainWindow
 			new(WindowWords.Word(_logWindow == null ? "Log in its own window" : "Log back in the main window"), () => LogPop_Click(this, new RoutedEventArgs())),
 			new(WindowWords.Word("Compact view"), () => ShowCompact()),
 		]);
-		foreach (var s in _vm.Setups.Where(s => !ReferenceEquals(s, _vm.SelectedSetup))) {
-			items.Add(new(WindowWords.Format("Show setup: {0}", s.Name), () => {
-				if (!_vm.IsRunning) {
-					_vm.SelectedSetup = s;
-				}
-			}));
+		// (another setup is shown only while no run goes: the list does not offer what would do nothing)
+		if (!_vm.IsRunning) {
+			foreach (var s in _vm.Setups.Where(s => !ReferenceEquals(s, _vm.SelectedSetup))) {
+				items.Add(new(WindowWords.Format("Show setup: {0}", s.Name), () => {
+					if (!_vm.IsRunning) {
+						_vm.SelectedSetup = s;
+					}
+				}));
+			}
 		}
 		foreach (var r in _vm.Steps) {
 			items.Add(new(WindowWords.Format("Settings of {0}", r.Name), () => OpenStepSettings(r)));

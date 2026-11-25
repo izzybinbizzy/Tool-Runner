@@ -32,6 +32,9 @@ public static class NewSetupDialog
 		var pattern = new TextBox { Text = "{output} - {profile}" };
 		var note = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
 
+		// the program's path as typed or pasted (the quotes of Explorer's "Copy as path" taken off)
+		string Typed() => SettingsPanel.TypedPath(exe.Text);
+
 		void Row(string a_label, FrameworkElement a_edit, FrameworkElement? a_extra = null)
 		{
 			stack.Children.Add(new TextBlock { Text = a_label, Foreground = Brushes2.Get("Accent"), Margin = new Thickness(0, 8, 0, 4) });
@@ -76,9 +79,9 @@ public static class NewSetupDialog
 		string? loaded = null;
 		void FillInstances()
 		{
-			loaded = exe.Text.Trim();
+			loaded = Typed();
 			var list = new List<KeyValuePair<string, string?>>();
-			var dir = File.Exists(exe.Text.Trim()) ? Path.GetDirectoryName(Path.GetFullPath(exe.Text.Trim())) : null;
+			var dir = File.Exists(loaded) ? Path.GetDirectoryName(Path.GetFullPath(loaded)) : null;
 			if (dir != null && File.Exists(Path.Combine(dir, "ModOrganizer.ini"))) {
 				list.Add(new("Portable (beside Mod Organizer)", null));
 			}
@@ -94,7 +97,7 @@ public static class NewSetupDialog
 			profile.ItemsSource = null;
 			note.Text = "";
 			try {
-				var mo2 = Mo2Instance.Load(exe.Text.Trim(), InstanceDir());
+				var mo2 = Mo2Instance.Load(Typed(), InstanceDir());
 				var list = mo2.Profiles().ToList();
 				profile.ItemsSource = list;
 				profile.SelectedItem = list.Contains(mo2.SelectedProfile) ? mo2.SelectedProfile : list.FirstOrDefault();
@@ -106,7 +109,7 @@ public static class NewSetupDialog
 			}
 		}
 		exe.LostFocus += (_, _) => {
-			if (exe.Text.Trim() == loaded) {
+			if (Typed() == loaded) {
 				return;
 			}
 			FillInstances();
@@ -144,10 +147,10 @@ public static class NewSetupDialog
 			note.Text = "Looking through your mods and the folders beside Mod Organizer ...";
 			note.Foreground = Brushes2.Get("Muted");
 			try {
-				var (exeText, inst) = (exe.Text.Trim(), InstanceDir());
+				var (exeText, inst) = (Typed(), InstanceDir());
 				var mo2 = Mo2Instance.Load(exeText, inst);
 				var rows = await Task.Run(() => ToolFinder.Find(mo2));
-				if (exe.Text.Trim() != exeText || InstanceDir() != inst) {
+				if (Typed() != exeText || InstanceDir() != inst) {
 					note.Text = "";
 					return;
 				}
@@ -221,7 +224,7 @@ public static class NewSetupDialog
 				return;
 			}
 			// it looks through every mod (thousands on a big list): off the window's thread, the window says so
-			var (exeText, inst, setupName, pat) = (exe.Text.Trim(), InstanceDir(), Safe(name.Text.Trim()), pattern.Text.Trim() == "" ? "{output} - {profile}" : pattern.Text.Trim());
+			var (exeText, inst, setupName, pat) = (Typed(), InstanceDir(), Safe(name.Text.Trim()), pattern.Text.Trim() == "" ? "{output} - {profile}" : pattern.Text.Trim());
 			create.IsEnabled = false;
 			cancel.IsEnabled = false;
 			making = true;

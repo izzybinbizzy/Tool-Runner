@@ -11,6 +11,8 @@ namespace ToolRunner.App;
 //   "Tool Runner.exe" catalog                                                               every refusal and failure of its own: its code, what it means, what to do
 //   "Tool Runner.exe" lod --setup <file> --step <step>                                      the mods a LOD step builds from, with their pages
 //   "Tool Runner.exe" restore [--setup <file>]                                              put back an interrupted run
+//   "Tool Runner.exe" undo --setup <file>                                                   the setup's last run undone: its outputs and lists as before it
+//   "Tool Runner.exe" import --file <setup file> [--name <setup name>]                      a setup from elsewhere brought into the Setups folder
 //   "Tool Runner.exe" stop | stop-after                                                     ask the running run to stop
 //   "Tool Runner.exe" updates --setup <file>                                                its tools' newest versions (asks their pages)
 //   "Tool Runner.exe" changes --setup <file> [--look]                                       what Mod Organizer changed, newest first
@@ -19,12 +21,16 @@ namespace ToolRunner.App;
 //   "Tool Runner.exe" addon-check <file>                                                    what is wrong with an add-on file, in plain words
 //   "Tool Runner.exe" bugreport [--setup <file>]                                            one zip for a bug report (the setup's last run), names masked
 //   "Tool Runner.exe" share --setup <file> [--out <folder>]                                 a copy of the setup to share: its paths and commands taken out
-// --json after run, retry, check, preview, dryrun, status, updates, changes or tools prints one JSON object and nothing else (Reports.cs)
-// exit 0 = finished / clean / would start / idle, 1 = failed / refused / a run was cut off, 2 = stopped, 3 = bad arguments,
-//      4 = (updates) a tool has a newer version, 5 = (status) a run is going
+// --json after run, retry, check, preview, dryrun, status, catalog, updates, changes or tools prints one JSON object and nothing else (Reports.cs)
+// exit 0 = finished / clean / would start / idle, 1 = failed / refused / a run was cut off, 2 = stopped, 3 = bad arguments
+//      (an unknown command, a missing option, a file that is not there or is no setup), 4 = (updates) a tool has a newer version,
+//      5 = (status) a run is going
 public static class Cli
 {
-	public static bool Handles(string[] a_args) => a_args.Length > 0 && a_args[0] is "tools" or "addon-check" or "test-tools" or "run" or "retry" or "queue" or "check" or "preview" or "dryrun" or "status" or "catalog" or "lod" or "restore" or "stop" or "stop-after" or "import" or "updates" or "changes" or "bugreport" or "share" or "undo" or "--help" or "-h" or "/?";
+	// What the window itself is started with (App.OnStartup): nothing, the off-screen pictures, a start from Mod Organizer's
+	// Tools menu. Anything else typed is a command - a known one is carried out, an unknown one is said to be none. It never
+	// opens the window: a script with a misspelt command would sit behind a window nobody asked for, waiting on nothing
+	public static bool Handles(string[] a_args) => a_args.Length > 0 && a_args[0] is not ("--snapshot" or "--page" or "--for-profile");
 
 	// one JSON object on the output and nothing else: no line of words before or after it
 	static bool Json(string[] a_args) => a_args.Contains("--json");
@@ -79,11 +85,17 @@ public static class Cli
 				"addon-check" => AddOnCheckCmd(a_args),
 				"test-tools" => TestToolsCmd(a_args),
 				"share" => ShareCmd(a_args),
-				_ => Help(),
+				"--help" or "-h" or "/?" => Help(),
+				_ => Unknown(a_args),
 			};
-		} catch (Exception e) when (e is ArgumentException or IOException or InvalidDataException) {
+		} catch (Exception e) when (e is ArgumentException or FileNotFoundException or DirectoryNotFoundException or InvalidDataException or System.Text.Json.JsonException) {
+			// what was typed is wrong: an option left out, a file that is not there or is no setup
 			Said(a_args, e.Message);
 			return 3;
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			// the disk or Windows refused: its plain reason, and no crash note for what is no fault of the program
+			Said(a_args, e.Message);
+			return 1;
 		} catch (Exception e) {
 			// never Windows' crash box (a window on the player's screen): said, logged, exit 1
 			Said(a_args, "something went wrong - " + e.GetType().Name + ": " + e.Message);
@@ -100,6 +112,15 @@ public static class Cli
 		} else {
 			Console.WriteLine("Tool Runner: " + a_error);
 		}
+	}
+
+	static int Unknown(string[] a_args)
+	{
+		Said(a_args, $"\"{a_args[0]}\" is no command");
+		if (!Json(a_args)) {
+			Help();
+		}
+		return 3;
 	}
 
 	static int Help()
@@ -385,11 +406,7 @@ public static class Cli
 	// test-tools --setup <file>, exit 0 = what a run presses is there in every tool
 	static int TestToolsCmd(string[] a_args)
 	{
-		if (Opt(a_args, "--setup") is not { } s) {
-			Console.WriteLine("test-tools needs --setup <file>");
-			return 3;
-		}
-		var results = ToolProof.TestAll(Setup.Load(Path.GetFullPath(s)), RunLog.Null, CancellationToken.None);
+		var results = ToolProof.TestAll(Setup.Load(SetupArg(a_args)), RunLog.Null, CancellationToken.None);
 		foreach (var r in results) {
 			Console.WriteLine((r.Good ? "good  " : "LOOK  ") + r.Text);
 		}
@@ -441,11 +458,7 @@ public static class Cli
 	// the setup's last run that left anything undone: undo --setup <file>
 	static int UndoCmd(string[] a_args)
 	{
-		if (Opt(a_args, "--setup") is not { } s) {
-			Console.WriteLine("undo needs --setup <file>");
-			return 3;
-		}
-		var setup = Path.GetFullPath(s);
+		var setup = SetupArg(a_args);
 		var j = Journal.All(AppPaths.Runs).Where(j => !j.Undone && (j.Unfinished || RunUndo.LeftSomething(j)) && string.Equals(j.SetupFile, setup, StringComparison.OrdinalIgnoreCase)).OrderByDescending(j => j.Started).FirstOrDefault();
 		if (j == null) {
 			Console.WriteLine("nothing to undo: this setup has no run that changed anything");

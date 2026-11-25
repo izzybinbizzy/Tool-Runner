@@ -103,7 +103,7 @@ public static class SettingsPanel
 		}
 		var docs = new WrapPanel { Margin = new Thickness(-10, 0, 0, 6) };
 		a_host.Children.Add(docs);
-		var note = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6), Foreground = Brushes2.Get("Warn") };
+		var note = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) }.Live(TextBlock.ForegroundProperty, "Warn");
 		a_host.Children.Add(note);
 		// the setup's own pages (a Community Shaders setup has one more) - read off the profile, so not on the window's thread
 		_ = Task.Run(() => {
@@ -165,7 +165,11 @@ public static class SettingsPanel
 			Text = "Measuring this setup's run backups ..." };
 		var tidy = new Button { Content = "Keep only the newest now", Style = (Style)a_w.FindResource("Ghost"), IsEnabled = false };
 		var open = new Button { Content = "Open the backups folder", Style = (Style)a_w.FindResource("Ghost"), Margin = new Thickness(8, 0, 0, 0) };
-		open.Click += (_, _) => MainViewModel.OpenFolder(setup.BackupDir);
+		open.Click += (_, _) => {
+			if (MainViewModel.OpenFolder(setup.BackupDir) is { } why) {
+				a_w.Say("The backups folder did not open: " + why);
+			}
+		};
 		static string Gb(long a_b) => a_b >= 1L << 30 ? $"{a_b / (double)(1L << 30):0.0} GB" : $"{a_b / (double)(1L << 20):0} MB";
 		async void Measure()
 		{
@@ -303,7 +307,7 @@ public static class SettingsPanel
 			return hits;
 		}
 		var stack = setupPage;
-		var errors = new TextBlock { Foreground = Brushes2.Get("Bad"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0) };
+		var errors = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0) }.Live(TextBlock.ForegroundProperty, "Bad");
 		s_errors = errors;
 		var apply = new List<Func<string?>>();
 
@@ -451,7 +455,7 @@ public static class SettingsPanel
 			if (languages.SelectedItem is string picked && picked != WindowWords.Picked()) {
 				try {
 					WindowWords.Pick(picked);
-					languageNote.Text = "It applies the next time this program starts.";
+					languageNote.Text = WindowWords.Word("It applies the next time this program starts.");
 				} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 					a_vm.Say("The language could not be kept: " + e.Message, "bad");
 				}
@@ -461,8 +465,7 @@ public static class SettingsPanel
 		makeLanguage.Click += (_, _) => {
 			try {
 				var file = WindowWords.WriteTemplate(a_w);
-				a_vm.Say("Made: " + file, "good");
-				MainViewModel.OpenFolder(WindowWords.Folder);
+				a_vm.Say("Made: " + file + (MainViewModel.OpenFolder(WindowWords.Folder) is { } why ? " (its folder did not open: " + why + ")" : ""), "good");
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException) {
 				a_vm.Say("The language file could not be made: " + e.Message, "bad");
 			}
@@ -674,11 +677,17 @@ public static class SettingsPanel
 		var updRows = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
 		var updCheck = new Button { Content = "Check its tools for updates", Style = (Style)a_w.FindResource("Ghost"), HorizontalAlignment = HorizontalAlignment.Left };
 		updCheck.Click += async (_, _) => {
+			if (a_vm.Setup is not { } setup) {
+				return;
+			}
+			if (NotThisSetup(openedFor, openedName, setup) is { } another) {
+				updNote.Text = another;
+				return;
+			}
 			updCheck.IsEnabled = false;
 			updRows.Children.Clear();
 			updNote.Text = "Asking the tools' pages ...";
 			try {
-				var setup = a_vm.Setup!;
 				var res = await Task.Run(async () => await ToolUpdates.Check(setup, Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance), CancellationToken.None));
 				foreach (var r in res) {
 					var row = new DockPanel { Margin = new Thickness(0, 2, 0, 2) };
@@ -690,8 +699,8 @@ public static class SettingsPanel
 						row.Children.Add(get);
 					}
 					var said = r.Problem ?? (r.Newer ? $"a NEWER version is out: {r.Newest} (yours {r.Yours})" : $"up to date ({r.Yours})");
-					row.Children.Add(new TextBlock { Text = $"{r.Tool}: {said}", TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center,
-						Foreground = Brushes2.Get(r.Newer ? "Warn" : r.Problem != null ? "Muted" : "Text") });
+					row.Children.Add(new TextBlock { Text = $"{r.Tool}: {said}", TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center }
+						.Live(TextBlock.ForegroundProperty, r.Newer ? "Warn" : r.Problem != null ? "Muted" : "Text"));
 					updRows.Children.Add(row);
 				}
 				updNote.Text = ToolUpdates.Summary(res);
@@ -731,6 +740,10 @@ public static class SettingsPanel
 			if (s_testing != null) {
 				return;
 			}
+			if (a_vm.Setup is { } picked && NotThisSetup(openedFor, openedName, picked) is { } another) {
+				errors.Text = another;
+				return;
+			}
 			if (a_vm.Setup is not { } testSetup || !Ask.Show(a_w, "Test my tools", "Each tool this program drives through its window opens through Mod Organizer, up to the window a run presses, and closes again. " +
 				"Nothing is pressed and nothing is built. Mod Organizer closes for it, and the LOD tools read your whole load order first, so it can take a while.", "Test them", "Not now")) {
 				return;
@@ -744,7 +757,8 @@ public static class SettingsPanel
 				var results = await Task.Run(() => ToolProof.TestAll(testSetup, RunLog.Null, stop.Token));
 				// (into the drawing on screen now: Settings may have been drawn again since the test began)
 				foreach (var r in results) {
-					s_testRows?.Children.Add(new TextBlock { Text = r.Text, TextWrapping = TextWrapping.Wrap, Foreground = Brushes2.Get(r.Good ? "Text" : "Bad"), Margin = new Thickness(0, 2, 0, 2) });
+					s_testRows?.Children.Add(new TextBlock { Text = r.Text, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 2) }
+						.Live(TextBlock.ForegroundProperty, r.Good ? "Text" : "Bad"));
 				}
 			} catch (OperationCanceledException) {
 				a_vm.Say("The test of your tools was stopped; the tool it had opened is closed again.", "warn");
@@ -1005,7 +1019,11 @@ public static class SettingsPanel
 			a_w.ShowPanel("settings", true);
 		};
 		undo.Click += (_, _) => a_w.ShowPanel("settings", true);
-		folders.Click += (_, _) => MainViewModel.OpenFolder(AppPaths.Data);
+		folders.Click += (_, _) => {
+			if (MainViewModel.OpenFolder(AppPaths.Data) is { } why) {
+				a_w.Say("The data folder did not open: " + why);
+			}
+		};
 		// a clean removal of everything the program keeps (to the Recycle Bin, never erased)
 		var remove = new Button { Content = "Remove program data ...", Style = (Style)a_w.FindResource("Danger"), Margin = new Thickness(10, 0, 0, 0),
 			ToolTip = "Moves Tool Runner's data and run backups to the Recycle Bin. The mods the tools created stay in Mod Organizer." };
@@ -1211,12 +1229,13 @@ public static class SettingsPanel
 	// step's own settings are on screen only while it is open on the Steps page)
 	static string FindHint(int a_hits, string a_q, IReadOnlyList<JsonObject> a_steps, int a_open)
 	{
+		// (set after the window opened, so put into the window's language here - the walk that translates a window is past)
 		if (a_q == "") {
-			return "Find a setting - type a word (Ctrl+F)";
+			return WindowWords.Word("Find a setting - type a word (Ctrl+F)");
 		}
 		var others = StepsWith(a_steps, a_q, a_open);
-		return (a_hits == 0 ? "No setting here has that word." : $"{a_hits} setting(s) found.") +
-			(others.Count == 0 ? "" : $" Also in the settings of: {string.Join(", ", others)} (pick it on the Steps page).");
+		return (a_hits == 0 ? WindowWords.Word("No setting here has that word.") : WindowWords.Format("{0} setting(s) found.", a_hits)) +
+			(others.Count == 0 ? "" : " " + WindowWords.Format("Also in the settings of: {0} (pick it on the Steps page).", string.Join(", ", others)));
 	}
 
 	// the steps (all but a_skip) whose settings hold a_q - in a setting's name, its label or its value
@@ -1413,7 +1432,8 @@ public static class SettingsPanel
 		var row = new Grid { Margin = new Thickness(0, 0, 0, 10) };
 		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(230) });
 		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-		var label = new TextBlock { Text = a_label, Foreground = Brushes2.Get("Accent"), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
+		var label = new TextBlock { Text = a_label, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) }
+			.Live(TextBlock.ForegroundProperty, "Accent");
 		row.Children.Add(label);
 		FrameworkElement edit;
 		var cur = a_obj[a_key];
@@ -1457,7 +1477,7 @@ public static class SettingsPanel
 			t.TextChanged += (_, _) => Changed();
 			edit = t;
 		} else if (kind is JsonValueKind.Object or JsonValueKind.Array) {
-			var t = new TextBox { Text = cur?.ToJsonString(Pretty) ?? "", AcceptsReturn = true, MinHeight = 80, FontFamily = new System.Windows.Media.FontFamily("Cascadia Mono, Consolas"), FontSize = (double)Application.Current.FindResource("SizeLog") };
+			var t = new TextBox { Text = cur?.ToJsonString(Pretty) ?? "", AcceptsReturn = true, MinHeight = 80 }.Live(Control.FontFamilyProperty, "MonoFont").Live(Control.FontSizeProperty, "SizeLog");
 			a_apply.Add(() => {
 				try {
 					a_obj[a_key] = JsonNode.Parse(t.Text);
@@ -1477,7 +1497,7 @@ public static class SettingsPanel
 				if (t.Text == "" && cur == null) {
 					return null;
 				}
-				a_obj[a_key] = t.Text;
+				a_obj[a_key] = PathKind(a_key) == null ? t.Text : TypedPath(t.Text);
 				return null;
 			});
 			t.TextChanged += (_, _) => Changed();
@@ -1512,6 +1532,14 @@ public static class SettingsPanel
 		Grid.SetColumn(shown, 1);
 		row.Children.Add(shown);
 		a_host.Children.Add(row);
+	}
+
+	// A path as it was typed or pasted: the blanks round it taken off, and the quotes Explorer's "Copy as path" puts round it
+	// (kept, the path would name nothing that is there)
+	public static string TypedPath(string a_text)
+	{
+		var t = a_text.Trim();
+		return t.Length >= 2 && t[0] == '"' && t[^1] == '"' ? t[1..^1].Trim() : t;
 	}
 
 	enum PathPick
@@ -1563,7 +1591,8 @@ public static class SettingsPanel
 		var row = new Grid { Margin = new Thickness(0, 0, 0, 10) };
 		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(230) });
 		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-		row.Children.Add(new TextBlock { Text = label, Foreground = Brushes2.Get("Accent"), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) });
+		row.Children.Add(new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) }
+			.Live(TextBlock.ForegroundProperty, "Accent"));
 		var current = Setup.Str(a_obj, "character");
 		var names = new List<string> { WindowWords.Word(AnyCharacter) };
 		if (current != null) {
@@ -1627,7 +1656,8 @@ public static class SettingsPanel
 		var row = new Grid { Margin = new Thickness(0, 0, 0, 10) };
 		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(230) });
 		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-		row.Children.Add(new TextBlock { Text = a_label, Foreground = Brushes2.Get("Accent"), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) });
+		row.Children.Add(new TextBlock { Text = a_label, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) }
+			.Live(TextBlock.ForegroundProperty, "Accent"));
 		// shown in the window's language; what is saved is still each choice's own value, by its place in the list
 		var box = new ComboBox { ItemsSource = a_options.Select(o => WindowWords.Word(o.Text)).ToList() };
 		var cur = Setup.Str(a_obj, a_key);

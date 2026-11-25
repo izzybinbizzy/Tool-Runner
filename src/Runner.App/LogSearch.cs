@@ -38,14 +38,16 @@ public static class LogSearch
 		return warn;
 	}
 
-	// 2 = a failure, 1 = a warning, 0 = neither: the words after the line's time ("21:40:03  ! ..." / "21:40:03  !!! ...")
-	static int Mark(ReadOnlySpan<char> a_line)
+	// 2 = a failure, 1 = a warning, 0 = neither: the mark right after the line's time, as both logs write it ("21:40:03  ! ..." /
+	// "21:40:03  !!! ..." - the time, two spaces, the mark). Two spaces further in are the line's own words. The log's colors
+	// (LogView) and "first problem" read a line by this one rule
+	public static int Mark(ReadOnlySpan<char> a_line)
 	{
 		var gap = a_line.IndexOf("  ", StringComparison.Ordinal);
 		if (gap < 0 || gap > 12) {
 			return 0;
 		}
-		var words = a_line[gap..].TrimStart();
+		var words = a_line[(gap + 2)..];
 		return words.StartsWith("!!! ", StringComparison.Ordinal) ? 2 : words.StartsWith("! ", StringComparison.Ordinal) ? 1 : 0;
 	}
 }

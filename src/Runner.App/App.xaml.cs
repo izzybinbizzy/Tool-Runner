@@ -14,6 +14,9 @@ public partial class App : Application
 
 	static bool s_logging;
 
+	// the box that says an error is on screen: an error that comes again meanwhile is written down, never a second box
+	static bool s_telling;
+
 	// what no window can show is written down: an error on a thread of its own, and a background task that failed with nobody
 	// waiting on it (a start, a check, a look at Mod Organizer) instead of vanishing without a trace
 	public static void LogCrashes()
@@ -68,16 +71,30 @@ public partial class App : Application
 				Shutdown(1);
 				return;
 			}
+			// One box at a time. A box keeps the window alive under it, so an error that comes back with every look the window
+			// takes (once a second during a run) would open box upon box without end
+			if (s_telling) {
+				return;
+			}
+			s_telling = true;
 			var text = "Something went wrong: " + e.Exception.Message + "\n\nIt is written in crash.txt in the data folder. A run that is going is not affected.";
 			// the themed box over the window (every pop-up wears the theme); Windows' own box only when the window cannot carry one
+			var noWindow = MainWindow is not { IsLoaded: true };
 			try {
 				if (MainWindow is { IsLoaded: true } owner && Ask.Show(owner, "Something went wrong", text, "Open the data folder", "Close")) {
 					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(AppPaths.Data) { UseShellExecute = true })?.Dispose();
-				} else if (MainWindow is not { IsLoaded: true }) {
+				} else if (noWindow) {
 					MessageBox.Show(text, Brand.Name, MessageBoxButton.OK, MessageBoxImage.Warning);
 				}
 			} catch (Exception e2) when (e2 is InvalidOperationException or System.ComponentModel.Win32Exception) {
 				MessageBox.Show(text, Brand.Name, MessageBoxButton.OK, MessageBoxImage.Warning);
+			} finally {
+				s_telling = false;
+			}
+			// The error came before the window stood (the start itself failed): no window will ever close, so nothing would end
+			// the program - it would stay in memory unseen. It ends here, as a start that failed
+			if (noWindow) {
+				Shutdown(1);
 			}
 		};
 		LogCrashes();
@@ -256,7 +273,7 @@ public partial class App : Application
 		} finally {
 			try {
 				Directory.Delete(runs, true);
-			} catch (IOException) {
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			}
 		}
 		var t = new DateTime(2026, 10, 27, 22, 43, 0);

@@ -255,7 +255,9 @@ public partial class MainWindow : Window
 	// the window's keys - from one of its panel windows too, so Ctrl+H or Ctrl+, work wherever the keyboard is
 	void OnKeys(object a_s, KeyEventArgs a_e)
 	{
-		if (!Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) {
+		// (Control without Alt: the two together are AltGr, which types a letter on many keyboards - AltGr+L and AltGr+N on a
+		// Polish one - and that letter must reach the box it is typed into)
+		if ((Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) != ModifierKeys.Control) {
 			return;
 		}
 		switch (a_e.Key) {
@@ -358,7 +360,11 @@ public partial class MainWindow : Window
 			_vm.Say("Select a step in the list first.", "bad");
 			return;
 		}
-		if (_vm.IsRunning || _oldAsked) {
+		if (_oldAsked) {
+			return;
+		}
+		if (_vm.IsRunning) {
+			_vm.Say("A run is going - choose this when it has ended.", "bad");
 			return;
 		}
 		if (row.UsesOld) {
@@ -382,7 +388,7 @@ public partial class MainWindow : Window
 			} else if (Ask.Show(this, $"Use {row.Name}'s old output?", _vm.OldOutputText(look), "Use the old output", "Build it again")) {
 				await _vm.SetUseOld(row, true);
 			}
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) {
 			_vm.Say("The old output could not be looked at: " + e.Message, "bad");
 		} finally {
 			_oldAsked = false;
@@ -784,7 +790,7 @@ public partial class MainWindow : Window
 			_logOut = null;
 			_followOut = null;
 			LogHide.IsEnabled = true;
-			LogPop.Content = WindowWords.Word("_Pop out");
+			LogPop.Content = WindowWords.Word("Pop ou_t");
 			LogPop.ToolTip = WindowWords.Word("The log in a window of its own: size it, move it to another screen (Ctrl+L)");
 			if (!_closingAll) {
 				ShowLogHere(_logWasHere);
@@ -998,10 +1004,11 @@ public partial class MainWindow : Window
 		AutomationPropertiesName(filter, "Find a mod or a profile");
 		var look = new Button { Content = "Look now", Style = (Style)FindResource("Ghost"), ToolTip = "Notes what changed in Mod Organizer since the last look" };
 		var tools = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
-		tools.Children.Add(new TextBlock { Text = "Find", Foreground = Brushes2.Get("Muted"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
+		tools.Children.Add(new TextBlock { Text = "Find", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) }.Live(TextBlock.ForegroundProperty, "Muted"));
 		tools.Children.Add(filter);
 		tools.Children.Add(look);
-		var list = new ListBox { Background = Brushes2.Get("Panel2"), BorderBrush = Brushes2.Get("Line") };
+		// the theme's colors as live references: a theme picked while this view is open repaints it too
+		var list = new ListBox().Live(BackgroundProperty, "Panel2").Live(BorderBrushProperty, "Line");
 		ScrollViewer.SetHorizontalScrollBarVisibility(list, ScrollBarVisibility.Disabled);
 		AutomationPropertiesName(list, "MO2 Changelog");
 		list.ItemTemplate = (DataTemplate)System.Windows.Markup.XamlReader.Parse(
@@ -1078,8 +1085,8 @@ public partial class MainWindow : Window
 			"<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><StackPanel Margin='2,4'>" +
 			"<TextBlock><Run Text='{Binding When, Mode=OneWay}' FontWeight='SemiBold'/><Run Text='   '/><Run Text='{Binding Setup, Mode=OneWay}'/><Run Text='   '/><Run Text='{Binding Took, Mode=OneWay}'/></TextBlock>" +
 			"<TextBlock Text='{Binding Verdict}' TextWrapping='Wrap' Opacity='0.8' FontSize='{DynamicResource SizeSmall}'/></StackPanel></DataTemplate>");
-		var log = new TextBox { IsReadOnly = true, FontFamily = (System.Windows.Media.FontFamily)FindResource("MonoFont"), FontSize = (double)FindResource("SizeLog"), Background = Brushes2.Get("Panel2"),
-			Foreground = Brushes2.Get("Text"), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
+		var log = new TextBox { IsReadOnly = true, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto }
+			.Live(FontFamilyProperty, "MonoFont").Live(FontSizeProperty, "SizeLog").Live(BackgroundProperty, "Panel2").Live(ForegroundProperty, "Text");
 		AutomationPropertiesName(log, "The run's log");
 		var open = new Button { Content = "Open folder", Style = (Style)FindResource("Ghost"), Margin = new Thickness(0, 0, 8, 0), ToolTip = "This run's folder: its logs and its record" };
 		// one zip for a bug report, names masked; made on the player's press, never sent anywhere
@@ -1150,8 +1157,10 @@ public partial class MainWindow : Window
 			}
 		};
 		open.Click += (_, _) => {
-			if (list.SelectedItem is HistoryRow r) {
-				MainViewModel.OpenFolder(r.Folder);
+			if (list.SelectedItem is not HistoryRow r) {
+				_vm.Say("Pick a run first.", "warn");
+			} else if (MainViewModel.OpenFolder(r.Folder) is { } why) {
+				_vm.Say("This run's folder did not open: " + why, "warn");
 			}
 		};
 		if (_vm.History.Count == 0) {
@@ -1408,6 +1417,7 @@ public partial class MainWindow : Window
 	void NewSetup_Click(object a_s, RoutedEventArgs a_e)
 	{
 		if (_vm.IsRunning) {
+			_vm.Say("A run is going - make the setup when it has ended.", "bad");
 			return;
 		}
 		if (_vm.MovingData) {
@@ -1431,14 +1441,15 @@ public partial class MainWindow : Window
 	// the window goes once the run has stopped and put the profile back; a run that does not stop in 10 minutes keeps the window
 	async Task CloseWhenStopped(Journal? a_run)
 	{
-		var until = DateTime.Now.AddMinutes(10);
+		// (counted on a clock that only runs forward: the PC's own may be set, or change for the summer, while this waits)
+		var waited = System.Diagnostics.Stopwatch.StartNew();
 		// every run that appears meanwhile is stopped too: the one a start was still checking for, a queue's next setup (a stopped
 		// run ends the queue)
 		var stopped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		if (a_run != null) {
 			stopped.Add(a_run.Folder);
 		}
-		while (DateTime.Now < until && StillGoing()) {
+		while (waited.Elapsed < TimeSpan.FromMinutes(10) && StillGoing()) {
 			// a stop that could not be written is written again at the next beat
 			if (Engine.Active() is { } next && stopped.Add(next.Folder) && MainViewModel.TrySend(next.Folder, "stop") != null) {
 				stopped.Remove(next.Folder);
