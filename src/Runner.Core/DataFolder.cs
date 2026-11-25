@@ -135,7 +135,7 @@ public static class DataFolder
 			Choose(a_to);
 		}
 		try {
-			Files.DeleteDir(a_old);
+			RemoveMoved(a_old);
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 		}
 	}
@@ -170,11 +170,18 @@ public static class DataFolder
 	{
 		var from = Path.GetFullPath(a_from);
 		var to = Path.GetFullPath(a_to);
-		if (Files.SamePath(from, to)) {
+		// (by where each one really is: a link, a junction or another name for the same disk can make a folder that looks apart
+		// from the data folder one inside it, which the copy would fill and the removal of the old folder empty again)
+		if (Directory.Exists(to) && Files.IsLink(to)) {
+			throw new InvalidOperationException($"{to} is a link to another folder - pick the folder itself");
+		}
+		var realFrom = Physical(from);
+		var realTo = Physical(to);
+		if (Files.SamePath(from, to) || Files.SamePath(realFrom, realTo)) {
 			throw new InvalidOperationException("the data is in that folder already");
 		}
 		// a folder inside the data, or one that holds it, would be copied into itself and then removed with it
-		if (Files.IsUnder(to, from) || Files.IsUnder(from, to)) {
+		if (Files.IsUnder(to, from) || Files.IsUnder(from, to) || Files.IsUnder(realTo, realFrom) || Files.IsUnder(realFrom, realTo)) {
 			throw new InvalidOperationException($"{to} is inside the data folder, or holds it - pick a folder apart from it");
 		}
 		// a copy of this very move that was cut off before it counted holds nothing of the player's: it is made again
@@ -215,7 +222,9 @@ public static class DataFolder
 					throw new IOException($"{rel} did not copy whole");
 				}
 			}
-			if (!Repoint(to, from)) {
+			// (the copy keeps its mark of where it came from until the move counts: a stop before that leaves a copy the next
+			// try knows as this move's, never as someone's data)
+			if (!Repoint(to, from, true)) {
 				throw new IOException("a file of the copy could not be updated to its new place");
 			}
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
@@ -229,16 +238,65 @@ public static class DataFolder
 		}
 		// what is left after the mark never takes the move back: a start that finds the mark finishes both
 		try {
+			Files.Delete(Path.Combine(to, Pending));
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			// (the move counts already: a mark left there only makes the next start repoint once more - harmless)
+		}
+		try {
 			Choose(to);
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			return $"The new folder could not be marked yet ({e.Message}); the next start does it and removes {from}.";
 		}
 		try {
-			Files.DeleteDir(from);
+			RemoveMoved(from);
 			return null;
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			return $"The old folder could not all be removed ({e.Message}); the next start removes what is left of {from}.";
 		}
+	}
+
+	// The old folder of a move that counts, emptied with its mark going LAST: while anything of it is left, the mark stays, and
+	// the next start finishes the move instead of taking what is left for the data (a link inside goes as the link)
+	static void RemoveMoved(string a_old)
+	{
+		if (!Directory.Exists(a_old)) {
+			return;
+		}
+		var mark = Path.Combine(a_old, MovedMark);
+		foreach (var e in Directory.EnumerateFileSystemEntries(a_old).ToList()) {
+			if (Files.SamePath(e, mark)) {
+				continue;
+			}
+			if (!Directory.Exists(e)) {
+				Files.Delete(e);
+			} else if (Files.IsLink(e)) {
+				Directory.Delete(e);
+			} else {
+				Files.DeleteDir(e);
+			}
+		}
+		Files.Delete(mark);
+		Directory.Delete(a_old);
+	}
+
+	// where a path really is: each part of it that is a link or a junction followed to its target (a part not there yet is
+	// taken as written)
+	static string Physical(string a_path)
+	{
+		var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(a_path));
+		var root = Path.GetPathRoot(full) ?? "";
+		var now = root;
+		foreach (var part in full[root.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries)) {
+			now = Path.Combine(now, part);
+			try {
+				if (Directory.Exists(now) && new DirectoryInfo(now).ResolveLinkTarget(true) is { } target) {
+					now = Path.TrimEndingDirectorySeparator(Path.GetFullPath(target.FullName));
+				}
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+				// a link that cannot be followed is taken as written
+			}
+		}
+		return now;
 	}
 
 	static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
@@ -246,14 +304,25 @@ public static class DataFolder
 	// every JSON file under the folder: a string value that is the old folder, or a path inside it, is written under the new one
 	// (compared as values, so escaping and letters outside English never matter; a sibling folder sharing the name is left).
 	// True when every file that could hold such a path was read and written; false leaves the mark for the next start
-	public static bool Repoint(string a_now, string a_old)
+	public static bool Repoint(string a_now, string a_old, bool a_keepMark = false)
 	{
 		var from = Path.TrimEndingDirectorySeparator(Path.GetFullPath(a_old));
 		var to = Path.TrimEndingDirectorySeparator(Path.GetFullPath(a_now));
 		var failed = false;
 		foreach (var f in Directory.EnumerateFiles(a_now, "*.json", SearchOption.AllDirectories)) {
 			try {
-				var node = JsonNode.Parse(Files.ReadSharedText(f));
+				var text = Files.ReadSharedText(f);
+				JsonNode? node;
+				try {
+					// (as every setup is read: a comment or a comma after the last value is no reason to skip it)
+					node = JsonNode.Parse(text, documentOptions: Setup.ReadOptions);
+				} catch (JsonException) {
+					// not JSON this can read: fine unless it names the old folder, which it would go on naming after the move
+					if (NamesFolder(text, from)) {
+						failed = true;
+					}
+					continue;
+				}
 				if (node != null && Swap(node, from, to)) {
 					Files.WriteAtomic(f, node.ToJsonString(WriteOptions));
 				}
@@ -262,12 +331,10 @@ public static class DataFolder
 				failed = true;
 			} catch (UnauthorizedAccessException) {
 				failed = true;
-			} catch (JsonException) {
-				// not JSON this can read: nothing in it to repoint, and trying again would never change that
 			}
 		}
-		if (failed) {
-			return false;
+		if (failed || a_keepMark) {
+			return !failed;
 		}
 		try {
 			Files.Delete(Path.Combine(a_now, Pending));
@@ -305,13 +372,20 @@ public static class DataFolder
 		return changed;
 	}
 
+	// (compared with every "/" read as "\\": Windows takes both, and a hand-written path may use either)
 	static string? Moved(string a_path, string a_from, string a_to)
 	{
-		if (a_path.Equals(a_from, StringComparison.OrdinalIgnoreCase)) {
+		var p = a_path.Replace('/', '\\');
+		var f = a_from.Replace('/', '\\');
+		if (p.Equals(f, StringComparison.OrdinalIgnoreCase)) {
 			return a_to;
 		}
-		return a_path.Length > a_from.Length && a_path.StartsWith(a_from, StringComparison.OrdinalIgnoreCase) && a_path[a_from.Length] is '\\' or '/'
-			? a_to + a_path[a_from.Length..]
+		return p.Length > f.Length && p.StartsWith(f, StringComparison.OrdinalIgnoreCase) && p[f.Length] == '\\'
+			? a_to + a_path[f.Length..]
 			: null;
 	}
+
+	// a text names the folder or a path in it, written either way and as JSON escapes it
+	static bool NamesFolder(string a_text, string a_folder) =>
+		a_text.Replace("\\\\", "\\").Replace('/', '\\').Contains(a_folder.Replace('/', '\\'), StringComparison.OrdinalIgnoreCase);
 }

@@ -43,7 +43,28 @@ public static class Program
 		SystemChecks.SteamRunning = () => false;
 		// nor this PC's own data: the tests' data folder stands beside them before anything asks for one, so an app-data
 		// folder this PC chose for every copy of the program is never taken for theirs
-		Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory, Brand.Name + " Data"));
+		var testData = Path.Combine(AppContext.BaseDirectory, Brand.Name + " Data");
+		var madeData = !Directory.Exists(testData);
+		Directory.CreateDirectory(testData);
+		try {
+			RunAll(filter);
+		} finally {
+			// (made by this run: gone with it, a test that failed too; one that was there before stays as it was)
+			if (madeData) {
+				try {
+					Directory.Delete(testData, true);
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+					Console.WriteLine("the tests' data folder could not be removed: " + e.Message);
+				}
+			}
+		}
+		Console.WriteLine();
+		Console.WriteLine(s_fail == 0 ? $"=== ALL {s_pass} TESTS PASS ===" : $"=== {s_fail} FAILED, {s_pass} passed ===");
+		return s_fail == 0 ? 0 : 1;
+	}
+
+	static void RunAll(string filter)
+	{
 		var tests = typeof(Program).GetMethods(System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)
 			.Where(m => m.Name.StartsWith("T_", StringComparison.Ordinal) && m.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)).OrderBy(m => m.MetadataToken);
 		foreach (var t in tests) {
@@ -60,9 +81,6 @@ public static class Program
 				Console.WriteLine(e.InnerException?.StackTrace?.Split('\n').FirstOrDefault()?.Trim());
 			}
 		}
-		Console.WriteLine();
-		Console.WriteLine(s_fail == 0 ? $"=== ALL {s_pass} TESTS PASS ===" : $"=== {s_fail} FAILED, {s_pass} passed ===");
-		return s_fail == 0 ? 0 : 1;
 	}
 
 	static void Check(bool a_ok, string a_what)
@@ -5849,6 +5867,45 @@ public static class Program
 			Check(DataFolder.MovedTo(old3) is { } where && Files.SamePath(where, to3), "the mark names where the data went");
 			DataFolder.FinishMove(old3, to3);
 			Check(DataFolder.Chosen(to3) && !Directory.Exists(old3), "the new folder is the player's choice and the old one is gone");
+			// the old folder's mark goes last: while a file of it is held, the mark stays for the next start to finish the move
+			var old4 = Path.Combine(root, "beside 4", Brand.Name + " Data");
+			var to4 = Path.Combine(root, "appdata 4", Brand.Name);
+			Directory.CreateDirectory(old4);
+			Directory.CreateDirectory(to4);
+			File.WriteAllText(Path.Combine(old4, DataFolder.MovedMark), to4);
+			File.WriteAllText(Path.Combine(old4, "held.json"), "{}");
+			using (new FileStream(Path.Combine(old4, "held.json"), FileMode.Open, FileAccess.Read, FileShare.None)) {
+				DataFolder.FinishMove(old4, to4);
+				Check(File.Exists(Path.Combine(old4, DataFolder.MovedMark)), "a file that will not go keeps the mark beside it");
+			}
+			DataFolder.FinishMove(old4, to4);
+			Check(!Directory.Exists(old4), "and the next start removes the rest, the mark last");
+			// a setup written by hand (a comment, a comma after its last value, a path with forward slashes) is repointed too
+			var from5 = Path.Combine(root, "beside 5", Brand.Name + " Data");
+			var to5 = Path.Combine(root, "appdata 5", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from5, "Setups"));
+			File.WriteAllText(Path.Combine(from5, "Setups", "Hand.json"), "{\n  // written by hand\n  \"backups\": \"" + from5.Replace('\\', '/') + "/Backups\",\n}");
+			Check(DataFolder.MoveTo(from5, to5) == null, "a setup written by hand moves");
+			var hand = JsonNode.Parse(File.ReadAllText(Path.Combine(to5, "Setups", "Hand.json")), documentOptions: new System.Text.Json.JsonDocumentOptions { CommentHandling = System.Text.Json.JsonCommentHandling.Skip, AllowTrailingCommas = true })!;
+			Check(Files.SamePath(hand["backups"]!.GetValue<string>(), Path.Combine(to5, "Backups")), "and its path into the data, written with forward slashes, follows it: " + hand["backups"]);
+			// a file that does not read as JSON but names the old folder stops the move: it would go on naming it after
+			var from6 = Path.Combine(root, "beside 6", Brand.Name + " Data");
+			var to6 = Path.Combine(root, "appdata 6", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from6, "Setups"));
+			File.WriteAllText(Path.Combine(from6, "Setups", "Broken.json"), "{ \"backups\": \"" + from6.Replace("\\", "\\\\", StringComparison.Ordinal) + "\\\\Backups\", ");
+			Throws<IOException>(() => DataFolder.MoveTo(from6, to6), "a file naming the data folder that cannot be repointed stops the move");
+			Check(File.Exists(Path.Combine(from6, "Setups", "Broken.json")) && !Directory.Exists(to6), "and the data stays where it was, nothing of the copy left");
+			// a link that leads into the data folder is that folder, whatever its own path says
+			var link = Path.Combine(root, "link into the data");
+			Directory.CreateDirectory(Path.Combine(from5 + " again", "inside"));
+			using (var mk = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{Path.Combine(from5 + " again", "inside")}\"") {
+				UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true })!) {
+				mk.WaitForExit();
+			}
+			Check(Directory.Exists(link), "the test's junction was made");
+			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from5 + " again", link), "a link is refused as the new place");
+			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from5 + " again", Path.Combine(link, "deeper")), "a folder reached through a link into the data is refused");
+			Directory.Delete(link);
 		} finally {
 			if (Directory.Exists(root)) {
 				Directory.Delete(root, true);

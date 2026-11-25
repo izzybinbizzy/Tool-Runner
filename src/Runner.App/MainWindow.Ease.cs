@@ -107,7 +107,13 @@ public partial class MainWindow
 		if (name == null) {
 			return;
 		}
+		// (a data move may have begun while the name was typed: the copy never runs beside it)
+		if (_vm.MovingData) {
+			_vm.Say(_vm.WhyNotWriting("copied")!, "bad");
+			return;
+		}
 		_copying = true;
+		_vm.CopyingSetup = true;
 		// the window's own work: closing waits for it, so a copy is never cut off half made
 		using var hold = _vm.Working("a setup is being copied");
 		try {
@@ -119,6 +125,7 @@ public partial class MainWindow
 			_vm.Say("The copy could not be made: " + e.Message, "bad");
 		} finally {
 			_copying = false;
+			_vm.CopyingSetup = false;
 		}
 	}
 
