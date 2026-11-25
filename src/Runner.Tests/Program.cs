@@ -579,6 +579,17 @@ public static class Program
 		Check(closedBox.Move == BoxMove.Press && closedBox.Button == "No" && closedBox.Note.Contains("does not know", StringComparison.Ordinal), "closed with its declining button, and named: " + closedBox.Note);
 		Equal("Ignore", KnownBoxes.Judge(new BoxSeen("SkyrimSE.exe", true, "Error", "Something failed", ["Abort", "Retry", "Ignore"]), true).Button, "Windows' own three: Ignore");
 		Equal(BoxMove.Stop, KnownBoxes.Judge(new BoxSeen("SkyrimSE.exe", true, "Working", "Packing the archives ...", ["Cancel"]), true).Move, "a box whose one button is Cancel shows something at work: never pressed");
+		// a box in words, as the log and the run's notes name it: whose it is, its title, its words, its buttons
+		Equal("SkyrimSE.exe: \"Error\" - Something failed [Abort / Retry / Ignore]",
+			KnownBoxes.Describe(new BoxSeen("SkyrimSE.exe", true, "Error", "Something failed", ["Abort", "Retry", "Ignore"])), "a box in words");
+		Equal("a program of the run: \"Note\"", KnownBoxes.Describe(new BoxSeen("", false, "Note", "  ", [])), "no program's name, no words, no buttons");
+		Check(KnownBoxes.Describe(new BoxSeen("x.exe", false, "T", new string('a', 400), [])).EndsWith("a ...", StringComparison.Ordinal), "a long text cut short");
+		// a plugin by its ending, in any letter case
+		Check(Plugins.IsPlugin("Skyrim.ESM") && Plugins.IsPlugin("Patch.esl") && !Plugins.IsPlugin("Patch.esp.bak") && !Plugins.IsPlugin("esp"), "a plugin is known by its ending");
+		// the download's name as GitHub lists it: its spaces made dots
+		Check(ProgramUpdate.SameAssetName("Tool.Runner.1.1.zip", "Tool Runner 1.1.zip"), "GitHub's dots for spaces");
+		Check(!ProgramUpdate.SameAssetName(null, "Tool Runner 1.1.zip") && !ProgramUpdate.SameAssetName("Tool.Runner.1.2.zip", "Tool Runner 1.1.zip"),
+			"no name listed, or another version's");
 		Equal(BoxMove.Name, KnownBoxes.Judge(new BoxSeen("TexGenx64.exe", false, "TexGen", "Exit TexGen?", ["Yes", "No"]), true).Move, "a tool's own box is only named, whatever the setup says about the game's");
 
 		pressed.Clear();
