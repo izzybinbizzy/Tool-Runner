@@ -74,9 +74,9 @@ Shader caches, DynDOLOD's clean save, Synthesis, Landscape Fixer, PGPatcher, xLO
 "Tool Runner.exe" retry --setup <file>
 "Tool Runner.exe" queue --setup <file> --setup <file> ... [--keep-going]
 "Tool Runner.exe" check --setup <file>
-"Tool Runner.exe" preview --setup <file>
-"Tool Runner.exe" dryrun --setup <file>
-"Tool Runner.exe" status
+"Tool Runner.exe" preview --setup <file> [--only <step> | --from <step> | --until <step>]
+"Tool Runner.exe" dryrun --setup <file> [--only <step> | --from <step> | --until <step>]
+"Tool Runner.exe" status [--setup <file>]
 "Tool Runner.exe" restore [--setup <file>]
 "Tool Runner.exe" undo --setup <file>
 "Tool Runner.exe" stop | stop-after
