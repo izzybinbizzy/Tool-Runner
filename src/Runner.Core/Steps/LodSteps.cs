@@ -436,8 +436,10 @@ public static class Cli
 				return string.Join(Environment.NewLine, tail) + (tail.Count > 0 ? Environment.NewLine : "");
 			}
 		}
+		// (held to the method's end; the guarded close below is the one that counts, and a second close does nothing)
+		using var file = OpenOutput(a_outFile, out var notKept);
+		kept = file;
 		try {
-			kept = OpenOutput(a_outFile, out var notKept);
 			if (notKept != null) {
 				a_ctx.Log.Warn($"{Path.GetFileName(a_exe)}'s output could not be kept in {a_outFile} ({notKept})");
 			}
