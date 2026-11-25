@@ -11852,7 +11852,7 @@ public static class Program
 		Equal(4.0, Setup.Num(typed, "idleMinutes"), "... asked for as one with a fraction");
 		Check(Setup.Int(typed, "name") == null && Setup.Num(typed, "name") == null && Setup.Int(typed, "none") == null, "a word, and nothing, are no number");
 		Check(Setup.Int(typed, "far") == null && Setup.Num(typed, "far") == 5_000_000_000d, "a number past what a whole one holds is none where a whole one is asked for");
-		var read = Setup.RootOf("""{ "keepBackups": 20, "guidedReminderMin": 2.5, "name": "7" }""")!;
+		var read = Setup.RootOf("""{ "keepBackups": 20, "guidedReminderMin": 2.5, "name": "seven" }""")!;
 		Check(Setup.Int(read, "keepBackups") == 20 && Setup.Num(read, "keepBackups") == 20d && Setup.Num(read, "guidedReminderMin") == 2.5 && Setup.Int(read, "name") == null,
 			"read from a file, the same answers");
 		Equal(20, new StepSettings(new JsonObject { ["min_files"] = JsonValue.Create(20L) }).Int("min_files", 100), "a step's number typed in Settings too");
@@ -11968,7 +11968,8 @@ public static class Program
 			var read = Journal.Load(dir);
 			Check(read.Unfinished && read.Live, "read back, a run that is going is unfinished and live");
 			// a record an older version wrote still names them - with answers of the moment it was saved: they are passed over
-			File.WriteAllText(j.File, text.Replace("\"State\": \"Running\"", "\"State\": \"Finished\", \"Unfinished\": true, \"OwnerAlive\": true", StringComparison.Ordinal).
+			// (the run's own state, at the record's top level - a step's state further in stays as it is)
+			File.WriteAllText(j.File, text.Replace("\n  \"State\": \"Running\"", "\n  \"State\": \"Finished\", \"Unfinished\": true, \"OwnerAlive\": true", StringComparison.Ordinal).
 				Replace("\"Pid\": " + Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture), "\"Pid\": 0", StringComparison.Ordinal));
 			var old = Journal.Load(dir);
 			Check(old.State == RunState.Finished && !old.Unfinished && !old.OwnerAlive, "an older record's stored answers are not believed: the run finished, and nobody owns it");
