@@ -11613,8 +11613,22 @@ public static class Program
 		Check(!byHand.Steps[0].On, "a step switched \"false\" is off");
 		Equal(1, SetupShare.Share(byHand, "1.0", []).Removed.Count(r => r.Contains("beforeRun", StringComparison.Ordinal)), "one command given as a word is named when the setup is shared");
 		Equal(1, byHand.TakeOutCommands(), "... and taken out of a setup that is brought in");
+		Check(Setup.Num(Setup.RootOf("""{ "far": 1e400 }""")!, "far") == null, "a number past what a number holds is none");
 		bool Due(double a_every) => ToolRunner.App.MainViewModel.ReminderDue(a_every, new DateTime(2026, 1, 1), new DateTime(2026, 1, 1, 0, 5, 0));
 		Check(!Due(1e300) && !Due(double.NaN) && !Due(0) && !Due(6) && Due(5) && Due(1), "a reminder every 1e300 minutes is never due, and no error");
+	}
+
+	// a name written twice in one object: the file does not read, said where it is read - never an error at the first look into it
+	static void T_ANameTwiceInAFileIsAFileThatDoesNotRead()
+	{
+		Throws<System.Text.Json.JsonException>(() => Setup.RootOf("""{ "minFreeGb": 20, "steps": [], "minFreeGb": 30 }"""), "a setup with a setting twice");
+		Throws<System.Text.Json.JsonException>(() => Setup.RootOf("""{ "steps": [ { "step": "texgen", "settings": { "deadline_min": 60, "deadline_min": 90 } } ] }"""), "... or a step's setting twice");
+		Throws<System.Text.Json.JsonException>(() => Setup.Parse(System.Text.Encoding.UTF8.GetBytes("""{ "name": "a", "name": "b" }"""), "x.json"), "... read as the preview reads it");
+		Check(Setup.RootOf("""{ "name": "a", "Name": "b", /* a note */ "steps": [], }""") is { Count: 3 }, "two names that differ by their case are two names; a comment and a last comma as before");
+		var addOn = AddOns.Problems("""{ "schema": 1, "name": "A", "name": "B" }""");
+		Check(addOn.Count == 1 && addOn[0].StartsWith("it is not valid JSON", StringComparison.Ordinal), "an add-on file with a name twice is said to its author: " + string.Join("; ", addOn));
+		Check(LauncherStep.SettingsProblem("""{ "Mo2InstancePath": "a", "Mo2InstancePath": "b" }""", "Landscape Fixer") is { } why && why.Contains("does not read as settings", StringComparison.Ordinal),
+			"a tool's settings file with one stops its step before anything is changed");
 	}
 
 	// ... and every text a step fails with: its own words, or the tool's, come with a code and what to do

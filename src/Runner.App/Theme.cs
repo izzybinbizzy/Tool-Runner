@@ -58,7 +58,7 @@ public static class Theme
 	static JsonObject BuiltIn(string a_name)
 	{
 		if (Shipped.Contains(a_name) || a_name == Default) {
-			return JsonNode.Parse(ShippedText(a_name)) as JsonObject ?? [];
+			return JsonNode.Parse(ShippedText(a_name), documentOptions: JsonRead.Plain) as JsonObject ?? [];
 		}
 		if (a_name == ColorBlind) {
 			return new JsonObject { ["colors"] = Tokens(("Good", "#0072B2"), ("Warn", "#7A5C00"), ("Bad", "#B34E00"), ("BannerBad", "#FBE6D4")) };
@@ -208,7 +208,7 @@ public static class Theme
 				continue;
 			}
 			try {
-				var o = JsonNode.Parse(Files.ReadSharedText(f)) as JsonObject;
+				var o = JsonNode.Parse(Files.ReadSharedText(f), documentOptions: JsonRead.Plain) as JsonObject;
 				var name = (o?["name"] as JsonObject)?["value"]?.ToString() ?? o?["name"]?.ToString();
 				// a theme named like a built-in look (by its name or its file name) gets "(file)" added, so both can be picked
 				var shown = string.IsNullOrWhiteSpace(name) || name == Default || BuiltIns.Contains(name) ? Path.GetFileNameWithoutExtension(f) : name;
@@ -296,11 +296,11 @@ public static class Theme
 	// what a theme looks like, for its card in the gallery; a key it leaves out shows the default's value, as applying it would
 	public static Look LookOf(string a_name, string? a_file)
 	{
-		var basis = JsonNode.Parse(ShippedText(Default)) as JsonObject ?? [];
+		var basis = JsonNode.Parse(ShippedText(Default), documentOptions: JsonRead.Plain) as JsonObject ?? [];
 		JsonObject? own = null;
 		string? problem = null;
 		try {
-			own = a_file != null ? JsonNode.Parse(Files.ReadSharedText(a_file)) as JsonObject : a_name == Default ? basis : BuiltIn(a_name);
+			own = a_file != null ? JsonNode.Parse(Files.ReadSharedText(a_file), documentOptions: JsonRead.Plain) as JsonObject : a_name == Default ? basis : BuiltIn(a_name);
 		} catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException or InvalidDataException) {
 			problem = "does not read: " + e.Message;
 		}
@@ -332,8 +332,8 @@ public static class Theme
 	public static string CopyAs(string a_name, string? a_file)
 	{
 		EnsureFolder();
-		var doc = JsonNode.Parse(TemplateText()) as JsonObject ?? [];
-		var from = a_file != null ? JsonNode.Parse(Files.ReadSharedText(a_file)) as JsonObject ?? [] : a_name == Default ? [] : BuiltIn(a_name);
+		var doc = JsonNode.Parse(TemplateText(), documentOptions: JsonRead.Plain) as JsonObject ?? [];
+		var from = a_file != null ? JsonNode.Parse(Files.ReadSharedText(a_file), documentOptions: JsonRead.Plain) as JsonObject ?? [] : a_name == Default ? [] : BuiltIn(a_name);
 		// every value the source sets goes over the template's, group by group, so the copy keeps each "where" line
 		foreach (var (key, node) in from) {
 			if (node is JsonObject group && doc[key] is JsonObject target && key is "colors" or "fonts" or "sizes" or "shape" or "glyphs" or "windowsAccent") {
@@ -385,7 +385,7 @@ public static class Theme
 			return new(null, null, $"no theme called \"{a_name}\" in the Themes folder - the built-in one is used");
 		}
 		try {
-			return new(JsonNode.Parse(Files.ReadSharedText(file)) as JsonObject ?? [], Path.GetDirectoryName(file)!, null);
+			return new(JsonNode.Parse(Files.ReadSharedText(file), documentOptions: JsonRead.Plain) as JsonObject ?? [], Path.GetDirectoryName(file)!, null);
 		} catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException) {
 			return new(null, null, $"{Path.GetFileName(file)} does not read ({e.Message}) - the built-in theme is used");
 		}

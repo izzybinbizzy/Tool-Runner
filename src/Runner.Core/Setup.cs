@@ -150,9 +150,11 @@ public sealed class Setup
 	// A setup file is also written by hand: a number or a switch in quotes ("90", "false") says what it says without them,
 	// and one name where a list is read is a list of that one. Read as not set, the step ran with its default - a step
 	// switched "false" ran - while Settings showed what the file said
+	// (a number past what a number holds - 1e400 - reads as endless: none)
 	public static double? Num(JsonObject a_o, string a_key) =>
-		a_o[a_key] is JsonValue v ? (v.TryGetValue<double>(out var d) ? d : v.TryGetValue<long>(out var l) ? l : v.TryGetValue<int>(out var i) ? i :
-			v.TryGetValue<string>(out var s) && double.TryParse(s.Trim(), System.Globalization.NumberStyles.Float, InvariantCulture, out var typed) && double.IsFinite(typed) ? typed : null) : null;
+		a_o[a_key] is JsonValue v && (v.TryGetValue<double>(out var d) ? d : v.TryGetValue<long>(out var l) ? l : v.TryGetValue<int>(out var i) ? i :
+			v.TryGetValue<string>(out var s) && double.TryParse(s.Trim(), System.Globalization.NumberStyles.Float, InvariantCulture, out var typed) ? typed : double.NaN) is var n &&
+		double.IsFinite(n) ? n : null;
 
 	public static bool? Bool(JsonObject a_o, string a_key) =>
 		a_o[a_key] is JsonValue v ? (v.TryGetValue<bool>(out var b) ? b : v.TryGetValue<string>(out var s) && bool.TryParse(s, out var typed) ? typed : null) : null;
@@ -163,7 +165,7 @@ public sealed class Setup
 		_ => [],
 	};
 
-	static readonly JsonDocumentOptions ReadOptions = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
+	static readonly JsonDocumentOptions ReadOptions = JsonRead.ByHand;
 	static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
 	// what the program keeps beside the setups (the tools' versions, the outputs' sizes): files of its own in that folder, never

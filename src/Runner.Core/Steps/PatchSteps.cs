@@ -17,7 +17,7 @@ public abstract class LauncherStep : IStep
 	// builds from that other profile and writes into that other mods folder. The file goes back after the step
 	public static string PointedAt(string? a_settings, string a_instance, string a_profile, string a_game, string a_output)
 	{
-		var json = a_settings is { Length: > 0 } ? JsonNode.Parse(a_settings)?.AsObject() ?? [] : [];
+		var json = a_settings is { Length: > 0 } ? JsonNode.Parse(a_settings, documentOptions: JsonRead.Plain)?.AsObject() ?? [] : [];
 		json["ModManager"] = 1;
 		json["Mo2InstancePath"] = a_instance;
 		json["Mo2ProfileName"] = a_profile;
@@ -46,7 +46,7 @@ public abstract class LauncherStep : IStep
 		if (a_settings.Trim().Length == 0) {
 			return Pointing[0];
 		}
-		var held = JsonNode.Parse(a_settings) as JsonObject;
+		var held = JsonNode.Parse(a_settings, documentOptions: JsonRead.Plain) as JsonObject;
 		return held == null ? Pointing[0] : Pointing.FirstOrDefault(k => !held.ContainsKey(k));
 	}
 
@@ -113,7 +113,7 @@ public abstract class LauncherStep : IStep
 			foreach (var f in Directory.EnumerateFiles(a_translations, "*.json")) {
 				try {
 					// a file of another shape (a list, a plain value) is passed over - indexing it by name would throw and stop the step
-					if (JsonNode.Parse(Files.ReadSharedText(f)) is JsonObject root && root["run"] is JsonObject run &&
+					if (JsonNode.Parse(Files.ReadSharedText(f), documentOptions: JsonRead.Plain) is JsonObject root && root["run"] is JsonObject run &&
 					    run["generate"] is JsonValue v && v.TryGetValue<string>(out var n) && n.Trim() != "") {
 						names.Add(n.Trim());
 					}
@@ -281,7 +281,7 @@ public sealed class PgPatcherStep : IStep
 		if (set != null && !File.Exists(set)) {
 			yield return new Issue(Key, true, "the PGPatcher settings set is missing: " + set);
 		} else if (set != null && a_s.Bool("pglite_check", false)) {
-			var conf = JsonNode.Parse(Files.ReadSharedText(set)) as JsonObject;
+			var conf = JsonNode.Parse(Files.ReadSharedText(set), documentOptions: JsonRead.Plain) as JsonObject;
 			var mode = conf?["params"]?["processing"]?["pglitemode"]?.GetValue<bool>() == true;
 			var ticked = Runner.PgLiteTicked(a_c.Profile);
 			if (mode != ticked) {
@@ -304,7 +304,7 @@ public sealed class PgPatcherStep : IStep
 		try {
 			if (source != null) {
 				StepKit.KeepFile(a_ctx, live);
-				var conf = JsonNode.Parse(Files.ReadSharedText(source)) as JsonObject ?? throw new StepFailedException("PGPatcher's settings do not read");
+				var conf = JsonNode.Parse(Files.ReadSharedText(source), documentOptions: JsonRead.Plain) as JsonObject ?? throw new StepFailedException("PGPatcher's settings do not read");
 				if (conf["params"]?["output"] is not JsonObject output) {
 					throw new StepFailedException("PGPatcher's settings have no output section - run PGPatcher once by hand to make them");
 				}
@@ -541,7 +541,7 @@ public sealed class SynthesisStep : IStep
 	{
 		JsonNode? root;
 		try {
-			root = JsonNode.Parse(a_settings);
+			root = JsonNode.Parse(a_settings, documentOptions: JsonRead.Plain);
 		} catch (System.Text.Json.JsonException) {
 			return a_settings;
 		}
@@ -642,7 +642,7 @@ public sealed class PandoraStep : IStep
 		var before = File.Exists(settings) ? Files.ReadShared(settings) : null;
 		JsonObject conf;
 		try {
-			conf = before == null ? [] : JsonNode.Parse(Files.DecodeText(before)) as JsonObject ?? [];
+			conf = before == null ? [] : JsonNode.Parse(Files.DecodeText(before), documentOptions: JsonRead.Plain) as JsonObject ?? [];
 		} catch (JsonException) {
 			throw new StepFailedException("Pandora's Settings.json in Mod Organizer's overwrite folder does not read - fix or move it first");
 		}

@@ -90,7 +90,7 @@ public static class AddOns
 	{
 		JsonObject? o;
 		try {
-			o = JsonNode.Parse(a_text, null, new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip }) as JsonObject;
+			o = JsonNode.Parse(a_text, null, JsonRead.ByHand) as JsonObject;
 		} catch (JsonException e) {
 			return ["it is not valid JSON: " + e.Message];
 		}
@@ -143,7 +143,7 @@ public static class AddOns
 		if (Problems(text, a_modDir).Count > 0) {
 			return null;
 		}
-		var o = (JsonObject)JsonNode.Parse(text, null, new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip })!;
+		var o = (JsonObject)JsonNode.Parse(text, null, JsonRead.ByHand)!;
 		return new AddOn(a_file, a_modDir, Text(o, "name")!, Text(o, "author")!, Text(o, "page") ?? "", Text(o, "program")!, Text(o, "arguments") ?? "", Text(o, "output")!,
 			o["minutes"]?.GetValue<int>() ?? DefaultMinutes, Text(o, "makes"), Text(o, "before"), Text(o, "after"),
 			Hash(bytes, Path.GetFullPath(Path.Combine(a_modDir, Text(o, "program")!))));

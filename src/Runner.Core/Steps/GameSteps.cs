@@ -373,7 +373,7 @@ public sealed class ShaderStep : IStep
 				if (text.StartsWith<byte>([0xEF, 0xBB, 0xBF])) {
 					text = text[3..];
 				}
-				boot = JsonNode.Parse(text, null, new System.Text.Json.JsonDocumentOptions { CommentHandling = System.Text.Json.JsonCommentHandling.Skip, AllowTrailingCommas = true })
+				boot = JsonNode.Parse(text, null, JsonRead.ByHand)
 					is JsonObject o && o[BootKey] is JsonObject off
 					? string.Join("|", off.Select(kv => kv.Key + "=" + (kv.Value?.ToJsonString() ?? "null")).Order(StringComparer.Ordinal))
 					: "";
@@ -520,7 +520,7 @@ public sealed class ShaderStep : IStep
 			return "it has no record of a build by this program";
 		}
 		try {
-			var o = JsonNode.Parse(Files.ReadSharedText(stamp)) as JsonObject;
+			var o = JsonNode.Parse(Files.ReadSharedText(stamp), documentOptions: JsonRead.Plain) as JsonObject;
 			// The cache must still hold what it held when it was stamped (nearly all of it), judged by its own count. Judged by a
 			// fixed 50 files, a small shader mod's cache that the step had accepted with fewer read as out of date at every run
 			// and was built again each time. A stamp from before the count was kept is held to the old 50

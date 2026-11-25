@@ -254,7 +254,7 @@ public static class DataFolder
 		foreach (var f in Directory.EnumerateFiles(a_now, "*.json", SearchOption.AllDirectories)) {
 			try {
 				// (read as a setup is read: one with a comment or a last comma in it holds paths to repoint too)
-				var node = JsonNode.Parse(Files.ReadSharedText(f), documentOptions: new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+				var node = JsonNode.Parse(Files.ReadSharedText(f), documentOptions: JsonRead.ByHand);
 				if (node != null && Swap(node, from, to)) {
 					Files.WriteAtomic(f, node.ToJsonString(WriteOptions));
 				}

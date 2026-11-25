@@ -1589,7 +1589,7 @@ public static class SettingsPanel
 					return null;
 				}
 				try {
-					a_obj[a_key] = JsonNode.Parse(t.Text);
+					a_obj[a_key] = JsonNode.Parse(t.Text, documentOptions: JsonRead.ByHand);
 					return null;
 				} catch (JsonException e) {
 					return WindowWords.Format("{0}: not valid ({1})", WindowWords.Word(a_label), e.Message);

@@ -83,7 +83,7 @@ public static class UiState
 			return s_state;
 		}
 		try {
-			if (System.IO.File.Exists(File) && JsonNode.Parse(Files.ReadShared(File)) is JsonObject read) {
+			if (System.IO.File.Exists(File) && JsonNode.Parse(Files.ReadShared(File), documentOptions: JsonRead.Plain) is JsonObject read) {
 				s_state = read;
 			}
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) {
