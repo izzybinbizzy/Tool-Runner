@@ -98,9 +98,6 @@ public sealed class RunContext
 	public Dictionary<string, string> CleanSaveExtraOff { get; set; } = [];
 	public string Mo2Dir => Path.GetDirectoryName(Mo2.Exe)!;
 
-	// this step made nothing of its output mod (a guided tool wrote elsewhere): the mod is not this run's, so a put-back and Undo leave it as it was
-	public bool OutputUntouched { get; set; }
-
 	// the step in hand starts the game with a mod set to list the game's files anew (Crdw.Apply): when it finishes, that list is current
 	public bool FreshList { get; set; }
 
@@ -197,7 +194,7 @@ public sealed class FileGuide(Journal a_journal, Func<bool> a_continued, Action 
 		}
 		while (!a_continued()) {
 			a_ct.ThrowIfCancellationRequested();
-			Thread.Sleep(500);
+			a_ct.WaitHandle.WaitOne(500);
 		}
 		a_clear();
 		if (s != null) {

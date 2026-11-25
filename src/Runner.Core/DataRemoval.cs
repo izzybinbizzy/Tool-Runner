@@ -10,19 +10,28 @@ public static class DataRemoval
 {
 	public sealed record Plan(List<string> Remove, List<string> Kept, string? Refused, string DataDir = "");
 
-	// why removal may not go ahead now (null = it may): a run going or not put back
-	static string? Busy(string a_dataDir)
+	// why removal may not go ahead now (null = it may): a run going or not put back, or a record that does not read. One read
+	// of each record answers all of it and gives a_runs, so no record counts as finished in one look and unreadable in the next
+	static string? Busy(string a_dataDir, out List<Journal> a_runs)
 	{
-		var all = Journal.All(Runner.RunsDir(a_dataDir)).ToList();
+		a_runs = [];
+		(string Folder, Exception Why)? bad;
+		try {
+			(a_runs, bad) = Journal.AllOrUnreadable(Runner.RunsDir(a_dataDir));
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			return "the run records could not be listed: " + e.Message;
+		}
+		var all = a_runs;
 		return all.Any(j => j.Live && j.OwnerAlive) || QueueRun.Read(a_dataDir) != null ? "a run is going - wait for it to end" :
-			all.Any(j => j.Unfinished) ? "a run did not finish - put your profile back first, or its switched-off outputs stay off" : null;
+			all.Any(j => j.Unfinished) ? "a run did not finish - put your profile back first, or its switched-off outputs stay off" :
+			bad is { } b ? $"the run record in \"{Path.GetFileName(b.Folder)}\" could not be read ({b.Why.Message}) - it may be a run that still needs your profile put back" : null;
 	}
 
 	public static Plan Make(string a_dataDir, bool a_keepSetups)
 	{
 		var remove = new List<string>();
 		var kept = new List<string>();
-		var refused = Busy(a_dataDir);
+		var refused = Busy(a_dataDir, out var runs);
 		var setups = Path.Combine(a_dataDir, "Setups");
 		// each setup's own run backups, by the run-folder name the runner gives them; nothing else in that folder is touched. A setup
 		// that cannot be read, or a folder that cannot be listed, refuses the removal: its backups would be left behind unseen
@@ -44,11 +53,7 @@ public static class DataRemoval
 		}
 		// a setup deleted since still has its run records, and each names its own backup folder - taken only when that folder is
 		// named the way the runner names a run backup, so a record that points anywhere else removes nothing
-		try {
-			remove.AddRange(Journal.All(Runner.RunsDir(a_dataDir)).Select(RunBackup).OfType<string>());
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
-			refused ??= "the run records could not be listed: " + e.Message;
-		}
+		remove.AddRange(runs.Select(RunBackup).OfType<string>());
 		// its work folder in ProgramData (FasterNGIO's wrapper), under the new and the old name
 		foreach (var work in WorkRoots.Where(Directory.Exists)) {
 			remove.Add(work);
@@ -185,7 +190,7 @@ public static class DataRemoval
 		// the run lock through the whole removal, and the check made again under it: a run started from the command line while the
 		// list was on screen is never left without its record and backups
 		using var hold = a_plan.DataDir == "" ? null : Runner.HoldIfFree() ?? throw new InvalidOperationException("a run started - nothing was removed");
-		if (a_plan.DataDir != "" && Busy(a_plan.DataDir) is { } now) {
+		if (a_plan.DataDir != "" && Busy(a_plan.DataDir, out _) is { } now) {
 			throw new InvalidOperationException(now + " - nothing was removed");
 		}
 		var recycle = a_recycle ?? Recycle;

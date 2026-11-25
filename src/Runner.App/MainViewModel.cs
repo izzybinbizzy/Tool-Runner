@@ -187,7 +187,7 @@ public sealed partial class MainViewModel : Observable
 	public string EstimateText { get; set => Set(ref field, value); } = "";
 	public bool StopAfterAsked { get; set => Set(ref field, value); }
 	// the LOG box shows the detailed log (every line) when ticked, else the simple step-by-step one
-	public bool DetailedLog { get; set { if (Set(ref field, value)) { _logTail.Restart(); TailLog(); } } }
+	public bool DetailedLog { get; set { if (Set(ref field, value)) { TailLog(true); } } }
 	// the step the setup's last run stopped at ("" = nothing to run again): the "Run again from ..." button
 	public string RetryFrom { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(RetryText)); } } = "";
 	public string RetryText => RetryFrom == "" ? "" : "Run _again from " + StepCatalog.Name(RetryFrom);
@@ -274,8 +274,11 @@ public sealed partial class MainViewModel : Observable
 	public Cmd RetryCommand => field ??= new(() => _ = RunRetry());
 
 	// "A new version is out" (his checklist 471): the banner's text ("" = nothing to tell), its download page and "Not now"
-	public string NewVersion { get; set => Set(ref field, value); } = "";
+	public string NewVersion { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(CanInstallNew)); } } = "";
 	string _newVersion = "";
+	// the program can take that version and install it itself: while its newest version comes from its own GitHub release
+	// (a Nexus download needs the player's own key - there the banner has only the download page)
+	public bool CanInstallNew => ProgramUpdate.Installs && _newVersion != "";
 	public Cmd OpenNewVersionCommand => field ??= new(() => {
 		if (OpenPage(ProgramUpdate.Page) is { } why) {
 			Say("The download page did not open: " + why, "bad");
@@ -287,6 +290,14 @@ public sealed partial class MainViewModel : Observable
 		}
 		NewVersion = "";
 	});
+
+	// the off-screen pictures: the banner as it shows for a made-up newer version ("" = no banner)
+	public void DemoNewVersion(string a_version)
+	{
+		_newVersion = a_version;
+		NewVersion = a_version == "" ? "" : $"{Brand.Name} {a_version} is out (you have {MainWindow.AppVersion}). Its download page has what changed.";
+		OnPropertyChanged(nameof(CanInstallNew));
+	}
 
 	// asked once the window is up, off its thread; a look that fails says nothing (the next start tries again)
 	public async Task LookForNewVersion(string a_current)
@@ -897,9 +908,30 @@ public sealed partial class MainViewModel : Observable
 		return !a_detailed && File.Exists(simple) && new FileInfo(simple).Length > 0 ? simple : Path.Combine(a_folder, "log.txt");
 	}
 
-	void TailLog()
+	// The log is read on a worker - a slow disk never holds the window - one read at a time, its text handed over on the window's
+	// thread. A look while a read is still going is left to the next one; a switch between the simple and the detailed log
+	// (a_restart) waits for that read and then reads the other log from its start. LogRead: the newest read, so what needs its
+	// text (First problem) can wait for it
+	Task _tailing = Task.CompletedTask;
+	public Task LogRead => _tailing;
+
+	void TailLog(bool a_restart = false)
 	{
-		var (text, reset) = _logTail.Read(_run == null ? null : LogFile(_run.Folder, DetailedLog));
+		if (!a_restart && !_tailing.IsCompleted) {
+			return;
+		}
+		_tailing = TailLogAfter(_tailing, _run == null ? null : LogFile(_run.Folder, DetailedLog), a_restart);
+	}
+
+	async Task TailLogAfter(Task a_before, string? a_file, bool a_restart)
+	{
+		await a_before;
+		var (text, reset) = await Task.Run(() => {
+			if (a_restart) {
+				_logTail.Restart();
+			}
+			return _logTail.Read(a_file);
+		});
 		if (reset) {
 			LogChanged?.Invoke("", true);
 		}
@@ -1660,7 +1692,7 @@ public sealed partial class MainViewModel : Observable
 
 	// each step's usual minutes (the old updater's own logs, 30 Sep - 26 Oct 2026) - the made-up run of the pictures only
 	internal static readonly Dictionary<string, double> DemoMinutes = new() {
-		["shaders"] = 28, ["cleansave"] = 7.5, ["loot"] = 0.5, ["easynpc"] = 3, ["upf"] = 3, ["smash"] = 3, ["reqtificator"] = 3, ["wryebash"] = 3, ["synthesis"] = 1.3, ["landscapefixer"] = 9, ["pgpatcher"] = 4,
+		["shaders"] = 28, ["cleansave"] = 7.5, ["synthesis"] = 1.3, ["landscapefixer"] = 9, ["pgpatcher"] = 4,
 		["xlodgen"] = 17.5, ["acmos"] = 1.5, ["grass"] = 0.8, ["treelodgen"] = 2.3, ["texgen"] = 5.5, ["dyndolod"] = 24, ["anvillod"] = 24,
 		["pandora"] = 0.5, ["playsave"] = 7,
 	};
@@ -1862,7 +1894,7 @@ public sealed partial class MainViewModel : Observable
 	public static void OpenFolder(string a_dir)
 	{
 		if (Directory.Exists(a_dir)) {
-			Process.Start(new ProcessStartInfo("explorer.exe", "\"" + a_dir + "\"") { UseShellExecute = true });
+			Process.Start(new ProcessStartInfo("explorer.exe", "\"" + a_dir + "\"") { UseShellExecute = true })?.Dispose();
 		}
 	}
 }

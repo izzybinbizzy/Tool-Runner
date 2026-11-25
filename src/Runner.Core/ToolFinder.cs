@@ -3,8 +3,7 @@ namespace ToolRunner;
 // His checklist 467: the first-start helper. Which of the tools a setup can run are in Mod Organizer's Executables list, which sit on the
 // PC without being listed, and which are missing, with where to get each and where to put it; the ones found are added to the list for the
 // player, with Mod Organizer closed (it writes its ini when it closes, over anything written meanwhile). A step exists only for a tool the
-// list holds, so this comes before a setup is made. FasterNGIO and Wrye Bash are left out: the first is found in the mods without a list
-// entry, the second is a guided step, off in a new setup.
+// list holds, so this comes before a setup is made. FasterNGIO is left out: it is found in the mods without a list entry.
 public static class ToolFinder
 {
 	public sealed record Tool(string Step, string Name, IReadOnlyList<string> Binaries, string Arguments, string Page, string Where);
@@ -187,7 +186,8 @@ public static class ToolFinder
 			added.Add(title);
 		}
 		if (added.Count > 0) {
-			Files.Copy(a_mo2.IniPath, BackupOf(a_mo2), true);
+			// a later add keeps the first copy too: never written over, so the ini as it was before any add stays
+			Files.Copy(a_mo2.IniPath, Files.FreeFile(BackupOf(a_mo2)), false);
 			Files.WriteAtomic(a_mo2.IniPath, text);
 		}
 		return added;

@@ -117,14 +117,13 @@ public sealed class Journal
 	public bool StopAfterStep { get; set; }
 	public List<StepRecord> Steps { get; set; } = [];
 	public List<string> Built { get; set; } = [];
+	// set only by older versions, on a run that changed the plugin order: read so such a run still has an order for Undo to take
+	// back (and its backup still counts as one to keep); no run of this version sets it (CodeRabbit on pull request #40)
+	public bool OrderChanged { get; set; }
 	// the steps this run did not run because the setup uses their old output, each with that output's mod - on record before
 	// the run switches it back on at the step's place (OldOutput), and Done once it has; a put-back switches the ones that
 	// were carried out on like what the run built, and leaves the others as the profile had them before the run
 	public List<OldUse> UsedOld { get; set; } = [];
-	// LOOT's sort finished: its list is in this run's folder (LootStep.SortedFile) and every put-back of this run keeps it
-	public bool Sorted { get; set; }
-	// that sort left the plugin files other than they were before the run: Undo has an order to take back
-	public bool OrderChanged { get; set; }
 	public List<string> Retire { get; set; } = [];
 	public List<string> Added { get; set; } = [];
 	// Output mods that stood in the mods folder with no line in the mod list: the run gave each one its line before its
@@ -302,8 +301,9 @@ public sealed class Journal
 				if (System.IO.File.Exists(Path.Combine(d, "journal.json"))) {
 					j = Load(d);
 				}
-			} catch (JsonException) {
-			} catch (IOException) {
+			} catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException or InvalidDataException) {
+				// (a record that does not read is passed over here - an empty one, "null", too; NewestUnreadable keeps a start from
+				// going over the newest such record)
 			}
 			if (j != null) {
 				yield return j;
@@ -322,33 +322,55 @@ public sealed class Journal
 			return null;
 		}
 		foreach (var d in Directory.GetDirectories(a_runsDir).OrderDescending()) {
-			// by its name in the folder's own list: a record this user may not read is still there (File.Exists says "no" for
-			// that too, and a run then started over an interrupted one as if there were none)
 			try {
-				if (!Directory.EnumerateFiles(d, "journal.json").Any()) {
-					continue;
+				if (HasRecord(d)) {
+					LoadPatiently(d);
+					return null;
 				}
-			} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
-				return (d, e);
-			}
-			try {
-				Exception? last = null;
-				for (var i = 0; i < 5; ++i) {
-					try {
-						Load(d);
-						return null;
-					} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
-						// held for a moment by another program: looked at again before it counts
-						last = e;
-						Thread.Sleep(200);
-					}
-				}
-				return (d, last!);
-			} catch (Exception e) when (e is JsonException or InvalidDataException) {
+			} catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException or InvalidDataException) {
 				return (d, e);
 			}
 		}
 		return null;
+	}
+
+	// Every run record, each read once, and the first that cannot be read with why (null: every one reads). What deletes on the
+	// strength of the records - removing the program's data, pruning old backups - judges by this one read alone: a record
+	// passed over by All may be a run that still needs its profile put back or its backup for an undo, and a second read of
+	// the same record need not come out as the first did. The first record that does not read ends the look: whatever deletes
+	// refuses on it, and each record after it would cost its own second of tries.
+	public static (List<Journal> Runs, (string Folder, Exception Why)? Bad) AllOrUnreadable(string a_runsDir)
+	{
+		var runs = new List<Journal>();
+		if (!Directory.Exists(a_runsDir)) {
+			return (runs, null);
+		}
+		foreach (var d in Directory.GetDirectories(a_runsDir).OrderDescending()) {
+			try {
+				if (HasRecord(d)) {
+					runs.Add(LoadPatiently(d));
+				}
+			} catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException or InvalidDataException) {
+				return (runs, (d, e));
+			}
+		}
+		return (runs, null);
+	}
+
+	// by its name in the folder's own list: a record this user may not read is still there (File.Exists says "no" for that
+	// too, and a run then started over an interrupted one as if there were none)
+	static bool HasRecord(string a_dir) => Directory.EnumerateFiles(a_dir, "journal.json").Any();
+
+	// a record read; a file held for a moment by another program is looked at again before that counts
+	static Journal LoadPatiently(string a_dir)
+	{
+		for (var i = 0; ; ++i) {
+			try {
+				return Load(a_dir);
+			} catch (Exception e) when (i < 4 && (e is IOException or UnauthorizedAccessException)) {
+				Thread.Sleep(200);
+			}
+		}
 	}
 }
 
@@ -390,8 +412,8 @@ public sealed class JournalCache(string a_runsDir)
 				var j = Journal.Load(d);
 				_seen[d] = (f.LastWriteTimeUtc, f.Length, j);
 				list.Add(j);
-			} catch (JsonException) {
-			} catch (IOException) {
+			} catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException or InvalidDataException) {
+				// (passed over, as Journal.All does)
 			}
 		}
 		foreach (var gone in _seen.Keys.Where(k => !live.Contains(k)).ToList()) {

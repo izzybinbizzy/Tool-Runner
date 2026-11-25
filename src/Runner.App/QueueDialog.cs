@@ -44,6 +44,7 @@ public static class QueueDialog
 			Height = UiState.Fit(UiState.Number("queue.height"), 560, 380, room.Height), MinWidth = UiState.Least(420, room.Width), MinHeight = UiState.Least(380, room.Height),
 			WindowStartupLocation = WindowStartupLocation.CenterOwner,
 			Background = Brushes2.Get("Panel"), Foreground = Brushes2.Get("Text"), ResizeMode = ResizeMode.CanResize, ShowInTaskbar = false,
+			FontFamily = (System.Windows.Media.FontFamily)a_owner.FindResource("UiFont"), FontSize = (double)a_owner.FindResource("SizeBody"),
 		};
 		w.Closed += (_, _) => {
 			UiState.Set("queue.width", w.ActualWidth);
@@ -54,12 +55,17 @@ public static class QueueDialog
 		var stack = new StackPanel();
 		DockPanel.SetDock(stack, Dock.Top);
 		dock.Children.Add(stack);
-		stack.Children.Add(new TextBlock { Text = "QUEUE OF SETUPS", Style = (Style)a_owner.FindResource("H1"), Margin = new Thickness(0, 0, 0, 6), FontSize = 18 });
+		stack.Children.Add(new TextBlock { Text = "QUEUE OF SETUPS", Style = (Style)a_owner.FindResource("H1"), Margin = new Thickness(0, 0, 0, 6), FontSize = (double)a_owner.FindResource("SizeHeading1") });
 		stack.Children.Add(new TextBlock { Text = "Tick the setups to run and put them in order. Each one runs whole - its check, its tools, your profile put back - before the next starts.",
 			Style = (Style)a_owner.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 14) });
 
 		var rows = a_setups.Select(MakeRow).ToList();
 		var list = new ListBox { MinHeight = 120, AllowDrop = true };
+		// each row's container carries the setup's name: a screen reader reads the container, not the panel inside it
+		var rowName = new Style(typeof(ListBoxItem), Application.Current?.TryFindResource(typeof(ListBoxItem)) as Style);
+		rowName.Setters.Add(new Setter(System.Windows.Automation.AutomationProperties.NameProperty, new System.Windows.Data.Binding {
+			RelativeSource = System.Windows.Data.RelativeSource.Self, Path = new PropertyPath("Content.(0)", System.Windows.Automation.AutomationProperties.NameProperty) }));
+		list.ItemContainerStyle = rowName;
 		// a click on a tick box is the box's own, so its row would stay unselected: the row follows the box's focus
 		foreach (var r in rows) {
 			r.Box.GotKeyboardFocus += (_, _) => list.SelectedItem = r.Item;

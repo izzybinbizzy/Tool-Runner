@@ -90,7 +90,10 @@
         <DockPanel>
           <Button DockPanel.Dock="Right" Content="Not now" Style="{StaticResource Ghost}" Command="{Binding SetAsideNewVersionCommand}" Margin="8,0,0,0"
                   AutomationProperties.HelpText="Not mentioned again until a newer version is out"/>
-          <Button DockPanel.Dock="Right" Content="Open the _download page" Style="{StaticResource Primary}" Command="{Binding OpenNewVersionCommand}"/>
+          <Button DockPanel.Dock="Right" Content="Open the _download page" Style="{StaticResource Ghost}" Command="{Binding OpenNewVersionCommand}" Margin="8,0,0,0"/>
+          <Button DockPanel.Dock="Right" Content="Download and _install" Style="{StaticResource Primary}" Click="InstallNew_Click"
+                  Visibility="{Binding CanInstallNew, Converter={StaticResource Vis}}"
+                  ToolTip="Takes the new version from its GitHub release, checks it, and puts it in place of this one. Your setups, run records and backups are not touched."/>
           <TextBlock Text="{Binding NewVersion}" Foreground="{DynamicResource Text}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,16,0"/>
         </DockPanel>
       </Border>

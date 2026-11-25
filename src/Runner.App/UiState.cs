@@ -105,6 +105,16 @@ public static class UiState
 		}
 	}
 
+	// a word kept ("" when none is: the version last started, for one)
+	public static string Text(string a_key)
+	{
+		lock (Gate) {
+			return State()[a_key] is JsonValue v && v.TryGetValue<string>(out var s) ? s : "";
+		}
+	}
+
+	public static void Set(string a_key, string a_value) => Keep(a_key, JsonValue.Create(a_value));
+
 	public static void Set(string a_key, double a_value) => Keep(a_key, JsonValue.Create(Math.Round(a_value)));
 
 	public static void Set(string a_key, bool a_value) => Keep(a_key, JsonValue.Create(a_value));

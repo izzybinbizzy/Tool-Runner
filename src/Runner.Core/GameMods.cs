@@ -461,7 +461,7 @@ public static partial class Crdw
 
 	// all but the steps that only start the game and save, compile shaders (a shader cache is no file the mod lists), or
 	// sort the load order
-	public static bool Writes(string a_step) => a_step is not ("cleansave" or "playsave" or "shaders" or Steps.LootStep.StepKey);
+	public static bool Writes(string a_step) => a_step is not ("cleansave" or "playsave" or "shaders");
 
 	// What the player still has to do for it once the run is over, or null. a_changed: the run built something or switched
 	// mods off and on again. a_current: the game made its list anew in this run after the last thing that may have changed
