@@ -4534,6 +4534,8 @@ public static class Program
 		Check(ToolUpdates.Summary([both, one]).StartsWith("2 tool(s) could not be checked", StringComparison.Ordinal), "a shared row's two tools both counted: " + ToolUpdates.Summary([both, one]));
 		Check(ToolUpdates.Summary([both with { Problem = null, Newer = true }, one]).StartsWith("2 tool(s) have a newer version", StringComparison.Ordinal), "both tools of a shared row newer");
 		Equal("Every tool is up to date.", ToolUpdates.Summary([one]), "nothing newer, nothing unchecked");
+		Check(ToolUpdates.SummaryParts([both, one]) is (var withPlace, 2) && withPlace.Contains("{0}", StringComparison.Ordinal) && ToolUpdates.SummaryParts([one]).Count == null,
+			"the same summary with a place for its number, for the window's language");
 	}
 
 	// the settings a tool's own window wrote: found, kept, put in place for a run and put back after
@@ -5232,7 +5234,7 @@ public static class Program
 	// entries - is in every shipped language as well, not only what a picture of the window showed
 	static void T_EveryShippedLanguageHasTheSettingsTexts()
 	{
-		string[] more = [.. ToolFinder.WhereTexts, .. LodGuide.Words, .. StepCatalog.All.Select(s => s.About), StepCatalog.Info(AddOns.KeyPrefix + "x").About, StepCatalog.RunsAfter,
+		string[] more = [.. ToolFinder.WhereTexts, .. LodGuide.Words, .. ToolUpdates.SummaryTexts, .. StepCatalog.All.Select(s => s.About), StepCatalog.Info(AddOns.KeyPrefix + "x").About, StepCatalog.RunsAfter,
 			.. StepCatalog.MustPrecede.Select(r => r.Why).Distinct(), "LOD output mods switched off before the first step (one per line)", "Plugin places after a run (each: the plugin, then last_master, after:<plugin> or end)", "A plugin's place when a run first ticks it (the plugin: the plugin it goes below)",
 			"{0} (default {1})", "Show setup: {0}", "Settings of {0}", "Run only {0}", "Find in the settings: \"{0}\"", "Stop the test", "Most recent save (any character)",
 			"leave it to me (unanswered, the step stops)", "every run", "never", "skip it during the run (it asks in my own game)",

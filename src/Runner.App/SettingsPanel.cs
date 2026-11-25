@@ -799,7 +799,8 @@ public static class SettingsPanel
 				}
 				// (built after the window loaded: into its language like the rest of it)
 				WindowWords.Tree(updRows);
-				updNote.Text = ToolUpdates.Summary(res);
+				var (summary, count) = ToolUpdates.SummaryParts(res);
+				updNote.Text = count is { } n ? WindowWords.Format(summary, n) : WindowWords.Word(summary);
 			} catch (Exception e) {
 				updNote.Text = WindowWords.Format("Could not check: {0}", e.Message);
 			} finally {

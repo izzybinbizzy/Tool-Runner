@@ -31,13 +31,25 @@ public static partial class ToolUpdates
 	public sealed record Result(string Step, string Tool, string Yours, string Newest, bool Newer, string Page, string? Problem, int Tools = 1);
 
 	// the line under the rows: every tool a row names is counted, and a row that could not be asked never counts as up to date
-	public static string Summary(IReadOnlyCollection<Result> a_res)
+	const string NewerText = "{0} tool(s) have a newer version - download it from its page (Mod Manager Download), then open the tool once and learn its settings again.";
+	const string NotCheckedText = "{0} tool(s) could not be checked - see their rows; the others are up to date.";
+	const string UpToDateText = "Every tool is up to date.";
+
+	// every text the summary can be (the window says each in its own language)
+	public static IReadOnlyList<string> SummaryTexts => [NewerText, NotCheckedText, UpToDateText];
+
+	// the summary as a text with a place for its number (no number: every tool is up to date)
+	public static (string Text, int? Count) SummaryParts(IReadOnlyCollection<Result> a_res)
 	{
 		var newer = a_res.Where(r => r.Newer).Sum(r => r.Tools);
 		var notChecked = a_res.Where(r => r.Problem != null).Sum(r => r.Tools);
-		return newer > 0 ? $"{newer} tool(s) have a newer version - download it from its page (Mod Manager Download), then open the tool once and learn its settings again." :
-			notChecked > 0 ? $"{notChecked} tool(s) could not be checked - see their rows; the others are up to date." :
-			"Every tool is up to date.";
+		return newer > 0 ? (NewerText, newer) : notChecked > 0 ? (NotCheckedText, notChecked) : (UpToDateText, null);
+	}
+
+	public static string Summary(IReadOnlyCollection<Result> a_res)
+	{
+		var (text, count) = SummaryParts(a_res);
+		return count is { } n ? text.Replace("{0}", n.ToString(InvariantCulture), StringComparison.Ordinal) : text;
 	}
 
 	// the player's copy of a step's tool: its program file and the version read off it (or off its MO2 mod's meta.ini)
