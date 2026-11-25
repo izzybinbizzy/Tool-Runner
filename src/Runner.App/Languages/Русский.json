@@ -411,6 +411,7 @@
   "STEPS": "ШАГИ",
   "Safe to close": "Можно закрывать",
   "Save to start from (empty = the newest)": "Сохранение, с которого начать (пусто = самое новое)",
+  "Save to start from when the run made no clean save": "Сохранение, с которого начать, если прогон не сделал чистого сохранения",
   "Says which tools Mod Organizer's list holds, which are on this PC but not listed, and where to get the rest": "Показывает, какие инструменты есть в списке Mod Organizer, какие есть на этом ПК, но не в списке, и где взять остальные",
   "Scratch folder (emptied after a run)": "Рабочая папка (очищается после прогона)",
   "Send them to the Recycle Bin": "Отправить их в корзину",

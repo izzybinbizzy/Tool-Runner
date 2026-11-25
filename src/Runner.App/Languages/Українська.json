@@ -411,6 +411,7 @@
   "STEPS": "КРОКИ",
   "Safe to close": "Можна закривати",
   "Save to start from (empty = the newest)": "Збереження, з якого почати (порожньо = найновіше)",
+  "Save to start from when the run made no clean save": "Збереження, з якого почати, якщо запуск не зробив чистого збереження",
   "Says which tools Mod Organizer's list holds, which are on this PC but not listed, and where to get the rest": "Показує, які інструменти є у списку Mod Organizer, які є на цьому ПК, але не в списку, і де взяти решту",
   "Scratch folder (emptied after a run)": "Робоча тека (очищується після запуску)",
   "Send them to the Recycle Bin": "Надіслати їх до кошика",

@@ -411,6 +411,7 @@
   "STEPS": "PASOS",
   "Safe to close": "Se puede cerrar",
   "Save to start from (empty = the newest)": "Partida desde la que empezar (vacío = la más reciente)",
+  "Save to start from when the run made no clean save": "Partida desde la que empezar cuando la ejecución no hizo ninguna partida limpia",
   "Says which tools Mod Organizer's list holds, which are on this PC but not listed, and where to get the rest": "Indica qué herramientas tiene la lista de Mod Organizer, cuáles están en este PC pero no en la lista, y dónde conseguir el resto",
   "Scratch folder (emptied after a run)": "Carpeta de trabajo (se vacía tras una ejecución)",
   "Send them to the Recycle Bin": "Enviarlas a la Papelera de reciclaje",

@@ -11458,6 +11458,8 @@ public static class Program
 		      ToolRunner.App.SettingsPanel.OfferedKeys("grass").Contains("deadline_min"), "a time limit is offered where one is read");
 		Equal("Wait after the teleport (seconds)", ToolRunner.App.SettingsPanel.LabelOf("settle_s", "playsave"), "the save steps' wait is named for what it is");
 		Equal("Wait before closing (seconds)", ToolRunner.App.SettingsPanel.LabelOf("settle_s", "shaders"), "the shader step's too");
+		Check(ToolRunner.App.SettingsPanel.OfferedKeys("playsave").Contains("save") && ToolRunner.App.SettingsPanel.LabelOf("save", "playsave") != ToolRunner.App.SettingsPanel.LabelOf("save", "cleansave"),
+			"the final save's own save is offered, under words of its own");
 	}
 
 	static void T_EveryRefusalIsInTheCatalog()

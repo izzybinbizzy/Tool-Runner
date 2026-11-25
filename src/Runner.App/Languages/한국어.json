@@ -411,6 +411,7 @@
   "STEPS": "단계",
   "Safe to close": "닫아도 안전함",
   "Save to start from (empty = the newest)": "시작할 세이브 (비워 두면 가장 최근)",
+  "Save to start from when the run made no clean save": "실행이 클린 세이브를 만들지 않았을 때 시작할 세이브",
   "Says which tools Mod Organizer's list holds, which are on this PC but not listed, and where to get the rest": "Mod Organizer 목록에 어떤 도구가 있는지, 어떤 도구가 이 PC에는 있지만 목록에는 없는지, 나머지는 어디서 받을 수 있는지 알려 줍니다",
   "Scratch folder (emptied after a run)": "작업 폴더 (실행 후 비워짐)",
   "Send them to the Recycle Bin": "휴지통으로 보내기",

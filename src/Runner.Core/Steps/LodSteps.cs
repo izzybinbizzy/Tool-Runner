@@ -35,7 +35,7 @@ public sealed class XLodGenStep : IStep
 				a_ctx.Activity(Key, "xLODGen is reading the load order");
 				var loadingHwnd = (nint)main.Current.NativeWindowHandle;
 				var opts = Find(a_ctx, main, e => Uia.Name(e) == "LODGen Options" && Uia.Type(e) == ControlType.Window, TimeSpan.FromMinutes(15), "xLODGen's options",
-					proc, () => LogText(loadingHwnd));
+					proc, () => LogText(loadingHwnd), deadline);
 				var list = WorldspaceList(a_ctx, opts, TimeSpan.FromSeconds(30));
 				var want = a_s.List("worldspaces");
 				CheckList.Set(a_ctx, list, n => want.Count == 0 || want.Contains("all", StringComparer.OrdinalIgnoreCase) || want.Contains(n.Split(' ')[0], StringComparer.OrdinalIgnoreCase));
@@ -161,13 +161,17 @@ public sealed class XLodGenStep : IStep
 	// A window of the tool that comes once it has read the load order. a_proc and a_says: the tool itself and what its log
 	// box says - a tool that closed, or whose log names an error while it loads, is said at once with its own words; the wait
 	// used to look for the window alone and end, a quarter of an hour later, with "did not appear"
+	// a_timeout runs from the last time its log said something new: a tool still reading a large load order (a slow disk, a
+	// virus scanner reading every plugin with it) is waited for, one that has gone silent is not. a_most, the step's own
+	// limit, ends the wait either way
 	internal static AutomationElement Find(RunContext a_ctx, AutomationElement a_root, Func<AutomationElement, bool> a_match, TimeSpan a_timeout, string a_what,
-		Process? a_proc = null, Func<string>? a_says = null)
+		Process? a_proc = null, Func<string>? a_says = null, TimeSpan? a_most = null)
 	{
 		var sw = Stopwatch.StartNew();
+		var quiet = Stopwatch.StartNew();
 		var read = TimeSpan.FromSeconds(-10);
 		var said = "";
-		while (sw.Elapsed < a_timeout) {
+		while (quiet.Elapsed < a_timeout && (a_most == null || sw.Elapsed < a_most)) {
 			a_ctx.Cancel.ThrowIfCancellationRequested();
 			var hit = Uia.All(a_root).FirstOrDefault(a_match);
 			if (hit != null) {
@@ -176,7 +180,11 @@ public sealed class XLodGenStep : IStep
 			// its log is read every few seconds, not every look (the whole text crosses from its process each time)
 			if (a_says != null && sw.Elapsed - read >= TimeSpan.FromSeconds(5)) {
 				read = sw.Elapsed;
-				said = a_says();
+				var now = a_says();
+				if (!string.Equals(now, said, StringComparison.Ordinal)) {
+					quiet.Restart();
+				}
+				said = now;
 				if (LoadError(said) is { } error) {
 					throw new StepFailedException($"{a_what} never came - the tool stopped while it was loading: {error}");
 				}
@@ -192,7 +200,9 @@ public sealed class XLodGenStep : IStep
 			}
 			a_ctx.Pause(TimeSpan.FromSeconds(1));
 		}
-		throw new StepFailedException($"{a_what} did not appear within {a_timeout.TotalMinutes:0.#} minutes" + LastSaid(said));
+		throw new StepFailedException((quiet.Elapsed >= a_timeout
+			? a_says == null ? $"{a_what} did not appear within {a_timeout.TotalMinutes:0.#} minutes" : $"{a_what} did not appear, and the tool's log said nothing new for {a_timeout.TotalMinutes:0.#} minutes"
+			: $"{a_what} did not appear within the step's {a_most!.Value.TotalMinutes:0.#} minute limit") + LastSaid(said));
 	}
 
 	static string LastSaid(string a_log) => LastLine(a_log) is { Length: > 0 } last ? $" - the last line of its log: {last}" : "";

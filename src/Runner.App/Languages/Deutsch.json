@@ -411,6 +411,7 @@
   "STEPS": "SCHRITTE",
   "Safe to close": "Kann geschlossen werden",
   "Save to start from (empty = the newest)": "Spielstand, von dem aus gestartet wird (leer = der neueste)",
+  "Save to start from when the run made no clean save": "Spielstand, von dem aus gestartet wird, wenn der Lauf keinen sauberen Spielstand erstellt hat",
   "Says which tools Mod Organizer's list holds, which are on this PC but not listed, and where to get the rest": "Sagt, welche Tools die Liste von Mod Organizer enthält, welche auf diesem PC, aber nicht gelistet sind, und wo es den Rest gibt",
   "Scratch folder (emptied after a run)": "Arbeitsordner (nach einem Lauf geleert)",
   "Send them to the Recycle Bin": "In den Papierkorb verschieben",

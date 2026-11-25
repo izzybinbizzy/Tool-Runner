@@ -411,6 +411,7 @@
   "STEPS": "ÉTAPES",
   "Safe to close": "Fermeture sans risque",
   "Save to start from (empty = the newest)": "Sauvegarde de départ (vide = la plus récente)",
+  "Save to start from when the run made no clean save": "Sauvegarde de départ quand le traitement n'a fait aucune sauvegarde propre",
   "Says which tools Mod Organizer's list holds, which are on this PC but not listed, and where to get the rest": "Indique quels outils la liste de Mod Organizer contient, lesquels sont sur ce PC mais pas dans la liste, et où trouver le reste",
   "Scratch folder (emptied after a run)": "Dossier de travail (vidé après un traitement)",
   "Send them to the Recycle Bin": "Les envoyer à la Corbeille",

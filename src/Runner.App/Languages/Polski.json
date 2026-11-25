@@ -411,6 +411,7 @@
   "STEPS": "KROKI",
   "Safe to close": "Można zamknąć",
   "Save to start from (empty = the newest)": "Zapis początkowy (puste = najnowszy)",
+  "Save to start from when the run made no clean save": "Zapis początkowy, gdy przebieg nie utworzył czystego zapisu",
   "Says which tools Mod Organizer's list holds, which are on this PC but not listed, and where to get the rest": "Mówi, które narzędzia są na liście Mod Organizera, które są na tym komputerze, ale poza listą, i skąd wziąć resztę",
   "Scratch folder (emptied after a run)": "Folder roboczy (opróżniany po przebiegu)",
   "Send them to the Recycle Bin": "Przenieś je do Kosza",

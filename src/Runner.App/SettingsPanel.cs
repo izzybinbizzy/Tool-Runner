@@ -73,7 +73,7 @@ public static class SettingsPanel
 	};
 
 	// every label the step editor can show for a known setting (a shipped language must hold each)
-	public static IReadOnlyCollection<string> StepLabels => [.. Labels.Values.Append(AnvilPresetLabel).Append(ArriveLabel).Distinct(StringComparer.Ordinal)];
+	public static IReadOnlyCollection<string> StepLabels => [.. Labels.Values.Append(AnvilPresetLabel).Append(ArriveLabel).Append(NoCleanSaveLabel).Distinct(StringComparer.Ordinal)];
 
 	// an edit not saved yet (the window asks before Settings closes over it)
 	public static bool HasChanges { get; private set; }
@@ -110,7 +110,7 @@ public static class SettingsPanel
 			("idle_s", JsonValueKind.Number, "45"), ("quiet_min", JsonValueKind.Number, "5"), ("min_files", JsonValueKind.Number, "50"), ("max_restarts", JsonValueKind.Number, "3"),
 			("sanity_min", JsonValueKind.Number, "3"), ("settle_s", JsonValueKind.Number, "30"), .. ModsWhileItRuns, .. OfferOfFasterArchives],
 		["cleansave"] = [("settle_s", JsonValueKind.Number, "10"), .. BeforeASaveLoads, .. OfferOfFasterArchives],
-		["playsave"] = [("wait_s", JsonValueKind.Number, "60"), ("dyndolod_wait_s", JsonValueKind.Number, "30"), ("settle_s", JsonValueKind.Number, "10"), .. BeforeASaveLoads, .. OfferOfFasterArchives],
+		["playsave"] = [("save", JsonValueKind.String, "none"), ("wait_s", JsonValueKind.Number, "60"), ("dyndolod_wait_s", JsonValueKind.Number, "30"), ("settle_s", JsonValueKind.Number, "10"), .. BeforeASaveLoads, .. OfferOfFasterArchives],
 		["grass"] = [("stall_min", JsonValueKind.Number, "10"), ("min_files", JsonValueKind.Number, "100"), ("fasterngio_args", JsonValueKind.String, "--world all"),
 			("first_start_min", JsonValueKind.Number, "5"), ("stuck_min", JsonValueKind.Number, "20"), ("max_restarts", JsonValueKind.Number, "15"), ("max_idle_restarts", JsonValueKind.Number, "3"),
 			("disable_during", JsonValueKind.Array, "none"), .. OfferOfFasterArchives],
@@ -310,8 +310,12 @@ public static class SettingsPanel
 	// (in the two save steps the wait is the one after the player was moved, not one before the game closes)
 	const string ArriveLabel = "Wait after the teleport (seconds)";
 
+	// (the final save starts from the run's own clean save; the save a setup names is only for a run that made none)
+	const string NoCleanSaveLabel = "Save to start from when the run made no clean save";
+
 	static string Label(string a_key, string a_step) => a_step == "anvillod" && a_key == "preset" ? AnvilPresetLabel :
-		a_key == "settle_s" && Setup.SaveSteps.Contains(a_step) ? ArriveLabel : Label(a_key);
+		a_key == "settle_s" && Setup.SaveSteps.Contains(a_step) ? ArriveLabel :
+		a_key == "save" && a_step == "playsave" ? NoCleanSaveLabel : Label(a_key);
 
 	static string Label(string a_key) => Labels.TryGetValue(a_key, out var l) ? l : a_key.Length == 0 ? "Unnamed setting" : char.ToUpperInvariant(a_key[0]) + a_key[1..].Replace('_', ' ');
 

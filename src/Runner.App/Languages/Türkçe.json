@@ -411,6 +411,7 @@
   "STEPS": "ADIMLAR",
   "Safe to close": "Kapatmak güvenli",
   "Save to start from (empty = the newest)": "Başlanacak kayıt (boş = en yenisi)",
+  "Save to start from when the run made no clean save": "Çalıştırma temiz kayıt yapmadıysa başlanacak kayıt",
   "Says which tools Mod Organizer's list holds, which are on this PC but not listed, and where to get the rest": "Mod Organizer'ın listesinde hangi araçların olduğunu, hangilerinin bu bilgisayarda olup listede olmadığını ve gerisinin nereden alınacağını söyler",
   "Scratch folder (emptied after a run)": "Çalışma klasörü (çalıştırmadan sonra boşaltılır)",
   "Send them to the Recycle Bin": "Onları Geri Dönüşüm Kutusu'na gönder",

@@ -411,6 +411,7 @@
   "STEPS": "ステップ",
   "Safe to close": "閉じても安全です",
   "Save to start from (empty = the newest)": "開始するセーブ (空欄 = 最新)",
+  "Save to start from when the run made no clean save": "実行がクリーン セーブを作らなかったときに開始するセーブ",
   "Says which tools Mod Organizer's list holds, which are on this PC but not listed, and where to get the rest": "Mod Organizer の一覧にあるツール、この PC にはあるが一覧にないツール、残りの入手先を示します",
   "Scratch folder (emptied after a run)": "作業フォルダー (実行後に空になります)",
   "Send them to the Recycle Bin": "ごみ箱に移動",

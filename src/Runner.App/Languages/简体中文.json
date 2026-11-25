@@ -411,6 +411,7 @@
   "STEPS": "步骤",
   "Safe to close": "可以安全关闭",
   "Save to start from (empty = the newest)": "起始存档（留空 = 最新的）",
+  "Save to start from when the run made no clean save": "运行未制作干净存档时的起始存档",
   "Says which tools Mod Organizer's list holds, which are on this PC but not listed, and where to get the rest": "说明 Mod Organizer 列表中有哪些工具，哪些在此电脑上但未列出，以及其余工具从哪里获取",
   "Scratch folder (emptied after a run)": "临时文件夹（运行后清空）",
   "Send them to the Recycle Bin": "移到回收站",
