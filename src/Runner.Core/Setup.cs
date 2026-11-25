@@ -45,9 +45,18 @@ public sealed class Setup
 	public IReadOnlyList<string> ChangesHideProfiles => List(Obj("changes"), "hideProfiles");
 	public IReadOnlyList<string> ChangesHideMods => List(Obj("changes"), "hideModsStartingWith");
 
-	public IReadOnlyDictionary<string, string> PlaceAfter =>
-		(Root["placeAfter"] as JsonObject)?.Where(p => p.Value is JsonValue).ToDictionary(p => p.Key, p => p.Value!.ToString(), StringComparer.OrdinalIgnoreCase) ??
-		new Dictionary<string, string>();
+	// (a plugin named twice in other letters - a file edited by hand - counts once, the first time: read into one dictionary
+	// that ignores letter case it threw, and it is read after each step, where a run puts the profile back)
+	public IReadOnlyDictionary<string, string> PlaceAfter
+	{
+		get {
+			var after = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+			foreach (var p in (Root["placeAfter"] as JsonObject ?? []).Where(p => p.Value is JsonValue)) {
+				after.TryAdd(p.Key, p.Value!.ToString());
+			}
+			return after;
+		}
+	}
 
 	public IReadOnlyList<Profile.PlaceRule> Placement =>
 		// (a setup file comes from anywhere: an entry whose two names are not both given is no rule - a null there threw at the

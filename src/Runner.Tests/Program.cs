@@ -12307,6 +12307,10 @@ public static class Program
 		var odd = Setup.FromJson(new JsonObject { ["placement"] = JsonNode.Parse("[[\"Mine.esp\", \"afer:Skyrim.esm\"], [\"Other.esp\", \"after:Skyrim.esm\"], [\"Last.esp\", \"end\"], [\"Top.esp\", \"last_master\"]]") }).Problems();
 		var named = odd.Where(p => p.Contains("a place is last_master", StringComparison.Ordinal)).ToList();
 		Check(named.Count == 1 && named[0].Contains("Mine.esp", StringComparison.Ordinal) && RunnerErrors.Find(named[0])?.Code == "TR-118", "the one slip is named, the three places are not: " + string.Join(" | ", odd));
+		// a plugin named twice under "placeAfter" in other letters is read once, the first time - never a throw after a step
+		var twice = Setup.FromJson(new JsonObject { ["placeAfter"] = JsonNode.Parse("{\"DynDOLOD.esm\": \"PGPatcher.esp\", \"dyndolod.esm\": \"Other.esp\", \"Lone.esp\": 3}") });
+		Equal(2, twice.PlaceAfter.Count, "each plugin once (a number is a value too)");
+		Equal("PGPatcher.esp", twice.PlaceAfter["DYNDOLOD.ESM"], "the first one, found in any letter case");
 	}
 
 	// ... and that guard is a real one: a planted refusal nobody put in the catalog is caught, a note and a known one are not
