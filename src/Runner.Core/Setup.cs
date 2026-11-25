@@ -295,11 +295,12 @@ public sealed class Setup
 	}
 
 	// the files Windows starts as a program
-	static readonly string[] ProgramKinds = [".exe", ".bat", ".cmd", ".com", ".ps1", ".vbs"];
+	static readonly string[] ProgramKinds = [".exe", ".bat", ".cmd", ".com", ".scr", ".pif", ".ps1", ".vbs"];
 
-	// a step's setting that names a program: by its key, or by what its value ends with
+	// a step's setting that names a program: by its key ("exe", "fasterngio_exe", Synthesis's "exe_path" - whatever the
+	// value ends with, since the step starts it), or by what its value ends with
 	static bool NamesProgram(string a_key, string a_value) =>
-		a_key is "exe" || a_key.EndsWith("_exe", StringComparison.Ordinal) ||
+		a_key is "exe" || a_key.EndsWith("_exe", StringComparison.Ordinal) || a_key.StartsWith("exe_", StringComparison.Ordinal) ||
 		ProgramKinds.Any(x => a_value.Trim().Trim('"').EndsWith(x, StringComparison.OrdinalIgnoreCase));
 
 	// What the setup starts on this PC by itself, one line each, in words: Mod Organizer, its own commands before and after
@@ -315,7 +316,8 @@ public sealed class Setup
 		lines.AddRange(AfterRun.Select(c => "a command after each run: " + c));
 		foreach (var s in Steps) {
 			foreach (var (key, value) in s.Settings) {
-				if (value is JsonValue v && v.TryGetValue<string>(out var text) && text.Trim() != "" && NamesProgram(key, text)) {
+				// ("image" is the name the tool's process runs under, which the step waits for: it starts nothing)
+				if (key != "image" && value is JsonValue v && v.TryGetValue<string>(out var text) && text.Trim() != "" && NamesProgram(key, text)) {
 					lines.Add($"{StepCatalog.Name(s.Key)} ({key}): {text}");
 				}
 			}

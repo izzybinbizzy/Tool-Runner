@@ -304,7 +304,16 @@ public sealed class PgPatcherStep : IStep
 		try {
 			if (source != null) {
 				StepKit.KeepFile(a_ctx, live);
-				var conf = JsonNode.Parse(Files.ReadSharedText(source), documentOptions: JsonRead.Plain) as JsonObject ?? throw new StepFailedException("PGPatcher's settings do not read");
+				// (a file that is no JSON at all left the step as an error of the reader's, with no word on what to do)
+				JsonObject? conf;
+				try {
+					conf = JsonNode.Parse(Files.ReadSharedText(source), documentOptions: JsonRead.Plain) as JsonObject;
+				} catch (System.Text.Json.JsonException e) {
+					throw new StepFailedException($"PGPatcher's settings do not read ({Path.GetFileName(source)}: {e.Message})");
+				}
+				if (conf == null) {
+					throw new StepFailedException($"PGPatcher's settings do not read ({Path.GetFileName(source)} holds no settings)");
+				}
 				if (conf["params"]?["output"] is not JsonObject output) {
 					throw new StepFailedException("PGPatcher's settings have no output section - run PGPatcher once by hand to make them");
 				}

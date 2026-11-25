@@ -11660,6 +11660,13 @@ public static class Program
 		s.TakeOutWhatStartsPrograms();
 		Equal(0, s.Starts().Count, "... and its programs: it starts nothing, and nothing is asked");
 		Equal(0, Setup.FromJson(new JsonObject { ["steps"] = new JsonArray() }).Starts().Count, "a setup with nothing in it starts nothing");
+		// a program a step starts is one by the setting's name, whatever its file is called
+		var odd = Setup.FromJson(new JsonObject { ["steps"] = new JsonArray(new JsonObject { ["step"] = "synthesis", ["settings"] = new JsonObject {
+			["exe_path"] = @"D:\Tools\Synthesis\Synthesis", ["fasterngio_exe"] = @"D:\Tools\ngio.bin", ["output_mod"] = "Synthesis Output", ["note"] = "a saver.scr", ["image"] = "Synthesis.exe" } }) });
+		Equal(3, odd.Starts().Count, "Synthesis's own program path, a program under any name, a value that ends like one: " + string.Join(" | ", odd.Starts()));
+		Check(!odd.Starts().Any(l => l.Contains("(image)", StringComparison.Ordinal)), "the name a tool's process runs under starts nothing, and is not listed");
+		Equal(4, odd.TakeOutWhatStartsPrograms().Count, "... and each is taken out of a setup that is brought in (that name with them, as before)");
+		Equal("Synthesis Output", Setup.Str(odd.Steps[0].Settings, "output_mod"), "what names no program stays");
 	}
 
 	// a setup file from another player: brought in with nothing left that starts a program here, under a name that is free
