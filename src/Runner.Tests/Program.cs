@@ -5591,8 +5591,10 @@ public static class Program
 			HiddenDesktop.OnPlayersDesktop = pids => pids.Count > 0 ? [(nint)1] : [];
 			using (var leaky = new HiddenDesktop("MO2-Tool-Runner-test-b")) {
 				using var p = leaky.Start(ping, Path.GetTempPath());
+				// (up to 20 s: the suite runs at Idle priority beside other builds, where the guard's look can be late; the tool
+				// itself would run 30 s, so an end inside 20 s is still the guard's)
 				var sw = Stopwatch.StartNew();
-				while (!p.HasExited && sw.Elapsed < TimeSpan.FromSeconds(5)) {
+				while (!p.HasExited && sw.Elapsed < TimeSpan.FromSeconds(20)) {
 					Thread.Sleep(100);
 				}
 				Check(p.HasExited, "a tool that showed on his screen was not ended");
