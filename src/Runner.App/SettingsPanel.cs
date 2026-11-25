@@ -187,10 +187,11 @@ public static class SettingsPanel
 			if (!t.IsCompletedSuccessfully) {
 				return;
 			}
+			// (added after the page was put into the window's language: each said in it here)
 			foreach (var (title, url) in t.Result.Item1) {
-				docs.Children.Add(Link(a_w, title, url));
+				docs.Children.Add(Link(a_w, WindowWords.Word(title), url));
 			}
-			note.Text = t.Result.Item2 ?? "";
+			note.Text = WindowWords.Word(t.Result.Item2 ?? "");
 			note.Visibility = t.Result.Item2 == null ? Visibility.Collapsed : Visibility.Visible;
 		}, TaskScheduler.FromCurrentSynchronizationContext());
 		var rows = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
@@ -211,7 +212,8 @@ public static class SettingsPanel
 						DockPanel.SetDock(open, Dock.Right);
 						row.Children.Add(open);
 					}
-					row.Children.Add(new TextBlock { Text = $"{h.Mod} ({h.What})" + (h.Page == null ? WindowWords.Word(" - no Nexus page recorded") : ""), TextWrapping = TextWrapping.Wrap,
+					var what = string.Join(LodGuide.KindsJoin, h.What.Split(LodGuide.KindsJoin).Select(WindowWords.Word));
+					row.Children.Add(new TextBlock { Text = $"{h.Mod} ({what})" + (h.Page == null ? WindowWords.Word(" - no Nexus page recorded") : ""), TextWrapping = TextWrapping.Wrap,
 						VerticalAlignment = VerticalAlignment.Center });
 					rows.Children.Add(row);
 				}

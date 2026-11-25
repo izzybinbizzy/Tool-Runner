@@ -5232,7 +5232,7 @@ public static class Program
 	// entries - is in every shipped language as well, not only what a picture of the window showed
 	static void T_EveryShippedLanguageHasTheSettingsTexts()
 	{
-		string[] more = [.. ToolFinder.WhereTexts, .. StepCatalog.All.Select(s => s.About), StepCatalog.Info(AddOns.KeyPrefix + "x").About, StepCatalog.RunsAfter,
+		string[] more = [.. ToolFinder.WhereTexts, .. LodGuide.Words, .. StepCatalog.All.Select(s => s.About), StepCatalog.Info(AddOns.KeyPrefix + "x").About, StepCatalog.RunsAfter,
 			.. StepCatalog.MustPrecede.Select(r => r.Why).Distinct(), "LOD output mods switched off before the first step (one per line)", "Plugin places after a run (each: the plugin, then last_master, after:<plugin> or end)", "A plugin's place when a run first ticks it (the plugin: the plugin it goes below)",
 			"{0} (default {1})", "Show setup: {0}", "Settings of {0}", "Run only {0}", "Find in the settings: \"{0}\"", "Stop the test", "Most recent save (any character)",
 			"leave it to me (unanswered, the step stops)", "every run", "never", "skip it during the run (it asks in my own game)",

@@ -36,6 +36,16 @@ public static class LodGuide
 	public static bool Applies(string a_step) => ForStep.ContainsKey(a_step);
 
 	const string CsPage = "https://dyndolod.info/Mods/Community-Shaders";
+	const string CsTitle = "DynDOLOD's page on Community Shaders (its grass LOD settings)";
+	const string CsNote = "This setup runs Community Shaders (or a fork of it). With its Grass Optimizations the far grass is made from DynDOLOD's own grass " +
+		"assets, so DynDOLOD's grass brightness settings do not change it: DynDOLOD's Community Shaders page has the settings for this setup. " +
+		"Its Grass Lighting values change the near grass too - your look, set them in Community Shaders' own menu.";
+
+	// what a mod changes, as Find names it (several joined by this)
+	public const string KindsJoin = ", ";
+
+	// every text of the guide the window shows in its own language: the pages' names, the note, the kinds
+	public static IReadOnlyList<string> Words => [.. Docs.Values.SelectMany(d => d.Select(p => p.Title)).Append(CsTitle).Append(CsNote).Concat(Kinds.Values).Distinct(StringComparer.Ordinal)];
 
 	// a ticked mod ships Community Shaders' plugin (Community Shaders, Bottled Shaders, Open Shaders)
 	public static bool RunsCommunityShaders(Setup a_setup, Mo2Instance a_mo2) =>
@@ -56,18 +66,14 @@ public static class LodGuide
 	{
 		var outList = Docs.GetValueOrDefault(a_step, []).ToList();
 		if (a_step is "grass" or "texgen" or "dyndolod" && RunsCommunityShaders(a_setup, a_mo2)) {
-			outList.Insert(0, ("DynDOLOD's page on Community Shaders (its grass LOD settings)", CsPage));
+			outList.Insert(0, (CsTitle, CsPage));
 		}
 		return outList;
 	}
 
 	// a plain line for a Community Shaders setup's grass, else null
 	public static string? SetupNote(Setup a_setup, Mo2Instance a_mo2, string a_step) =>
-		a_step is "grass" or "texgen" or "dyndolod" && RunsCommunityShaders(a_setup, a_mo2)
-			? "This setup runs Community Shaders (or a fork of it). With its Grass Optimizations the far grass is made from DynDOLOD's own grass " +
-			  "assets, so DynDOLOD's grass brightness settings do not change it: DynDOLOD's Community Shaders page has the settings for this setup. " +
-			  "Its Grass Lighting values change the near grass too - your look, set them in Community Shaders' own menu."
-			: null;
+		a_step is "grass" or "texgen" or "dyndolod" && RunsCommunityShaders(a_setup, a_mo2) ? CsNote : null;
 
 	// the mods whose ACTIVE plugins (ticked in plugins.txt, the copy that wins in Mod Organizer) change what this step builds
 	// from; the setup's own outputs left out - they are made from these
@@ -96,7 +102,7 @@ public static class LodGuide
 			}
 		}
 		return byMod.Select(kv => (Mod: kv.Key, What: wanted.Where(kv.Value.Contains).Select(k => Kinds[k]).ToList()))
-			.Where(x => x.What.Count > 0).Select(x => new Hit(x.Mod, string.Join(", ", x.What), NexusPage(a_mo2.ModDir(x.Mod))))
+			.Where(x => x.What.Count > 0).Select(x => new Hit(x.Mod, string.Join(KindsJoin, x.What), NexusPage(a_mo2.ModDir(x.Mod))))
 			.OrderBy(h => h.Mod, StringComparer.OrdinalIgnoreCase).ToList();
 	}
 
