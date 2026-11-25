@@ -139,6 +139,8 @@ public static class RunnerErrors
 		E("TR-322", "no longer in the mod list",
 			"An old output was to be switched on at its step's place, and its line was gone from the profile's mod list by then (taken out while the run went on).",
 			"Press F5 in Mod Organizer so it lists that mod again (or put the mod back in its mods folder), then start the run again the way you started it - the step stays set to use its old output."),
+		E("TR-323", "DynDOLOD and AnvilLOD are both switched on", "A profile uses one of the two LOD tools: each makes what the other makes, and keeps the other's output off.",
+			"Untick the DynDOLOD step or the AnvilLOD step in the list, then start again."),
 		E("TR-312", "is not in this profile's mod list", "A mod this step names is not in this profile's mod list.",
 			"Install the mod or correct its name: in Mod Organizer, or in Settings > Steps where the step names it."),
 

@@ -172,7 +172,7 @@ public static class NewSetupDialog
 					line.Children.Add(new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Brushes2.Get(r.State == ToolFinder.Found.Missing ? "Muted" : "Text"), Text = r.State switch {
 						ToolFinder.Found.Listed => WindowWords.F($"{r.Tool.Name}: in Mod Organizer's list"),
 						ToolFinder.Found.NotListed => WindowWords.F($"{r.Tool.Name}: found, not in the list yet - {r.Binary}"),
-						_ => WindowWords.F($"{r.Tool.Name}: not found - {r.Tool.Where}"),
+						_ => WindowWords.F($"{r.Tool.Name}: not found - {WindowWords.Word(r.Tool.Where)}"),
 					} });
 					toolRows.Children.Add(line);
 				}

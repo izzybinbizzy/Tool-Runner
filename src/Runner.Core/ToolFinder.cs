@@ -14,6 +14,10 @@ public static class ToolFinder
 
 	const string OwnFolder = "unpack it into a folder of its own beside Mod Organizer - not inside Program Files, the game's folder or Mod Organizer's mods folder";
 	const string AsMod = "install it with Mod Organizer, as a mod";
+	const string InDynDolodsPlace = "only when you use it in place of DynDOLOD: unpack it into a folder of its own beside Mod Organizer";
+
+	// every "where it goes" a missing tool is told with (a shipped language must hold each)
+	public static IReadOnlyList<string> WhereTexts => [OwnFolder, AsMod, InDynDolodsPlace];
 	const string XLodGenPage = "https://stepmodifications.org/forum/topic/13451-xlodgen-terrain-lod-beta/";
 
 	static string PageOf(string a_step) => ToolUpdates.Known[a_step].Page;
@@ -28,6 +32,7 @@ public static class ToolFinder
 		new("treelodgen", "TreeLODGen", ["TreeLODGen.exe"], "", PageOf("treelodgen"), OwnFolder),
 		new("texgen", "TexGen", ["TexGenx64.exe", "TexGen.exe"], "-sse", PageOf("texgen"), OwnFolder),
 		new("dyndolod", "DynDOLOD", ["DynDOLODx64.exe", "DynDOLOD.exe"], "-sse", PageOf("dyndolod"), OwnFolder),
+		new("anvillod", "AnvilLOD", ["AnvilLOD.exe"], "", PageOf("anvillod"), InDynDolodsPlace),
 		new("pandora", "Pandora Behaviour Engine", ["Pandora Behaviour Engine+.exe", "Pandora Behaviour Engine.exe"], "", PageOf("pandora"), AsMod),
 	];
 

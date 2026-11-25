@@ -5224,7 +5224,7 @@ public static class Program
 	// entries - is in every shipped language as well, not only what a picture of the window showed
 	static void T_EveryShippedLanguageHasTheSettingsTexts()
 	{
-		string[] more = ["LOD output mods switched off before the first step (one per line)", "Plugin places after a run (each: the plugin, then last_master, after:<plugin> or end)", "A plugin's place when a run first ticks it (the plugin: the plugin it goes below)",
+		string[] more = [.. ToolFinder.WhereTexts, "LOD output mods switched off before the first step (one per line)", "Plugin places after a run (each: the plugin, then last_master, after:<plugin> or end)", "A plugin's place when a run first ticks it (the plugin: the plugin it goes below)",
 			"{0} (default {1})", "Show setup: {0}", "Settings of {0}", "Run only {0}", "Find in the settings: \"{0}\"", "Stop the test", "Most recent save (any character)",
 			"leave it to me (unanswered, the step stops)", "every run", "never", "skip it during the run (it asks in my own game)",
 			"new cache at every game start", "leave it alone - warn me only", "off", "on", "none", "the step's own", "Data folder (setups, runs, backups): {0}", ToolRunner.App.MainWindow.FooterText, "Data folder: {0}"];
@@ -9140,6 +9140,41 @@ public static class Program
 		Equal(RootBuilderAddOn.State.Different, RootBuilderAddOn.StateOf(mo2), "another copy of it is told apart");
 		RootBuilderAddOn.Add(mo2);
 		Equal(RootBuilderAddOn.State.Current, RootBuilderAddOn.StateOf(mo2), "and brought level");
+	}
+
+	// AnvilLOD takes DynDOLOD's place: found like any tool, its step made by New setup - switched off where DynDOLOD is there
+	// too, each keeping the other's output off -, and the two never run together
+	static void T_AnvilLodIsAStepANewSetupMakes()
+	{
+		using var f = new FakeMo2();
+		foreach (var (mod, exe) in new[] { ("DynDOLOD Tool", "DynDOLODx64.exe"), ("Anvil Tool", "AnvilLOD.exe") }) {
+			Directory.CreateDirectory(Path.Combine(f.Mods, mod));
+			File.WriteAllText(Path.Combine(f.Mods, mod, exe), "");
+		}
+		var found = ToolFinder.Find(Mo2Instance.Load(f.Exe, f.Instance), [f.Mods]);
+		Equal(ToolFinder.Found.NotListed, found.Single(r => r.Tool.Step == "anvillod").State, "AnvilLOD is one of the tools looked for");
+		// with AnvilLOD alone in the list its step is the one switched on
+		ToolFinder.AddFound(Mo2Instance.Load(f.Exe, f.Instance), found.Where(r => r.Tool.Step == "anvillod"));
+		var alone = SetupMaker.Make(f.Exe, f.Instance, "Test", "Anvil only", f.Data);
+		var only = alone.Steps.Single(s => s.Key == "anvillod");
+		Check(only.On && Files.SamePath(Setup.Str(only.Settings, "exe")!, Path.Combine(f.Mods, "Anvil Tool", "AnvilLOD.exe")) && Setup.Str(only.Settings, "output_mod") == "AnvilLOD Output - Test",
+			"its step, on, with its program and its output: " + only.Settings.ToJsonString());
+		Check(alone.Steps.All(s => s.Key != "dyndolod") && Setup.List(only.Settings, "replaces").Count == 0, "no DynDOLOD: nothing for it to keep off");
+		// with both, DynDOLOD's step is on and AnvilLOD's is there, off; each names the other's output
+		ToolFinder.AddFound(Mo2Instance.Load(f.Exe, f.Instance), ToolFinder.Find(Mo2Instance.Load(f.Exe, f.Instance), [f.Mods]));
+		var both = SetupMaker.Make(f.Exe, f.Instance, "Test", "Both", f.Data);
+		var (dyn, anvil) = (both.Steps.Single(s => s.Key == "dyndolod"), both.Steps.Single(s => s.Key == "anvillod"));
+		Check(dyn.On && !anvil.On, "DynDOLOD's step is the one switched on");
+		Equal("AnvilLOD Output - Test", Setup.List(dyn.Settings, "replaces").Single(), "DynDOLOD keeps AnvilLOD's output off");
+		Equal("DynDOLOD Output - Test", Setup.List(anvil.Settings, "replaces").Single(), "and AnvilLOD DynDOLOD's");
+		Check(Files.SamePath(Setup.Str(anvil.Settings, "dyndolod")!, Path.Combine(f.Mods, "DynDOLOD Tool")), "AnvilLOD is told where DynDOLOD's rule files are");
+		var order = both.Steps.Select(s => s.Key).ToList();
+		Check(order.IndexOf("dyndolod") < order.IndexOf("anvillod") && StepCatalog.OrderWarnings(order).Count == 0, "in an order the tools' own rules allow: " + string.Join(", ", order));
+		// the two switched on together are refused, with what to do
+		var mo2 = Mo2Instance.Load(f.Exe, f.Instance);
+		var refused = Preflight.Run(both, mo2, ["dyndolod", "anvillod"]).Where(i => i.Blocking && i.Text.Contains("both switched on", StringComparison.Ordinal)).ToList();
+		Check(refused.Count == 1 && RunnerErrors.Find(refused[0].Text)?.Code == "TR-323", "both at once is refused: " + string.Join(" | ", refused.Select(i => i.Text)));
+		Check(!Preflight.Run(both, mo2, ["dyndolod"]).Any(i => i.Text.Contains("both switched on", StringComparison.Ordinal)), "one of them is not");
 	}
 
 	// the tools on the PC named against Mod Organizer's list, the found ones added to it with every other line left alone

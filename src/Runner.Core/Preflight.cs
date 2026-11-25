@@ -18,6 +18,11 @@ public static class Preflight
 		if (a_setup.NotKnown is { Count: > 0 } notKnown) {
 			outList.Add(new Issue("", false, $"this setup names step(s) this version does not have, left out of the run: {string.Join(", ", notKnown)} - take them out of the setup to stop this note"));
 		}
+		// DynDOLOD and AnvilLOD make the same LOD, and each keeps the other's output off for good: run together, the second
+		// threw the first one's work away - or, each naming the other, both outputs ended switched off
+		if (a_steps.Contains("dyndolod") && a_steps.Contains("anvillod")) {
+			outList.Add(new Issue("", true, "DynDOLOD and AnvilLOD are both switched on - each makes the LOD the other makes: untick one of the two"));
+		}
 		var control = new Mo2Control(a_mo2, a_setup.Profile, RunLog.Null);
 		var profile = new Profile(a_mo2, a_setup.Profile, () => control.Running);
 		if (!profile.Exists) {
