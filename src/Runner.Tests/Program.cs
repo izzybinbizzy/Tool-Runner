@@ -11814,6 +11814,32 @@ public static class Program
 		}
 	}
 
+	// a run's record holds what the run wrote, never what is worked out from it at the moment it is asked: who is alive is
+	// a question to Windows, and a record that stored the answer stored it out of date
+	static void T_ARecordHoldsWhatWasWrittenNotWhatIsWorkedOut()
+	{
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "record " + Guid.NewGuid().ToString("N")[..8], "2026-11-01 10-00-00 worked out");
+		Directory.CreateDirectory(dir);
+		try {
+			var j = new Journal { Id = Path.GetFileName(dir), Folder = dir, SetupName = "worked out", Started = DateTime.Now, State = RunState.Running, Pid = Environment.ProcessId,
+				Steps = [new StepRecord { Key = "texgen", State = StepState.Running }] };
+			j.Save();
+			var text = File.ReadAllText(j.File);
+			Check(!text.Contains("OwnerAlive", StringComparison.Ordinal) && !text.Contains("Unfinished", StringComparison.Ordinal) && !text.Contains("\"Live\"", StringComparison.Ordinal),
+				"none of the three worked-out answers is in the file");
+			Check(text.Contains("\"State\": \"Running\"", StringComparison.Ordinal) && text.Contains("\"Pid\"", StringComparison.Ordinal), "what they are worked out from is");
+			var read = Journal.Load(dir);
+			Check(read.Unfinished && read.Live, "read back, a run that is going is unfinished and live");
+			// a record an older version wrote still names them - with answers of the moment it was saved: they are passed over
+			File.WriteAllText(j.File, text.Replace("\"State\": \"Running\"", "\"State\": \"Finished\", \"Unfinished\": true, \"OwnerAlive\": true", StringComparison.Ordinal).
+				Replace("\"Pid\": " + Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture), "\"Pid\": 0", StringComparison.Ordinal));
+			var old = Journal.Load(dir);
+			Check(old.State == RunState.Finished && !old.Unfinished && !old.OwnerAlive, "an older record's stored answers are not believed: the run finished, and nobody owns it");
+		} finally {
+			Directory.Delete(Path.GetDirectoryName(dir)!, true);
+		}
+	}
+
 	// the window's look: every run folder is asked about only when something says a record changed - where the folder is watched
 	static void T_ALookDoesNotWalkEveryRunFolderWhileNothingChanged()
 	{

@@ -239,6 +239,8 @@ public sealed class Journal
 	public Dictionary<string, char>? UndoTheirs { get; set; }
 	public Dictionary<string, bool>? UndoMarks { get; set; }
 
+	// (worked out from the three it names, and never written into the record)
+	[JsonIgnore]
 	public bool Unfinished => State == RunState.Running || NeedsRestore || Undoing;
 
 	// the final save is being made: the run's profile is already put back (it is not Unfinished - nothing to restore), but its
@@ -257,6 +259,10 @@ public sealed class Journal
 	public bool Live => Unfinished || InGameAfter || FinishingUp;
 
 	// is the program that wrote it still alive? (a run that is still going is never "unfinished")
+	// Asked of Windows whenever it is asked for, and never written into the record: as a value of the record it was asked
+	// of Windows at every save - several times a minute through a run - to store an answer no reader takes from the
+	// file, and one that was out of date the moment it stood there
+	[JsonIgnore]
 	public bool OwnerAlive => Pid != 0 && Procs.Alive(Pid) && IsRunner(Pid) &&
 		(PidStarted == null || Procs.StartTime(Pid) is { } s && Math.Abs((s - PidStarted.Value).TotalSeconds) < 2);
 
