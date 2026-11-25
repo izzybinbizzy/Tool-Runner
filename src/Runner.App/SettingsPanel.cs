@@ -39,7 +39,6 @@ public static class SettingsPanel
 		["preset"] = "DynDOLOD preset file",
 		["no_terrain_underside"] = "Never make a terrain underside",
 		["reads"] = "The terrain LOD folder it paints",
-		["tool_dir"] = "The tool's folder",
 		["tool_writes"] = "The mod the tool writes into",
 		["min_files"] = "Fewest files that counts as a result",
 		["hidden"] = "Hidden (the tool runs where it never shows on your screen)",
