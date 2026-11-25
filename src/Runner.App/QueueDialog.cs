@@ -65,7 +65,7 @@ public static class QueueDialog
 		foreach (var r in rows) {
 			r.Box.GotKeyboardFocus += (_, _) => list.SelectedItem = r.Item;
 		}
-		System.Windows.Automation.AutomationProperties.SetName(list, "Setups in the order they run");
+		System.Windows.Automation.AutomationProperties.SetName(list, WindowWords.Word("Setups in the order they run"));
 		// with the keyboard on a row itself (the arrow keys), Space ticks it - on its tick box Space is the box's own. (Taken
 		// on the way down: the list answers Space itself, and what it has answered reaches no handler after it)
 		list.PreviewKeyDown += (_, e) => {

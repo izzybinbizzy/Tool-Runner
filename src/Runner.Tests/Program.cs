@@ -4890,6 +4890,86 @@ public static class Program
 		}
 	}
 
+	// a part of a window drawn again is walked again: a translation that is another text's English, with a translation of its
+	// own, would then be translated twice. And every value a text takes ({0}, {1:0.0}) is in its translation
+	static void T_NoTranslationIsAnotherTextsEnglish()
+	{
+		foreach (var name in ToolRunner.App.WindowWords.Shipped()) {
+			var words = ToolRunner.App.WindowWords.Read(ToolRunner.App.WindowWords.ShippedText(name)!, out _)!;
+			var twice = words.Where(p => p.Value != p.Key && words.TryGetValue(p.Value, out var again) && again != p.Value).Select(p => p.Key).ToList();
+			Check(twice.Count == 0, $"{name}: nothing is translated twice ({string.Join(" | ", twice.Take(5))})");
+			foreach (var (english, word) in words) {
+				var places = System.Text.RegularExpressions.Regex.Matches(english, @"\{\d+(?:[,:][^}]*)?\}").Select(m => m.Value).Order(StringComparer.Ordinal).ToList();
+				var kept = System.Text.RegularExpressions.Regex.Matches(word, @"\{\d+(?:[,:][^}]*)?\}").Select(m => m.Value).Order(StringComparer.Ordinal).ToList();
+				Check(places.SequenceEqual(kept), $"{name}: every value of \"{english}\" has its place in \"{word}\"");
+			}
+		}
+	}
+
+	// a text with values in it is looked up by its form ("Use {0}'s old output?"), the values put in as they are
+	static void T_ATextWithValuesIsLookedUpByItsForm()
+	{
+		var tool = "DynDOLOD";
+		var at = 3;
+		var of = 13;
+		Check(ToolRunner.App.WindowWords.F($"Use {tool}'s old output?") == "Use DynDOLOD's old output?", "with no language in use it reads as written");
+		try {
+			ToolRunner.App.WindowWords.Use(new Dictionary<string, string> {
+				["Use {0}'s old output?"] = "Alte Ausgabe von {0} verwenden?", ["step {0} of {1}"] = "Schritt {0} von {1}", ["broken {0}"] = "kaputt {0} {1}",
+			});
+			Check(ToolRunner.App.WindowWords.F($"Use {tool}'s old output?") == "Alte Ausgabe von DynDOLOD verwenden?", "the language's form of it, the value as it is");
+			Check(ToolRunner.App.WindowWords.F($"step {at} of {of}") == "Schritt 3 von 13", "two values");
+			Check(ToolRunner.App.WindowWords.F($"broken {tool}") == "broken DynDOLOD", "a translation whose places do not fit falls back to the English");
+			Check(ToolRunner.App.WindowWords.F($"not in the file: {tool}") == "not in the file: DynDOLOD", "a text the language lacks stays English");
+		} finally {
+			ToolRunner.App.WindowWords.Use(new Dictionary<string, string>());
+		}
+	}
+
+	static void T_TimeBetweenTwoClockReadings()
+	{
+		// (two instants three hours apart, read as the PC's own clock shows them - in many places a daylight-saving change lies between)
+		var from = new DateTime(2026, 3, 29, 0, 30, 0, DateTimeKind.Utc).ToLocalTime();
+		var to = new DateTime(2026, 3, 29, 3, 30, 0, DateTimeKind.Utc).ToLocalTime();
+		Check(Times.Between(from, to) == TimeSpan.FromHours(3), "three hours are three hours, whatever the clock did between them");
+		Check(Times.WholeMinutes(TimeSpan.FromMinutes(59.6)) == 60 && Times.WholeMinutes(TimeSpan.FromMinutes(-5)) == 0, "whole minutes, never below nothing");
+		Check(Times.HoursAndMinutes(TimeSpan.FromMinutes(59.6)) == "1 h 00 min", "59.6 minutes read 1 h 00 min: " + Times.HoursAndMinutes(TimeSpan.FromMinutes(59.6)));
+		Check(Times.HoursAndMinutes(TimeSpan.FromMinutes(44.4)) == "44 min" && Times.HoursAndMinutes(TimeSpan.FromMinutes(125)) == "2 h 05 min", "minutes, and hours with minutes");
+		Check(RunSummary.Span(TimeSpan.FromMinutes(119.6)) == "2 h 00 min", "the summary rounds the same way: " + RunSummary.Span(TimeSpan.FromMinutes(119.6)));
+		Check(ToolRunner.App.MainViewModel.Short(TimeSpan.FromMinutes(59.6)) == "1h 00m", "the window's short form: " + ToolRunner.App.MainViewModel.Short(TimeSpan.FromMinutes(59.6)));
+		Check(ToolRunner.App.MainViewModel.Short(TimeSpan.FromSeconds(-300)) == "0s", "a time below nothing shows as none");
+		Check(ToolRunner.App.MainViewModel.Long(TimeSpan.FromMinutes(59.6)) == "1 h 00 min", "the window's long form");
+	}
+
+	static void T_NamesWindowsKeepsForDevices()
+	{
+		foreach (var name in new[] { "CON", "nul", "COM1", "LPT9", "NUL.txt", "con.json" }) {
+			Check(Setup.IsDeviceName(name) && !Setup.PlainName(name), name + " is a device's name, no folder's");
+		}
+		foreach (var name in new[] { "Console", "COM10", "Nullable", "My setup", "DynDOLOD Output - My Profile" }) {
+			Check(!Setup.IsDeviceName(name) && Setup.PlainName(name), name + " is a plain name");
+		}
+		Check(SetupFiles.BadName(Path.GetTempPath(), "AUX") is { } why && why.Contains("Windows keeps", StringComparison.Ordinal), "a setup cannot be called AUX");
+	}
+
+	static void T_AThemeColorIsHexDigitsOrAName()
+	{
+		foreach (var good in new[] { "#FFF", "#1F6FD1", "#660B1A2E", "#abcd", "Red", " transparent " }) {
+			Check(ToolRunner.App.Theme.PlainColor(good), good + " is a color");
+		}
+		foreach (var bad in new[] { "", "#12", "#GGGGGG", "ContextColor file:///C:/x.icc 1,0,0", "sc#1,0,0", "#FF FF FF", "Red;Blue" }) {
+			Check(!ToolRunner.App.Theme.PlainColor(bad), "\"" + bad + "\" is refused");
+		}
+	}
+
+	static void T_SmallTextRulesOfTheWindow()
+	{
+		Check(ToolRunner.App.PanelWindow.Plain("HISTORY") == "History" && ToolRunner.App.PanelWindow.Plain("MO2 CHANGELOG") == "MO2 Changelog", "a heading as a window title");
+		Check(ToolRunner.App.SettingsPanel.TypedPath("  \"C:\\Tools\\x.exe\"  ") == "C:\\Tools\\x.exe", "a path pasted with Explorer's quotes loses them");
+		Check(ToolRunner.App.SettingsPanel.TypedPath(" C:\\a b ") == "C:\\a b" && ToolRunner.App.SettingsPanel.TypedPath("\"") == "\"", "a path without them is only trimmed");
+		Check(ToolRunner.App.Cli.Handles(["frobnicate"]) && !ToolRunner.App.Cli.Handles(["--snapshot"]) && !ToolRunner.App.Cli.Handles([]), "a word that is no command is the command line's to refuse, not the window's to open on");
+	}
+
 	// what the window shows only once it is used - the step editor's labels, the settings choices not picked, the command box's
 	// entries - is in every shipped language as well, not only what a picture of the window showed
 	static void T_EveryShippedLanguageHasTheSettingsTexts()

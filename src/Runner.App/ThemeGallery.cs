@@ -99,7 +99,7 @@ public static class ThemeGallery
 			if (problems == null) {
 				return;
 			}
-			note.Text = problems.Count == 0 ? $"\"{Theme.Current}\" is in use." : "In use, with these values left as the default: " + string.Join("; ", problems.Take(6));
+			note.Text = problems.Count == 0 ? WindowWords.F($"\"{Theme.Current}\" is in use.") : WindowWords.Format("In use, with these values left as the default: {0}", string.Join("; ", problems.Take(6)));
 			MarkCurrent();
 			A11y.Say(a_w, note.Text);
 		}
@@ -107,9 +107,9 @@ public static class ThemeGallery
 		{
 			var name = new TextBlock { Text = a_l.Name, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 8, 0, 0) };
 			name.SetResourceReference(TextBlock.ForegroundProperty, "Text");
-			var kind = new TextBlock { Text = a_l.Problem ?? (a_l.Dark ? "Dark" : "Light") + (a_l.File == null ? "" : "  ·  your file"), Style = (Style)a_w.FindResource("MutedText"),
+			var kind = new TextBlock { Text = a_l.Problem ?? WindowWords.Word(a_l.Dark ? "Dark" : "Light") + (a_l.File == null ? "" : "  ·  " + WindowWords.Word("your file")), Style = (Style)a_w.FindResource("MutedText"),
 				TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap };
-			var inUse = new TextBlock { Text = "In use", FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Right, Visibility = Visibility.Collapsed };
+			var inUse = new TextBlock { Text = WindowWords.Word("In use"), FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Right, Visibility = Visibility.Collapsed };
 			inUse.SetResourceReference(TextBlock.ForegroundProperty, "Accent");
 			var foot = new Grid();
 			foot.Children.Add(kind);
@@ -127,7 +127,7 @@ public static class ThemeGallery
 				Background = Brushes.Transparent, BorderThickness = new Thickness(0),
 				Template = (ControlTemplate)System.Windows.Markup.XamlReader.Parse(
 					"<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='Button'><ContentPresenter/></ControlTemplate>") };
-			System.Windows.Automation.AutomationProperties.SetName(b, $"{a_l.Name} theme, {(a_l.Dark ? "dark" : "light")}");
+			System.Windows.Automation.AutomationProperties.SetName(b, WindowWords.Format(a_l.Dark ? "{0} theme, dark" : "{0} theme, light", a_l.Name));
 			System.Windows.Automation.AutomationProperties.SetHelpText(b, a_l.About);
 			b.GotKeyboardFocus += (_, _) => frame.SetResourceReference(Border.BorderBrushProperty, "AccentLight");
 			b.LostKeyboardFocus += (_, _) => MarkCurrent();
@@ -159,6 +159,8 @@ public static class ThemeGallery
 			foreach (var l in looks) {
 				cards.Children.Add(Card(l));
 			}
+			// (the cards are made once the themes are read, after the window loaded: into its language like the rest of it)
+			WindowWords.Tree(cards);
 			if (error != null) {
 				note.Text = error;
 			}
@@ -214,8 +216,8 @@ public static class ThemeGallery
 			}
 		};
 		var about = new TextBlock { Style = (Style)a_w.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 0),
-			Text = "\"High contrast\" takes Windows' own high-contrast colors, and is used by itself while Windows has high contrast on and no look was picked here. " +
-			       "\"Color-blind safe\" keeps finished, warning and failed apart by more than red and green. Every state also has its own mark." };
+			Text = WindowWords.Word("\"High contrast\" takes Windows' own high-contrast colors, and is used by itself while Windows has high contrast on and no look was picked here. " +
+			       "\"Color-blind safe\" keeps finished, warning and failed apart by more than red and green. Every state also has its own mark.") };
 
 		var body = new StackPanel();
 		body.Children.Add(note);

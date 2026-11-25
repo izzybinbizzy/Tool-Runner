@@ -70,7 +70,7 @@ public static class WindowWords
 
 	// a text with names put into it ("Run only {0}"): the language's own form of it, the names as they are; a translation whose
 	// places do not fit falls back to the English form
-	public static string Format(string a_english, params object[] a_args)
+	public static string Format(string a_english, params object?[] a_args)
 	{
 		try {
 			return string.Format(System.Globalization.CultureInfo.CurrentCulture, Word(a_english), a_args);
@@ -78,6 +78,15 @@ public static class WindowWords
 			return string.Format(System.Globalization.CultureInfo.CurrentCulture, a_english, a_args);
 		}
 	}
+
+	// a text with values put into it, as the code writes it ($"Use {name}'s old output?"): the language's own form of it - its key
+	// in a language file is the text with {0}, {1} ... where the values stand - with the values as they are
+	public static string F(FormattableString a_text) => Format(a_text.Format, a_text.GetArguments());
+
+	// what a row of the step list says of itself: a row is made from a template, which the walk over a window does not reach
+	public static string RowLeftOut => Word("left out: a new game has no save to keep clean");
+	public static string RowUsesOld => Word("not run: its old output is used");
+	public static string RowUsualTip => Word("its usual time");
 
 	public static void Use(IReadOnlyDictionary<string, string> a_words)
 	{

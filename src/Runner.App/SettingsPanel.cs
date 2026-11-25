@@ -92,8 +92,8 @@ public static class SettingsPanel
 	// the mods a LOD step builds from and the LOD tool's own help, each a page to open (the runner never guesses their values)
 	static void LodBlock(MainWindow a_w, Setup a_setup, string a_step, Panel a_host)
 	{
-		a_host.Children.Add(new TextBlock { Text = "Before you set it up: LOD can come out too bright, too dark or missing when its settings do not match the mods it is " +
-			"built from. Each of those mods' own pages (and the LOD tool's help) says what it needs - the runner never guesses another author's values.",
+		a_host.Children.Add(new TextBlock { Text = WindowWords.Word("Before you set it up: LOD can come out too bright, too dark or missing when its settings do not match the mods it is " +
+			"built from. Each of those mods' own pages (and the LOD tool's help) says what it needs - the runner never guesses another author's values."),
 			Style = (Style)a_w.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 6) });
 		static Button Link(MainWindow a_win, string a_text, string a_url)
 		{
@@ -133,22 +133,24 @@ public static class SettingsPanel
 			try {
 				var hits = await Task.Run(() => LodGuide.Find(a_setup, Mo2Instance.Load(a_setup.Mo2Exe, a_setup.Mo2Instance), a_step));
 				rows.Children.Clear();
-				rows.Children.Add(new TextBlock { Text = hits.Count == 0 ? "No ticked mod changes what it builds from." :
-					$"{hits.Count} ticked mod(s) change what it builds from - check each one's page for its LOD settings:", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 4) });
+				rows.Children.Add(new TextBlock { Text = hits.Count == 0 ? WindowWords.Word("No ticked mod changes what it builds from.") :
+					WindowWords.F($"{hits.Count} ticked mod(s) change what it builds from - check each one's page for its LOD settings:"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 4) });
 				foreach (var h in hits) {
 					var row = new DockPanel { Margin = new Thickness(0, 2, 0, 2) };
 					if (h.Page != null) {
-						var open = Link(a_w, "Open its page", h.Page);
+						var open = Link(a_w, WindowWords.Word("Open its page"), h.Page);
 						DockPanel.SetDock(open, Dock.Right);
 						row.Children.Add(open);
 					}
-					row.Children.Add(new TextBlock { Text = $"{h.Mod} ({h.What}){(h.Page == null ? " - no Nexus page recorded" : "")}", TextWrapping = TextWrapping.Wrap,
+					row.Children.Add(new TextBlock { Text = $"{h.Mod} ({h.What})" + (h.Page == null ? WindowWords.Word(" - no Nexus page recorded") : ""), TextWrapping = TextWrapping.Wrap,
 						VerticalAlignment = VerticalAlignment.Center });
 					rows.Children.Add(row);
 				}
+				// (built after the window loaded: into its language like the rest of it)
+				WindowWords.Tree(rows);
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) {
 				rows.Children.Clear();
-				rows.Children.Add(new TextBlock { Text = "Could not read the profile: " + e.Message, TextWrapping = TextWrapping.Wrap });
+				rows.Children.Add(new TextBlock { Text = WindowWords.Format("Could not read the profile: {0}", e.Message), TextWrapping = TextWrapping.Wrap });
 			} finally {
 				find.IsEnabled = true;
 			}
@@ -181,20 +183,20 @@ public static class SettingsPanel
 				}
 			});
 			var keep = Setup.Int(setup.Root, "keepBackups") ?? 5;
-			say.Text = all.Count == 0 ? "This setup has no run backups yet." :
-				$"This setup's run backups: {all.Count} run(s), {Gb(all.Sum(b => b.Bytes))} in all - " +
-				(keep > 0 ? $"the newest {keep} are kept after each run." : "every one is kept (Backups to keep is 0).");
+			say.Text = all.Count == 0 ? WindowWords.Word("This setup has no run backups yet.") :
+				WindowWords.F($"This setup's run backups: {all.Count} run(s), {Gb(all.Sum(b => b.Bytes))} in all - ") +
+				(keep > 0 ? WindowWords.F($"the newest {keep} are kept after each run.") : WindowWords.Word("every one is kept (Backups to keep is 0)."));
 			tidy.IsEnabled = keep > 0 && all.Count > keep;
-			tidy.ToolTip = $"Removes all but the newest {keep} now (the number saved above); a run's own backup and one an unfinished run needs are never touched";
+			tidy.ToolTip = WindowWords.F($"Removes all but the newest {keep} now (the number saved above); a run's own backup and one an unfinished run needs are never touched");
 		}
 		tidy.Click += async (_, _) => {
 			var keep = Setup.Int(setup.Root, "keepBackups") ?? 5;
-			if (!Ask.Show(a_w, "Remove old backups", $"All but the newest {keep} of this setup's run backups are deleted for good (they are copies of outputs and settings " +
-			        "from runs that finished long ago). A backup an unfinished run still needs is kept.", "Remove them", "Keep them")) {
+			if (!Ask.Show(a_w, "Remove old backups", WindowWords.F($"All but the newest {keep} of this setup's run backups are deleted for good (they are copies of outputs and settings from runs that finished long ago). A backup an unfinished run still needs is kept."),
+			        "Remove them", "Keep them")) {
 				return;
 			}
 			tidy.IsEnabled = false;
-			using var hand = a_w.Working("old backups are being removed");
+			using var hand = a_w.Working(WindowWords.Word("old backups are being removed"));
 			try {
 				var removed = await Task.Run(() => {
 					// one at a time with runs and put-backs (the run lock, taken and given back on this thread)
@@ -247,8 +249,8 @@ public static class SettingsPanel
 		var newVersions = new CheckBox { Content = "Tell me when a new version is out", IsChecked = !ProgramUpdate.IsOff(AppPaths.Data), Margin = new Thickness(0, 0, 0, 4) };
 		newVersions.Click += (_, _) => ProgramUpdate.SetOff(AppPaths.Data, newVersions.IsChecked != true);
 		a_stack.Children.Add(newVersions);
-		a_stack.Children.Add(new TextBlock { Text = "At most once a day, when the window opens, it asks its own download page which version is newest - nothing else is sent, " +
-			"and nothing is downloaded: the page opens in your browser when you choose.", Style = (Style)a_w.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap });
+		a_stack.Children.Add(new TextBlock { Text = WindowWords.Word("At most once a day, when the window opens, it asks its own download page which version is newest - nothing else is sent, " +
+			"and nothing is downloaded: the page opens in your browser when you choose."), Style = (Style)a_w.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap });
 	}
 
 	// Which drawing of the settings is the one on screen: counted on with every drawing, and when the settings window closes.
@@ -363,8 +365,8 @@ public static class SettingsPanel
 			try {
 				var (file, gone) = await Task.Run(() => SetupShare.Write(Setup.Parse(text, source), Path.Combine(AppPaths.Data, "Shared setups"), MainWindow.AppVersion))
 					.ConfigureAwait(true);
-				if (Ask.Show(a_w, "Shared copy made", $"It is ready: {Path.GetFileName(file)}\n\nWhat the other player sets themselves:\n" +
-				    (gone.Count == 0 ? "nothing" : string.Join("\n", gone.Select(g => "- " + g))) + "\n\nThey bring it in with the import command (see the readme).",
+				if (Ask.Show(a_w, "Shared copy made", WindowWords.F($"It is ready: {Path.GetFileName(file)}") + "\n\n" + WindowWords.Word("What the other player sets themselves:") + "\n" +
+				    (gone.Count == 0 ? WindowWords.Word("nothing") : string.Join("\n", gone.Select(g => "- " + g))) + "\n\n" + WindowWords.Word("They bring it in with the import command (see the readme)."),
 				    "Show the file", "Close")) {
 					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{file}\"") { UseShellExecute = true })?.Dispose();
 				}
@@ -526,7 +528,7 @@ public static class SettingsPanel
 				if (a_vm.Setup != current) {
 					return;
 				}
-				addOnNote.Text = found.Count == 0 ? "No ticked mod of this profile holds an add-on." : $"{found.Count} add-on file(s) in this profile's ticked mods.";
+				addOnNote.Text = found.Count == 0 ? WindowWords.Word("No ticked mod of this profile holds an add-on.") : WindowWords.F($"{found.Count} add-on file(s) in this profile's ticked mods.");
 				foreach (var hit in found) {
 					var row = new DockPanel { Margin = new Thickness(0, 2, 0, 2) };
 					if (hit.AddOn is { } addOn && !AddOns.Allowed(current, addOn)) {
@@ -577,10 +579,12 @@ public static class SettingsPanel
 						row.Children.Add(allow);
 					}
 					row.Children.Add(new TextBlock { TextWrapping = TextWrapping.Wrap, Text = hit.AddOn is { } a ?
-						$"{a.Name}, by {a.Author}, in {hit.Mod}" + (AddOns.InSetup(current, a) ? " - in this setup" : "") :
+						WindowWords.F($"{a.Name}, by {a.Author}, in {hit.Mod}") + (AddOns.InSetup(current, a) ? WindowWords.Word(" - in this setup") : "") :
 						$"{hit.File}: {string.Join("; ", hit.Problems)}" });
 					addOnRows.Children.Add(row);
 				}
+				// (built after the window loaded: into its language like the rest of it)
+				WindowWords.Tree(addOnRows);
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) {
 				a_vm.Say("The add-ons could not be looked for: " + e.Message, "bad");
 			} finally {
@@ -615,15 +619,15 @@ public static class SettingsPanel
 				var menuMo2 = Mo2Instance.Load(menuSetup.Mo2Exe, menuSetup.Mo2Instance);
 				Head("MO2 TOOLS MENU");
 				var menuNote = new TextBlock { Style = (Style)a_w.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8),
-					Text = Mo2MenuEntry.IsCurrent(menuMo2, program) ? "This program is in Mod Organizer's Tools menu. It opens here on the profile Mod Organizer shows." :
-						"An entry in Mod Organizer's Tools menu that opens this program on the profile Mod Organizer shows. It is one small file in Mod Organizer's plugins folder." };
+					Text = WindowWords.Word(Mo2MenuEntry.IsCurrent(menuMo2, program) ? "This program is in Mod Organizer's Tools menu. It opens here on the profile Mod Organizer shows." :
+						"An entry in Mod Organizer's Tools menu that opens this program on the profile Mod Organizer shows. It is one small file in Mod Organizer's plugins folder.") };
 				stack.Children.Add(menuNote);
 				if (!Mo2MenuEntry.IsCurrent(menuMo2, program)) {
 					var addMenu = new Button { Content = "Add it to the Tools menu", Style = (Style)a_w.FindResource("Ghost"), HorizontalAlignment = HorizontalAlignment.Left };
 					addMenu.Click += (_, _) => {
 						try {
 							Mo2MenuEntry.Add(menuMo2, program);
-							menuNote.Text = "Added. It shows the next time Mod Organizer starts.";
+							menuNote.Text = WindowWords.Word("Added. It shows the next time Mod Organizer starts.");
 							addMenu.IsEnabled = false;
 						} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException) {
 							a_vm.Say("The entry could not be added: " + e.Message, "bad");
@@ -644,11 +648,11 @@ public static class SettingsPanel
 				if (state != RootBuilderAddOn.State.NoRootBuilder) {
 					Head("ROOT BUILDER");
 					var rootNote = new TextBlock { Style = (Style)a_w.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8),
-						Text = "Runs wait for Root Builder to put its files in place and to take them out. Our add-on, Root Builder Profiles, keeps what Root Builder leaves behind per profile " +
-						"and offers to move presets no mod owns out of the game folder. It is optional, and it needs Root Builder itself." };
+						Text = WindowWords.Word("Runs wait for Root Builder to put its files in place and to take them out. Our add-on, Root Builder Profiles, keeps what Root Builder leaves behind per profile " +
+						"and offers to move presets no mod owns out of the game folder. It is optional, and it needs Root Builder itself.") };
 					stack.Children.Add(rootNote);
 					if (state == RootBuilderAddOn.State.Current) {
-						rootNote.Text += " It is in Mod Organizer.";
+						rootNote.Text += WindowWords.Word(" It is in Mod Organizer.");
 					} else {
 						var addOn = new Button { Content = state == RootBuilderAddOn.State.NotAdded ? "Add Root Builder Profiles ..." : "Update Root Builder Profiles ...", Style = (Style)a_w.FindResource("Ghost"), HorizontalAlignment = HorizontalAlignment.Left };
 						addOn.Click += (_, _) => {
@@ -657,7 +661,7 @@ public static class SettingsPanel
 							}
 							try {
 								RootBuilderAddOn.Add(rootMo2);
-								rootNote.Text = "Root Builder Profiles is in Mod Organizer now. It loads the next time Mod Organizer starts.";
+								rootNote.Text = WindowWords.Word("Root Builder Profiles is in Mod Organizer now. It loads the next time Mod Organizer starts.");
 								addOn.IsEnabled = false;
 							} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException) {
 								a_vm.Say("The add-on could not be added: " + e.Message, "bad");
@@ -691,7 +695,7 @@ public static class SettingsPanel
 			}
 			updCheck.IsEnabled = false;
 			updRows.Children.Clear();
-			updNote.Text = "Asking the tools' pages ...";
+			updNote.Text = WindowWords.Word("Asking the tools' pages ...");
 			try {
 				var res = await Task.Run(async () => await ToolUpdates.Check(setup, Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance), CancellationToken.None));
 				foreach (var r in res) {
@@ -703,14 +707,16 @@ public static class SettingsPanel
 						DockPanel.SetDock(get, Dock.Right);
 						row.Children.Add(get);
 					}
-					var said = r.Problem ?? (r.Newer ? $"a NEWER version is out: {r.Newest} (yours {r.Yours})" : $"up to date ({r.Yours})");
+					var said = r.Problem ?? (r.Newer ? WindowWords.F($"a NEWER version is out: {r.Newest} (yours {r.Yours})") : WindowWords.F($"up to date ({r.Yours})"));
 					row.Children.Add(new TextBlock { Text = $"{r.Tool}: {said}", TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center }
 						.Live(TextBlock.ForegroundProperty, r.Newer ? "Warn" : r.Problem != null ? "Muted" : "Text"));
 					updRows.Children.Add(row);
 				}
+				// (built after the window loaded: into its language like the rest of it)
+				WindowWords.Tree(updRows);
 				updNote.Text = ToolUpdates.Summary(res);
 			} catch (Exception e) {
-				updNote.Text = "Could not check: " + e.Message;
+				updNote.Text = WindowWords.Format("Could not check: {0}", e.Message);
 			} finally {
 				updCheck.IsEnabled = true;
 			}
@@ -749,15 +755,15 @@ public static class SettingsPanel
 				errors.Text = another;
 				return;
 			}
-			if (a_vm.Setup is not { } testSetup || !Ask.Show(a_w, "Test my tools", "Each tool this program drives through its window opens through Mod Organizer, up to the window a run presses, and closes again. " +
-				"Nothing is pressed and nothing is built. Mod Organizer closes for it, and the LOD tools read your whole load order first, so it can take a while.", "Test them", "Not now")) {
+			if (a_vm.Setup is not { } testSetup || !Ask.Show(a_w, "Test my tools", WindowWords.Word("Each tool this program drives through its window opens through Mod Organizer, up to the window a run presses, and closes again. " +
+				"Nothing is pressed and nothing is built. Mod Organizer closes for it, and the LOD tools read your whole load order first, so it can take a while."), "Test them", "Not now")) {
 				return;
 			}
 			s_testRows?.Children.Clear();
 			using var stop = new CancellationTokenSource();
 			s_testing = stop;
 			s_showTest?.Invoke();
-			using var hand = a_w.Working("your tools are being tested");
+			using var hand = a_w.Working(WindowWords.Word("your tools are being tested"));
 			try {
 				var results = await Task.Run(() => ToolProof.TestAll(testSetup, RunLog.Null, stop.Token));
 				// (into the drawing on screen now: Settings may have been drawn again since the test began)
@@ -794,7 +800,7 @@ public static class SettingsPanel
 			// the step on screen keeps its fields until every value reads (a wrong one stays where it can be fixed)
 			var wrong = stepApply.Select(f => f()).OfType<string>().ToList();
 			if (wrong.Count > 0) {
-				errors.Text = "Fix this step first:\n" + string.Join("\n", wrong);
+				errors.Text = WindowWords.Word("Fix this step first:") + "\n" + string.Join("\n", wrong);
 				pick.SelectedIndex = shown;
 				return;
 			}
@@ -843,8 +849,8 @@ public static class SettingsPanel
 				var learned = ToolSettings.Load(setupNow, stepKey);
 				var name = StepCatalog.Name(stepKey);
 				var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Style = (Style)a_w.FindResource("MutedText"), Margin = new Thickness(0, 4, 0, 6),
-					Text = learned == null ? "Its settings are not learned yet: it runs with whatever its own window last saved." :
-						$"Its settings were learned {learned.At.ToLocalTime().ToString("MMM d HH:mm", InvariantCulture)} ({learned.Files.Count} file(s)) - every run uses them." };
+					Text = learned == null ? WindowWords.Word("Its settings are not learned yet: it runs with whatever its own window last saved.") :
+						WindowWords.F($"Its settings were learned {learned.At.ToLocalTime().ToString("MMM d HH:mm", InvariantCulture)} ({learned.Files.Count} file(s)) - every run uses them.") };
 				var learn = new Button { Content = "Learn its settings (opens its own window)", Style = (Style)a_w.FindResource("Ghost"),
 					HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 12) };
 				// while a tool is being opened (or is open) to learn its settings, this button stops that wait instead. The wait
@@ -854,7 +860,7 @@ public static class SettingsPanel
 				void ShowLearn()
 				{
 					if (s_learning is { } going) {
-						learn.Content = LearningHere(setupNow, stepKey) ? "Stop waiting" : $"Stop waiting for {s_learningName}";
+						learn.Content = LearningHere(setupNow, stepKey) ? WindowWords.Word("Stop waiting") : WindowWords.F($"Stop waiting for {s_learningName}");
 						learn.IsEnabled = !going.Stopping;
 					} else {
 						learn.Content = learnText;
@@ -864,7 +870,7 @@ public static class SettingsPanel
 				// the step whose tool is open: this view's line now says how it goes
 				if (s_learning is { } still && LearningHere(setupNow, stepKey)) {
 					s_learningSays = t => status.Text = t;
-					status.Text = still.Opened ? $"{name} is open - set it up, save, and close it ..." : $"waiting to open {name} ...";
+					status.Text = still.Opened ? WindowWords.F($"{name} is open - set it up, save, and close it ...") : WindowWords.F($"waiting to open {name} ...");
 				}
 				s_showLearn = ShowLearn;
 				ShowLearn();
@@ -877,8 +883,8 @@ public static class SettingsPanel
 						}
 						return;
 					}
-					if (!Ask.Show(a_w, "Learn its settings", $"{name} opens through Mod Organizer (Mod Organizer is closed first if it is open). Set it up the way every run " +
-					        "should use it, save, and close it - its settings are then kept with this setup. To change them later, do this again.", "Open it", "Not now")) {
+					if (!Ask.Show(a_w, "Learn its settings", WindowWords.F($"{name} opens through Mod Organizer (Mod Organizer is closed first if it is open). Set it up the way every run should use it, save, and close it - its settings are then kept with this setup. To change them later, do this again."),
+					        "Open it", "Not now")) {
 						return;
 					}
 					using var now = new ToolOpen();
@@ -888,17 +894,17 @@ public static class SettingsPanel
 					s_learningName = name;
 					s_learningSays = t => status.Text = t;
 					s_showLearn?.Invoke();
-					status.Text = $"opening {name} ...";
+					status.Text = WindowWords.F($"opening {name} ...");
 					ToolOpen.Result result;
 					try {
-						using (a_w.Working($"{name} is open to learn its settings")) {
+						using (a_w.Working(WindowWords.F($"{name} is open to learn its settings"))) {
 							result = await now.Go(setupNow, stepKey,
-								why => Ask.Show(a_w, $"{name} cannot open yet", $"{ToolsDialog.Capital(why)}.\n\n{name} opens through Mod Organizer, and Mod Organizer is closed first - " +
-								                     $"never while that is open. Close it and try again, or wait here: {name} opens by itself once it has ended, and you can stop " +
-								                     "waiting at any time.", "Wait for it", "Not now"),
+								why => Ask.Show(a_w, WindowWords.F($"{name} cannot open yet"), $"{ToolsDialog.Capital(why)}.\n\n" +
+								                     WindowWords.F($"{name} opens through Mod Organizer, and Mod Organizer is closed first - never while that is open. Close it and try again, or wait here: {name} opens by itself once it has ended, and you can stop waiting at any time."),
+								                     "Wait for it", "Not now"),
 								line => a_w.Dispatcher.BeginInvoke(() => {
 									if (s_learning == now) {
-										s_learningSays?.Invoke(now.Opened ? $"{name} is open - set it up, save, and close it ..." : line);
+										s_learningSays?.Invoke(now.Opened ? WindowWords.F($"{name} is open - set it up, save, and close it ...") : line);
 									}
 								}));
 						}
@@ -908,8 +914,8 @@ public static class SettingsPanel
 					var says = s_learningSays;
 					s_learningSays = null;
 					var outcome = (result.Learned is { } l
-						? $"Learned: {l.Files.Count} settings file(s) ({string.Join(", ", l.Files.Select(f => Path.GetFileName(f.Live)))}) - every run uses them."
-						: result.How == ToolOpen.Ending.Failed ? "Not learned: " + result.Why : "Not learned: " + ToolsDialog.Outcome(name, result)) + ToolsDialog.StillOn(now.StillOn);
+						? WindowWords.F($"Learned: {l.Files.Count} settings file(s) ({string.Join(", ", l.Files.Select(f => Path.GetFileName(f.Live)))}) - every run uses them.")
+						: result.How == ToolOpen.Ending.Failed ? WindowWords.Format("Not learned: {0}", result.Why) : WindowWords.Format("Not learned: {0}", ToolsDialog.Outcome(name, result))) + ToolsDialog.StillOn(now.StillOn);
 					s_showLearn?.Invoke();
 					// on the view that shows that step now, and on the main window's message line too (the settings window may be
 					// on another step by now, or closed)
@@ -1096,7 +1102,7 @@ public static class SettingsPanel
 		var opens = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
 		foreach (var (text, panel, keys) in new[] { ("History", "history", "Ctrl+H"), ("Themes", "themes", "Ctrl+T") }) {
 			var open = new Button { Content = text, Style = (Style)a_w.FindResource("Ghost"), HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 0, 0, 6),
-				ToolTip = (panel == "history" ? "Past runs and the MO2 Changelog" : "The window's look and text size") + " (" + keys + ")" };
+				ToolTip = WindowWords.Word(panel == "history" ? "Past runs and the MO2 Changelog" : "The window's look and text size") + " (" + keys + ")" };
 			open.Click += (_, _) => a_w.ShowPanel(panel);
 			opens.Children.Add(open);
 		}
@@ -1138,8 +1144,8 @@ public static class SettingsPanel
 		s_learningStep == a_step && string.Equals(s_learningSetup, a_setup.File, StringComparison.OrdinalIgnoreCase);
 
 	static bool AskStopLearning(Window a_over) =>
-		Ask.Show(a_over, $"Stop waiting for {s_learningName}?", $"{s_learningName} is open. Its settings are kept once you save and close it there.\n\n" +
-			$"If you stop waiting, {s_learningName} stays open, but nothing it saves is kept with this setup.", "Stop waiting", "Keep waiting");
+		Ask.Show(a_over, WindowWords.F($"Stop waiting for {s_learningName}?"), WindowWords.F($"{s_learningName} is open. Its settings are kept once you save and close it there.") + "\n\n" +
+			WindowWords.F($"If you stop waiting, {s_learningName} stays open, but nothing it saves is kept with this setup."), "Stop waiting", "Keep waiting");
 
 	// The settings window is about to close: a wait for a tool opened from it would go on with nothing left to stop it, and keep
 	// the main window from closing. One still waiting for its window is stopped (nothing is lost); one whose tool is open is
@@ -1345,12 +1351,12 @@ public static class SettingsPanel
 			return;
 		}
 		var to = AppPaths.AppDataFolder;
-		if (!Ask.Show(a_w, "Keep data through updates", $"Tool Runner's data (your setups, the run history, the settings learned from your tools) moves from\n{AppPaths.Data}\nto\n{to}\n\n" +
-			    "Every copy of Tool Runner on this PC then uses it, also a new version unzipped into another folder. Run backups stay where your setups put them.\n\n" +
-			    "Tool Runner closes when the move is done; start it again.", "Move my data", "Not now")) {
+		if (!Ask.Show(a_w, "Keep data through updates", WindowWords.F($"Tool Runner's data (your setups, the run history, the settings learned from your tools) moves from\n{AppPaths.Data}\nto\n{to}") + "\n\n" +
+			    WindowWords.Word("Every copy of Tool Runner on this PC then uses it, also a new version unzipped into another folder. Run backups stay where your setups put them.") + "\n\n" +
+			    WindowWords.Word("Tool Runner closes when the move is done; start it again."), "Move my data", "Not now")) {
 			return;
 		}
-		using var hand = a_w.Working("the program's data is being moved");
+		using var hand = a_w.Working(WindowWords.Word("the program's data is being moved"));
 		// from here no setup is written, copied or started (MovingData); a change already on its way into its file lands first
 		a_vm.MovingData = true;
 		string? leftOver;
@@ -1376,7 +1382,7 @@ public static class SettingsPanel
 		}
 		// moved: the program runs on the new folder from its next start, so nothing is written here again before it closes
 		HasChanges = false;
-		Ask.Tell(a_w, "Moved", $"Your data is now in {to}." + (leftOver == null ? "" : $"\n\n{leftOver}") + " Tool Runner closes now; start it again.", "Close");
+		Ask.Tell(a_w, "Moved", WindowWords.F($"Your data is now in {to}.") + (leftOver == null ? "" : $"\n\n{leftOver}") + " " + WindowWords.Word("Tool Runner closes now; start it again."), "Close");
 		Application.Current.Shutdown();
 	}
 
@@ -1388,23 +1394,23 @@ public static class SettingsPanel
 		if (HasChanges && !Ask.Show(a_w, "Settings not saved", "You changed settings and did not press Save. Go on without saving them?", "Go on", "Keep editing")) {
 			return;
 		}
-		var keepSetups = Ask.Show(a_w, "Keep your setups?", "Your setups (which steps run, in which order, with which settings) can stay, so a new copy of the program " +
-			"picks them up again. Everything else the program keeps goes.", "Keep my setups", "Remove them too");
+		var keepSetups = Ask.Show(a_w, "Keep your setups?", WindowWords.Word("Your setups (which steps run, in which order, with which settings) can stay, so a new copy of the program " +
+			"picks them up again. Everything else the program keeps goes."), "Keep my setups", "Remove them too");
 		var plan = await Task.Run(() => DataRemoval.Make(AppPaths.Data, keepSetups));
 		if (plan.Refused != null) {
 			a_errors.Text = "Not removed: " + plan.Refused + ".";
 			return;
 		}
 		var lines = plan.Remove.Select(p => "• " + p).ToList();
-		var text = "These go to the Recycle Bin (you can bring them back from there):\n" + string.Join("\n", lines) +
-			(plan.Kept.Count > 0 ? "\n\nThese stay:\n" + string.Join("\n", plan.Kept.Select(p => "• " + p)) : "") +
-			"\n\nThe mods the tools made (the outputs) stay in Mod Organizer - they are part of your load order; remove them there if you want." +
-			"\n\nThe window closes afterwards. The program file itself stays where it is - delete it yourself when you are done.";
+		var text = WindowWords.Word("These go to the Recycle Bin (you can bring them back from there):") + "\n" + string.Join("\n", lines) +
+			(plan.Kept.Count > 0 ? "\n\n" + WindowWords.Word("These stay:") + "\n" + string.Join("\n", plan.Kept.Select(p => "• " + p)) : "") +
+			"\n\n" + WindowWords.Word("The mods the tools made (the outputs) stay in Mod Organizer - they are part of your load order; remove them there if you want.") +
+			"\n\n" + WindowWords.Word("The window closes afterwards. The program file itself stays where it is - delete it yourself when you are done.");
 		if (!Ask.Show(a_w, "Remove the program's data", text, "Send them to the Recycle Bin", "Keep everything")) {
 			return;
 		}
 		List<string> failed = [];
-		using var hand = a_w.Working("the program's data is being removed");
+		using var hand = a_w.Working(WindowWords.Word("the program's data is being removed"));
 		// the window's own watch on the runs folder is let go first: with it, Windows refuses to move the data folder
 		a_w.WatchRuns(false);
 		try {
@@ -1420,7 +1426,7 @@ public static class SettingsPanel
 		}
 		if (failed.Count > 0) {
 			a_w.WatchRuns(true);
-			a_errors.Text = "Some of it could not go to the Recycle Bin:\n" + string.Join("\n", failed);
+			a_errors.Text = WindowWords.Word("Some of it could not go to the Recycle Bin:") + "\n" + string.Join("\n", failed);
 			return;
 		}
 		HasChanges = false;

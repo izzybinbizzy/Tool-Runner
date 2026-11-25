@@ -47,11 +47,11 @@ public static class NewSetupDialog
 			System.Windows.Automation.AutomationProperties.SetName(a_edit, a_label);
 			stack.Children.Add(d);
 		}
-		Row("Mod Organizer's program (ModOrganizer.exe)", exe, browse);
-		Row("Its instance", instance);
-		Row("Profile", profile);
-		Row("Setup name", name);
-		Row("Output mod names ({output} and {profile} are filled in)", pattern);
+		Row(WindowWords.Word("Mod Organizer's program (ModOrganizer.exe)"), exe, browse);
+		Row(WindowWords.Word("Its instance"), instance);
+		Row(WindowWords.Word("Profile"), profile);
+		Row(WindowWords.Word("Setup name"), name);
+		Row(WindowWords.Word("Output mod names ({output} and {profile} are filled in)"), pattern);
 		stack.Children.Add(note);
 
 		// a step exists only for a tool Mod Organizer's list holds, so this comes before the setup is made
@@ -60,7 +60,7 @@ public static class NewSetupDialog
 		var toolRows = new StackPanel();
 		stack.Children.Add(findTools);
 		var toolsFound = new ScrollViewer { Content = toolRows, MaxHeight = 240, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 6, 0, 0) };
-		System.Windows.Automation.AutomationProperties.SetName(toolsFound, "The tools found");
+		System.Windows.Automation.AutomationProperties.SetName(toolsFound, WindowWords.Word("The tools found"));
 		stack.Children.Add(toolsFound);
 
 		// what was found belongs to the Mod Organizer it was found in: its Add button must not write to one the player has left
@@ -83,7 +83,7 @@ public static class NewSetupDialog
 			var list = new List<KeyValuePair<string, string?>>();
 			var dir = File.Exists(loaded) ? Path.GetDirectoryName(Path.GetFullPath(loaded)) : null;
 			if (dir != null && File.Exists(Path.Combine(dir, "ModOrganizer.ini"))) {
-				list.Add(new("Portable (beside Mod Organizer)", null));
+				list.Add(new(WindowWords.Word("Portable (beside Mod Organizer)"), null));
 			}
 			list.AddRange(Mo2Instance.GlobalInstances().Select(d => new KeyValuePair<string, string?>(Path.GetFileName(d), d)));
 			instance.ItemsSource = list;
@@ -101,7 +101,7 @@ public static class NewSetupDialog
 				var list = mo2.Profiles().ToList();
 				profile.ItemsSource = list;
 				profile.SelectedItem = list.Contains(mo2.SelectedProfile) ? mo2.SelectedProfile : list.FirstOrDefault();
-				note.Text = $"Found {list.Count} profile(s), {mo2.Executables.Count} executable(s); game: {mo2.GameDir}";
+				note.Text = WindowWords.F($"Found {list.Count} profile(s), {mo2.Executables.Count} executable(s); game: {mo2.GameDir}");
 				note.Foreground = Brushes2.Get("Muted");
 			} catch (Exception e) when (e is IOException or ArgumentException or UnauthorizedAccessException) {
 				note.Text = e.Message;
@@ -144,7 +144,7 @@ public static class NewSetupDialog
 		findTools.Click += async (_, _) => {
 			findTools.IsEnabled = false;
 			toolRows.Children.Clear();
-			note.Text = "Looking through your mods and the folders beside Mod Organizer ...";
+			note.Text = WindowWords.Word("Looking through your mods and the folders beside Mod Organizer ...");
 			note.Foreground = Brushes2.Get("Muted");
 			try {
 				var (exeText, inst) = (Typed(), InstanceDir());
@@ -170,25 +170,27 @@ public static class NewSetupDialog
 						line.Children.Add(page);
 					}
 					line.Children.Add(new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Brushes2.Get(r.State == ToolFinder.Found.Missing ? "Muted" : "Text"), Text = r.State switch {
-						ToolFinder.Found.Listed => $"{r.Tool.Name}: in Mod Organizer's list",
-						ToolFinder.Found.NotListed => $"{r.Tool.Name}: found, not in the list yet - {r.Binary}",
-						_ => $"{r.Tool.Name}: not found - {r.Tool.Where}",
+						ToolFinder.Found.Listed => WindowWords.F($"{r.Tool.Name}: in Mod Organizer's list"),
+						ToolFinder.Found.NotListed => WindowWords.F($"{r.Tool.Name}: found, not in the list yet - {r.Binary}"),
+						_ => WindowWords.F($"{r.Tool.Name}: not found - {r.Tool.Where}"),
 					} });
 					toolRows.Children.Add(line);
 				}
+				// (built after the window loaded: into its language like the rest of it)
+				WindowWords.Tree(toolRows);
 				var missing = rows.Count(r => r.State == ToolFinder.Found.Missing);
-				note.Text = missing == 0 ? "Every tool was found." : $"{missing} tool(s) not found. A run only needs the ones you use: a step is made for each tool the list holds.";
+				note.Text = missing == 0 ? WindowWords.Word("Every tool was found.") : WindowWords.F($"{missing} tool(s) not found. A run only needs the ones you use: a step is made for each tool the list holds.");
 				var found = rows.Count(r => r.State == ToolFinder.Found.NotListed);
 				if (found > 0) {
-					var add = new Button { Content = $"Add the {found} found tool(s) to Mod Organizer's list", Style = (Style)a_owner.FindResource("Ghost"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0) };
+					var add = new Button { Content = WindowWords.F($"Add the {found} found tool(s) to Mod Organizer's list"), Style = (Style)a_owner.FindResource("Ghost"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0) };
 					add.Click += (_, _) => {
 						try {
 							var added = ToolFinder.AddFound(Mo2Instance.Load(exeText, inst), rows);
 							add.IsEnabled = false;
 							Fill();
-							note.Text = $"Added to Mod Organizer's list: {string.Join(", ", added)}.";
+							note.Text = WindowWords.F($"Added to Mod Organizer's list: {string.Join(", ", added)}.");
 						} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or Mo2BusyException) {
-							note.Text = "Not added: " + e.Message;
+							note.Text = WindowWords.Format("Not added: {0}", e.Message);
 							note.Foreground = Brushes2.Get("Bad");
 						}
 					};
@@ -209,18 +211,18 @@ public static class NewSetupDialog
 		w.Closing += (_, e) => e.Cancel = making;
 		create.Click += async (_, _) => {
 			if (profile.SelectedItem is not string p || name.Text.Trim() == "") {
-				note.Text = "Pick Mod Organizer, a profile and a name.";
+				note.Text = WindowWords.Word("Pick Mod Organizer, a profile and a name.");
 				note.Foreground = Brushes2.Get("Bad");
 				return;
 			}
 			// (the name is a folder's name too - a run's records and backups: one no run would take is said here, not at the first run)
 			if (!Setup.PlainName(Safe(name.Text.Trim()))) {
-				note.Text = $"\"{name.Text.Trim()}\" cannot be a setup's name: Windows takes no folder of that name. Give it another one.";
+				note.Text = WindowWords.F($"\"{name.Text.Trim()}\" cannot be a setup's name: Windows takes no folder of that name. Give it another one.");
 				note.Foreground = Brushes2.Get("Bad");
 				return;
 			}
 			var file = Path.Combine(AppPaths.Setups, Safe(name.Text.Trim()) + ".json");
-			if (File.Exists(file) && !Ask.Show(w, "Replace that setup?", $"A setup called {name.Text.Trim()} exists. Replace it?", "Replace", "Keep it")) {
+			if (File.Exists(file) && !Ask.Show(w, "Replace that setup?", WindowWords.F($"A setup called {name.Text.Trim()} exists. Replace it?"), "Replace", "Keep it")) {
 				return;
 			}
 			// it looks through every mod (thousands on a big list): off the window's thread, the window says so
@@ -228,14 +230,14 @@ public static class NewSetupDialog
 			create.IsEnabled = false;
 			cancel.IsEnabled = false;
 			making = true;
-			note.Text = "Looking through your mods for the tools ...";
+			note.Text = WindowWords.Word("Looking through your mods for the tools ...");
 			note.Foreground = Brushes2.Get("Muted");
 			try {
 				var s = await Task.Run(() => SetupMaker.Make(exeText, inst, p, setupName, AppPaths.Data, pat));
 				s.Save(file);
 				made = file;
 			} catch (Exception e) {
-				note.Text = "Not made: " + e.Message;
+				note.Text = WindowWords.Format("Not made: {0}", e.Message);
 				note.Foreground = Brushes2.Get("Bad");
 			} finally {
 				making = false;

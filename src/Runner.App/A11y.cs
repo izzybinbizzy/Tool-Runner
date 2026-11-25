@@ -38,20 +38,20 @@ public static class A11y
 	{
 		var parts = new List<string>();
 		if (!a_on) {
-			parts.Add("switched off");
+			parts.Add(WindowWords.Word("switched off"));
 		} else if (a_leftOut) {
-			parts.Add("left out for a new game");
+			parts.Add(WindowWords.Word("left out for a new game"));
 		} else if (a_usesOld) {
-			parts.Add("not run, its old output is used");
+			parts.Add(WindowWords.Word("not run, its old output is used"));
 		}
 		parts.Add(a_state switch {
-			StepState.Running => "running" + (a_elapsed == "" ? "" : " for " + a_elapsed),
-			StepState.Done => "done" + (a_elapsed == "" ? "" : " in " + a_elapsed),
-			StepState.Failed => "failed",
-			StepState.Stopped => "stopped",
-			StepState.Skipped => "skipped",
-			StepState.Pending => "waiting its turn",
-			_ => a_usual == "" ? "" : "usually takes " + a_usual,
+			StepState.Running => a_elapsed == "" ? WindowWords.Word("running") : WindowWords.Format("running for {0}", a_elapsed),
+			StepState.Done => a_elapsed == "" ? WindowWords.Word("done") : WindowWords.Format("done in {0}", a_elapsed),
+			StepState.Failed => WindowWords.Word("failed"),
+			StepState.Stopped => WindowWords.Word("stopped"),
+			StepState.Skipped => WindowWords.Word("skipped"),
+			StepState.Pending => WindowWords.Word("waiting its turn"),
+			_ => a_usual == "" ? "" : WindowWords.Format("usually takes {0}", a_usual),
 		});
 		if (a_note != "") {
 			parts.Add(a_note);

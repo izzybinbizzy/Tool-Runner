@@ -384,8 +384,8 @@ public partial class MainWindow : Window
 			} else if (look == null) {
 				Ask.Tell(this, "No old output to use", whyNot ?? "", "OK");
 			} else if (!look.Usable) {
-				Ask.Tell(this, $"{row.Name}'s old output cannot be used", string.Join("\n\n", OldOutput.Warning(look, _vm.Setup?.Profile ?? "")), "OK");
-			} else if (Ask.Show(this, $"Use {row.Name}'s old output?", _vm.OldOutputText(look), "Use the old output", "Build it again")) {
+				Ask.Tell(this, WindowWords.F($"{row.Name}'s old output cannot be used"), string.Join("\n\n", OldOutput.Warning(look, _vm.Setup?.Profile ?? "")), "OK");
+			} else if (Ask.Show(this, WindowWords.F($"Use {row.Name}'s old output?"), _vm.OldOutputText(look), "Use the old output", "Build it again")) {
 				await _vm.SetUseOld(row, true);
 			}
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) {
@@ -445,8 +445,8 @@ public partial class MainWindow : Window
 		}
 		var warn = _vm.WarningsIfMovedTo(a_row, a_to);
 		if (warn.Count > 0 && !Ask.Show(this, "Out of the recommended order",
-			    "Moving this step breaks the order the tools' own instructions give. Things could go wrong if they run out of order:\n\n• " +
-			    string.Join("\n• ", warn) + "\n\nMove it anyway?", "Move anyway", "Keep the order")) {
+			    WindowWords.Word("Moving this step breaks the order the tools' own instructions give. Things could go wrong if they run out of order:") + "\n\n• " +
+			    string.Join("\n• ", warn) + "\n\n" + WindowWords.Word("Move it anyway?"), "Move anyway", "Keep the order")) {
 			return;
 		}
 		await _vm.MoveTo(a_row, a_to);
@@ -739,7 +739,7 @@ public partial class MainWindow : Window
 		void FindNext()
 		{
 			var q = find.Text;
-			Reveal(LogSearch.Next(box.Text, q, box.FoundAt + 1), q.Length, q == "" ? "" : "Not in the log.");
+			Reveal(LogSearch.Next(box.Text, q, box.FoundAt + 1), q.Length, q == "" ? "" : WindowWords.Word("Not in the log."));
 		}
 		next.Click += (_, _) => FindNext();
 		find.KeyDown += (_, e) => {
@@ -753,7 +753,7 @@ public partial class MainWindow : Window
 		{
 			var at = LogSearch.FirstProblem(box.Text);
 			var end = at < 0 ? -1 : box.Text.IndexOf('\n', at);
-			Reveal(at, at < 0 ? 0 : (end < 0 ? box.Text.Length : end) - at, "No line of this log is marked as a problem.");
+			Reveal(at, at < 0 ? 0 : (end < 0 ? box.Text.Length : end) - at, WindowWords.Word("No line of this log is marked as a problem."));
 		}
 		problem.Click += (_, _) => {
 			// the simple log marks no line (only the detailed one says "!" and "!!!"): the detailed log is shown first, and the
@@ -1023,11 +1023,11 @@ public partial class MainWindow : Window
 		}
 		void Show(IEnumerable<Mo2Changes.Change> a_shown) =>
 			rows = a_shown.Reverse().Select(r => new ChangeRow(r.Mod, r.What,
-				$"{r.When.ToString("MMM d, HH:mm", InvariantCulture)}   ·   {(r.Profiles.Count == 0 ? "Mod Organizer's mods" : string.Join(", ", r.Profiles))}   ·   {r.Who}")).ToList();
+				$"{r.When.ToString("MMM d, HH:mm", InvariantCulture)}   ·   {(r.Profiles.Count == 0 ? WindowWords.Word("Mod Organizer's mods") : string.Join(", ", r.Profiles))}   ·   {r.Who}")).ToList();
 		async void Load(bool a_look)
 		{
 			look.IsEnabled = false;
-			note.Text = a_look ? "Looking at Mod Organizer ..." : "Reading ...";
+			note.Text = WindowWords.Word(a_look ? "Looking at Mod Organizer ..." : "Reading ...");
 			try {
 				var (shown, since, found) = await Task.Run(() => {
 					var mo2 = Mo2Instance.Load(setup!.Mo2Exe, setup.Mo2Instance);
@@ -1038,13 +1038,13 @@ public partial class MainWindow : Window
 					return (Mo2Changes.Shown(Mo2Changes.Read(dir), setup.ChangesHideProfiles, setup.ChangesHideMods), Mo2Changes.WatchedSince(dir), n);
 				});
 				Show(shown);
-				note.Text = (since == null ? "Not watched yet: the first look starts it." : $"Watched since {since.Value.ToString("MMM d, yyyy HH:mm", InvariantCulture)}.") +
-					" A change made outside the runner shows with the time it was noticed - when this view opens, on Look now, or when a run starts." +
-					(found > 0 ? $" {found} new." : found == 0 ? " Nothing new." : found == null ? " No new look while a run is going or did not finish." : "") +
-					(rows.Count == 0 && since != null ? " No changes noted yet." : "");
+				note.Text = (since == null ? WindowWords.Word("Not watched yet: the first look starts it.") : WindowWords.Format("Watched since {0}.", since.Value.ToString("MMM d, yyyy HH:mm", InvariantCulture))) +
+					WindowWords.Word(" A change made outside the runner shows with the time it was noticed - when this view opens, on Look now, or when a run starts.") +
+					(found > 0 ? WindowWords.Format(" {0} new.", found) : found == 0 ? WindowWords.Word(" Nothing new.") : found == null ? WindowWords.Word(" No new look while a run is going or did not finish.") : "") +
+					(rows.Count == 0 && since != null ? WindowWords.Word(" No changes noted yet.") : "");
 				Fill();
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) {
-				note.Text = "Could not read Mod Organizer: " + e.Message;
+				note.Text = WindowWords.Format("Could not read Mod Organizer: {0}", e.Message);
 			} finally {
 				look.IsEnabled = a_demo == null;
 			}
@@ -1097,9 +1097,9 @@ public partial class MainWindow : Window
 			report.IsEnabled = false;
 			try {
 				var zip = await Task.Run(() => BugReport.Make(AppPaths.Data, row == null ? null : Journal.Load(row.Folder), Path.Combine(AppPaths.Data, "Bug reports"), AppVersion));
-				if (Ask.Show(Over("history"), "Bug report made", $"It is ready: {Path.GetFileName(zip)}\n\nIt holds {(row == null ? "the program's own notes" : "this run's logs and record")}, the setup it ran and the " +
-				    "versions of Windows, Mod Organizer, the game and each tool. Your Windows user name and your PC's name are masked. Nothing was sent anywhere.\n\n" +
-				    "To report the bug: open an issue on the program's GitHub page, say what happened and what you expected, and attach this zip.",
+				if (Ask.Show(Over("history"), "Bug report made", WindowWords.F($"It is ready: {Path.GetFileName(zip)}") + "\n\n" + WindowWords.Word(row == null ? "It holds the program's own notes, the setup it ran and the versions of Windows, Mod Organizer, the game and each tool." : "It holds this run's logs and record, the setup it ran and the versions of Windows, Mod Organizer, the game and each tool.") + " " +
+				    WindowWords.Word("Your Windows user name and your PC's name are masked. Nothing was sent anywhere.") + "\n\n" +
+				    WindowWords.Word("To report the bug: open an issue on the program's GitHub page, say what happened and what you expected, and attach this zip."),
 				    "Show the zip and open the issue page", "Close")) {
 					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{zip}\"") { UseShellExecute = true })?.Dispose();
 					if (MainViewModel.OpenPage(BugReport.Issues) is { } why) {
@@ -1132,8 +1132,8 @@ public partial class MainWindow : Window
 					_vm.Say("It cannot be undone: " + e.Message, "bad");
 					return;
 				}
-				if (!Ask.Show(Over("history"), "Undo this run?", "Each output goes back to what it was before this run, and your mod and plugin lists too. Mod Organizer closes for it. The mods you " +
-					"ticked, unticked or installed since stay as you left them; a change of order goes back with the lists. This run's outputs stay in its backup.", "Undo the run", "Keep it")) {
+				if (!Ask.Show(Over("history"), "Undo this run?", WindowWords.Word("Each output goes back to what it was before this run, and your mod and plugin lists too. Mod Organizer closes for it. The mods you " +
+					"ticked, unticked or installed since stay as you left them; a change of order goes back with the lists. This run's outputs stay in its backup."), "Undo the run", "Keep it")) {
 					return;
 				}
 				await _vm.Undo(row.Folder).ConfigureAwait(true);
@@ -1149,7 +1149,7 @@ public partial class MainWindow : Window
 			if (list.SelectedItem is HistoryRow r) {
 				var p = MainViewModel.LogFile(r.Folder, _vm.DetailedLog);
 				try {
-					log.Text = File.Exists(p) ? Tail(p, 150_000) : "(no log)";
+					log.Text = File.Exists(p) ? Tail(p, 150_000) : WindowWords.Word("(no log)");
 					log.ScrollToEnd();
 				} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 					log.Text = e.Message;
@@ -1164,7 +1164,7 @@ public partial class MainWindow : Window
 			}
 		};
 		if (_vm.History.Count == 0) {
-			log.Text = "No runs of this setup yet.";
+			log.Text = WindowWords.Word("No runs of this setup yet.");
 		}
 		// an empty list says why it is empty (a blank box reads as broken)
 		var empty = new TextBlock { Text = "No runs of this setup yet - its runs show here, newest first, each with its log.", Style = (Style)FindResource("MutedText"),
@@ -1198,7 +1198,7 @@ public partial class MainWindow : Window
 		var bytes = new byte[fs.Length - start];
 		fs.ReadExactly(bytes);
 		var text = System.Text.Encoding.UTF8.GetString(bytes);
-		return start == 0 ? text : "(the start of this log is in its folder)\n" + text[(text.IndexOf('\n') + 1)..];
+		return start == 0 ? text : WindowWords.Word("(the start of this log is in its folder)") + "\n" + text[(text.IndexOf('\n') + 1)..];
 	}
 
 	static void AutomationPropertiesName(DependencyObject a_o, string a_name) => System.Windows.Automation.AutomationProperties.SetName(a_o, a_name);
@@ -1257,17 +1257,17 @@ public partial class MainWindow : Window
 		}
 		UiState.Set("version.seen", AppVersion);
 		if (lines.Count > 0) {
-			Ask.Tell(this, $"New in {Brand.Name} {AppVersion}", $"You had version {before} before.\n\n" + string.Join("\n", lines), "Close");
+			Ask.Tell(this, WindowWords.F($"New in {Brand.Name} {AppVersion}"), WindowWords.F($"You had version {before} before.") + "\n\n" + string.Join("\n", lines), "Close");
 		}
 	}
 
 	// what the box before an install says: where the new version comes from, where it goes, and what is never touched
 	static string InstallText(ProgramUpdate.Release a_release, string a_folder) =>
-		$"{Brand.Name} {a_release.Version} is taken from its GitHub release{(a_release.Size > 0 ? $" ({a_release.Size / 1024.0 / 1024:0.0} MB)" : "")}, checked, " +
-		$"and put in place of this version in:\n{a_folder}\n\n" +
-		"Your setups, run records and backups are not touched - they stay in the data folder.\n\n" +
-		"This version's files are set aside beside the new ones until the next start, and every step is taken back if one fails. " +
-		"The program then closes and starts again by itself.";
+		(a_release.Size > 0 ? WindowWords.F($"{Brand.Name} {a_release.Version} ({a_release.Size / 1024.0 / 1024:0.0} MB) is taken from its GitHub release, checked, and put in place of this version in:")
+			: WindowWords.F($"{Brand.Name} {a_release.Version} is taken from its GitHub release, checked, and put in place of this version in:")) + $"\n{a_folder}\n\n" +
+		WindowWords.Word("Your setups, run records and backups are not touched - they stay in the data folder.") + "\n\n" +
+		WindowWords.Word("This version's files are set aside beside the new ones until the next start, and every step is taken back if one fails. " +
+		"The program then closes and starts again by itself.");
 
 	// the off-screen pictures: the banner of a made-up newer version, and the box before its install
 	public void DemoNewVersion(bool a_show) => _vm.DemoNewVersion(a_show ? "1.1" : "");
@@ -1314,7 +1314,7 @@ public partial class MainWindow : Window
 				return;
 			}
 			var folder = Path.GetDirectoryName(AppPaths.Exe) ?? AppContext.BaseDirectory;
-			if (!Ask.Show(this, $"Install {Brand.Name} {release.Version}?", InstallText(release, folder), "Download and install", "Not now")) {
+			if (!Ask.Show(this, WindowWords.F($"Install {Brand.Name} {release.Version}?"), InstallText(release, folder), "Download and install", "Not now")) {
 				return;
 			}
 			// settings typed and not saved are asked about now, before anything is taken down (the program closes at the end);
@@ -1327,7 +1327,7 @@ public partial class MainWindow : Window
 			// The window stays until the new files are in place AND the restart is decided (WorkInHand): closed half way, the program
 			// would stand half replaced, and a close asked for meanwhile must not cut off the start of the new version. A close
 			// asked for while it went happens when the hand is let go - at once on a failure, after the decision on a success
-			var hand = Working($"{Brand.Name} {release.Version} is being installed");
+			var hand = Working(WindowWords.F($"{Brand.Name} {release.Version} is being installed"));
 			var restarted = false;
 			try {
 				try {

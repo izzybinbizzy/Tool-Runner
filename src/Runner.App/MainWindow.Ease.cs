@@ -100,14 +100,14 @@ public partial class MainWindow
 			_vm.Say(_vm.WhyNotWriting("copied")!, "bad");
 			return;
 		}
-		var name = Ask.Input(this, "Copy this setup", $"A new setup with the steps and settings of \"{item.Name}\", and the settings its tools learned. Nothing of \"{item.Name}\" changes. The copy's name:",
+		var name = Ask.Input(this, "Copy this setup", WindowWords.F($"A new setup with the steps and settings of \"{item.Name}\", and the settings its tools learned. Nothing of \"{item.Name}\" changes. The copy's name:"),
 			SetupFiles.FreeCopyName(item.File), "Make the copy", n => SetupFiles.BadName(AppPaths.Setups, n));
 		if (name == null) {
 			return;
 		}
 		_copying = true;
 		// the window's own work: closing waits for it, so a copy is never cut off half made
-		using var hold = _vm.Working("a setup is being copied");
+		using var hold = _vm.Working(WindowWords.Word("a setup is being copied"));
 		try {
 			var from = item.File;
 			var made = await Task.Run(() => SetupFiles.Duplicate(from, name)).ConfigureAwait(true);
@@ -143,14 +143,14 @@ public partial class MainWindow
 		if (_panels.TryGetValue("settings", out var open)) {
 			open.Close();
 		}
-		var name = Ask.Input(this, "Rename this setup", $"The new name of \"{item.Name}\". Its runs and their history, and the settings its tools learned, go with it.",
+		var name = Ask.Input(this, "Rename this setup", WindowWords.F($"The new name of \"{item.Name}\". Its runs and their history, and the settings its tools learned, go with it."),
 			item.Name, "Rename", n => SetupFiles.BadName(AppPaths.Setups, n, item.File));
 		if (name == null || name.Trim() == item.Name) {
 			return;
 		}
 		_renaming = true;
 		// the window's own work: closing waits for it, so a rename is never cut off between its files
-		using var hold = _vm.Working("a setup is being renamed");
+		using var hold = _vm.Working(WindowWords.Word("a setup is being renamed"));
 		// from here no change or save of the setup starts (Renaming), until the renamed one is shown
 		_vm.Renaming = true;
 		try {

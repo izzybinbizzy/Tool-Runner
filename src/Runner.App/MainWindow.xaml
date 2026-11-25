@@ -177,9 +177,9 @@
                 <TextBlock x:Name="num" Grid.Column="1" Text="{Binding Number}" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"/>
                 <StackPanel Grid.Column="2" VerticalAlignment="Center">
                   <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
-                  <TextBlock Text="left out: a new game has no save to keep clean" Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                  <TextBlock Text="{x:Static local:WindowWords.RowLeftOut}" Style="{StaticResource MutedText}" TextWrapping="Wrap"
                              Visibility="{Binding LeftOut, Converter={StaticResource Vis}}"/>
-                  <TextBlock x:Name="old" Text="not run: its old output is used" Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                  <TextBlock x:Name="old" Text="{x:Static local:WindowWords.RowUsesOld}" Style="{StaticResource MutedText}" TextWrapping="Wrap"
                              Foreground="{DynamicResource Warn}"
                              Visibility="{Binding UsesOld, Converter={StaticResource Vis}}"/>
                   <TextBlock Text="{Binding Needs}" Style="{StaticResource MutedText}" TextWrapping="Wrap" Foreground="{DynamicResource Warn}"
@@ -193,7 +193,7 @@
                 </StackPanel>
                 <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
                   <TextBlock x:Name="elapsed" Text="{Binding Elapsed}" Foreground="{DynamicResource AccentLight}" Margin="0,0,8,0"/>
-                  <TextBlock x:Name="usual" Text="{Binding Usual}" Style="{StaticResource MutedText}" ToolTip="its usual time"/>
+                  <TextBlock x:Name="usual" Text="{Binding Usual}" Style="{StaticResource MutedText}" ToolTip="{x:Static local:WindowWords.RowUsualTip}"/>
                 </StackPanel>
                 <TextBlock x:Name="glyph" Grid.Column="4" Text="{Binding Glyph}" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="{DynamicResource SizeBody}"
                            Foreground="{Binding State, Converter={StaticResource StateBrush}}"/>
