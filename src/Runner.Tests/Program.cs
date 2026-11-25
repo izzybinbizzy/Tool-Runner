@@ -11618,6 +11618,47 @@ public static class Program
 		Check(!Due(1e300) && !Due(double.NaN) && !Due(0) && !Due(6) && Due(5) && Due(1), "a reminder every 1e300 minutes is never due, and no error");
 	}
 
+	// a setup file from another player: brought in with nothing left that starts a program here, under a name that is free
+	static void T_ASetupFromElsewhereIsBroughtInUnderAFreeName()
+	{
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "bring in " + Guid.NewGuid().ToString("N")[..8]);
+		Directory.CreateDirectory(dir);
+		try {
+			var from = Path.Combine(dir, "Their Setup (shared).json");
+			File.WriteAllText(from, """
+				{ "name": "Their Setup", "mo2": { "exe": "C:\\Their\\ModOrganizer.exe", "profile": "Default" }, "backups": "C:\\Their\\Backups", "beforeRun": "start.bat",
+				  "steps": [ { "step": "texgen", "settings": { "executable": "TexGen", "exe": "C:\\Their\\TexGenx64.exe", "output_mod": "TexGen Output" } } ] }
+				""");
+			var setups = Path.Combine(dir, "Setups");
+			var first = SetupShare.BringIn(from, null, setups);
+			Check(first.File == Path.Combine(setups, "Their Setup.json") && File.Exists(first.File), "brought in under its own name: " + string.Join(" | ", first.Lines));
+			var read = Setup.Load(first.File!);
+			Check(read.Mo2Exe == "" && read.BeforeRun.Count == 0 && read.BackupDir == "" && Setup.Str(read.Steps[0].Settings, "exe") == null, "nothing in it starts a program or names a path of the other PC");
+			Equal("TexGen Output", Setup.Str(read.Steps[0].Settings, "output_mod"), "what is no path and no program stays");
+			Check(first.Lines.Any(l => l.Contains("its 1 own command(s)", StringComparison.Ordinal)) && first.Lines.Any(l => l.StartsWith("taken out", StringComparison.Ordinal)),
+				"what went is said: " + string.Join(" | ", first.Lines));
+			var again = SetupShare.BringIn(from, null, setups);
+			Check(again.File == null && !again.NoName && again.Lines[0].StartsWith("a setup with that name exists", StringComparison.Ordinal), "a name that is taken is said, and nothing is written");
+			var free = SetupShare.BringIn(from, null, setups, true);
+			Equal<string?>(Path.Combine(setups, "Their Setup (2).json"), free.File, "the window brings it in under the next free name");
+			Equal("Their Setup (2)", Setup.Load(free.File!).Name, "... which is its name inside too");
+			Equal<string?>(Path.Combine(setups, "Their Setup (3).json"), SetupShare.BringIn(from, null, setups, true).File, "and the one after it");
+			Equal<string?>(Path.Combine(setups, "Mine.json"), SetupShare.BringIn(from, "Mine", setups).File, "a name given for it");
+			var store = SetupShare.BringIn(from, "output sizes", setups);
+			Check(store.File == null && store.NoName && !File.Exists(Path.Combine(setups, "output sizes.json")), "the name of one of the program's own files is no setup's name");
+			Equal<string?>(Path.Combine(setups, "output sizes (2).json"), SetupShare.BringIn(from, "output sizes", setups, true).File, "... the window gives it the next free one");
+			var none = SetupShare.BringIn(from, "..", setups);
+			Check(none.File == null && none.NoName, "a name with nothing plain in it");
+			File.WriteAllText(from, """{ "name": "..", "mo2": {}, "steps": [] }""");
+			Equal<string?>(Path.Combine(setups, "Their Setup (shared).json"), SetupShare.BringIn(from, null, setups).File, "a file whose own name is none is kept under its file's name");
+			File.WriteAllText(from, """{ "steps": "none" }""");
+			Check(SetupShare.BringIn(from, null, setups).Lines[0].StartsWith("not a setup file", StringComparison.Ordinal), "a file that is no setup");
+			Equal("Example", ToolRunner.App.Cli.ImportName("Example. "), "the command line's name for it is the same one");
+		} finally {
+			Directory.Delete(dir, true);
+		}
+	}
+
 	// what the command line prints once nobody reads it any more is dropped: never an error, never another exit code
 	static void T_PrintingToAReaderThatIsGoneIsNoError()
 	{

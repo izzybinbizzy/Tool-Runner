@@ -7,9 +7,11 @@ namespace ToolRunner.App;
 // A new setup: Mod Organizer's program, its profile, a name - the steps are found from MO2's Executables list.
 public static class NewSetupDialog
 {
-	public static string? Run(Window a_owner)
+	// a_imported: what an import said (what it took out of the file); null when the setup was made here
+	public static string? Run(Window a_owner, out IReadOnlyList<string>? a_imported)
 	{
 		string? made = null;
+		List<string>? imported = null;
 		// its sizes held to the screen (a least size above the screen's would win over the size it is given)
 		var room = SystemParameters.WorkArea;
 		var w = new Window {
@@ -206,6 +208,9 @@ public static class NewSetupDialog
 
 		var create = new Button { Content = "_Make the setup", Style = (Style)a_owner.FindResource("Primary"), Margin = new Thickness(0, 0, 10, 0), IsDefault = true };
 		var cancel = new Button { Content = "Cancel", Style = (Style)a_owner.FindResource("Ghost"), IsCancel = true };
+		// a setup another player shared: brought in under its own name, with everything taken out that would start something here
+		var import = new Button { Content = "Import a setup file ...", Style = (Style)a_owner.FindResource("Ghost"), Margin = new Thickness(10, 0, 0, 0),
+			ToolTip = "Imports a setup file another player shared with you. Everything in it that would start a program on this PC is taken out: afterwards you set your own Mod Organizer, profile and folders in Settings." };
 		// while the setup is being made the box stays open: closed then, the setup would be written all the same and never shown
 		var making = false;
 		w.Closing += (_, e) => e.Cancel = making;
@@ -222,6 +227,13 @@ public static class NewSetupDialog
 				return;
 			}
 			var file = Path.Combine(AppPaths.Setups, Safe(name.Text.Trim()) + ".json");
+			// (the program keeps files of its own beside the setups: a setup under one of their names was never listed, and
+			// was written over when a step next finished)
+			if (Setup.IsStore(file)) {
+				note.Text = WindowWords.Format("\"{0}\" is the name of one of the program's own files. Give the setup another name.", name.Text.Trim());
+				note.Foreground = Brushes2.Get("Bad");
+				return;
+			}
 			// (a run started elsewhere while this box stood open reads the setup of that name)
 			if (File.Exists(file) && Engine.Active() is { } going && string.Equals(going.SetupFile, file, StringComparison.OrdinalIgnoreCase)) {
 				note.Text = WindowWords.Word("A run is using the setup of that name right now. Give this one another name, or wait for the run to end.");
@@ -235,6 +247,7 @@ public static class NewSetupDialog
 			var (exeText, inst, setupName, pat) = (Typed(), InstanceDir(), Safe(name.Text.Trim()), pattern.Text.Trim() == "" ? "{output} - {profile}" : pattern.Text.Trim());
 			create.IsEnabled = false;
 			cancel.IsEnabled = false;
+			import.IsEnabled = false;
 			making = true;
 			note.Text = WindowWords.Word("Looking through your mods for the tools ...");
 			note.Foreground = Brushes2.Get("Muted");
@@ -253,6 +266,40 @@ public static class NewSetupDialog
 				making = false;
 				create.IsEnabled = true;
 				cancel.IsEnabled = true;
+				import.IsEnabled = true;
+			}
+			if (made != null) {
+				w.Close();
+			}
+		};
+		import.Click += async (_, _) => {
+			var d = new OpenFileDialog { Filter = WindowWords.Word("Setup files") + "|*.json", Title = WindowWords.Word("A setup file to import") };
+			if (d.ShowDialog(w) != true) {
+				return;
+			}
+			var from = d.FileName;
+			create.IsEnabled = false;
+			cancel.IsEnabled = false;
+			import.IsEnabled = false;
+			making = true;
+			try {
+				// (its own name; one that is taken gets a number after it - nothing of the player's is ever written over)
+				var got = await Task.Run(() => SetupShare.BringIn(from, null, AppPaths.Setups, true));
+				if (got.File == null) {
+					note.Text = WindowWords.Format("Not imported: {0}", string.Join(" ", got.Lines));
+					note.Foreground = Brushes2.Get("Bad");
+				} else {
+					made = got.File;
+					imported = got.Lines;
+				}
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or InvalidDataException or System.Text.Json.JsonException) {
+				note.Text = WindowWords.Format("Not imported: {0}", e.Message);
+				note.Foreground = Brushes2.Get("Bad");
+			} finally {
+				making = false;
+				create.IsEnabled = true;
+				cancel.IsEnabled = true;
+				import.IsEnabled = true;
 			}
 			if (made != null) {
 				w.Close();
@@ -261,6 +308,7 @@ public static class NewSetupDialog
 		var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 18, 0, 0) };
 		bar.Children.Add(create);
 		bar.Children.Add(cancel);
+		bar.Children.Add(import);
 		stack.Children.Add(bar);
 		// the box can be sized; its content scrolls when it is made smaller than it needs (named for a screen reader, which
 		// meets the scrolling region as a pane of its own)
@@ -268,6 +316,7 @@ public static class NewSetupDialog
 		System.Windows.Automation.AutomationProperties.SetName(fields, "New setup fields");
 		w.Content = fields;
 		w.ShowDialog();
+		a_imported = imported;
 		return made;
 	}
 

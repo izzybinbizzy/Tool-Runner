@@ -138,4 +138,66 @@ public static partial class SetupShare
 		Files.WriteAtomic(file, Setup.TextOf(r.Setup));
 		return (file, r.Removed);
 	}
+
+	// What bringing a setup in came to. File: where it was written (null: it was not brought in); Lines: what to tell the
+	// player; NoName: the name it was to take is no setup's name
+	public sealed record Brought(string? File, List<string> Lines, bool NoName = false);
+
+	// The name a setup from elsewhere is kept under. It becomes a file name in the Setups folder and the name of its run
+	// folders: no folder parts, no characters Windows refuses, no dot or space at its end (Windows drops those from a folder's
+	// name). What is left passes the test a setup's name must pass before a run; null when nothing plain is left
+	public static string? PlainNameOf(string a_given)
+	{
+		var name = string.Concat(Path.GetFileName(a_given).Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '-' : c)).Trim().TrimEnd('.', ' ');
+		return Setup.PlainName(name) ? name : null;
+	}
+
+	// A setup file from elsewhere written into a_setups under a_name (its own name when none is given, its file's when that
+	// is no name), with everything taken out that would start something on this PC: its commands, every program it names,
+	// every path of the PC it came from, every add-on approval. a_freeName: a name that is taken gets a number after it
+	// ("Name (2)") - the window, which asks for no name; else that is said and nothing is written
+	public static Brought BringIn(string a_file, string? a_name, string a_setups, bool a_freeName = false)
+	{
+		var s = Setup.Load(Path.GetFullPath(a_file));
+		if (s.Root["steps"] is not JsonArray || s.Root["mo2"] is not JsonObject) {
+			return new(null, ["not a setup file (no steps list, no Mod Organizer): " + a_file]);
+		}
+		if ((PlainNameOf(a_name ?? s.Name) ?? (a_name == null ? PlainNameOf(Path.GetFileNameWithoutExtension(a_file)) : null)) is not { } given) {
+			return new(null, ["the setup's name is not a plain name"], true);
+		}
+		var name = given;
+		var dst = Path.Combine(a_setups, name + ".json");
+		for (var n = 2; a_freeName && (File.Exists(dst) || Setup.IsStore(dst)); ++n) {
+			name = $"{given} ({n.ToString(InvariantCulture)})";
+			dst = Path.Combine(a_setups, name + ".json");
+		}
+		// (the program keeps files of its own beside the setups: a setup under one of their names was never listed, and was
+		// written over when a step next finished)
+		if (Setup.IsStore(dst)) {
+			return new(null, [$"\"{name}\" is the name of one of the program's own files"], true);
+		}
+		if (File.Exists(dst)) {
+			return new(null, ["a setup with that name exists: " + dst]);
+		}
+		s.Root["name"] = name;
+		// a file from elsewhere: what it gives as a mod's name must be one, and it brings no command of its own to run here
+		var wrong = s.ModNames().Where(m => !Setup.PlainName(m.Name)).Select(m => $"{m.Where}: {m.Name}").Distinct().ToList();
+		if (wrong.Count > 0) {
+			return new(null, ["not brought in - these are not mod names (a plain folder name each): " + string.Join("; ", wrong.Take(8))]);
+		}
+		var commands = s.TakeOutCommands();
+		var programs = s.TakeOutWhatStartsPrograms();
+		programs.AddRange(TakeOutPaths(s.Root));
+		Directory.CreateDirectory(a_setups);
+		s.Save(dst);
+		var lines = new List<string> { "setup written: " + dst };
+		if (commands > 0) {
+			lines.Add($"its {commands} own command(s) to run before or after a run were taken out - a setup from elsewhere runs no command on this PC; add your own in Settings");
+		}
+		if (programs.Count > 0) {
+			// a setup from elsewhere starts no program the player did not point it at, and allows no add-on for them
+			lines.Add("taken out - set your own in Settings: " + string.Join("; ", programs));
+		}
+		return new(dst, lines);
+	}
 }

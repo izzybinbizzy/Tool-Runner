@@ -445,7 +445,7 @@ public static class SettingsPanel
 				var (file, gone) = await Task.Run(() => SetupShare.Write(Setup.Parse(text, source), Path.Combine(AppPaths.Data, "Shared setups"), MainWindow.AppVersion))
 					.ConfigureAwait(true);
 				if (Ask.Show(a_w, "Shared copy made", WindowWords.F($"It is ready: {Path.GetFileName(file)}") + "\n\n" + WindowWords.Word("What the other player sets themselves:") + "\n" +
-				    (gone.Count == 0 ? WindowWords.Word("nothing") : string.Join("\n", gone.Select(g => "- " + g))) + "\n\n" + WindowWords.Word("They bring it in with the import command (see the readme)."),
+				    (gone.Count == 0 ? WindowWords.Word("nothing") : string.Join("\n", gone.Select(g => "- " + g))) + "\n\n" + WindowWords.Word("They bring it in with New setup > Import a setup file."),
 				    "Show the file", "Close")) {
 					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{file}\"") { UseShellExecute = true })?.Dispose();
 				}

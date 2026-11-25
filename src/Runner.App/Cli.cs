@@ -547,51 +547,22 @@ public static class Cli
 		return r.State == RunState.Restored ? 0 : 1;
 	}
 
-	// The name a setup from elsewhere is kept under. It becomes a file name in the Setups folder and the name of its run
-	// folders: no folder parts, no characters Windows refuses, no dot or space at its end (Windows drops those from a folder's
-	// name). What is left passes the test a setup's name must pass before a run; null when nothing plain is left
-	public static string? ImportName(string a_given)
-	{
-		var name = string.Concat(Path.GetFileName(a_given).Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '-' : c)).Trim().TrimEnd('.', ' ');
-		return Setup.PlainName(name) ? name : null;
-	}
+	// the name a setup from elsewhere is kept under (SetupShare.PlainNameOf)
+	public static string? ImportName(string a_given) => SetupShare.PlainNameOf(a_given);
 
 	// a setup file from elsewhere brought into the Setups folder: import --file <setup json> [--name <setup name>]
+	// (the window does the same from New setup > Import a setup file: SetupShare.BringIn)
 	static int Import(string[] a_args)
 	{
 		var file = Opt(a_args, "--file") ?? throw new ArgumentException("--file <setup file> is needed");
-		var s = Setup.Load(Path.GetFullPath(file));
-		if (s.Root["steps"] is not System.Text.Json.Nodes.JsonArray || s.Root["mo2"] is not System.Text.Json.Nodes.JsonObject) {
-			Console.WriteLine("not a setup file (no steps list, no Mod Organizer): " + file);
-			return 1;
+		var got = SetupShare.BringIn(file, Opt(a_args, "--name"), AppPaths.Setups);
+		if (got.NoName) {
+			throw new ArgumentException(got.Lines[0] + ": give it a name with --name <setup name>");
 		}
-		var name = ImportName(Opt(a_args, "--name") ?? s.Name) ?? throw new ArgumentException("the setup needs a plain name - give it one with --name <setup name>");
-		s.Root["name"] = name;
-		var dst = Path.Combine(AppPaths.Setups, name + ".json");
-		if (File.Exists(dst)) {
-			Console.WriteLine("a setup with that name exists: " + dst);
-			return 1;
+		foreach (var line in got.Lines) {
+			Console.WriteLine(line);
 		}
-		// a file from elsewhere: what it gives as a mod's name must be one, and it brings no command of its own to run here
-		var wrong = s.ModNames().Where(m => !Setup.PlainName(m.Name)).Select(m => $"{m.Where}: {m.Name}").Distinct().ToList();
-		if (wrong.Count > 0) {
-			Console.WriteLine("not brought in - these are not mod names (a plain folder name each): " + string.Join("; ", wrong.Take(8)));
-			return 1;
-		}
-		var commands = s.TakeOutCommands();
-		var programs = s.TakeOutWhatStartsPrograms();
-		programs.AddRange(SetupShare.TakeOutPaths(s.Root));
-		Directory.CreateDirectory(AppPaths.Setups);
-		s.Save(dst);
-		Console.WriteLine("setup written: " + dst);
-		if (commands > 0) {
-			Console.WriteLine($"its {commands} own command(s) to run before or after a run were taken out - a setup from elsewhere runs no command on this PC; add your own in Settings");
-		}
-		if (programs.Count > 0) {
-			// a setup from elsewhere starts no program the player did not point it at, and allows no add-on for them
-			Console.WriteLine("taken out - set your own in Settings: " + string.Join("; ", programs));
-		}
-		return 0;
+		return got.File == null ? 1 : 0;
 	}
 
 	static int Stop(string a_what)
