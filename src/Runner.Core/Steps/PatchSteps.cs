@@ -419,13 +419,15 @@ public sealed class SynthesisStep : IStep
 				// judged by its window (its timers and patcher states change while it works), never by its CPU alone; a patcher
 				// that failed is read off Synthesis's own log the moment its run ends (one failed, no Synthesis.esp)
 				DateTime? exitedAt = null;
+				var grown = new GrowingText { KeepAll = false };
+				var said = new LogDigest();
 				Waits.Tool(a_ctx, Key, proc, a_s.Deadline(90), () => {
 					var fresh = new[] { espOw, espMod }.FirstOrDefault(p => File.Exists(p) && File.GetLastWriteTimeUtc(p) > t0);
 					if (fresh != null && DateTime.UtcNow - File.GetLastWriteTimeUtc(fresh) > TimeSpan.FromSeconds(20)) {
 						return Waits.Poll.Done;
 					}
 					runLog ??= RunLog(logs, tRun);
-					if (fresh == null && runLog != null && Failure(Files.ReadSharedText(runLog)) is { } why) {
+					if (fresh == null && runLog != null && Judged(runLog, grown, said) is { } why) {
 						throw new StepFailedException($"Synthesis: {why} - it wrote no Synthesis.esp (its log: {runLog})");
 					}
 					// a Synthesis that closed is given a moment for its last write, then the step ends - never the 90-minute deadline
@@ -461,16 +463,67 @@ public sealed class SynthesisStep : IStep
 	// a finished run whose log holds an error: which patcher failed and why; null while it runs or when nothing failed
 	public static string? Failure(string a_log)
 	{
-		if (!a_log.Contains("Finished patcher run", StringComparison.Ordinal)) {
-			return null;
+		var all = new LogDigest();
+		all.Take(a_log);
+		return all.Failure;
+	}
+
+	// The same, of a log taken as it grows: what the verdict needs is kept from each addition. The wait read and searched the
+	// whole log at every look - megabytes of it, every two seconds, in a long run
+	public sealed class LogDigest
+	{
+		bool _finished;
+		// the patcher that last started, the first error, and the patcher that had started when it came
+		string? _patcher, _error, _failed;
+
+		public void Restart() => (_finished, _patcher, _error, _failed) = (false, null, null, null);
+
+		// lines the log gained
+		public void Take(string a_added)
+		{
+			foreach (var line in a_added.Split('\n')) {
+				Line(line);
+			}
 		}
-		var err = Regex.Matches(a_log, @"\[ERR\] \[T\d+\] (?<m>.+)").Select(m => m.Groups["m"].Value.Trim()).FirstOrDefault(m => m.Length > 0 && !m.StartsWith("Error while running", StringComparison.Ordinal));
-		if (err == null) {
-			return null;
+
+		void Line(string a_line)
+		{
+			_finished |= a_line.Contains("Finished patcher run", StringComparison.Ordinal);
+			if (_error != null) {
+				return;
+			}
+			if (a_line.Contains("[ERR] [T", StringComparison.Ordinal) && Regex.Match(a_line, @"\[ERR\] \[T\d+\] (?<m>.+)") is { Success: true } m &&
+			    m.Groups["m"].Value.Trim() is { Length: > 0 } said && !said.StartsWith("Error while running", StringComparison.Ordinal)) {
+				(_error, _failed) = (said, _patcher);
+			} else if (a_line.Contains("Starting Patcher ", StringComparison.Ordinal) && Regex.Matches(a_line, @"Starting Patcher (?<p>.+?) Run").LastOrDefault() is { } start) {
+				_patcher = start.Groups["p"].Value;
+			}
 		}
-		var at = a_log.IndexOf(err, StringComparison.Ordinal);
-		var patcher = Regex.Matches(a_log[..at], @"Starting Patcher (?<p>.+?) Run").LastOrDefault()?.Groups["p"].Value;
-		return (patcher != null ? $"its patcher \"{patcher}\" failed: " : "a patcher failed: ") + (err.Length > 300 ? err[..300] : err);
+
+		public string? Failure => !_finished || _error == null ? null :
+			(_failed != null ? $"its patcher \"{_failed}\" failed: " : "a patcher failed: ") + (_error.Length > 300 ? _error[..300] : _error);
+
+		// the same, with the line the log is still writing counted in
+		public string? FailureWith(string a_unfinished)
+		{
+			if (a_unfinished.Length == 0) {
+				return Failure;
+			}
+			var with = (LogDigest)MemberwiseClone();
+			with.Line(a_unfinished);
+			return with.Failure;
+		}
+	}
+
+	// what the run's log says of a failure, read by what it gained since the last look
+	static string? Judged(string a_file, GrowingText a_log, LogDigest a_said)
+	{
+		a_log.Read(a_file);
+		if (a_log.Restarted) {
+			a_said.Restart();
+		}
+		a_said.Take(a_log.Added);
+		return a_said.FailureWith(a_log.Unfinished);
 	}
 
 	public const string GoRx = @"^GoButton|\bRun\b|RunPatchers";

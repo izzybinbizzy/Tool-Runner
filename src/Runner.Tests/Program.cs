@@ -250,6 +250,13 @@ public static class Program
 		Check(Native.FromBuffer(buf, bytes.Length).Contains("LOD generation done", StringComparison.Ordinal), "packed text with an empty tail read back");
 		var plain = "plain log line".ToCharArray();
 		Equal("plain log line", Native.FromBuffer(plain, plain.Length), "a plain buffer untouched");
+		// only a log's end is made a text: packed or not is told by the whole of it, and its last letters stand in half as many
+		// characters
+		var log = string.Concat(Enumerable.Repeat("[00:01] Tamriel 12 34\r\n", 400)) + "LOD generation done.";
+		Equal("generation done.", Native.TailOf(log, 16), "the end of a plain text");
+		var end = Native.TailOf(Encoding.Unicode.GetString(Encoding.ASCII.GetBytes(log)), 40);
+		Check(end.EndsWith("12 34\r\nLOD generation done.", StringComparison.Ordinal) && end.Length is >= 40 and <= 42, "the end of a packed one, unpacked: " + end);
+		Equal("", Native.TailOf("", 40), "no text");
 	}
 
 	// ------------------------------------------------------------------ MO2's ini
@@ -5382,6 +5389,46 @@ public static class Program
 		Equal<string?>(null, SynthesisStep.Failure("[INF] [T2] Starting Patcher A Run\n[INF] [T2] Finished patcher run\n"), "a clean run is no failure");
 	}
 
+	// Synthesis's log is judged by what each look added to it, as its whole text would be: it grows to megabytes in a long
+	// run, and was read and searched whole every two seconds
+	static void T_ASynthesisLogIsJudgedAsItGrows()
+	{
+		var noise = string.Concat(Enumerable.Range(0, 3000).Select(i => $"2026-10-27 16:04:{i % 60:00}.000 -04:00 [INF] [T{i % 9}] Patched record {i}\r\n"));
+		const string first = "2026-10-27 16:04:36.640 -04:00 [INF] [T16] ================= Starting Patcher First Run =================\r\n";
+		const string second = "2026-10-27 16:05:36.640 -04:00 [INF] [T16] ================= Starting Patcher Second Patcher Run =================\r\n";
+		const string third = "2026-10-27 16:06:36.640 -04:00 [INF] [T16] ================= Starting Patcher Third Run =================\r\n";
+		const string finished = "2026-10-27 16:07:45.911 -04:00 [INF] [T2] Finished patcher run\r\n";
+		var failed = first + noise + second + noise +
+			"2026-10-27 16:05:45.899 -04:00 [ERR] [T35] System.NotImplementedException: Writing with compression enabled is not currently supported.\r\n" +
+			"2026-10-27 16:05:45.907 -04:00 [ERR] [T35] Error while running:\r\n" + third + noise +
+			"2026-10-27 16:06:45.899 -04:00 [ERR] [T35] a later error\r\n" + finished;
+		var clean = first + noise + second + noise + finished;
+		foreach (var (name, log) in new[] { ("a patcher that failed", failed), ("a clean run", clean), ("a run still going", first + noise + second), ("a log's last line without its end", failed.TrimEnd()) }) {
+			// fed as it grows: in pieces that end anywhere, the last line not yet whole at some looks
+			var digest = new SynthesisStep.LogDigest();
+			var whole = "";
+			for (var at = 0; at < log.Length; at += 7919) {
+				var piece = log[at..Math.Min(log.Length, at + 7919)];
+				var before = whole.Length - (whole.LastIndexOf('\n') + 1);
+				whole += piece;
+				var from = whole.Length - piece.Length - before;
+				var end = whole.LastIndexOf('\n') + 1;
+				if (end > from) {
+					digest.Take(whole[from..end]);
+				}
+				Equal(SynthesisStep.Failure(whole), digest.FailureWith(whole[end..]), $"{name}, {whole.Length} letters in: judged by what was added as by the whole log");
+			}
+			digest.Restart();
+			Equal<string?>(null, digest.Failure, $"{name}: a log begun anew is judged anew");
+		}
+		var why = SynthesisStep.Failure(failed);
+		Check(why != null && why.Contains("\"Second Patcher\"", StringComparison.Ordinal) && why.Contains("compression", StringComparison.Ordinal) && !why.Contains("later", StringComparison.Ordinal),
+			"the first error, and the patcher that had started when it came: " + why);
+		Equal(why, SynthesisStep.Failure(failed.TrimEnd()), "the same of a log whose last line has no end yet");
+		Equal<string?>(null, SynthesisStep.Failure(clean), "a clean run is no failure");
+		Equal<string?>(null, SynthesisStep.Failure(first + noise + second), "a run still going is not judged");
+	}
+
 	// seen in a real run: a window being destroyed answers UI Automation with a raw COM error - a "gone" element, never
 	// a failed step
 	static void T_AWindowGoingAwayIsNotAFailure()
@@ -10392,10 +10439,13 @@ public static class Program
 			owner.Start();
 			made.Wait();
 			Check(hung != 0, "(a hung window to ask)");
-			Equal("its log says done", Native.ControlText(mine), "a window that answers is read whole");
+			var buf = Array.Empty<char>();
+			Equal((17, "its log says done"), Native.ControlTail(mine, 4000, ref buf), "a window that answers is read whole");
+			Equal((17, "done"), Native.ControlTail(mine, 4, ref buf), "or by its end alone");
+			Check(buf.Length >= 18, "into the buffer its caller keeps");
 			var sw = Stopwatch.StartNew();
 			Check(!Native.TrySend(hung, Native.WM_GETTEXTLENGTH, 0, 0, out _), "a hung window gives no answer");
-			Equal("", Native.ControlText(hung), "and reads as no text");
+			Equal((0, ""), Native.ControlTail(hung, 4000, ref buf), "and reads as no text");
 			Check(sw.Elapsed < TimeSpan.FromSeconds(5), $"within the limit, not for as long as it hangs: {sw.Elapsed.TotalSeconds:0.0} s");
 		} finally {
 			Native.SendLimitMs = keep;

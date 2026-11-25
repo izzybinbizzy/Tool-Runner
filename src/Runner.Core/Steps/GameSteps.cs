@@ -91,6 +91,9 @@ public sealed class GrassStep : IStep
 	public static string? WrapperExit(string a_output) =>
 		Regex.Match(a_output, @"^exit code (-?\d+)\s*\z", RegexOptions.Multiline) is { Success: true } m ? m.Groups[1].Value : null;
 
+	// how much of the wrapper's output a look reads: its last lines, the wrapper's own last line among them
+	const int OutputEnd = 64 * 1024;
+
 	void FasterNgio(RunContext a_ctx, StepSettings a_s)
 	{
 		var exe = a_s.Req("fasterngio_exe");
@@ -121,24 +124,27 @@ public sealed class GrassStep : IStep
 			var sw = Stopwatch.StartNew();
 			var last = Stopwatch.StartNew();
 			var size = -1L;
-			string body;
 			try {
 				while (true) {
 					a_ctx.Cancel.ThrowIfCancellationRequested();
 					a_ctx.Pause(TimeSpan.FromSeconds(2));
-					body = File.Exists(outFile) ? Files.ReadSharedText(outFile) : "";
-					if (WrapperExit(body) != null) {
-						break;
-					}
+					// asked by its length, and only its end read when that is new: everything FasterNGIO has said so far was
+					// read whole at every look
+					var written = new FileInfo(outFile);
+					var length = written.Exists ? written.Length : -1;
 					// the wrapper's first line writes the file: with no FasterNGIO seen and no file, Mod Organizer never started
 					// it - said now, not as "wrote nothing for 10 minutes"
-					if (started == null && !File.Exists(outFile) && sw.Elapsed > TimeSpan.FromSeconds(20)) {
+					if (started == null && length < 0 && sw.Elapsed > TimeSpan.FromSeconds(20)) {
 						throw new StepFailedException("Mod Organizer did not start FasterNGIO (its wrapper never ran) - look at Mod Organizer for a box it shows, then run again");
 					}
-					if (body.Length != size) {
-						size = body.Length;
+					if (length != size) {
+						size = length;
 						last.Restart();
-						var lastLine = body.TrimEnd().Split('\n').LastOrDefault()?.Trim() ?? "";
+						var end = length > 0 ? Files.ReadSharedTailText(outFile, OutputEnd) : "";
+						if (WrapperExit(end) != null) {
+							break;
+						}
+						var lastLine = end.TrimEnd().Split('\n').LastOrDefault()?.Trim() ?? "";
 						if (lastLine != "") {
 							a_ctx.Activity(Key, lastLine.Length > 140 ? lastLine[..140] : lastLine);
 						}
@@ -154,6 +160,7 @@ public sealed class GrassStep : IStep
 				// a stop or a stall: the run's own FasterNGIO ended by its PID
 				StepKit.CloseTool(a_ctx, image);
 			}
+			var body = File.Exists(outFile) ? Files.ReadSharedText(outFile) : "";
 			var lines = body.TrimEnd().Split('\n');
 			foreach (var ln in lines.Where(l => l.Contains("warning", StringComparison.OrdinalIgnoreCase) || l.Contains("error", StringComparison.OrdinalIgnoreCase)).Take(8).Concat(lines.TakeLast(3))) {
 				a_ctx.Log.Detail("| " + ln.TrimEnd());

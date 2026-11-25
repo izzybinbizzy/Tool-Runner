@@ -191,45 +191,77 @@ public static partial class Native
 		return new string(buf, 0, Math.Max(n, 0));
 	}
 
-	// the FULL text of an edit / memo (UI Automation cuts a VCL memo at 2048 characters), unpacked when a tool answers with its
-	// ANSI bytes packed two to a character (xLODGen 4.1.5o)
-	// A window that does not answer in time reads as no text this look: the caller's loop goes on to its own clock
-	public static string ControlText(nint a_hwnd)
+	// how long an edit / memo's text is (-1: no answer in time, or the window is gone)
+	public static int TextLength(nint a_hwnd) => TrySend(a_hwnd, WM_GETTEXTLENGTH, 0, 0, out var length) ? (int)length : -1;
+
+	// The end of an edit / memo's text - at most a_most letters of it - and how long the whole is. (0, ""): no text, or no
+	// answer in time; the caller's loop goes on to its own clock. The FULL text is asked for (UI Automation cuts a VCL memo at
+	// 2048 characters, and an edit control gives no part of its text without changing what is selected in it), into a_buf,
+	// which the caller keeps from look to look: a log box of megabytes was made anew as an array, and again as a text, at
+	// every look. Unpacked when a tool answers with its ANSI bytes packed two to a character (xLODGen 4.1.5o)
+	public static (int Length, string Tail) ControlTail(nint a_hwnd, int a_most, ref char[] a_buf)
 	{
-		if (!TrySend(a_hwnd, WM_GETTEXTLENGTH, 0, 0, out var length) || (int)length <= 0) {
-			return "";
+		var n = TextLength(a_hwnd);
+		if (n <= 0) {
+			return (0, "");
 		}
-		var n = (int)length;
-		var buf = new char[n + 1];
-		return SendMessageTimeoutBuf(a_hwnd, WM_GETTEXT, n + 1, buf, SMTO_ABORTIFHUNG | SMTO_BLOCK, SendLimitMs, out var got) != 0 ? FromBuffer(buf, (int)got) : "";
+		if (a_buf.Length < n + 1) {
+			a_buf = new char[Math.Max(n + 1, a_buf.Length * 2)];
+		} else {
+			Array.Clear(a_buf, 0, n + 1);
+		}
+		return SendMessageTimeoutBuf(a_hwnd, WM_GETTEXT, n + 1, a_buf, SMTO_ABORTIFHUNG | SMTO_BLOCK, SendLimitMs, out var got) != 0
+			? (n, TailOf(a_buf.AsSpan(0, Math.Clamp((int)got, 0, n + 1)), a_most))
+			: (0, "");
 	}
 
 	// A tool that packs its ANSI bytes two to a character counts BYTES in its answer, so half the buffer stays empty; the text
 	// ends at the first empty character, or those empties outvote the packed half and it is never unpacked (in a real run
 	// xLODGen's "LOD generation done." went unseen and the finished tool was called idle)
-	public static string FromBuffer(char[] a_buf, int a_got)
+	public static string FromBuffer(char[] a_buf, int a_got) => TailOf(a_buf.AsSpan(0, Math.Clamp(a_got, 0, a_buf.Length)), int.MaxValue);
+
+	// the last a_most letters of a text as a tool's window answered it. Whether it is packed is told by the WHOLE of it (its
+	// last lines alone can be mostly letters of another alphabet); only the end is made a text
+	public static string TailOf(ReadOnlySpan<char> a_text, int a_most)
 	{
-		var s = new string(a_buf, 0, Math.Clamp(a_got, 0, a_buf.Length));
-		var nul = s.IndexOf('\0');
-		return UnpackAnsi(nul >= 0 ? s[..nul] : s);
+		var nul = a_text.IndexOf('\0');
+		if (nul >= 0) {
+			a_text = a_text[..nul];
+		}
+		if (!Packed(a_text)) {
+			return new string(a_text[^Math.Min(a_most, a_text.Length)..]);
+		}
+		// two letters to a character: the last a_most of them stand in half as many characters
+		return Unpack(a_text[^Math.Min(a_most / 2 + 1, a_text.Length)..]);
 	}
 
-	public static string UnpackAnsi(string a_s)
+	public static string UnpackAnsi(string a_s) => Packed(a_s) ? Unpack(a_s) : a_s;
+
+	static bool Packed(ReadOnlySpan<char> a_s)
 	{
-		if (string.IsNullOrEmpty(a_s)) {
-			return a_s;
+		if (a_s.IsEmpty) {
+			return false;
 		}
-		var wide = a_s.Count(c => c > 0x2FFF);
+		var wide = 0;
+		foreach (var c in a_s) {
+			if (c > 0x2FFF) {
+				++wide;
+			}
+		}
 		if (wide < a_s.Length * 0.6) {
-			return a_s;
+			return false;
 		}
-		var raw = Encoding.Unicode.GetBytes(a_s);
-		var printable = raw.Count(b => b is >= 32 and < 127 or 9 or 10 or 13);
-		if (printable < raw.Length * 0.9) {
-			return a_s;
+		var raw = MemoryMarshal.AsBytes(a_s);
+		var printable = 0;
+		foreach (var b in raw) {
+			if (b is >= 32 and < 127 or 9 or 10 or 13) {
+				++printable;
+			}
 		}
-		return Encoding.Latin1.GetString(raw).Replace("\0", "");
+		return printable >= raw.Length * 0.9;
 	}
+
+	static string Unpack(ReadOnlySpan<char> a_s) => Encoding.Latin1.GetString(MemoryMarshal.AsBytes(a_s)).Replace("\0", "");
 
 	public static List<nint> TopWindowsOf(IReadOnlyCollection<int> a_pids, bool a_visibleOnly = true)
 	{
