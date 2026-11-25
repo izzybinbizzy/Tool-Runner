@@ -116,7 +116,8 @@ public static class BugReport
 		if (setupFile != null && File.Exists(setupFile)) {
 			try {
 				setup = Setup.Load(setupFile);
-			} catch (Exception e) when (e is IOException or System.Text.Json.JsonException or InvalidDataException) {
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException) {
+				// (a setup that does not read is what the report may be about: it is made without it)
 			}
 		}
 		var entries = new List<(string Name, string Text)> { ("about.txt", About(a_version, setup)) };
