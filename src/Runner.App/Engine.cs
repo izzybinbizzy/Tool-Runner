@@ -165,13 +165,56 @@ public static partial class ConsoleAttach
 
 	public static void ToParent()
 	{
-		if (AttachConsole(-1)) {
-			// the console owns this writer for the rest of the program's life (a command ends the process right after)
+		// the console owns these writers for the rest of the program's life (a command ends the process right after)
 #pragma warning disable CA2000
-			var o = new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true };
+		if (AttachConsole(-1)) {
+			// A console shows the bytes written to it in its own code page: UTF-8 written there came out as wrong letters for
+			// every name with an accent or a non-Latin letter in it (a mod, a folder). A file or a pipe - a script - gets
+			// UTF-8, as before
+			var encoding = Console.IsOutputRedirected ? new System.Text.UTF8Encoding(false) : Console.OutputEncoding;
+			Console.SetOut(new ReaderGone(new StreamWriter(Console.OpenStandardOutput(), encoding) { AutoFlush = true }));
+		} else {
+			Console.SetOut(new ReaderGone(Console.Out));
+		}
 #pragma warning restore CA2000
-			Console.SetOut(o);
-			Console.SetError(o);
+		Console.SetError(Console.Out);
+	}
+
+	// What is printed goes to whoever reads it, and a write fails once that reader is gone (a pipe closed early:
+	// "... | select -first 1"). Left to fail, it made a finished run end with exit 1, and from the place that says what went
+	// wrong it ended the program on an error of its own. Nobody is reading any more: what is written from then on is dropped
+	public sealed class ReaderGone(TextWriter a_to) : TextWriter(InvariantCulture)
+	{
+		bool _gone;
+
+		public override System.Text.Encoding Encoding => a_to.Encoding;
+
+		public override void Write(char a_value) => Try(() => a_to.Write(a_value));
+
+		public override void Write(string? a_value) => Try(() => a_to.Write(a_value));
+
+		public override void WriteLine(string? a_value) => Try(() => a_to.WriteLine(a_value));
+
+		public override void Flush() => Try(a_to.Flush);
+
+		void Try(Action a_write)
+		{
+			if (_gone) {
+				return;
+			}
+			try {
+				a_write();
+			} catch (Exception e) when (e is IOException or ObjectDisposedException or UnauthorizedAccessException) {
+				_gone = true;
+			}
+		}
+
+		protected override void Dispose(bool a_disposing)
+		{
+			if (a_disposing) {
+				a_to.Dispose();
+			}
+			base.Dispose(a_disposing);
 		}
 	}
 }

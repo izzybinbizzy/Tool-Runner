@@ -11618,6 +11618,58 @@ public static class Program
 		Check(!Due(1e300) && !Due(double.NaN) && !Due(0) && !Due(6) && Due(5) && Due(1), "a reminder every 1e300 minutes is never due, and no error");
 	}
 
+	// what the command line prints once nobody reads it any more is dropped: never an error, never another exit code
+	static void T_PrintingToAReaderThatIsGoneIsNoError()
+	{
+		using var to = new ClosingWriter();
+		using var o = new ToolRunner.App.ConsoleAttach.ReaderGone(to);
+		o.WriteLine("one");
+		o.Write("two");
+		o.Write('!');
+		Equal("one" + Environment.NewLine + "two!", to.Text, "while it is read, every write goes through");
+		to.Gone = true;
+		o.WriteLine("three");
+		o.Write('x');
+		o.Flush();
+		to.Gone = false;
+		o.WriteLine("four");
+		Equal("one" + Environment.NewLine + "two!", to.Text, "after the first write that failed nothing more is tried");
+		Equal(1, to.Failed, "... the reader is asked once, not at every line");
+	}
+
+	sealed class ClosingWriter() : StringWriter(System.Globalization.CultureInfo.InvariantCulture)
+	{
+		public bool Gone;
+		public int Failed;
+		public string Text => ToString();
+
+		public override void Write(char a_value)
+		{
+			Fail();
+			base.Write(a_value);
+		}
+
+		public override void Write(string? a_value)
+		{
+			Fail();
+			base.Write(a_value);
+		}
+
+		public override void WriteLine(string? a_value)
+		{
+			Fail();
+			base.WriteLine(a_value);
+		}
+
+		void Fail()
+		{
+			if (Gone) {
+				++Failed;
+				throw new IOException("The pipe is being closed.");
+			}
+		}
+	}
+
 	// the command line: an option its command does not have, one without what it names, a stray word - refused, never passed over
 	static void T_TheCommandLineRefusesWhatACommandDoesNotTake()
 	{
