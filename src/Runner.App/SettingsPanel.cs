@@ -1671,7 +1671,7 @@ public static class SettingsPanel
 				var wasPicked = box.SelectedIndex > 0;
 				var wasFilling = filling;
 				filling = true;
-				box.ItemsSource = new List<string> { AnyCharacter };
+				box.ItemsSource = new List<string> { WindowWords.Word(AnyCharacter) };
 				box.SelectedIndex = 0;
 				filling = wasFilling;
 				if (wasPicked) {
