@@ -109,11 +109,12 @@ public sealed class XLodGenStep : IStep
 
 	// A tool's log box as a wait needs it: the last a_most letters of the main window's fullest memo, looked up at every look.
 	// Which memo that is, is asked by length alone, and its text crosses from the tool's process only when that length is
-	// new, or StaleAfter is over (a line written again in place keeps the length): every memo's whole text was fetched,
+	// new, or StaleAfter is over: every memo's whole text was fetched,
 	// and made a text here, at every look
 	internal sealed class LogBox(nint a_main, int a_most)
 	{
-		static readonly TimeSpan StaleAfter = TimeSpan.FromSeconds(30);
+		// (a tool that writes its progress again in place keeps the length: its line is read anew this often all the same)
+		static readonly TimeSpan StaleAfter = TimeSpan.FromSeconds(10);
 
 		char[] _buf = [];
 		nint _memo;

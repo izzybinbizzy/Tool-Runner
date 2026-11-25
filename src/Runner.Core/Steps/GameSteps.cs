@@ -712,15 +712,19 @@ public sealed class ShaderStep : IStep
 		{
 			foreach (var raw in a_added.Split('\n', StringSplitOptions.RemoveEmptyEntries)) {
 				var line = raw.TrimEnd('\r');
-				if (InGame.RemainingIn(line) != null) {
+				var counts = InGame.RemainingIn(line) != null;
+				if (counts) {
 					_remaining = line;
-				} else if (Marks.Any(m => line.Contains(m, StringComparison.Ordinal))) {
+				}
+				// (a count that also says a compile began or ended is kept among the marks too: the next count takes its place
+				// as the newest count, never what it said)
+				if (Marks.Any(m => line.Contains(m, StringComparison.Ordinal))) {
 					// (never without end: the oldest go first, and the newest are the ones that are asked about)
 					if (_kept.Count >= Most) {
 						_kept.RemoveAt(0);
 					}
 					_kept.Add(line);
-				} else if (_timing == null && line.Contains("ShaderTiming", StringComparison.Ordinal)) {
+				} else if (!counts && _timing == null && line.Contains("ShaderTiming", StringComparison.Ordinal)) {
 					_timing = line;
 				}
 			}

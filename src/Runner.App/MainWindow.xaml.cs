@@ -105,11 +105,8 @@ public partial class MainWindow : Window
 		PreviewKeyDown += OnKeys;
 		// the program in front or not, whichever of its windows it is (Settings and History are windows of their own)
 		if (Application.Current is { } app) {
-			app.Activated += (_, _) => {
-				_inFront = true;
-				Wake();
-			};
-			app.Deactivated += (_, _) => _inFront = false;
+			app.Activated += AppActivated;
+			app.Deactivated += AppDeactivated;
 		}
 		// a mod ticked in Mod Organizer while the window was in the background: each step's last run is worked out again
 		Activated += async (_, _) => {
@@ -1614,9 +1611,22 @@ public partial class MainWindow : Window
 		});
 	}
 
+	void AppActivated(object? a_s, EventArgs a_e)
+	{
+		_inFront = true;
+		Wake();
+	}
+
+	void AppDeactivated(object? a_s, EventArgs a_e) => _inFront = false;
+
 	protected override void OnClosed(EventArgs a_e)
 	{
 		Theme.Applied -= _vm.Repaint;
+		// (the program holds what it is told of: a window drawn for the off-screen pictures would stay with it)
+		if (Application.Current is { } app) {
+			app.Activated -= AppActivated;
+			app.Deactivated -= AppDeactivated;
+		}
 		_demo = true;
 		_timer.Stop();
 		_watch?.Dispose();

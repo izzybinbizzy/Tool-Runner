@@ -37,6 +37,12 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	{
 		var pid = 0;
 		Exception? failed = null;
+		// the asker's end and the caller's giving up, told apart under one lock: a start that comes back after the caller has
+		// said it failed is ended at once - left running, nobody would have it on record (a Mod Organizer that started that
+		// way was taken for the player's own)
+		var gate = new Lock();
+		var finished = false;
+		var abandoned = false;
 		var asker = new Thread(() => {
 			// every object the service hands out holds a reference into it until it is let go: each is, the last one first
 			var held = new List<object>();
@@ -68,9 +74,16 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 				if (rc != 0) {
 					throw new InvalidOperationException($"code {rc}");
 				}
-				pid = Convert.ToInt32(Ask(Property(answer, "ProcessId"), "Value"), InvariantCulture);
-				if (pid == 0) {
+				var started = Convert.ToInt32(Ask(Property(answer, "ProcessId"), "Value"), InvariantCulture);
+				if (started == 0) {
 					throw new InvalidOperationException("no process number came back");
+				}
+				lock (gate) {
+					if (abandoned) {
+						Procs.KillTree(started);
+					} else {
+						pid = started;
+					}
 				}
 			} catch (OutOfMemoryException e) {
 				// (nothing may leave this thread: an error that does ends the whole program, and a run that ends that way
@@ -85,12 +98,24 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 						System.Runtime.InteropServices.Marshal.ReleaseComObject(held[i]);
 					}
 				}
+				lock (gate) {
+					finished = true;
+				}
 			}
 		}) { IsBackground = true, Name = "start by Windows' management service" };
 		asker.SetApartmentState(ApartmentState.STA);
 		asker.Start();
 		if (!asker.Join(StartAnswer)) {
-			throw new InvalidOperationException($"Windows could not start {a_commandLine} (its management service did not answer within {StartAnswer.TotalMinutes:0} minutes)");
+			// (a start that came back in the meantime counts: its number is on record from here on)
+			lock (gate) {
+				abandoned = !finished && pid == 0;
+			}
+			if (abandoned) {
+				throw new InvalidOperationException($"Windows could not start {a_commandLine} (its management service did not answer within {StartAnswer.TotalMinutes:0} minutes)");
+			}
+		}
+		if (pid != 0) {
+			return pid;
 		}
 		if (failed != null) {
 			throw new InvalidOperationException($"Windows could not start {a_commandLine} ({failed.Message})", failed);

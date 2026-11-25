@@ -45,9 +45,17 @@
     <EmbeddedResource Include="$(IntermediateOutputPath)Languages.zip" LogicalName="Languages.zip" Visible="false" />
   </ItemGroup>
 
-  <Target Name="PackLanguages" BeforeTargets="AssignTargetPaths" Inputs="@(LanguageFile)" Outputs="$(IntermediateOutputPath)Languages.zip">
+  <!-- the list of the language files, written only when it changes: a file taken out or renamed makes the pack again too -->
+  <Target Name="ListLanguages">
     <MakeDir Directories="$(IntermediateOutputPath)" />
-    <ZipDirectory SourceDirectory="$(MSBuildProjectDirectory)\Languages" DestinationFile="$(IntermediateOutputPath)Languages.zip" Overwrite="true" />
+    <WriteLinesToFile File="$(IntermediateOutputPath)Languages.list" Lines="@(LanguageFile->'%(Filename)%(Extension)')" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
+
+  <!-- only the listed files go into the pack, never anything else left in the folder -->
+  <Target Name="PackLanguages" BeforeTargets="AssignTargetPaths" DependsOnTargets="ListLanguages" Inputs="@(LanguageFile);$(IntermediateOutputPath)Languages.list" Outputs="$(IntermediateOutputPath)Languages.zip">
+    <RemoveDir Directories="$(IntermediateOutputPath)Languages" />
+    <Copy SourceFiles="@(LanguageFile)" DestinationFolder="$(IntermediateOutputPath)Languages" />
+    <ZipDirectory SourceDirectory="$(IntermediateOutputPath)Languages" DestinationFile="$(IntermediateOutputPath)Languages.zip" Overwrite="true" />
   </Target>
 
   <ItemGroup>

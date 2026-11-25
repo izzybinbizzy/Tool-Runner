@@ -5173,6 +5173,64 @@ public static class Program
 		}
 	}
 
+	// the languages packed into the program are the language files, every one, byte for byte, each found by its name (names
+	// with letters of other alphabets too) - and nothing else is in the pack
+	static void T_ThePackedLanguagesAreTheLanguageFiles()
+	{
+		var folder = Path.Combine(Path.GetDirectoryName(SourceDir())!, "Runner.App", "Languages");
+		if (!Directory.Exists(folder)) {
+			Console.WriteLine($"  (skipped: the source is not at {folder})");
+			return;
+		}
+		var files = Directory.GetFiles(folder, "*.json").Select(f => Path.GetFileNameWithoutExtension(f)!).Order(StringComparer.Ordinal).ToList();
+		Check(files.Count >= 12, "the language files were found: " + files.Count);
+		Equal(string.Join("|", files), string.Join("|", ToolRunner.App.WindowWords.Shipped()), "the pack holds every language file and nothing else");
+		foreach (var name in files) {
+			Equal(File.ReadAllText(Path.Combine(folder, name + ".json")), ToolRunner.App.WindowWords.ShippedText(name), name + ": the packed text is the file's");
+		}
+		Equal<string?>(null, ToolRunner.App.WindowWords.ShippedText("No Such Language"), "a language that is not there");
+	}
+
+	// a folder counted, sized and dated without an object for each file comes to what the walk over every file came to
+	static void T_AFolderIsCountedAsEveryFileInIt()
+	{
+		using var f = new FakeMo2();
+		var dir = Path.Combine(f.Root, "counted");
+		Directory.CreateDirectory(Path.Combine(dir, "sub", "deeper"));
+		Directory.CreateDirectory(Path.Combine(dir, "empty"));
+		var written = new[] { ("a.txt", 3, 2026), ("sub/b.dds", 5, 2025), ("sub/deeper/c.nif", 7, 2024), ("sub/.hidden", 11, 2023) };
+		foreach (var (name, size, year) in written) {
+			var file = Path.Combine(dir, name.Replace('/', '\\'));
+			File.WriteAllBytes(file, new byte[size]);
+			File.SetLastWriteTimeUtc(file, new DateTime(year, 3, 4, 5, 6, 7, DateTimeKind.Utc));
+		}
+		File.SetAttributes(Path.Combine(dir, "sub", ".hidden"), FileAttributes.Hidden | FileAttributes.ReadOnly);
+		try {
+			var every = new DirectoryInfo(dir).EnumerateFiles("*", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0 }).ToList();
+			Equal(every.Count, Files.CountFiles(dir), "as many files as the walk over every file finds, a hidden one too");
+			Equal(every.Sum(x => x.Length), Files.SizeOf(dir), "their size");
+			Equal(every.Max(x => x.LastWriteTimeUtc), Files.NewestWrite(dir), "the newest time");
+			Equal(new DateTime(2026, 3, 4, 5, 6, 7, DateTimeKind.Utc), Files.NewestWrite(dir), "... which is the newest file's, in UTC");
+			Equal(4, Files.CountFiles(dir), "four files");
+			Equal(26L, Files.SizeOf(dir), "26 bytes");
+			var gone = Path.Combine(dir, "not there");
+			Check(Files.CountFiles(gone) == 0 && Files.SizeOf(gone) == 0 && Files.NewestWrite(gone) == DateTime.MinValue, "a folder that is not there");
+		} finally {
+			File.SetAttributes(Path.Combine(dir, "sub", ".hidden"), FileAttributes.Normal);
+		}
+	}
+
+	// a shader-log line that counts what is left and also says a compile ended is kept as both: a later count never takes
+	// away that the compile ended
+	static void T_AShaderLogLineWithACountAndAMarkIsKeptAsBoth()
+	{
+		var d = new ShaderStep.LogDigest();
+		d.Take("[12:00:00.000] [info] [ShaderTiming] Shader compilation completed, remaining=0\n[12:00:01.000] [info] [ShaderTiming] slow shader: 10 ms, remaining=0\n");
+		Check(d.Text.Contains("Shader compilation completed", StringComparison.Ordinal), "the line that says the compile ended stays: " + d.Text);
+		Equal<int?>(0, InGame.RemainingIn(d.Text), "the newest count is the one asked");
+		Check(d.Text.EndsWith("slow shader: 10 ms, remaining=0", StringComparison.Ordinal), "and stands last");
+	}
+
 	// what a screen reader says of a control - its name, and the help text after it - goes into the window's language with
 	// the rest of its words; a help text a binding fills is the binding's (a step row's own, already in the language)
 	static void T_AScreenReadersWordsAreInTheWindowsLanguage()
