@@ -244,7 +244,8 @@ public static partial class FasterArchives
 			a_ctx.Log.Detail("its window has closed already - starting the game again");
 			return;
 		}
-		var limit = TimeSpan.FromMinutes(Math.Max(1, a_s.Num("offer_wait_min", 30)));
+		// (a part of a minute is a wait like any other; none at all is no wait, and the usual one stands)
+		var limit = TimeSpan.FromMinutes(a_s.Num("offer_wait_min", 30) is > 0 and var wait ? wait : 30);
 		// the band that says the run waits for the player, with no Done to press: the run goes on by itself
 		a_ctx.Activity(a_step, "Faster Archives asks for your choice in its own window");
 		a_ctx.Control.WaitingForPlayer?.Invoke(Asks);

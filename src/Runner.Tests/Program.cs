@@ -11562,6 +11562,40 @@ public static class Program
 		Check(missing.Count == 0, $"{missing.Count} refusal(s) with no catalog entry (RunnerErrors.cs) - " + string.Join(" || ", missing.Take(6)));
 	}
 
+	// a step's numbers come out of a file anyone may have written: one below zero is the step's own default, minutes are one at least
+	static void T_AStepsNumbersAreHeldToWhatTheWindowAllows()
+	{
+		var s = new StepSettings(new JsonObject { ["start_min"] = -5, ["wait_s"] = -1, ["quiet_min"] = 0, ["idle_s"] = 0, ["crash_wait_min"] = -2.5, ["offer_wait_min"] = 0.02,
+			["min_files"] = 0, ["max_restarts"] = 7, ["build_min"] = 2.9 });
+		Equal(8, s.Int("start_min", 8), "minutes below zero: the default");
+		Equal(60, s.Int("wait_s", 60), "seconds below zero: the default");
+		Equal(1, s.Int("quiet_min", 5), "no minutes at all: one minute");
+		Equal(0, s.Int("idle_s", 45), "no seconds is a number");
+		Equal(0, s.Int("min_files", 100), "and so is no file");
+		Equal(7, s.Int("max_restarts", 3), "a number as it stands");
+		Equal(2, s.Int("build_min", 15), "a number with a fraction, where a whole one is read: its whole part");
+		Equal(30.0, s.Num("crash_wait_min", 30), "a wait below zero: the default");
+		Equal(0.02, s.Num("offer_wait_min", 30), "a part of a minute stands");
+		Equal(15, s.Int("not there", 15), "what the file does not hold: the default");
+		Equal(TimeSpan.FromMinutes(1), new StepSettings(new JsonObject { ["deadline_min"] = 0 }).Deadline(60), "a time limit of none is one minute");
+		Equal(TimeSpan.FromMinutes(60), new StepSettings(new JsonObject { ["deadline_min"] = -3 }).Deadline(60), "one below zero is the step's own");
+		// what Settings writes into the setup it shows: a whole number as a long, any other as a double
+		var typed = new JsonObject { ["keepBackups"] = JsonValue.Create(20L), ["minFreeGb"] = JsonValue.Create(35L), ["guidedReminderMin"] = JsonValue.Create(2.5), ["idleMinutes"] = 4,
+			["name"] = "a word", ["far"] = JsonValue.Create(5_000_000_000L) };
+		Equal(20, Setup.Int(typed, "keepBackups"), "a whole number typed in Settings is that number before the setup is loaded again");
+		Equal(35.0, Setup.Num(typed, "minFreeGb"), "... asked for either way");
+		Equal(2.5, Setup.Num(typed, "guidedReminderMin"), "a number with a fraction");
+		Equal(2, Setup.Int(typed, "guidedReminderMin"), "... and its whole part");
+		Equal(4, Setup.Int(typed, "idleMinutes"), "a number the code put there");
+		Equal(4.0, Setup.Num(typed, "idleMinutes"), "... asked for as one with a fraction");
+		Check(Setup.Int(typed, "name") == null && Setup.Num(typed, "name") == null && Setup.Int(typed, "none") == null, "a word, and nothing, are no number");
+		Check(Setup.Int(typed, "far") == null && Setup.Num(typed, "far") == 5_000_000_000d, "a number past what a whole one holds is none where a whole one is asked for");
+		var read = Setup.RootOf("""{ "keepBackups": 20, "guidedReminderMin": 2.5, "name": "7" }""")!;
+		Check(Setup.Int(read, "keepBackups") == 20 && Setup.Num(read, "keepBackups") == 20d && Setup.Num(read, "guidedReminderMin") == 2.5 && Setup.Int(read, "name") == null,
+			"read from a file, the same answers");
+		Equal(20, new StepSettings(new JsonObject { ["min_files"] = JsonValue.Create(20L) }).Int("min_files", 100), "a step's number typed in Settings too");
+	}
+
 	// ... and every text a step fails with: its own words, or the tool's, come with a code and what to do
 	static void T_EveryFailureOfAStepIsInTheCatalog()
 	{

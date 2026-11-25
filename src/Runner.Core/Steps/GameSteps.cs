@@ -251,7 +251,8 @@ public sealed class GrassStep : IStep
 						if (launches - 1 >= a_s.Int("max_restarts", 15)) {
 							throw new StepFailedException($"the game crashed {launches} times - more than is normal");
 						}
-						if (idle >= a_s.Int("max_idle_restarts", 3)) {
+						// (none allowed means the first one that adds nothing stops the step - never a restart that added files)
+						if (idle >= Math.Max(1, a_s.Int("max_idle_restarts", 3))) {
 							throw new StepFailedException($"{idle} restarts in a row built no new grass file - the cache is stuck");
 						}
 					}

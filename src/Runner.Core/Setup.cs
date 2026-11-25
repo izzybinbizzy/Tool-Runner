@@ -142,10 +142,13 @@ public sealed class Setup
 		a_o[a_key] is JsonValue v && v.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s) ? s : null;
 
 	public static int? Int(JsonObject a_o, string a_key) =>
-		a_o[a_key] is JsonValue v ? (v.TryGetValue<int>(out var i) ? i : v.TryGetValue<double>(out var d) && d >= int.MinValue && d <= int.MaxValue ? (int)d : null) : null;
+		Num(a_o, a_key) is { } d && d >= int.MinValue && d <= int.MaxValue ? (int)d : null;
 
+	// A number read from a file answers as any kind of number; one put into a setup in memory answers only as the kind it
+	// was made with. Settings keeps a whole number typed there as a long: asked for as an int or a double alone it read as
+	// not set, and until the setup was loaded again the window worked with the default (5 backups kept, where 20 were asked for)
 	public static double? Num(JsonObject a_o, string a_key) =>
-		a_o[a_key] is JsonValue v ? (v.TryGetValue<double>(out var d) ? d : v.TryGetValue<int>(out var i) ? i : null) : null;
+		a_o[a_key] is JsonValue v ? (v.TryGetValue<double>(out var d) ? d : v.TryGetValue<long>(out var l) ? l : v.TryGetValue<int>(out var i) ? i : null) : null;
 
 	public static bool? Bool(JsonObject a_o, string a_key) =>
 		a_o[a_key] is JsonValue v && v.TryGetValue<bool>(out var b) ? b : null;

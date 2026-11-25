@@ -318,7 +318,7 @@ public static class Runner
 					log.Warn($"ending the game (process {pid}): nobody here can answer its box");
 					EndGameAlone(control, pid, at, log);
 				}
-			}) { Wait = TimeSpan.FromSeconds(Setup.Int(setup.Root, "boxWaitSeconds") ?? 60), CloseUnknown = InGame.ClosesUnknown(setup) };
+			}) { Wait = TimeSpan.FromSeconds(Setup.Int(setup.Root, "boxWaitSeconds") is >= 0 and var wait ? wait : 60), CloseUnknown = InGame.ClosesUnknown(setup) };
 		var ctx = new RunContext {
 			Setup = setup, Mo2 = mo2, Profile = profile, Control = control, Log = log, Journal = journal, Cancel = cts.Token,
 			BackupFolder = journal.BackupDir, Guide = a_guide?.Invoke(journal) ?? new FileGuide(journal, commands.TakeContinue, commands.ClearContinue),

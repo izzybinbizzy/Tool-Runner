@@ -210,8 +210,12 @@ public sealed class StepSettings(JsonObject a_o)
 	public JsonObject Raw { get; } = a_o;
 	public string? Str(string a_key) => Setup.Str(Raw, a_key);
 	public string Req(string a_key) => Str(a_key) is { Length: > 0 } s ? s : throw new StepFailedException($"the step's setting \"{a_key}\" is not set");
-	public int Int(string a_key, int a_default) => Setup.Int(Raw, a_key) ?? a_default;
-	public double Num(string a_key, double a_default) => Setup.Num(Raw, a_key) ?? a_default;
+	// A number of a setup file that can come from anywhere (shared, brought in, written by hand): one below zero is no
+	// number - the step's own default stands - and a time in whole minutes is one minute at least. The Settings window
+	// holds a typed number to the same two rules; a number read past them made a step fail at once on "its -5 minute limit"
+	public int Int(string a_key, int a_default) =>
+		Setup.Int(Raw, a_key) is { } n && n >= 0 ? (a_key.EndsWith("_min", StringComparison.Ordinal) ? Math.Max(1, n) : n) : a_default;
+	public double Num(string a_key, double a_default) => Setup.Num(Raw, a_key) is { } d && d >= 0 ? d : a_default;
 	public bool Bool(string a_key, bool a_default) => Setup.Bool(Raw, a_key) ?? a_default;
 	public List<string> List(string a_key) => Setup.List(Raw, a_key);
 	public string? OutputMod => Str("output_mod") ?? Str("then_move_to_mod");
