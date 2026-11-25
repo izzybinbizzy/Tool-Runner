@@ -4274,6 +4274,7 @@ public static class Program
 		Check(refused.State != RunState.Finished && refused.Verdict.Contains("outside their folder", StringComparison.Ordinal), "and a run does not start, saying so: " + refused.Verdict);
 		// (the step itself holds the same line, for a record changed after the check)
 		var late = StepContext(f, "landscapefixer");
+		using var lateLog = late.Log;
 		Throws<StepFailedException>(() => ToolSettings.Apply(late, "landscapefixer"), "the step refuses it too");
 		Equal("theirs, changed since", File.ReadAllText(elsewhere), "and the file elsewhere is as it was");
 	}
@@ -4449,6 +4450,7 @@ public static class Program
 		using var f = new FakeMo2();
 		f.WriteSetup(("acmos", []));
 		var ctx = StepContext(f, "acmos");
+		using var ctxLog = ctx.Log;
 		var file = Path.Combine(f.Overwrite, "kept.ini");
 		File.WriteAllText(file, "before");
 		var then = new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc);
@@ -7748,6 +7750,7 @@ public static class Program
 		File.WriteAllText(Path.Combine(earlier, "New.ess"), "older words");
 		f.WriteSetup(("cleansave", []));
 		var ctx = StepContext(f, "cleansave");
+		using var ctxLog = ctx.Log;
 		var copy = InGame.CopySaves(ctx) ?? throw new InvalidOperationException("nothing copied");
 		Equal("unchanged", File.ReadAllText(Path.Combine(copy, "Old.ess")), "the unchanged save is there");
 		Equal("changed since", File.ReadAllText(Path.Combine(copy, "New.ess")), "the changed one as it is now");
@@ -10352,6 +10355,7 @@ public static class Program
 		using var f = new FakeMo2();
 		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
 		var ctx = StepContext(f, "landscapefixer");
+		using var ctxLog = ctx.Log;
 		var ini = Path.Combine(f.Root, "tool.ini");
 		File.WriteAllText(ini, "set for the run");
 		if (Enumerable.Range('D', 23).Select(c => (char)c + @":\").FirstOrDefault(d => !Directory.Exists(d)) is { } noDrive) {

@@ -436,15 +436,17 @@ public sealed class GrowingText
 	public string Read(string a_path)
 	{
 		using var fs = new FileStream(a_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-		var head = new byte[(int)Math.Min(HeadSize, fs.Length)];
+		// its length read once: the file may shrink while it is looked at, and a second reading must never undercut the first
+		var length = fs.Length;
+		var head = new byte[(int)Math.Min(HeadSize, length)];
 		var headGot = fs.ReadAtLeast(head, head.Length, false);
 		var same = Math.Min(headGot, _head.Length);
 		// (two bytes a letter: a line's end found byte by byte would cut a letter in two - such a file is read whole each time)
-		var whole = Wide(_how) || _pos == 0 || !string.Equals(a_path, _path, StringComparison.OrdinalIgnoreCase) || fs.Length < _pos || same < _head.Length ||
+		var whole = Wide(_how) || _pos == 0 || !string.Equals(a_path, _path, StringComparison.OrdinalIgnoreCase) || length < _pos || same < _head.Length ||
 			!head.AsSpan(0, same).SequenceEqual(_head.AsSpan(0, same));
 		if (!whole) {
 			fs.Position = _pos;
-			var added = new byte[fs.Length - _pos];
+			var added = new byte[length - _pos];
 			var read = fs.ReadAtLeast(added, added.Length, false);
 			var end = LineEnd(added, read);
 			// New lines that are no UTF-8, in a file whose lines so far (plain letters only) had passed for it: the file is in
