@@ -217,7 +217,7 @@
   "How (fasterngio or game)": "Як (fasterngio або game)",
   "If you stop waiting, {0} stays open, but nothing it saves is kept with this setup.": "Якщо ви перестанете чекати, {0} залишиться відкритим, але нічого зі збереженого ним не залишиться з цим набором.",
   "Import a setup file ...": "Імпортувати файл набору ...",
-  "Imports a setup file another player shared with you. Everything in it that would start a program on this PC is taken out: afterwards you set your own Mod Organizer, profile and folders in Settings.": "Імпортує файл набору, яким із вами поділився інший гравець. Усе, що запускало б програму на цьому ПК, з нього прибирається: потім ви задаєте свій Mod Organizer, профіль і теки в Налаштуваннях.",
+  "Imports a setup file another player shared with you, for the Mod Organizer and profile picked above. Everything in it that would start a program on this PC is taken out: what a step still needs is set in Settings afterwards.": "Імпортує файл набору, яким із вами поділився інший гравець, для вибраних вище Mod Organizer і профілю. Усе, що запускало б програму на цьому ПК, з нього прибирається: те, що ще потрібно кроку, задається потім у Налаштуваннях.",
   "In use": "Використовується",
   "In use, with these values left as the default: {0}": "Використовується, ці значення залишено типовими: {0}",
   "Install {0} {1}?": "Установити {0} {1}?",

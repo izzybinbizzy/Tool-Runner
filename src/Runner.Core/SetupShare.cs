@@ -139,6 +139,60 @@ public static partial class SetupShare
 		return (file, r.Removed);
 	}
 
+	// the Mod Organizer and the profile a setup that is brought in is made for
+	public sealed record ForProfile(string Mo2Exe, string Instance, string Profile);
+
+	// the settings that name an output mod of a run (its own, or another step's that is switched for it)
+	static readonly string[] OutputKeys = ["output_mod", "then_move_to_mod", "replaces", "enable_during", "disable_during"];
+
+	// Every output mod name the setup made from its pattern and the profile it was made for ("{output} - {profile}":
+	// "TexGen Output - Their Profile") becomes that output's name for a_profile; a name that is not of that shape - a mod of
+	// the player's - stays. Each profile keeps outputs of its own that way, as a new setup's do. Returns how many changed
+	static int NameOutputsFor(Setup a_setup, string a_profile)
+	{
+		var pattern = Setup.Str(a_setup.Root, "outputPattern") ?? "{output} - {profile}";
+		var (old, at) = (a_setup.Profile, pattern.IndexOf("{output}", StringComparison.OrdinalIgnoreCase));
+		if (old == "" || at < 0 || !pattern.Contains("{profile}", StringComparison.OrdinalIgnoreCase) || string.Equals(old, a_profile, StringComparison.OrdinalIgnoreCase)) {
+			return 0;
+		}
+		var before = pattern[..at].Replace("{profile}", old, StringComparison.OrdinalIgnoreCase);
+		var after = pattern[(at + "{output}".Length)..].Replace("{profile}", old, StringComparison.OrdinalIgnoreCase);
+		string? Named(string a_name) =>
+			a_name.Length > before.Length + after.Length && a_name.StartsWith(before, StringComparison.OrdinalIgnoreCase) && a_name.EndsWith(after, StringComparison.OrdinalIgnoreCase)
+				? SetupMaker.OutputName(pattern, a_name[before.Length..^after.Length], a_profile) : null;
+		int In(JsonArray a_list)
+		{
+			var n = 0;
+			for (var i = 0; i < a_list.Count; ++i) {
+				if (a_list[i] is JsonValue v && v.TryGetValue<string>(out var name) && Named(name) is { } to) {
+					a_list[i] = to;
+					++n;
+				}
+			}
+			return n;
+		}
+		int Under(JsonNode? a_node)
+		{
+			var n = 0;
+			if (a_node is JsonArray list) {
+				n += list.Sum(Under);
+			} else if (a_node is JsonObject o) {
+				foreach (var (key, value) in o.ToList()) {
+					if (!OutputKeys.Contains(key)) {
+						n += Under(value);
+					} else if (value is JsonArray many) {
+						n += In(many);
+					} else if (value is JsonValue v && v.TryGetValue<string>(out var name) && Named(name) is { } to) {
+						o[key] = to;
+						++n;
+					}
+				}
+			}
+			return n;
+		}
+		return a_setup.Steps.Sum(s => Under(s.Settings)) + (a_setup.Root["lodOutputs"] is JsonArray lod ? In(lod) : 0);
+	}
+
 	// What bringing a setup in came to. File: where it was written (null: it was not brought in); Lines: what to tell the
 	// player; NoName: the name it was to take is no setup's name
 	public sealed record Brought(string? File, List<string> Lines, bool NoName = false);
@@ -157,8 +211,9 @@ public static partial class SetupShare
 	// every path of the PC it came from, every add-on approval. a_freeName: a name that is taken gets a number after it
 	// ("Name (2)") - the window, which asks for no name; else that is said and nothing is written. a_data: the program's
 	// data folder - the setup's backups and scratch are kept in it, where a new setup keeps them (the other PC's folders
-	// were taken out, and without a backup folder no run of it starts)
-	public static Brought BringIn(string a_file, string? a_name, string a_setups, bool a_freeName = false, string? a_data = null)
+	// were taken out, and without a backup folder no run of it starts). a_for: the Mod Organizer and profile the player
+	// picked for it - the setup is made for them, and its outputs are named after that profile
+	public static Brought BringIn(string a_file, string? a_name, string a_setups, bool a_freeName = false, string? a_data = null, ForProfile? a_for = null)
 	{
 		var s = Setup.Load(Path.GetFullPath(a_file));
 		if (s.Root["steps"] is not JsonArray || s.Root["mo2"] is not JsonObject) {
@@ -194,9 +249,20 @@ public static partial class SetupShare
 			s.Root["backups"] = Path.Combine(a_data, "Backups");
 			s.Root["scratch"] = Path.Combine(a_data, "Scratch");
 		}
+		var (was, renamed) = (s.Profile, 0);
+		if (a_for != null) {
+			renamed = NameOutputsFor(s, a_for.Profile);
+			s.Root["mo2"] = new JsonObject { ["exe"] = a_for.Mo2Exe, ["instance"] = a_for.Instance, ["profile"] = a_for.Profile };
+		}
 		Directory.CreateDirectory(a_setups);
 		s.Save(dst);
 		var lines = new List<string> { "setup written: " + dst };
+		if (a_for != null) {
+			lines.Add($"it runs your Mod Organizer ({a_for.Mo2Exe}) and the profile {a_for.Profile}");
+		}
+		if (renamed > 0) {
+			lines.Add($"{renamed} output mod name(s) made for the profile \"{was}\" are named after {a_for!.Profile} now");
+		}
 		if (a_data != null) {
 			lines.Add("its backups and its scratch folder are kept where a new setup keeps them: " + a_data);
 		}

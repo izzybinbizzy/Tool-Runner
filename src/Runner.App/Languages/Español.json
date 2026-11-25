@@ -217,7 +217,7 @@
   "How (fasterngio or game)": "Cómo (fasterngio o game)",
   "If you stop waiting, {0} stays open, but nothing it saves is kept with this setup.": "Si dejas de esperar, {0} sigue abierta, pero nada de lo que guarde se conserva con esta configuración.",
   "Import a setup file ...": "Importar un archivo de configuración ...",
-  "Imports a setup file another player shared with you. Everything in it that would start a program on this PC is taken out: afterwards you set your own Mod Organizer, profile and folders in Settings.": "Importa un archivo de configuración que otro jugador ha compartido contigo. Se quita todo lo que iniciaría un programa en este PC: después eliges tu propio Mod Organizer, tu perfil y tus carpetas en Ajustes.",
+  "Imports a setup file another player shared with you, for the Mod Organizer and profile picked above. Everything in it that would start a program on this PC is taken out: what a step still needs is set in Settings afterwards.": "Importa un archivo de configuración que otro jugador ha compartido contigo, para el Mod Organizer y el perfil elegidos arriba. Se quita todo lo que iniciaría un programa en este PC: lo que un paso aún necesite se ajusta después en Ajustes.",
   "In use": "En uso",
   "In use, with these values left as the default: {0}": "En uso, con estos valores dejados en el predeterminado: {0}",
   "Install {0} {1}?": "¿Instalar {0} {1}?",

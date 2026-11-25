@@ -222,7 +222,7 @@ public static class NewSetupDialog
 		var cancel = new Button { Content = "Cancel", Style = (Style)a_owner.FindResource("Ghost"), IsCancel = true };
 		// a setup another player shared: brought in under its own name, with everything taken out that would start something here
 		var import = new Button { Content = "Import a setup file ...", Style = (Style)a_owner.FindResource("Ghost"), Margin = new Thickness(10, 0, 0, 0),
-			ToolTip = "Imports a setup file another player shared with you. Everything in it that would start a program on this PC is taken out: afterwards you set your own Mod Organizer, profile and folders in Settings." };
+			ToolTip = "Imports a setup file another player shared with you, for the Mod Organizer and profile picked above. Everything in it that would start a program on this PC is taken out: what a step still needs is set in Settings afterwards." };
 		// while the setup is being made the box stays open: closed then, the setup would be written all the same and never shown
 		var making = false;
 		w.Closing += (_, e) => e.Cancel = making;
@@ -297,13 +297,26 @@ public static class NewSetupDialog
 				return;
 			}
 			var from = d.FileName;
+			// the Mod Organizer and profile picked in this box, when they are: the setup is made for them
+			var (exeText, inst, forProfile) = (Typed(), InstanceDir(), profile.SelectedItem as string);
 			create.IsEnabled = false;
 			cancel.IsEnabled = false;
 			import.IsEnabled = false;
 			making = true;
 			try {
 				// (its own name; one that is taken gets a number after it - nothing of the player's is ever written over)
-				var got = await Task.Run(() => SetupShare.BringIn(from, null, AppPaths.Setups, true, AppPaths.Data));
+				var got = await Task.Run(() => {
+					SetupShare.ForProfile? mine = null;
+					if (forProfile != null) {
+						try {
+							var mo2 = Mo2Instance.Load(exeText, inst);
+							mine = new(Path.GetFullPath(exeText), inst ?? Path.GetDirectoryName(mo2.IniPath)!, forProfile);
+						} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) {
+							// (no Mod Organizer that reads is picked: the setup is brought in without one, and Settings takes it)
+						}
+					}
+					return SetupShare.BringIn(from, null, AppPaths.Setups, true, AppPaths.Data, mine);
+				});
 				if (got.File == null) {
 					note.Text = WindowWords.Format("Not imported: {0}", string.Join(" ", got.Lines));
 					note.Foreground = Brushes2.Get("Bad");

@@ -217,7 +217,7 @@
   "How (fasterngio or game)": "方式（fasterngio 或 game）",
   "If you stop waiting, {0} stays open, but nothing it saves is kept with this setup.": "如果停止等待，{0} 会保持打开，但它保存的内容不会与此方案一起保留。",
   "Import a setup file ...": "导入方案文件 ...",
-  "Imports a setup file another player shared with you. Everything in it that would start a program on this PC is taken out: afterwards you set your own Mod Organizer, profile and folders in Settings.": "导入其他玩家分享给你的方案文件。其中会在此电脑上启动程序的内容都会被去掉：之后请在设置中指定你自己的 Mod Organizer、配置文件和文件夹。",
+  "Imports a setup file another player shared with you, for the Mod Organizer and profile picked above. Everything in it that would start a program on this PC is taken out: what a step still needs is set in Settings afterwards.": "为上方选定的 Mod Organizer 和配置文件导入其他玩家分享给你的方案文件。其中会在此电脑上启动程序的内容都会被去掉：步骤仍需要的内容，之后请在设置中指定。",
   "In use": "使用中",
   "In use, with these values left as the default: {0}": "使用中，以下数值保留为默认：{0}",
   "Install {0} {1}?": "安装 {0} {1}？",

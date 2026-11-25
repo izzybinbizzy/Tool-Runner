@@ -217,7 +217,7 @@
   "How (fasterngio or game)": "Nasıl (fasterngio ya da game)",
   "If you stop waiting, {0} stays open, but nothing it saves is kept with this setup.": "Beklemeyi bırakırsanız {0} açık kalır, ama kaydettiği hiçbir şey bu kurulumla saklanmaz.",
   "Import a setup file ...": "Kurulum dosyası içe aktar ...",
-  "Imports a setup file another player shared with you. Everything in it that would start a program on this PC is taken out: afterwards you set your own Mod Organizer, profile and folders in Settings.": "Başka bir oyuncunun sizinle paylaştığı bir kurulum dosyasını içe aktarır. İçinde bu bilgisayarda bir program başlatacak her şey çıkarılır: ardından kendi Mod Organizer'ınızı, profilinizi ve klasörlerinizi Ayarlar'dan belirlersiniz.",
+  "Imports a setup file another player shared with you, for the Mod Organizer and profile picked above. Everything in it that would start a program on this PC is taken out: what a step still needs is set in Settings afterwards.": "Başka bir oyuncunun sizinle paylaştığı bir kurulum dosyasını, yukarıda seçilen Mod Organizer ve profil için içe aktarır. İçinde bu bilgisayarda bir program başlatacak her şey çıkarılır: bir adımın hâlâ ihtiyaç duyduğu şeyler sonradan Ayarlar'dan belirlenir.",
   "In use": "Kullanımda",
   "In use, with these values left as the default: {0}": "Kullanımda; şu değerler varsayılanda bırakıldı: {0}",
   "Install {0} {1}?": "{0} {1} kurulsun mu?",

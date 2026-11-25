@@ -217,7 +217,7 @@
   "How (fasterngio or game)": "方法 (fasterngio または game)",
   "If you stop waiting, {0} stays open, but nothing it saves is kept with this setup.": "待つのをやめても {0} は開いたままですが、保存された内容はこの構成に保持されません。",
   "Import a setup file ...": "構成ファイルを取り込む ...",
-  "Imports a setup file another player shared with you. Everything in it that would start a program on this PC is taken out: afterwards you set your own Mod Organizer, profile and folders in Settings.": "ほかのプレイヤーから共有された構成ファイルを取り込みます。この PC でプログラムを起動するものはすべて取り除かれます。取り込んだあと、自分の Mod Organizer、プロファイル、フォルダーを設定で指定してください。",
+  "Imports a setup file another player shared with you, for the Mod Organizer and profile picked above. Everything in it that would start a program on this PC is taken out: what a step still needs is set in Settings afterwards.": "ほかのプレイヤーから共有された構成ファイルを、上で選んだ Mod Organizer とプロファイル用に取り込みます。この PC でプログラムを起動するものはすべて取り除かれます。ステップにまだ必要なものは、取り込んだあと設定で指定してください。",
   "In use": "使用中",
   "In use, with these values left as the default: {0}": "使用中。次の値は既定のままです: {0}",
   "Install {0} {1}?": "{0} {1} をインストールしますか?",

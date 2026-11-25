@@ -11696,6 +11696,24 @@ public static class Program
 			Equal<string?>(Path.Combine(setups, "output sizes (2).json"), SetupShare.BringIn(from, "output sizes", setups, true).File, "... the window gives it the next free one");
 			var none = SetupShare.BringIn(from, "..", setups);
 			Check(none.File == null && none.NoName, "a name with nothing plain in it");
+			// brought in from the New setup box: for the Mod Organizer and profile picked there, its outputs named after that profile
+			File.WriteAllText(from, """
+				{ "name": "Friend", "mo2": { "exe": "", "profile": "Their Profile" }, "outputPattern": "{output} - {profile}", "lodOutputs": ["DynDOLOD Output - Their Profile", "Kept As It Is"],
+				  "steps": [ { "step": "texgen", "settings": { "output_mod": "TexGen Output - Their Profile", "disable_during": ["DynDOLOD Output - their profile", "Some Mod"], "deadline_min": 30 } },
+				             { "step": "shaders", "settings": { "caches": [ { "shader_mod": "Open Shaders - Their Profile", "output_mod": "Shader Cache - Their Profile" } ] } } ] }
+				""");
+			var mine = SetupShare.BringIn(from, null, setups, true, dir, new SetupShare.ForProfile(@"D:\MO2\ModOrganizer.exe", @"D:\MO2", "My Profile"));
+			var m = Setup.Load(mine.File!);
+			Check(m.Mo2Exe == @"D:\MO2\ModOrganizer.exe" && m.Mo2Instance == @"D:\MO2" && m.Profile == "My Profile", "it is made for the Mod Organizer and profile picked: " + string.Join(" | ", mine.Lines));
+			Equal("TexGen Output - My Profile", Setup.Str(m.Steps[0].Settings, "output_mod"), "an output named after the other profile is named after this one");
+			Equal("DynDOLOD Output - My Profile|Some Mod", string.Join("|", Setup.List(m.Steps[0].Settings, "disable_during")), "... in a list too, whatever its letters' case; a mod of the player's stays");
+			Equal("DynDOLOD Output - My Profile|Kept As It Is", string.Join("|", m.LodOutputs), "... and among the LOD outputs");
+			var cache = (JsonObject)((JsonArray)m.Steps[1].Settings["caches"]!)[0]!;
+			Check(Setup.Str(cache, "output_mod") == "Shader Cache - My Profile" && Setup.Str(cache, "shader_mod") == "Open Shaders - Their Profile", "a cache's output too - never the shader mod it is built for, which is a mod of the player's");
+			Check(mine.Lines.Any(l => l.StartsWith("4 output mod name(s) made for the profile \"Their Profile\"", StringComparison.Ordinal)), "how many were named anew is said: " + string.Join(" | ", mine.Lines));
+			Equal(30, Setup.Int(m.Steps[0].Settings, "deadline_min"), "what is no name stays");
+			var same = SetupShare.BringIn(from, "Same Profile", setups, false, dir, new SetupShare.ForProfile(@"D:\MO2\ModOrganizer.exe", @"D:\MO2", "their profile"));
+			Equal("TexGen Output - Their Profile", Setup.Str(Setup.Load(same.File!).Steps[0].Settings, "output_mod"), "for a profile of the same name nothing is named anew");
 			File.WriteAllText(from, """{ "name": "..", "mo2": {}, "steps": [] }""");
 			Equal<string?>(Path.Combine(setups, "Their Setup (shared).json"), SetupShare.BringIn(from, null, setups).File, "a file whose own name is none is kept under its file's name");
 			File.WriteAllText(from, """{ "steps": "none" }""");
