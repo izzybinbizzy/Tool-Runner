@@ -510,6 +510,12 @@ public static class SettingsPanel
 		Field(runPage, apply, "Keep MO2 open during a run (fewer restarts; needs the MO2 Tools menu entry)", work, "keepMo2Open", JsonValueKind.True);
 		Field(runPage, apply, "Commands before a run (one per line; each must succeed)", work, "beforeRun", JsonValueKind.Array);
 		Field(runPage, apply, "Commands after a run (one per line)", work, "afterRun", JsonValueKind.Array);
+		// what a run does to the profile besides its steps' own outputs: the LOD outputs that go off with them, and where the
+		// tools' plugins stand in the plugin list afterwards (a new setup writes the tools' own guidance; a player may change
+		// or empty each)
+		Field(runPage, apply, "LOD output mods switched off before the first step (one per line)", work, "lodOutputs", JsonValueKind.Array);
+		Field(runPage, apply, "Plugin places after a run (each: the plugin, then last_master, after:<plugin> or end)", work, "placement", JsonValueKind.Object);
+		Field(runPage, apply, "A plugin's place when a run first ticks it (the plugin: the plugin it goes below)", work, "placeAfter", JsonValueKind.Object);
 
 		// ---- Backups: only the last few runs' kept, as a zip, their size and a clean-up
 		work["keepBackups"] ??= 5;
@@ -1574,6 +1580,11 @@ public static class SettingsPanel
 		} else if (kind is JsonValueKind.Object or JsonValueKind.Array) {
 			var t = new TextBox { Text = cur?.ToJsonString(Pretty) ?? "", AcceptsReturn = true, MinHeight = 80 }.Live(Control.FontFamilyProperty, "MonoFont").Live(Control.FontSizeProperty, "SizeLog");
 			a_apply.Add(() => {
+				// (emptied: the setting leaves the setup - "" is no JSON, and saving a page nobody typed into said "not valid")
+				if (t.Text.Trim() == "") {
+					a_obj.Remove(a_key);
+					return null;
+				}
 				try {
 					a_obj[a_key] = JsonNode.Parse(t.Text);
 					return null;

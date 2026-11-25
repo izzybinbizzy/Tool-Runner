@@ -30,7 +30,6 @@ public sealed class Setup
 	public bool AlertNotification => Bool(Obj("alerts"), "notification") ?? true;
 	public bool AlertSound => Bool(Obj("alerts"), "sound") ?? true;
 	public bool AlertFlash => Bool(Obj("alerts"), "flash") ?? false;
-	public string LodOffBefore => Str(Root, "lodOutputsOffBefore") ?? "texgen";
 
 	public ShaderRebuild ShaderRebuild => Str(Root, "shaderRebuild")?.ToLowerInvariant() switch {
 		"always" => ShaderRebuild.Always,
