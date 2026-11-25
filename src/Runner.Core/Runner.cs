@@ -1142,6 +1142,11 @@ public static class Runner
 			foreach (var line in ToolErrors.Simple(StepCatalog.Name(a_s.Key), r.State, r.Note, why)) {
 				a_ctx.Log.Simple(line, r.State == StepState.Stopped ? Level.Warn : Level.Error);
 			}
+			// a failure of the runner's own (no error the tool's help documents): what to do about it, with its code, in both logs
+			if (!stopped && why == null && RunnerErrors.Find(r.Note) is { } own) {
+				a_ctx.Log.Warn($"what to do: {own.Todo} [{own.Code}]");
+				a_ctx.Log.Simple($"What to do: {own.Todo} [{own.Code}]", Level.Warn);
+			}
 			try {
 				StepKit.CloseTool(a_ctx, new StepSettings(a_s.Settings).Str("image"));
 				InGame.CloseGame(a_ctx);

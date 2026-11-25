@@ -11516,6 +11516,53 @@ public static class Program
 		Check(missing.Count == 0, $"{missing.Count} refusal(s) with no catalog entry (RunnerErrors.cs) - " + string.Join(" || ", missing.Take(6)));
 	}
 
+	// ... and every text a step fails with: its own words, or the tool's, come with a code and what to do
+	static void T_EveryFailureOfAStepIsInTheCatalog()
+	{
+		var core = SourceDir();
+		if (!Directory.Exists(core)) {
+			Console.WriteLine($"  (skipped: the source is not at {core})");
+			return;
+		}
+		var missing = new List<string>();
+		var seen = 0;
+		foreach (var file in Directory.EnumerateFiles(core, "*.cs", SearchOption.AllDirectories).Where(p => !p.Contains(@"\obj\", StringComparison.Ordinal) && !p.Contains(@"\bin\", StringComparison.Ordinal))) {
+			var src = File.ReadAllText(file);
+			foreach (System.Text.RegularExpressions.Match call in System.Text.RegularExpressions.Regex.Matches(src, @"\bnew StepFailedException\(")) {
+				var line = src.LastIndexOf('\n', call.Index) + 1;
+				if (src.AsSpan(line, call.Index - line).Contains("//", StringComparison.Ordinal)) {
+					continue;
+				}
+				// (a failure that only hands on a text made elsewhere - a tool's own box, a check's finding - has no words of its own here)
+				var text = string.Join(" ", ReadCall(src, call.Index + call.Length).Strings);
+				if (text.Trim().Length < 8) {
+					continue;
+				}
+				++seen;
+				if (RunnerErrors.Find(text + " ") == null) {
+					missing.Add($"{Path.GetFileName(file)}: {text.Trim()}");
+				}
+			}
+		}
+		Check(seen >= 120, $"the scan found the steps' failures ({seen})");
+		Check(missing.Count == 0, $"{missing.Count} failure(s) of a step with no catalog entry (RunnerErrors.cs) - " + string.Join(" || ", missing.Take(6)));
+		// the nearer entry wins: a limit before "the window did not come", an empty result before the tool's name
+		Equal("TR-408", RunnerErrors.Find("xLODGen's options did not appear within the step's 120 minute limit")?.Code, "the step's limit");
+		Equal("TR-433", RunnerErrors.Find("xLODGen's options did not appear, and the tool's log said nothing new for 15 minutes")?.Code, "a window that never came");
+		Equal("TR-411", RunnerErrors.Find("the grass cache looks empty (3 files)")?.Code, "almost nothing made");
+		Equal("TR-433", RunnerErrors.Find("DynDOLOD: no Start button in its options window (DynDOLOD needs Expert mode)")?.Code, "the window, not the tool's own words");
+		Equal(RunnerErrors.ToolsOwnWords, RunnerErrors.Find("Pandora: something only Pandora would say")?.Code, "what a tool itself said");
+		Equal(RunnerErrors.ToolsOwnWords, RunnerErrors.All[^1].Code, "and that entry is the last one asked");
+		// a tool's own documented error goes before the catalog's general words for "the tool said so"
+		var memory = Explain.For("dyndolod", "DynDOLOD: Error: Out of memory");
+		Check(memory is { Code: null, Help: "https://dyndolod.info/FAQ" }, "the tool's own help first: " + memory);
+		Check(Explain.For("pandora", "Pandora: something only Pandora would say") is { Code: RunnerErrors.ToolsOwnWords }, "the general words where the tool's help has none");
+		// a place that is no place is named at the check, where it was read as "end"
+		var odd = Setup.FromJson(new JsonObject { ["placement"] = JsonNode.Parse("[[\"Mine.esp\", \"afer:Skyrim.esm\"], [\"Other.esp\", \"after:Skyrim.esm\"], [\"Last.esp\", \"end\"], [\"Top.esp\", \"last_master\"]]") }).Problems();
+		var named = odd.Where(p => p.Contains("a place is last_master", StringComparison.Ordinal)).ToList();
+		Check(named.Count == 1 && named[0].Contains("Mine.esp", StringComparison.Ordinal) && RunnerErrors.Find(named[0])?.Code == "TR-118", "the one slip is named, the three places are not: " + string.Join(" | ", odd));
+	}
+
 	// ... and that guard is a real one: a planted refusal nobody put in the catalog is caught, a note and a known one are not
 	static void T_ARefusalWithoutAnEntryIsCaught()
 	{
@@ -11586,7 +11633,8 @@ public static class Program
 		setup.Root["shaderRebuild"] = "always";
 		Check(DiskForecast.Build(setup, mo2, setup.EnabledSteps, probes).Disks.Single().Parts.Any(p => p.Needed && p.What.Contains("Output A", StringComparison.Ordinal)),
 			"unless the setup rebuilds the caches every run");
-		Check(RunnerErrors.Find("DynDOLOD: the output path is not set in this preset, and there are no steps left") == null, "a tool's own words are not taken for the runner's");
+		Equal(RunnerErrors.ToolsOwnWords, RunnerErrors.Find("DynDOLOD: the output path is not set in this preset, and there are no steps left")?.Code,
+			"a tool's own words are told as the tool's own, never taken for one of the runner's refusals");
 		Equal("TR-112", RunnerErrors.Find("the setup has no steps")?.Code, "the setup's own are");
 	}
 

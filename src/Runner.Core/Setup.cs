@@ -220,7 +220,11 @@ public sealed class Setup
 			p.Add($"the setup's name is not a plain name (one folder name: no \\ / : * ? \" < > | and no \"..\", and none Windows keeps for a device, like CON or NUL): {own}");
 		}
 		if (Root["placement"] is JsonArray places && places.Any(e => e is not JsonArray a || !IsPlace(a))) {
-			p.Add("the setup's \"placement\" holds an entry that is not [plugin, after this plugin]");
+			p.Add("the setup's \"placement\" holds an entry that is not [plugin, place]");
+		}
+		// a place that is none of the three was read as "end": a slip of the hand ("afer:Skyrim.esm") moved the plugin to the very end
+		foreach (var odd in Placement.Where(r => r.Where is not ("last_master" or "end") && !(r.Where.StartsWith("after:", StringComparison.OrdinalIgnoreCase) && r.Where.Length > 6)).Take(3)) {
+			p.Add($"the setup's \"placement\" gives {odd.Plugin} the place \"{odd.Where}\" - a place is last_master, after:<plugin> or end");
 		}
 		return p;
 	}

@@ -569,7 +569,7 @@ public abstract class DynDolodFamily : IStep
 				Waits.Tool(a_ctx, Key, proc, a_s.Deadline(120), () => {
 					foreach (var box in Uia.Boxes(StepKit.PidsOf(image)())) {
 						if (Regex.IsMatch(box.Text, @"Installation Error|\bError\b") && !box.Text.Contains("PBR textures detected", StringComparison.Ordinal)) {
-							throw new StepFailedException($"{Tool}: {box.Text}");
+							throw new StepFailedException($"{Tool} reported an error: {box.Text}");
 						}
 						if (Uia.Button(box.Element, "No") != null) {
 							// questions: the known ones answered, an unknown one is never guessed (a "delete the output?" would get Yes)

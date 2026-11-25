@@ -738,7 +738,7 @@ public sealed class ShaderStep : IStep
 		}
 		var how = (a_s.Str("on_crash") ?? "ask").Trim().ToLowerInvariant();
 		if (how == "stop") {
-			throw new StepFailedException(what + " - the step stops here (the setup's \"on_crash\" is \"stop\")");
+			throw new StepFailedException(what + " - the step stops here (its setting \"When the game crashes while compiling\" says stop)");
 		}
 		if (how == "restart") {
 			a_ctx.Log.Detail($"starting the game again to carry on (the setup's \"on_crash\" is \"restart\") - start {a_start + 1}");

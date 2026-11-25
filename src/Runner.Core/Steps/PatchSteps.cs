@@ -479,7 +479,7 @@ public sealed class SynthesisStep : IStep
 		void StillOpen(string a_when)
 		{
 			if (Exited(a_proc)) {
-				throw new StepFailedException($"Synthesis closed {a_when}");
+				throw new StepFailedException($"Synthesis's window closed {a_when}");
 			}
 		}
 		static string Short(string a_t) => a_t.Length > 300 ? a_t[..300] + " ..." : a_t;
