@@ -337,7 +337,7 @@ public static partial class InGame
 		// the game's INIs: the profile's own when it keeps them (LocalSettings), else My Games'; SkyrimCustom.ini wins
 		var localInis = File.Exists(ini) && Files.ReadSharedText(ini).Split('\n').Any(l => l.Trim().Equals("LocalSettings=true", StringComparison.OrdinalIgnoreCase));
 		var iniDir = localInis ? a_profile.Dir : myGames;
-		var savePath = new[] { "SkyrimCustom.ini", "Skyrim.ini" }.Select(n => Path.Combine(iniDir, n)).Where(File.Exists)
+		var savePath = GameInis.Select(n => Path.Combine(iniDir, n)).Where(File.Exists)
 			.Select(f => Files.ReadSharedText(f).Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.StartsWith("sLocalSavePath=", StringComparison.OrdinalIgnoreCase)))
 			.FirstOrDefault(l => l != null)?["sLocalSavePath=".Length..].Trim();
 		return Path.Combine(myGames, string.IsNullOrEmpty(savePath) ? "Saves" : savePath.TrimEnd('\\'));
@@ -565,7 +565,7 @@ public static partial class InGame
 		if (d["messageBoxOpen"]?.GetValue<bool>() == false) {
 			return null;
 		}
-		var body = string.Join(" ", new[] { "bodyText", "text", "message" }.Select(k => d[k]?.ToString() ?? "")).Trim();
+		var body = string.Join(" ", BoxTextKeys.Select(k => d[k]?.ToString() ?? "")).Trim();
 		var labels = (d["buttons"] as JsonArray ?? d["buttonTexts"] as JsonArray ?? [])
 			.Select(b => b is JsonObject bo ? (bo["text"] ?? bo["label"])?.ToString() ?? "" : b?.ToString() ?? "").ToList();
 		return new GameBox(body, labels, d["buttonCount"]?.GetValue<int>(), d["cancelIndex"] is JsonValue c && c.TryGetValue<int>(out var cancel) ? cancel : -1);
@@ -761,7 +761,7 @@ public static partial class InGame
 			}
 			if (IsTrue(list["messageBoxOpen"])) {
 				var d = a_ctx.DevBench.Call("menu", new { action = "describe" }, 10);
-				parts.Add("a game message: " + string.Join(" ", new[] { "bodyText", "text", "message" }.Select(k => d[k]?.ToString() ?? "")).Trim());
+				parts.Add("a game message: " + string.Join(" ", BoxTextKeys.Select(k => d[k]?.ToString() ?? "")).Trim());
 			}
 		} catch (Exception e) when (e is HttpRequestException or TaskCanceledException or InvalidOperationException or FormatException or System.Text.Json.JsonException) {
 		}
@@ -939,6 +939,10 @@ public static partial class InGame
 	}
 
 	static bool IsTrue(JsonNode? a_n) => a_n is JsonValue v && v.TryGetValue<bool>(out var b) && b;
+
+	// (lists asked for at every look into the game: each made once)
+	static readonly string[] GameInis = ["SkyrimCustom.ini", "Skyrim.ini"];
+	static readonly string[] BoxTextKeys = ["bodyText", "text", "message"];
 
 	// the player's followers in a DevBench actor list: every living teammate loaded near them, never the player (followers
 	// come along - the game's follow package can leave one behind after a coc / MoveTo)

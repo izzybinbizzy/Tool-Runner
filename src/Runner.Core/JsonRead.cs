@@ -14,3 +14,15 @@ public static class JsonRead
 	// a file a person may have written: comments and a last comma are allowed
 	public static readonly JsonDocumentOptions ByHand = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true, AllowDuplicateProperties = false };
 }
+
+// How JSON is written, each way made once for the whole program. A set of options made anew for one write is no small
+// thing: each set builds and keeps its own picture of every type it writes, so one made at every call did that work
+// again each time and left it for the collector
+public static class JsonWrite
+{
+	// one value to a line
+	public static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
+
+	// ... with every letter written as it is (a name with an accent or a non-Latin letter reads as itself in the file)
+	public static readonly JsonSerializerOptions IndentedLetters = new() { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+}

@@ -568,7 +568,7 @@ public partial class App : Application
 		}
 		w.Close();
 		File.WriteAllText(Path.Combine(a_dir, "window words.json"), System.Text.Json.JsonSerializer.Serialize(words.ToDictionary(k => k, _ => ""),
-			new System.Text.Json.JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+			JsonWrite.IndentedLetters));
 		if (squeezed.Count > 0) {
 			File.WriteAllLines(Path.Combine(a_dir, "layout problems.txt"), squeezed);
 			ConsoleAttach.ToParent();

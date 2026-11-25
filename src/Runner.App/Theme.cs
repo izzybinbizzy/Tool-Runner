@@ -363,7 +363,7 @@ public static class Theme
 		if (doc["author"] is JsonObject author) {
 			author["value"] = "";
 		}
-		Files.WriteAtomic(path, doc.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+		Files.WriteAtomic(path, doc.ToJsonString(JsonWrite.IndentedLetters));
 		return path;
 	}
 

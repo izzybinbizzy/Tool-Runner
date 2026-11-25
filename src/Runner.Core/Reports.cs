@@ -12,7 +12,7 @@ public static class Reports
 {
 	public const int Schema = 1;
 
-	static readonly JsonSerializerOptions Indented = new() { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+	static readonly JsonSerializerOptions Indented = JsonWrite.IndentedLetters;
 
 	public static string Text(JsonObject a_o) => a_o.ToJsonString(Indented);
 

@@ -392,7 +392,7 @@ public static class Mo2Changes
 				["profiles"] = new JsonArray(r.Profiles.Select(p => (JsonNode)JsonValue.Create(p)).ToArray()),
 			});
 		}
-		Files.WriteAtomic(Path.Combine(a_dir, "changes.json"), arr.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+		Files.WriteAtomic(Path.Combine(a_dir, "changes.json"), arr.ToJsonString(JsonWrite.IndentedLetters));
 	}
 
 	static JsonObject LookJson(Look a_l)

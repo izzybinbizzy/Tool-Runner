@@ -283,6 +283,6 @@ public static class ToolVersions
 				known.Remove(k);
 			}
 		}
-		Files.WriteAtomic(StoreFile(a_setup), System.Text.Json.JsonSerializer.Serialize(known, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+		Files.WriteAtomic(StoreFile(a_setup), System.Text.Json.JsonSerializer.Serialize(known, JsonWrite.Indented));
 	}
 }

@@ -954,7 +954,7 @@ public partial class MainWindow : Window
 		return w;
 	}
 
-	TextBlock RenameNotice()
+	static TextBlock RenameNotice()
 	{
 		var t = new TextBlock { Text = "The setup is being renamed. Its settings show here as soon as that is done.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
 		t.SetResourceReference(TextBlock.ForegroundProperty, "Muted");

@@ -166,7 +166,7 @@ public sealed class Setup
 	};
 
 	static readonly JsonDocumentOptions ReadOptions = JsonRead.ByHand;
-	static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+	static readonly JsonSerializerOptions WriteOptions = JsonWrite.IndentedLetters;
 
 	// what the program keeps beside the setups (the tools' versions, the outputs' sizes): files of its own in that folder, never
 	// setups - a list of setups leaves them out

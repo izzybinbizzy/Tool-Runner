@@ -241,7 +241,7 @@ public static class DataFolder
 		}
 	}
 
-	static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+	static readonly JsonSerializerOptions WriteOptions = JsonWrite.IndentedLetters;
 
 	// every JSON file under the folder: a string value that is the old folder, or a path inside it, is written under the new one
 	// (compared as values, so escaping and letters outside English never matter; a sibling folder sharing the name is left).

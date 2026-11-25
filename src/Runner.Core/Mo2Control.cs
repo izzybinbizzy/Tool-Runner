@@ -12,6 +12,8 @@ public sealed class StepFailedException(string a_message) : Exception(a_message)
 // through the open instance so every tool sees the virtual Data folder.
 public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log)
 {
+	static readonly string[] NoneSeen = ["  (none seen)"];
+
 	public Mo2Instance Mo2 { get; } = a_mo2;
 	public string ProfileName { get; } = a_profile;
 	readonly RunLog _log = a_log;
@@ -964,7 +966,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		}
 		try {
 			var lines = new List<string> { $"{a_title} was asked for at {a_asked:HH:mm:ss}; it never appeared.", "", "Mod Organizer's processes and their children seen while waiting (the first ones may be older than the request):" };
-			lines.AddRange(a_started.Count == 0 ? new[] { "  (none seen)" } : a_started.Select(s => "  " + s));
+			lines.AddRange(a_started.Count == 0 ? NoneSeen : a_started.Select(s => "  " + s));
 			lines.AddRange(["", "Mod Organizer's log since the request:"]);
 			lines.AddRange(RawLinesSince(Mo2Log, a_logFrom).Select(s => "  " + s));
 			var logs = Path.GetDirectoryName(Mo2Log)!;

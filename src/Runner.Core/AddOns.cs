@@ -46,6 +46,7 @@ public static class AddOns
 	const int Schema = 1;
 	const int DefaultMinutes = 60, MostMinutes = 600, LongestName = 60;
 	static readonly string[] AllowedKeys = ["schema", "name", "author", "page", "program", "arguments", "output", "minutes", "makes", "before", "after"];
+	static readonly string[] Needed = ["name", "author", "program", "output"];
 
 	static string? Text(JsonObject a_o, string a_key) => a_o[a_key] is JsonValue v && v.TryGetValue<string>(out var s) ? s.Trim() : null;
 
@@ -102,7 +103,7 @@ public static class AddOns
 		if (o["schema"] is not JsonValue sv || !sv.TryGetValue<int>(out var schema) || schema != Schema) {
 			p.Add($"\"schema\" must be {Schema}");
 		}
-		foreach (var need in new[] { "name", "author", "program", "output" }.Where(k => string.IsNullOrEmpty(Text(o, k)))) {
+		foreach (var need in Needed.Where(k => string.IsNullOrEmpty(Text(o, k)))) {
 			p.Add($"\"{need}\" is missing");
 		}
 		if (Text(o, "name") is { Length: > 0 } name && (name.Length > LongestName || !GoodFolderName(name))) {

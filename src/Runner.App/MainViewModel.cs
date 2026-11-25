@@ -1052,11 +1052,13 @@ public sealed partial class MainViewModel : Observable
 		Renaming ? $"Not {a_done} yet: the setup is being renamed - try again in a moment." :
 		Saving ? $"Not {a_done} yet: the change before this one is still being saved - try again in a moment." : null;
 
+	static readonly string[] OrderFiles = ["modlist.txt", "plugins.txt"];
+
 	// the profile's mod list and plugin list as they are on disk (unreadable = a stamp of its own, so it never matches)
 	static string ProfileStamp(string a_dir)
 	{
 		try {
-			return string.Join("|", new[] { "modlist.txt", "plugins.txt" }.Select(f => Path.Combine(a_dir, f))
+			return string.Join("|", OrderFiles.Select(f => Path.Combine(a_dir, f))
 				.Select(f => File.Exists(f) ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Files.ReadShared(f))) : "-"));
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			return "unreadable " + Guid.NewGuid();

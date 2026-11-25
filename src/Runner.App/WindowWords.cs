@@ -14,20 +14,38 @@ public static class WindowWords
 {
 	public const string English = "English";
 
-	const string ShippedPrefix = "Language.";
+	// The shipped languages stand in the program as one packed file (as plain text they were a third of the program
+	// file). Its list of names is read without unpacking anything, and a language is unpacked only when it is asked for
+	const string ShippedPack = "Languages.zip";
 
-	// the languages inside the program
-	public static List<string> Shipped() =>
-		[.. typeof(WindowWords).Assembly.GetManifestResourceNames().Where(n => n.StartsWith(ShippedPrefix, StringComparison.Ordinal) && n.EndsWith(".json", StringComparison.Ordinal))
-			.Select(n => n[ShippedPrefix.Length..^".json".Length])];
-
-	public static string? ShippedText(string a_name)
+	static System.IO.Compression.ZipArchive? Pack()
 	{
-		using var s = typeof(WindowWords).Assembly.GetManifestResourceStream(ShippedPrefix + a_name + ".json");
+		var s = typeof(WindowWords).Assembly.GetManifestResourceStream(ShippedPack);
 		if (s == null) {
 			return null;
 		}
-		using var r = new StreamReader(s);
+		try {
+			return new System.IO.Compression.ZipArchive(s, System.IO.Compression.ZipArchiveMode.Read);
+		} catch (InvalidDataException) {
+			s.Dispose();
+			return null;
+		}
+	}
+
+	// the languages inside the program
+	public static List<string> Shipped()
+	{
+		using var pack = Pack();
+		return pack == null ? [] : [.. pack.Entries.Where(e => e.FullName.EndsWith(".json", StringComparison.OrdinalIgnoreCase)).Select(e => e.FullName[..^".json".Length]).Order(StringComparer.Ordinal)];
+	}
+
+	public static string? ShippedText(string a_name)
+	{
+		using var pack = Pack();
+		if (pack?.GetEntry(a_name + ".json") is not { } entry) {
+			return null;
+		}
+		using var r = new StreamReader(entry.Open());
 		return r.ReadToEnd();
 	}
 
@@ -98,11 +116,14 @@ public static class WindowWords
 	}
 
 	// the words of a language file; null, with why, when it does not read
+	// (a language file a player wrote may hold comments and a last comma; made once - JsonWrite says why)
+	static readonly JsonSerializerOptions ReadOptions = new() { AllowTrailingCommas = true, ReadCommentHandling = JsonCommentHandling.Skip };
+
 	public static Dictionary<string, string>? Read(string a_text, out string a_problem)
 	{
 		a_problem = "";
 		try {
-			return JsonSerializer.Deserialize<Dictionary<string, string>>(a_text, new JsonSerializerOptions { AllowTrailingCommas = true, ReadCommentHandling = JsonCommentHandling.Skip }) ?? [];
+			return JsonSerializer.Deserialize<Dictionary<string, string>>(a_text, ReadOptions) ?? [];
 		} catch (JsonException e) {
 			a_problem = e.Message;
 			return null;
@@ -258,7 +279,7 @@ public static class WindowWords
 		foreach (var k in s_words.Keys) {
 			words.TryAdd(k, "");
 		}
-		Files.WriteAtomic(file, JsonSerializer.Serialize(words, new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+		Files.WriteAtomic(file, JsonSerializer.Serialize(words, JsonWrite.IndentedLetters));
 		return file;
 	}
 }

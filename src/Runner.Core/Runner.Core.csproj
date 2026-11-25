@@ -8,7 +8,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <!-- a_ parameter names and Win32 constant names are this code's style (CommonLib's) -->
-    <NoWarn>$(NoWarn);CA1707;CA1401;CA1720;CA1861;CA1869;CA1822</NoWarn>
+    <NoWarn>$(NoWarn);CA1707;CA1401;CA1720</NoWarn>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>ToolRunner</RootNamespace>
     <Authors>izzydoingit</Authors>

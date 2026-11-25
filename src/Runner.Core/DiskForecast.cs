@@ -30,7 +30,7 @@ public static class OutputSizes
 	{
 		var known = Load(a_setup);
 		known[Path.GetFullPath(a_modDir)] = a_bytes;
-		Files.WriteAtomic(StoreFile(a_setup), JsonSerializer.Serialize(known, new JsonSerializerOptions { WriteIndented = true }));
+		Files.WriteAtomic(StoreFile(a_setup), JsonSerializer.Serialize(known, JsonWrite.Indented));
 	}
 }
 

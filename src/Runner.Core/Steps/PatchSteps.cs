@@ -23,7 +23,7 @@ public abstract class LauncherStep : IStep
 		json["Mo2ProfileName"] = a_profile;
 		json["GameLocation"] = a_game;
 		json["OutputLocation"] = a_output;
-		return json.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+		return json.ToJsonString(JsonWrite.Indented);
 	}
 
 	// The tool's window and its settings file are its author's and may change in any version, with no word to this program: a
@@ -324,7 +324,7 @@ public sealed class PgPatcherStep : IStep
 				if (conf["params"]?["modmanager"] is JsonObject manager && manager.ContainsKey("mo2instancedir")) {
 					manager["mo2instancedir"] = Path.GetDirectoryName(a_ctx.Mo2.IniPath)!;
 				}
-				Files.WriteAtomic(live, conf.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+				Files.WriteAtomic(live, conf.ToJsonString(JsonWrite.Indented));
 				a_ctx.Log.Detail($"PGPatcher settings: {a_s.Str("settings") ?? "its own"} (output {mod})");
 			}
 			using (new Toggle(a_ctx, StepKit.ToolMods(a_ctx, a_s), [mod, .. a_s.List("disable_during")], "PGPatcher", a_ctx.Cancel)) {
@@ -565,7 +565,7 @@ public sealed class SynthesisStep : IStep
 				changed = true;
 			}
 		}
-		return changed ? top.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) : a_settings;
+		return changed ? top.ToJsonString(JsonWrite.Indented) : a_settings;
 	}
 
 	// found again each time: the window seen first can be its start-up window, gone a moment later, and a gone window reads as empty
@@ -662,7 +662,7 @@ public sealed class PandoraStep : IStep
 		var stray = Path.Combine(a_ctx.Mo2.OverwriteDir, "Engine.log");
 		StepKit.KeepFile(a_ctx, settings);
 		try {
-			Files.WriteAtomic(settings, conf.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+			Files.WriteAtomic(settings, conf.ToJsonString(JsonWrite.Indented));
 			using (new Toggle(a_ctx, [.. a_s.List("enable_during"), .. StepKit.ToolMods(a_ctx, a_s)], a_s.List("disable_during"), "Pandora", a_ctx.Cancel)) {
 				try {
 					using var proc = a_ctx.Control.RunExecutable(a_s.Req("executable"), image, a_s.Str("args") ?? "--auto_run --auto_close", a_ctx.Cancel);

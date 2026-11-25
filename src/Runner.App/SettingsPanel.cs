@@ -1532,7 +1532,7 @@ public static class SettingsPanel
 		Application.Current.Shutdown();
 	}
 
-	static readonly JsonSerializerOptions Pretty = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+	static readonly JsonSerializerOptions Pretty = JsonWrite.IndentedLetters;
 
 	// one setting: its editor by its kind; the returned function writes it back (or says what is wrong)
 	// a_onUnlessSet: a switch the setup does not hold yet shows on (its default), so saving the page keeps it what it was
