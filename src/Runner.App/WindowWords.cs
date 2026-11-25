@@ -169,7 +169,7 @@ public static class WindowWords
 		}
 		bool Free(DependencyProperty a_p) => !BindingOperations.IsDataBound(a_root, a_p);
 		switch (a_root) {
-			case TextBlock t when Free(TextBlock.TextProperty) && !string.IsNullOrWhiteSpace(t.Text):
+			case TextBlock t when Free(TextBlock.TextProperty) && !MadeOfRuns(t) && !string.IsNullOrWhiteSpace(t.Text):
 				Do(t.Text, w => t.Text = w);
 				break;
 			case ContentControl c when Free(ContentControl.ContentProperty) && c.Content is string s && !string.IsNullOrWhiteSpace(s):
@@ -198,6 +198,15 @@ public static class WindowWords
 		foreach (var child in LogicalTreeHelper.GetChildren(a_root).OfType<DependencyObject>().ToList()) {
 			Walk(child, a_seen);
 		}
+	}
+
+	// A text put together from several runs, or from a run a binding fills (the status bar's lights: a colored dot and the
+	// words beside it). Its Text reads as the runs' texts in a row; set, it would throw the runs away - and the light then
+	// stood at the words of the moment for good
+	static bool MadeOfRuns(TextBlock a_t)
+	{
+		var runs = LogicalTreeHelper.GetChildren(a_t).OfType<System.Windows.Documents.Inline>().ToList();
+		return runs.Count > 1 || runs.Any(r => r is System.Windows.Documents.Run run && BindingOperations.IsDataBound(run, System.Windows.Documents.Run.TextProperty));
 	}
 
 	public static void Tree(DependencyObject a_root)

@@ -94,7 +94,7 @@ public static class ToolsDialog
 			var name = new TextBlock { Text = tool.Name, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
 			var state = new TextBlock { Text = StateOf(tool.Learned), Style = (Style)a_owner.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center,
 				Margin = new Thickness(12, 0, 12, 0) };
-			var open = new Button { Content = tool.Learned == null ? "Set it up" : "Set up again", Style = (Style)a_owner.FindResource("Ghost"), VerticalAlignment = VerticalAlignment.Center,
+			var open = new Button { Content = WindowWords.Word(tool.Learned == null ? "Set it up" : "Set up again"), Style = (Style)a_owner.FindResource("Ghost"), VerticalAlignment = VerticalAlignment.Center,
 				ToolTip = WindowWords.F($"Opens {tool.Name} in its own window, through Mod Organizer (Mod Organizer is closed first if it is open)") };
 			System.Windows.Automation.AutomationProperties.SetName(open, $"{open.Content}: {tool.Name}");
 			var grid = new Grid { Margin = new Thickness(0, 4, 0, 4) };
