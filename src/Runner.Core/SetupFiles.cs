@@ -205,13 +205,17 @@ public static class SetupFiles
 			}
 			// The way back failed too: the setup stands under its new name. Its learned settings go with it and the run records
 			// follow below, so the three are never left apart; what cannot follow is named with where each one is
+			// (wherever the folder stands now: under its old name, or half way through a change of letters under its " (renaming)" one)
+			var standing = new[] { origin, learned }.FirstOrDefault(d => Directory.Exists(d) && !Files.SamePath(d, learnedTo));
 			try {
-				if (Directory.Exists(origin) && !Directory.Exists(learnedTo)) {
-					MoveFolder(origin, learnedTo);
+				if (standing != null && !Directory.Exists(learnedTo)) {
+					Directory.Move(standing, learnedTo);
 				}
 			} catch (Exception e3) when (e3 is IOException or UnauthorizedAccessException) {
+				var records = runs.Where(j => Files.SamePath(j.SetupFile, a_file)).Select(j => Path.GetFileName(j.Folder)).ToList();
 				throw new IOException($"it could not be renamed whole ({e.Message}), and could not take its old name back ({stuck.Message}): the setup is now \"{to}\" and its " +
-					$"learned settings are still in \"{origin}\" - move that folder to \"{learnedTo}\"; its run records still name \"{a_file}\"", e);
+					$"learned settings are still in \"{standing}\" - move that folder to \"{learnedTo}\"" +
+					(records.Count == 0 ? "" : $"; these run records still name \"{a_file}\": {string.Join(", ", records)}"), e);
 			}
 		}
 		// Every run record that names the setup follows it. One that cannot be written stops the rename: every record names the
