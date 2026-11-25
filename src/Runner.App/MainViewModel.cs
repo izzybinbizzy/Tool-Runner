@@ -144,7 +144,7 @@ public sealed partial class MainViewModel : Observable
 	// the title bar and the taskbar button say what runs (read out on Alt+Tab, seen with the window behind the game)
 	public string WindowTitle => !IsRunning ? Brand.Name :
 		Waiting != "" ? $"{WaitingTitle} - {Brand.Name}" :
-		$"{NowTitle}{(ProgressKnown ? $" {Progress * 100:0}%" : "")} - {Brand.Name}";
+		$"{NowTitle}{(ProgressKnown ? $" {Progress * 100:0}%" : "")}{(FinishAt == "" ? "" : ", " + FinishAt)} - {Brand.Name}";
 
 	// What the run waits on the player for is either a guided part in the game (they do it, then press Done) or something
 	// only they can end outside it - their own Mod Organizer left open - which the run notices by itself: no Done to press
@@ -170,6 +170,12 @@ public sealed partial class MainViewModel : Observable
 	public System.Windows.Shell.TaskbarItemProgressState TaskbarState { get; set => Set(ref field, value); }
 	public string Clock { get; set => Set(ref field, value); } = "";
 	public string Left { get; set => Set(ref field, value); } = "";
+	// when the run should be done, by the steps' usual times ("done about 21:40"; "" when not known): beside the clock, in the
+	// title the taskbar button shows, and in the notification-area icon's tip
+	public string FinishAt { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(WindowTitle)); } } = "";
+
+	// the clock time in the player's own way of writing it (24 hours or AM / PM)
+	public static string DoneAbout(DateTime a_at) => "done about " + a_at.ToString("t", System.Globalization.CultureInfo.CurrentCulture);
 	public string Verdict { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(VerdictLine)); } } = "";
 	public string VerdictKind { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(VerdictLine)); } } = "";
 	public string Waiting { get; set { if (Set(ref field, value)) { OnPropertyChanged(nameof(ShowProgress)); OnPropertyChanged(nameof(ProgressBusy)); OnPropertyChanged(nameof(WindowTitle)); } } } = "";
@@ -179,7 +185,7 @@ public sealed partial class MainViewModel : Observable
 	public string EstimateText { get; set => Set(ref field, value); } = "";
 	public bool StopAfterAsked { get; set => Set(ref field, value); }
 	// the LOG box shows the detailed log (every line) when ticked, else the simple step-by-step one
-	public bool DetailedLog { get; set { if (Set(ref field, value)) { _logTail.Restart(); TailLog(); } } }
+	public bool DetailedLog { get; set { if (Set(ref field, value)) { TailLog(true); } } }
 	// the step the setup's last run stopped at ("" = nothing to run again): the "Run again from ..." button
 	public string RetryFrom { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(RetryText)); } } = "";
 	public string RetryText => RetryFrom == "" ? "" : "Run _again from " + StepCatalog.Name(RetryFrom);
@@ -330,6 +336,21 @@ public sealed partial class MainViewModel : Observable
 	string _lastWaiting = "";
 	readonly LogTail _logTail = new();
 	Dictionary<string, TimeSpan> _usual = [];
+
+	// the usual step times of the run shown, worked out again for each new run (a run of the same setup brings the times its
+	// earlier runs learned), from the records the look already read off the window's thread
+	string? _runUsualFor;
+	Dictionary<string, TimeSpan> _runUsual = [];
+
+	Dictionary<string, TimeSpan> RunUsual(Journal a_run, List<Journal> a_runs)
+	{
+		var key = a_run.SetupFile + "\n" + a_run.Id;
+		if (!string.Equals(_runUsualFor, key, StringComparison.OrdinalIgnoreCase)) {
+			_runUsualFor = key;
+			_runUsual = Engine.UsualTimes(a_run.SetupFile, a_runs);
+		}
+		return _runUsual;
+	}
 
 	public MainViewModel()
 	{
@@ -773,10 +794,16 @@ public sealed partial class MainViewModel : Observable
 		};
 		var elapsed = (_run.Ended ?? DateTime.Now) - _run.Started;
 		Clock = Long(elapsed);
-		var leftT = _run.Steps.Where(s => s.State is StepState.Pending or StepState.Running)
-			.Select(s => _usual.TryGetValue(s.Key, out var t) ? (s.State == StepState.Running && s.Started != null ? Max(TimeSpan.Zero, t - (DateTime.Now - s.Started.Value)) : t) : TimeSpan.Zero)
+		// the running setup's own usual times, whichever setup is picked in the list (CodeRabbit on pull request #38)
+		var usual = RunUsual(_run, runs);
+		var ahead = _run.Steps.Where(s => s.State is StepState.Pending or StepState.Running).ToList();
+		var leftT = ahead.Select(s => usual.TryGetValue(s.Key, out var t) ? (s.State == StepState.Running && s.Started != null ? Max(TimeSpan.Zero, t - (DateTime.Now - s.Started.Value)) : t) : TimeSpan.Zero)
 			.Aggregate(TimeSpan.Zero, (a, b) => a + b);
-		Left = IsRunning && leftT > TimeSpan.Zero ? "about " + Long(leftT) + " left" : "";
+		// a step still to come that never ran before has no usual time: what is left is then at least that much, and no
+		// finish time is promised
+		var partial = ahead.Any(s => !usual.ContainsKey(s.Key));
+		Left = IsRunning && leftT > TimeSpan.Zero ? (partial ? "at least " : "about ") + Long(leftT) + " left" : "";
+		FinishAt = IsRunning && leftT > TimeSpan.Zero && !partial ? DoneAbout(DateTime.Now + leftT) : "";
 		StepOf = IsRunning && cur != null ? $"step {_run.Steps.IndexOf(cur) + 1} of {steps}" : "";
 		// a run that ended is summed up once (its record is the same object until its file changes)
 		if (IsRunning || _run.Live) {
@@ -879,9 +906,30 @@ public sealed partial class MainViewModel : Observable
 		return !a_detailed && File.Exists(simple) && new FileInfo(simple).Length > 0 ? simple : Path.Combine(a_folder, "log.txt");
 	}
 
-	void TailLog()
+	// The log is read on a worker - a slow disk never holds the window - one read at a time, its text handed over on the window's
+	// thread. A look while a read is still going is left to the next one; a switch between the simple and the detailed log
+	// (a_restart) waits for that read and then reads the other log from its start. LogRead: the newest read, so what needs its
+	// text (First problem) can wait for it
+	Task _tailing = Task.CompletedTask;
+	public Task LogRead => _tailing;
+
+	void TailLog(bool a_restart = false)
 	{
-		var (text, reset) = _logTail.Read(_run == null ? null : LogFile(_run.Folder, DetailedLog));
+		if (!a_restart && !_tailing.IsCompleted) {
+			return;
+		}
+		_tailing = TailLogAfter(_tailing, _run == null ? null : LogFile(_run.Folder, DetailedLog), a_restart);
+	}
+
+	async Task TailLogAfter(Task a_before, string? a_file, bool a_restart)
+	{
+		await a_before;
+		var (text, reset) = await Task.Run(() => {
+			if (a_restart) {
+				_logTail.Restart();
+			}
+			return _logTail.Read(a_file);
+		});
 		if (reset) {
 			LogChanged?.Invoke("", true);
 		}
@@ -963,6 +1011,7 @@ public sealed partial class MainViewModel : Observable
 		NotYetSaved("started");
 
 	string? NotYetSaved(string a_done) =>
+		Renaming ? $"Not {a_done} yet: the setup is being renamed - try again in a moment." :
 		Saving ? $"Not {a_done} yet: the change before this one is still being saved - try again in a moment." : null;
 
 	// the profile's mod list and plugin list as they are on disk (unreadable = a stamp of its own, so it never matches)
@@ -1413,9 +1462,9 @@ public sealed partial class MainViewModel : Observable
 		if (Setup is not { } setup || setup.Root["steps"] is not JsonArray arr) {
 			return;
 		}
-		if (SetupInUse || Saving) {
+		if (SetupInUse || Saving || Renaming) {
 			a_row.On = !a_on;
-			Say(SetupInUse ? "Not changed: a run is using this setup right now." : "Not changed yet: the change before this one is still being saved - try again in a moment.", "bad");
+			Say(SetupInUse ? "Not changed: a run is using this setup right now." : NotYetSaved("changed")!, "bad");
 			return;
 		}
 		var mine = arr.OfType<JsonObject>().Where(o => Setup.Str(o, "step") == a_row.Key).ToList();
@@ -1472,8 +1521,8 @@ public sealed partial class MainViewModel : Observable
 		if (Setup is not { } setup || setup.Root["steps"] is not JsonArray arr) {
 			return;
 		}
-		if (SetupInUse || Saving) {
-			Say(SetupInUse ? "Not moved: a run is using this setup right now." : "Not moved yet: the change before this one is still being saved - try again in a moment.", "bad");
+		if (SetupInUse || Saving || Renaming) {
+			Say(SetupInUse ? "Not moved: a run is using this setup right now." : NotYetSaved("moved")!, "bad");
 			return;
 		}
 		var i = Steps.IndexOf(a_row);
@@ -1526,6 +1575,10 @@ public sealed partial class MainViewModel : Observable
 	// a change to the setup shown is on its way into its file (the next change waits for it: NotNow)
 	public bool Saving { get; private set; }
 
+	// the setup shown is being renamed: its file moves, and no change or save may land in the old one meanwhile (CodeRabbit on
+	// pull request #38) - held from before the last save is waited for until the renamed setup is shown
+	public bool Renaming { get; set; }
+
 	// The write of a setup that is under way (finished when none is). A window that closes waits for it, and so does the
 	// program's end: a change the window took is in the file before the program is gone
 	public static Task PendingSetupSave { get; private set; } = Task.CompletedTask;
@@ -1539,8 +1592,8 @@ public sealed partial class MainViewModel : Observable
 		if (Setup is not { } setup) {
 			return false;
 		}
-		if (Saving) {
-			Say("Not saved yet: the change before this one is still being saved - try again in a moment.", "bad");
+		if (NotYetSaved("saved") is { } notNow) {
+			Say(notNow, "bad");
 			return false;
 		}
 		if (Engine.Active() is { } j && string.Equals(j.SetupFile, setup.File, StringComparison.OrdinalIgnoreCase)) {
@@ -1638,6 +1691,7 @@ public sealed partial class MainViewModel : Observable
 		Progress = current == "xlodgen" ? Math.Min(0.97, now / 17.5) : Math.Min(0.95, now / 1.5);
 		Clock = Long(TimeSpan.FromMinutes(spent));
 		Left = $"about {Long(TimeSpan.FromMinutes(left))} left";
+		FinishAt = DoneAbout(new DateTime(2026, 10, 27, 20, 0, 0, DateTimeKind.Local).AddMinutes(spent + left));
 		Verdict = "";
 		Mo2Open = a_waiting || current == "xlodgen";
 		GameRunning = a_waiting;
@@ -1694,7 +1748,7 @@ public sealed partial class MainViewModel : Observable
 		Waiting = "";
 		StepOf = "";
 		Clock = Long(at - start);
-		Left = "";
+		Left = FinishAt = "";
 		Verdict = j.Verdict;
 		VerdictKind = a_failed ? "bad" : "good";
 		RetryFrom = a_failed ? "dyndolod" : "";
@@ -1731,7 +1785,7 @@ public sealed partial class MainViewModel : Observable
 		Estimate();
 		ShowReady();
 		Waiting = "";
-		Clock = Left = Verdict = "";
+		Clock = Left = FinishAt = Verdict = "";
 		Progress = 0;
 		Mo2Open = false;
 		GameRunning = false;

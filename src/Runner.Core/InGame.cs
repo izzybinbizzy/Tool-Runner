@@ -991,8 +991,15 @@ public static partial class InGame
 		return f == null ? null : Path.GetFileNameWithoutExtension(f.Name);
 	}
 
+	// the offline tests' stand-in for a game start (never set in a run): StartAndLoad's own loop is tested without a game
+	public static Action<RunContext, StepSettings>? LaunchStandIn { get; set; }
+
 	static void LaunchGame(RunContext a_ctx, StepSettings a_s)
 	{
+		if (LaunchStandIn is { } standIn) {
+			standIn(a_ctx, a_s);
+			return;
+		}
 		NoGameRunning(a_ctx);
 		GameStart.Prepare(a_ctx);
 		a_ctx.Control.LaunchGame(a_s.Str("launch_executable") ?? "SKSE", FreshGamePid(), a_ctx.Cancel);

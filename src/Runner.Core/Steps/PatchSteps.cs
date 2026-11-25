@@ -26,6 +26,60 @@ public abstract class LauncherStep : IStep
 		return json.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
 	}
 
+	// The tool's window and its settings file are its author's and may change in any version, with no word to this program: a
+	// failure that comes from reading them is this program's to fix, and says so - its author is never sent the report
+	public static string OursToFix(string a_name) =>
+		$" This is Tool Runner's to fix, not {a_name}'s: a newer {a_name} may have changed its window or its settings file. Report it on Tool Runner's GitHub page, never on {a_name}'s own page.";
+
+	// the fields that decide what the tool reads and where it writes: one renamed in its settings file would leave this
+	// program's value unread, and the tool would build from whatever profile and into whatever folder it was last pointed at
+	// (the game's folder too: renamed, the tool would read its own new key and build for a game folder it was given before)
+	static readonly string[] Pointing = ["Mo2InstancePath", "Mo2ProfileName", "GameLocation", "OutputLocation"];
+
+	// and the field that tells it which mod manager the mods are in (PointedAt writes it as Mod Organizer's every run)
+	const string Manager = "ModManager";
+
+	// the first of those fields a settings file the tool already wrote does not hold (null: all there, or no file yet - a new
+	// one gets them all). A file that holds no object, or an empty one, holds none of them
+	public static string? MissingField(string? a_settings)
+	{
+		if (a_settings == null) {
+			return null;
+		}
+		if (a_settings.Trim().Length == 0) {
+			return Pointing[0];
+		}
+		var held = JsonNode.Parse(a_settings) as JsonObject;
+		return held == null ? Pointing[0] : Pointing.Append(Manager).FirstOrDefault(k => !held.ContainsKey(k));
+	}
+
+	// What stops the step in the tool's settings file before anything of it changes (null: nothing - no file yet is fine, a new
+	// one gets every field): a file that is there but blank, one that does not read as settings, one that lost a field this
+	// program points
+	public static string? SettingsProblem(string? a_settings, string a_name)
+	{
+		if (a_settings != null && a_settings.Trim().Length == 0) {
+			return $"{a_name}'s settings file is empty - nothing was changed and {a_name} was not started. Open {a_name} once through Mod Organizer, let it save its settings, then run the step again.";
+		}
+		string? gone;
+		try {
+			gone = MissingField(a_settings);
+		} catch (JsonException) {
+			return $"{a_name}'s settings file does not read as settings - nothing was changed and {a_name} was not started." + OursToFix(a_name);
+		}
+		var why = gone == Manager ? "tell it the mods are in Mod Organizer" : "point it at this profile and this output";
+		return gone == null ? null : $"{a_name}'s settings file no longer holds \"{gone}\", which Tool Runner sets to {why} - nothing was changed and {a_name} was not started." + OursToFix(a_name);
+	}
+
+	// the tool's settings file still holds every field this program points: looked at before anything of the step is changed
+	void CheckSettings(RunContext a_ctx)
+	{
+		var file = SettingsFile(a_ctx);
+		if (SettingsProblem(File.Exists(file) ? Files.ReadSharedText(file) : null, StepCatalog.Name(Key)) is { } why) {
+			throw new StepFailedException(why);
+		}
+	}
+
 	void PointAtThisRun(RunContext a_ctx, string a_output)
 	{
 		var file = SettingsFile(a_ctx);
@@ -99,6 +153,7 @@ public abstract class LauncherStep : IStep
 		var name = StepCatalog.Name(Key);
 		// the process to watch: the setup's own, else the program MO2's entry starts (its title need not be the file's name)
 		var image = a_s.Str("image") ?? (a_ctx.Mo2.Executable(a_s.Req("executable"))?.Binary is { Length: > 0 } binary ? Path.GetFileName(binary) : a_s.Req("executable") + ".exe");
+		CheckSettings(a_ctx);
 		StepKit.ParkMod(a_ctx, Key, mod);
 		var tw = a_s.Str("tool_writes");
 		var toolDir = tw is { Length: > 0 } ? a_ctx.Mo2.ModDir(tw) : null;
@@ -114,14 +169,16 @@ public abstract class LauncherStep : IStep
 		using (new Toggle(a_ctx, [mod, .. a_s.List("enable_during"), .. StepKit.ToolMods(a_ctx, a_s)], a_s.List("disable_during"), name, a_ctx.Cancel)) {
 			try {
 				using var proc = a_ctx.Control.RunExecutable(a_s.Req("executable"), image, a_s.Str("args"), a_ctx.Cancel);
-				var w = StepKit.WaitWindow(a_ctx, image, t => Regex.IsMatch(t, TitleRx), TimeSpan.FromMinutes(3), name + "'s window");
+				// (its window is known by its title: one renamed in a newer version is this program's to follow)
+				var w = Uia.WaitWindow(StepKit.PidsOf(image), t => Regex.IsMatch(t, TitleRx), TimeSpan.FromMinutes(3), a_ctx.Cancel) ??
+					throw new StepFailedException($"{name}'s window did not appear within 3 minutes." + OursToFix(name));
 				// its button, once its window has finished laying itself out (usable, on screen)
 				System.Windows.Automation.AutomationElement? go = null;
 				for (var sw = System.Diagnostics.Stopwatch.StartNew(); go == null; a_ctx.Pause(TimeSpan.FromSeconds(1))) {
 					a_ctx.Cancel.ThrowIfCancellationRequested();
 					go = Uia.Button(w, names) is { } b && Uia.Usable(b) ? b : null;
 					if (go == null && (Exited(proc) || sw.Elapsed > TimeSpan.FromMinutes(1))) {
-						throw new StepFailedException($"{name} shows no usable {StartNames[0]} button. Its window shows: {WindowSays(w)}");
+						throw new StepFailedException($"{name} shows no usable {StartNames[0]} button. Its window shows: {WindowSays(w)}." + OursToFix(name));
 					}
 				}
 				Uia.Press(go);
@@ -138,7 +195,7 @@ public abstract class LauncherStep : IStep
 						throw new StepFailedException($"{name} closed when {Uia.Name(go)} was pressed");
 					}
 					if (sw.Elapsed > TimeSpan.FromSeconds(30)) {
-						throw new StepFailedException($"{name} did not start working when {Uia.Name(go)} was pressed. Its window shows: {WindowSays(w)}");
+						throw new StepFailedException($"{name} did not start working when {Uia.Name(go)} was pressed. Its window shows: {WindowSays(w)}." + OursToFix(name));
 					}
 				}
 				a_ctx.Activity(Key, name + " is patching");

@@ -154,7 +154,7 @@ public sealed class Setup
 	public static List<string> List(JsonObject a_o, string a_key) =>
 		(a_o[a_key] as JsonArray)?.Select(n => n?.ToString() ?? "").Where(s => s != "").ToList() ?? [];
 
-	static readonly JsonDocumentOptions ReadOptions = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
+	internal static readonly JsonDocumentOptions ReadOptions = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
 	static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
 	// what the program keeps beside the setups (the tools' versions, the outputs' sizes): files of its own in that folder, never

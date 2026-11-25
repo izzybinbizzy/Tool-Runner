@@ -421,6 +421,26 @@ public partial class App : Application
 		w.Demo(false);
 		Pump(w, 600);
 		Save("5 a run going");
+		// his checklist 635: the compact view of that run, and the command box with a few letters typed
+		var compact = w.ShowCompact();
+		compact.ShowActivated = false;
+		compact.ShowInTaskbar = false;
+		compact.WindowStartupLocation = WindowStartupLocation.Manual;
+		compact.Left = -30000;
+		compact.Top = -30000;
+		compact.Show();
+		Pump(compact, 600);
+		Save("5b the compact view", compact);
+		compact.Close();
+		var commands = w.DemoCommandBox("set");
+		commands.ShowActivated = false;
+		commands.WindowStartupLocation = WindowStartupLocation.Manual;
+		commands.Left = -30000;
+		commands.Top = -30000;
+		commands.Show();
+		Pump(commands, 600);
+		Save("5c the command box", commands);
+		commands.Close();
 		w.Demo(true);
 		Pump(w, 600);
 		Save("6 a guided step");
