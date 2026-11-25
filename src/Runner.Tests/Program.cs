@@ -5173,6 +5173,44 @@ public static class Program
 		}
 	}
 
+	// what a screen reader says of a control - its name, and the help text after it - goes into the window's language with
+	// the rest of its words; a help text a binding fills is the binding's (a step row's own, already in the language)
+	static void T_AScreenReadersWordsAreInTheWindowsLanguage()
+	{
+		Exception? failed = null;
+		var t = new Thread(() => {
+			try {
+				ToolRunner.App.WindowWords.Use(new Dictionary<string, string> {
+					["Restore"] = "Wiederherstellen", ["Puts it back"] = "Stellt es wieder her", ["Restore the run"] = "Den Lauf wiederherstellen",
+				});
+				var button = new System.Windows.Controls.Button { Content = "Restore" };
+				System.Windows.Automation.AutomationProperties.SetName(button, "Restore the run");
+				System.Windows.Automation.AutomationProperties.SetHelpText(button, "Puts it back");
+				var bound = new System.Windows.Controls.Button { Content = "Restore", DataContext = new { Help = "Puts it back" } };
+				System.Windows.Data.BindingOperations.SetBinding(bound, System.Windows.Automation.AutomationProperties.HelpTextProperty, new System.Windows.Data.Binding("Help"));
+				var panel = new System.Windows.Controls.StackPanel();
+				panel.Children.Add(button);
+				panel.Children.Add(bound);
+				ToolRunner.App.WindowWords.Tree(panel);
+				Equal("Wiederherstellen", button.Content as string, "its words");
+				Equal("Den Lauf wiederherstellen", System.Windows.Automation.AutomationProperties.GetName(button), "its name for a screen reader");
+				Equal("Stellt es wieder her", System.Windows.Automation.AutomationProperties.GetHelpText(button), "and the help text after it");
+				Check(System.Windows.Data.BindingOperations.IsDataBound(bound, System.Windows.Automation.AutomationProperties.HelpTextProperty),
+					"a help text a binding fills keeps its binding");
+			} catch (Exception e) when (e is not OutOfMemoryException) {
+				failed = e;
+			} finally {
+				ToolRunner.App.WindowWords.Use(new Dictionary<string, string>());
+			}
+		});
+		t.SetApartmentState(ApartmentState.STA);
+		t.Start();
+		t.Join();
+		if (failed != null) {
+			throw new InvalidOperationException("the walk over a made-up window failed: " + failed.Message, failed);
+		}
+	}
+
 	// a text with values in it is looked up by its form ("Use {0}'s old output?"), the values put in as they are
 	static void T_ATextWithValuesIsLookedUpByItsForm()
 	{

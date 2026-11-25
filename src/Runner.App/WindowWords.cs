@@ -211,6 +211,11 @@ public static class WindowWords
 			if (Free(AutomationProperties.NameProperty) && AutomationProperties.GetName(fe) is { Length: > 0 } name) {
 				Do(name, w => AutomationProperties.SetName(fe, w));
 			}
+			// what a screen reader says after the name (the Restore button's, a theme card's): left out, it stayed English
+			// in every language, though its translation stood in the language's file
+			if (Free(AutomationProperties.HelpTextProperty) && AutomationProperties.GetHelpText(fe) is { Length: > 0 } help) {
+				Do(help, w => AutomationProperties.SetHelpText(fe, w));
+			}
 			// a context menu is no logical child of what it opens on
 			if (fe.ContextMenu is { } menu) {
 				Walk(menu, a_seen);
