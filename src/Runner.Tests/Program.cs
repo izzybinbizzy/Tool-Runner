@@ -5976,6 +5976,12 @@ public static class Program
 			} finally {
 				Subst($"{letter}: /d");
 			}
+			// data reached by a network path - which may be this very PC's own folder (\\localhost\C$\...) - is never moved: how it
+			// stands to the new place cannot be told (where Windows will not open that path, it is refused all the same)
+			var local = Path.GetFullPath(from5 + " again");
+			var viaNetwork = @"\\localhost\" + local[0] + "$" + local[2..];
+			Throws<InvalidOperationException>(() => DataFolder.MoveTo(viaNetwork, Path.Combine(local, "inside", "deeper")), "data reached by a network path is not moved");
+			Check(Directory.Exists(Path.Combine(local, "inside")) && !Directory.Exists(Path.Combine(local, "inside", "deeper")), "and nothing was copied");
 		} finally {
 			if (Directory.Exists(root)) {
 				Directory.Delete(root, true);

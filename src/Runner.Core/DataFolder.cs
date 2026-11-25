@@ -180,8 +180,13 @@ public static class DataFolder
 		if (Physical(from) is not { } realFrom || Physical(to) is not { } realTo) {
 			throw new InvalidOperationException($"where {to} really is could not be told apart from the data folder - pick a folder on this PC");
 		}
-		if (realTo.StartsWith(@"\\", StringComparison.Ordinal) && !realFrom.StartsWith(@"\\", StringComparison.Ordinal)) {
+		// (a network path can be a folder of this very PC - \\localhost\C$\... - under a name no comparison knows: neither side
+		// may be one)
+		if (realTo.StartsWith(@"\\", StringComparison.Ordinal)) {
 			throw new InvalidOperationException($"{to} is a network folder - pick a folder on this PC");
+		}
+		if (realFrom.StartsWith(@"\\", StringComparison.Ordinal)) {
+			throw new InvalidOperationException($"the data is in a network folder ({from}) - its relation to {to} cannot be told; move it by hand");
 		}
 		if (Files.SamePath(from, to) || Files.SamePath(realFrom, realTo)) {
 			throw new InvalidOperationException("the data is in that folder already");

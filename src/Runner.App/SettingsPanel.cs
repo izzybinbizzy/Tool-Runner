@@ -1667,8 +1667,15 @@ public static class SettingsPanel
 			b.TextChanged += (_, _) => {
 				// a character picked from the saves of the values before is no pick for these: back to any character at once,
 				// so a Save pressed before the new list is read never writes one profile's character for another
-				if (box.SelectedIndex > 0) {
-					box.SelectedIndex = 0;
+				// and the list holds only that until the new one is read: no character of the old profile can be picked again
+				var wasPicked = box.SelectedIndex > 0;
+				var wasFilling = filling;
+				filling = true;
+				box.ItemsSource = new List<string> { AnyCharacter };
+				box.SelectedIndex = 0;
+				filling = wasFilling;
+				if (wasPicked) {
+					Changed();
 				}
 				pause.Stop();
 				pause.Start();
