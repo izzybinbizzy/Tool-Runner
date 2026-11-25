@@ -11391,6 +11391,75 @@ public static class Program
 		Check(p.States()["DLC: Dawnguard"] == '*', "left as it was");
 	}
 
+	// Every setting a step reads off its own settings is one the Settings window can show: written by a new setup, or offered
+	// with its default when the step's file does not hold it. Read off the source, so a setting added to a step without its
+	// row in the window fails here
+	static void T_EverySettingAStepReadsIsOffered()
+	{
+		var steps = Path.Combine(SourceDir(), "Steps");
+		if (!Directory.Exists(steps)) {
+			Console.WriteLine($"  (skipped: the source is not at {steps})");
+			return;
+		}
+		var reads = new System.Text.RegularExpressions.Regex(@"\ba_s\.(?:Str|Req|Int|Num|Bool|List)\(""(\w+)""");
+		var classAt = new System.Text.RegularExpressions.Regex(@"(?m)^public (?:sealed |abstract |static |partial )*class (\w+)(?: : (\w+))?");
+		var keyAt = new System.Text.RegularExpressions.Regex(@"string Key => ""(\w+)""");
+		// what a new setup writes for the step, or the step cannot run without (the check names it)
+		string[] basics = ["executable", "output_mod", "then_move_to_mod", "output_dir", "launch_executable", "exe", "by", "fasterngio_exe", "reads", "dyndolod", "worldspaces",
+			"interior_cell", "wait_s", "dyndolod_wait_s", "dyndolod_off", "save", "shader_mod", "settings_mod", "tool_writes", "file", "sha", "image", "replaces"];
+		HashSet<string> KeysIn(string a_text) => [.. reads.Matches(a_text).Select(m => m.Groups[1].Value)];
+		var keysOf = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+		var baseOf = new Dictionary<string, string>(StringComparer.Ordinal);
+		var stepOf = new Dictionary<string, string>(StringComparer.Ordinal);
+		foreach (var file in Directory.GetFiles(steps, "*.cs")) {
+			var text = File.ReadAllText(file);
+			var marks = classAt.Matches(text);
+			for (var i = 0; i < marks.Count; i++) {
+				var body = text[marks[i].Index..(i + 1 < marks.Count ? marks[i + 1].Index : text.Length)];
+				var name = marks[i].Groups[1].Value;
+				keysOf[name] = KeysIn(body);
+				if (marks[i].Groups[2].Success) {
+					baseOf[name] = marks[i].Groups[2].Value;
+				}
+				if (keyAt.Match(body) is { Success: true } k) {
+					stepOf[name] = k.Groups[1].Value;
+				}
+			}
+		}
+		Check(stepOf.Count >= 13, $"the steps were found in the source ({stepOf.Count}): {string.Join(", ", stepOf.Values)}");
+		foreach (var (name, step) in stepOf) {
+			var read = new HashSet<string>(keysOf[name], StringComparer.Ordinal);
+			if (baseOf.TryGetValue(name, out var parent) && keysOf.TryGetValue(parent, out var theirs)) {
+				read.UnionWith(theirs);
+			}
+			var offered = ToolRunner.App.SettingsPanel.OfferedKeys(step);
+			var hidden = read.Where(k => !offered.Contains(k) && !basics.Contains(k)).Order(StringComparer.Ordinal).ToList();
+			Check(hidden.Count == 0, $"{step} reads {hidden.Count} setting(s) its page never offers: {string.Join(", ", hidden)}");
+		}
+		// what the game steps share: a game start that loads a save (InGame), Faster Archives' offer at any game start (GameMods)
+		var save = ToolRunner.App.SettingsPanel.OfferedKeys("cleansave").Concat(ToolRunner.App.SettingsPanel.OfferedKeys("playsave")).ToHashSet(StringComparer.Ordinal);
+		var inGame = KeysIn(File.ReadAllText(Path.Combine(SourceDir(), "InGame.cs")));
+		Check(inGame.Count >= 6, $"the save steps' settings were found in the source ({inGame.Count})");
+		var lost = inGame.Where(k => !save.Contains(k) && !basics.Contains(k)).ToList();
+		Check(lost.Count == 0, "the save steps read settings their pages never offer: " + string.Join(", ", lost));
+		var offer = KeysIn(File.ReadAllText(Path.Combine(SourceDir(), "GameMods.cs")));
+		Check(offer.Contains("max_offers") && offer.Contains("offer_wait_min"), "Faster Archives' two settings were found in the source");
+		foreach (var step in (string[])["cleansave", "playsave", "shaders", "grass"]) {
+			var offered = ToolRunner.App.SettingsPanel.OfferedKeys(step);
+			Check(offer.All(offered.Contains), $"{step} offers what Faster Archives' wait reads");
+		}
+		// each has words of its own, never the setting's raw name
+		foreach (var step in StepCatalog.DefaultOrder) {
+			var bare = ToolRunner.App.SettingsPanel.OfferedKeys(step).Where(k => !ToolRunner.App.SettingsPanel.StepLabels.Contains(ToolRunner.App.SettingsPanel.LabelOf(k, step))).ToList();
+			Check(bare.Count == 0, $"{step}: no label for {string.Join(", ", bare)}");
+		}
+		// the two save steps have no time limit of their own, so none is offered; every other step's is
+		Check(!ToolRunner.App.SettingsPanel.OfferedKeys("cleansave").Contains("deadline_min") && !ToolRunner.App.SettingsPanel.OfferedKeys("playsave").Contains("deadline_min") &&
+		      ToolRunner.App.SettingsPanel.OfferedKeys("grass").Contains("deadline_min"), "a time limit is offered where one is read");
+		Equal("Wait after the teleport (seconds)", ToolRunner.App.SettingsPanel.LabelOf("settle_s", "playsave"), "the save steps' wait is named for what it is");
+		Equal("Wait before closing (seconds)", ToolRunner.App.SettingsPanel.LabelOf("settle_s", "shaders"), "the shader step's too");
+	}
+
 	static void T_EveryRefusalIsInTheCatalog()
 	{
 		Equal(RunnerErrors.All.Count, RunnerErrors.All.Select(e => e.Code).Distinct().Count(), "one code per entry");

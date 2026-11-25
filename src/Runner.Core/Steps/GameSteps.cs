@@ -176,7 +176,8 @@ public sealed class GrassStep : IStep
 
 	// the old route: NGIO's PrecacheGrass.txt in the game folder, the game started until the cache is complete; a crash is resumed
 	// by starting again. The limits: a first start that dies within 5 minutes is a broken setup; after that short
-	// crashes are normal, but more than 15 restarts, or 3 in a row that add no grass file, stop the step.
+	// crashes are normal, but more than 15 restarts, or 3 in a row that add no grass file, stop the step - and so does the
+	// step's own time limit (the time Faster Archives' window stands open is not counted).
 	void ByGame(RunContext a_ctx, StepSettings a_s)
 	{
 		var mod = a_s.OutputMod!;
@@ -193,6 +194,7 @@ public sealed class GrassStep : IStep
 			var launches = 0;
 			var idle = 0;
 			var offers = 0;
+			var whole = Stopwatch.StartNew();
 			try {
 				while (File.Exists(flag)) {
 					a_ctx.Cancel.ThrowIfCancellationRequested();
@@ -219,10 +221,13 @@ public sealed class GrassStep : IStep
 							Procs.End(g);
 							break;
 						}
-						if (File.Exists(flag) && still.Elapsed > TimeSpan.FromMinutes(20)) {
-							a_ctx.Log.Detail("no new grass file for 20 minutes - the game is stuck, starting it again");
+						if (File.Exists(flag) && still.Elapsed > TimeSpan.FromMinutes(Math.Max(1, a_s.Int("stuck_min", 20)))) {
+							a_ctx.Log.Detail($"no new grass file for {still.Elapsed.TotalMinutes:0} minutes - the game is stuck, starting it again");
 							Procs.End(g);
 							break;
+						}
+						if (whole.Elapsed > a_s.Deadline(360)) {
+							throw new StepFailedException($"the grass cache passed its {a_s.Deadline(360).TotalMinutes:0} minute limit");
 						}
 						a_ctx.Pause(TimeSpan.FromSeconds(10));
 					}
@@ -231,7 +236,9 @@ public sealed class GrassStep : IStep
 					}
 					// Faster Archives closed the game for its offer: no crash, and not one of the cache's own starts
 					if (File.Exists(flag) && FasterArchives.Offered(InGame.LogFolders(a_ctx.Setup, a_ctx.Mo2), launched, a_ctx.Control.Started)) {
+						whole.Stop();
 						FasterArchives.Wait(a_ctx, Key, a_s, ++offers, launched);
+						whole.Start();
 						--launches;
 						continue;
 					}

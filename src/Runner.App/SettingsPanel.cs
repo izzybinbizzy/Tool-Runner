@@ -54,10 +54,26 @@ public static class SettingsPanel
 		["build_min"] = "Patcher build limit (minutes)",
 		["extra_args"] = "Extra arguments (one per line)",
 		["stall_min"] = "Give up when nothing moves for (minutes)",
+		["compile_watch_s"] = "Watch for a shader compile before a save is loaded (seconds)",
+		["compile_max_min"] = "Longest shader compile waited for before a save is loaded (minutes)",
+		["sanity_min"] = "Stop when the shader mod shows no sign of running for (minutes)",
+		["first_start_min"] = "A first game start that ends sooner counts as a fault (minutes)",
+		["max_idle_restarts"] = "Restarts in a row allowed that add no grass file",
+		["max_offers"] = "Times Faster Archives may close the game for its offer",
+		["offer_wait_min"] = "Wait for your choice in Faster Archives' window (minutes)",
+		["start_buttons"] = "Words on its start button (one per line)",
+		["skse_dll"] = "AnvilLOD's --skse-dll value",
+		["settings_dirs"] = "More folders its settings are kept in (one per line)",
+		["nexus_id"] = "Its Nexus page number (for the update check)",
+		["live_settings"] = "PGPatcher's own settings file",
+		["pgpatcher_mod"] = "The mod PGPatcher is installed in",
+		["exe_path"] = "Synthesis's program file",
+		["roads"] = "Road set (the name ACMOS gives it)",
+		["stuck_min"] = "Start the game again when no grass file is added for (minutes)",
 	};
 
 	// every label the step editor can show for a known setting (a shipped language must hold each)
-	public static IReadOnlyCollection<string> StepLabels => [.. Labels.Values.Append(AnvilPresetLabel).Distinct(StringComparer.Ordinal)];
+	public static IReadOnlyCollection<string> StepLabels => [.. Labels.Values.Append(AnvilPresetLabel).Append(ArriveLabel).Distinct(StringComparer.Ordinal)];
 
 	// an edit not saved yet (the window asks before Settings closes over it)
 	public static bool HasChanges { get; private set; }
@@ -77,17 +93,70 @@ public static class SettingsPanel
 			: $"Not saved: these are the settings of \"{a_openedName}\", and {(a_picked == null ? "no setup" : $"\"{a_picked.Name}\"")} is picked in the main window now. " +
 			  $"Pick \"{a_openedName}\" again to save them (what you typed stays here), or press Undo changes to see the picked setup's.";
 
-	// settings a step reads that its file may not list yet (shown empty, with the default the step uses)
+	const string StepsOwn = "the step's own";
+
+	// every game start of a step: how often Faster Archives may close the game for its offer, and how long its window may wait
+	static readonly (string Key, JsonValueKind Kind, string Default)[] OfferOfFasterArchives = [("max_offers", JsonValueKind.Number, "3"), ("offer_wait_min", JsonValueKind.Number, "30")];
+
+	// a game start that loads a save: the start's limit and the watch for a shader compile before the load is sent
+	static readonly (string Key, JsonValueKind Kind, string Default)[] BeforeASaveLoads = [("start_min", JsonValueKind.Number, "8"), ("compile_watch_s", JsonValueKind.Number, "300"), ("compile_max_min", JsonValueKind.Number, "90")];
+
+	static readonly (string Key, JsonValueKind Kind, string Default)[] ModsWhileItRuns = [("enable_during", JsonValueKind.Array, "none"), ("disable_during", JsonValueKind.Array, "none")];
+
+	// settings a step reads that its file may not list yet (shown empty, with the default the step uses): each one a step
+	// reads and a new setup does not write stands here, so none can be reached only by editing the setup's file by hand
 	static readonly Dictionary<string, (string Key, JsonValueKind Kind, string Default)[]> Known = new(StringComparer.Ordinal) {
 		["shaders"] = [("build_for_off", JsonValueKind.False, "off"), ("on_crash", JsonValueKind.String, "ask"), ("crash_wait_min", JsonValueKind.Number, "30"),
-			("idle_s", JsonValueKind.Number, "45"), ("quiet_min", JsonValueKind.Number, "5"), ("min_files", JsonValueKind.Number, "50"), ("max_restarts", JsonValueKind.Number, "3")],
-		["grass"] = [("stall_min", JsonValueKind.Number, "10"), ("min_files", JsonValueKind.Number, "100")],
-		["pgpatcher"] = [("pglite_check", JsonValueKind.False, "off")],
-		["dyndolod"] = [("no_terrain_underside", JsonValueKind.False, "off"), ("preset", JsonValueKind.String, "none")],
-		["landscapefixer"] = [("min_files", JsonValueKind.Number, "3")],
-		["acmos"] = [("hidden", JsonValueKind.True, "on")],
-		["synthesis"] = [("build_min", JsonValueKind.Number, "15")],
+			("idle_s", JsonValueKind.Number, "45"), ("quiet_min", JsonValueKind.Number, "5"), ("min_files", JsonValueKind.Number, "50"), ("max_restarts", JsonValueKind.Number, "3"),
+			("sanity_min", JsonValueKind.Number, "3"), ("settle_s", JsonValueKind.Number, "30"), .. ModsWhileItRuns, .. OfferOfFasterArchives],
+		["cleansave"] = [("settle_s", JsonValueKind.Number, "10"), .. BeforeASaveLoads, .. OfferOfFasterArchives],
+		["playsave"] = [("wait_s", JsonValueKind.Number, "60"), ("dyndolod_wait_s", JsonValueKind.Number, "30"), ("settle_s", JsonValueKind.Number, "10"), .. BeforeASaveLoads, .. OfferOfFasterArchives],
+		["grass"] = [("stall_min", JsonValueKind.Number, "10"), ("min_files", JsonValueKind.Number, "100"), ("fasterngio_args", JsonValueKind.String, "--world all"),
+			("first_start_min", JsonValueKind.Number, "5"), ("stuck_min", JsonValueKind.Number, "20"), ("max_restarts", JsonValueKind.Number, "15"), ("max_idle_restarts", JsonValueKind.Number, "3"),
+			("disable_during", JsonValueKind.Array, "none"), .. OfferOfFasterArchives],
+		["pgpatcher"] = [("pglite_check", JsonValueKind.False, "off"), ("settings", JsonValueKind.String, "none"), ("live_settings", JsonValueKind.String, StepsOwn), ("pgpatcher_mod", JsonValueKind.String, StepsOwn),
+			("args", JsonValueKind.String, "--autostart"), ("disable_during", JsonValueKind.Array, "none")],
+		["xlodgen"] = [("min_files", JsonValueKind.Number, "100"), ("args", JsonValueKind.String, StepsOwn), .. ModsWhileItRuns],
+		["acmos"] = [("hidden", JsonValueKind.True, "on"), ("min_files", JsonValueKind.Number, "100"), ("roads", JsonValueKind.String, StepsOwn), ("exe", JsonValueKind.String, StepsOwn)],
+		["treelodgen"] = [("preset", JsonValueKind.String, "none"), ("extra_args", JsonValueKind.Array, "none"), .. ModsWhileItRuns],
+		["texgen"] = [("min_files", JsonValueKind.Number, "1"), ("start_buttons", JsonValueKind.Array, StepsOwn), ("args", JsonValueKind.String, StepsOwn), .. ModsWhileItRuns],
+		["dyndolod"] = [("no_terrain_underside", JsonValueKind.False, "off"), ("preset", JsonValueKind.String, "none"), ("min_files", JsonValueKind.Number, "1"),
+			("start_buttons", JsonValueKind.Array, StepsOwn), ("args", JsonValueKind.String, StepsOwn), .. ModsWhileItRuns],
+		["anvillod"] = [("preset", JsonValueKind.String, "high"), ("skse_dll", JsonValueKind.String, "1170"), ("min_files", JsonValueKind.Number, "50"), ("extra_args", JsonValueKind.Array, "none"), .. ModsWhileItRuns],
+		["landscapefixer"] = [("min_files", JsonValueKind.Number, "3"), ("args", JsonValueKind.String, "none"), .. ModsWhileItRuns],
+		["pandora"] = [("args", JsonValueKind.String, "--auto_run --auto_close"), .. ModsWhileItRuns],
+		["synthesis"] = [("build_min", JsonValueKind.Number, "15"), ("exe_path", JsonValueKind.String, StepsOwn), ("disable_during", JsonValueKind.Array, "none")],
 	};
+
+	// What a step's page offers beyond what its file lists: the step's own (Known), then what every step with a tool, an
+	// output or a time limit of its own reads. The two save steps have no time limit of the whole step (their waits are
+	// their own settings), so none is offered there
+	static IEnumerable<(string Key, JsonValueKind Kind, string Default)> Offered(string a_step, JsonObject a_settings)
+	{
+		foreach (var k in Known.GetValueOrDefault(a_step, [])) {
+			yield return k;
+		}
+		if (a_settings.ContainsKey("executable")) {
+			yield return ("image", JsonValueKind.String, StepsOwn);
+			yield return ("settings_dirs", JsonValueKind.Array, "none");
+		}
+		if (a_settings.ContainsKey("output_mod") || a_settings.ContainsKey("then_move_to_mod")) {
+			yield return ("replaces", JsonValueKind.Array, "none");
+		}
+		if (ToolUpdates.Known.ContainsKey(a_step) || a_settings.ContainsKey("executable") || a_settings.ContainsKey("exe")) {
+			yield return ("nexus_id", JsonValueKind.String, ToolUpdates.Known.ContainsKey(a_step) ? "the tool's own page" : "none");
+		}
+		if (!Setup.SaveSteps.Contains(a_step)) {
+			yield return ("deadline_min", JsonValueKind.Number, StepsOwn);
+		}
+	}
+
+	// every setting a_step's page can offer when the step's file does not hold it
+	public static IReadOnlyCollection<string> OfferedKeys(string a_step) =>
+		[.. Offered(a_step, new JsonObject { ["executable"] = "", ["output_mod"] = "" }).Select(k => k.Key)];
+
+	// the label a_step's page shows for a setting
+	public static string LabelOf(string a_key, string a_step) => Label(a_key, a_step);
 
 	// the mods a LOD step builds from and the LOD tool's own help, each a page to open (the runner never guesses their values)
 	static void LodBlock(MainWindow a_w, Setup a_setup, string a_step, Panel a_host)
@@ -238,7 +307,11 @@ public static class SettingsPanel
 	// AnvilLOD's "preset" is a word (its own low / medium / high), DynDOLOD's a file
 	const string AnvilPresetLabel = "AnvilLOD preset";
 
-	static string Label(string a_key, string a_step) => a_step == "anvillod" && a_key == "preset" ? AnvilPresetLabel : Label(a_key);
+	// (in the two save steps the wait is the one after the player was moved, not one before the game closes)
+	const string ArriveLabel = "Wait after the teleport (seconds)";
+
+	static string Label(string a_key, string a_step) => a_step == "anvillod" && a_key == "preset" ? AnvilPresetLabel :
+		a_key == "settle_s" && Setup.SaveSteps.Contains(a_step) ? ArriveLabel : Label(a_key);
 
 	static string Label(string a_key) => Labels.TryGetValue(a_key, out var l) ? l : a_key.Length == 0 ? "Unnamed setting" : char.ToUpperInvariant(a_key[0]) + a_key[1..].Replace('_', ' ');
 
@@ -929,8 +1002,7 @@ public static class SettingsPanel
 			if (LodGuide.Applies(stepKey)) {
 				LodBlock(a_w, a_vm.Setup!, stepKey, stepHost);
 			}
-			foreach (var (key, kind, def) in Known.GetValueOrDefault(stepKey, []).Append((Key: "deadline_min", Kind: JsonValueKind.Number, Default: "the step's own"))
-				         .Where(k => !o.ContainsKey(k.Key))) {
+			foreach (var (key, kind, def) in Offered(stepKey, o).Where(k => !o.ContainsKey(k.Key)).ToList()) {
 				Field(stepHost, stepApply, WindowWords.Format("{0} (default {1})", WindowWords.Word(Label(key, stepKey)), WindowWords.Word(def)), o, key, kind, def == "on", stepKey);
 			}
 			// drawn after Settings opened (another step picked): into the window's language like the rest of it
@@ -1486,6 +1558,10 @@ public static class SettingsPanel
 		} else if (kind == JsonValueKind.Array && (cur == null || (cur as JsonArray)!.All(n => n is JsonValue))) {
 			var t = new TextBox { Text = string.Join("\n", (cur as JsonArray ?? []).Select(n => n?.ToString())), AcceptsReturn = true, MinHeight = 54, TextWrapping = TextWrapping.NoWrap };
 			a_apply.Add(() => {
+				// (a list the setup does not hold and nobody typed into is not written into it as an empty one)
+				if (cur == null && t.Text.Trim() == "") {
+					return null;
+				}
 				a_obj[a_key] = new JsonArray(t.Text.Replace("\r", "").Split('\n').Select(s => s.Trim()).Where(s => s != "").Select(s => (JsonNode)JsonValue.Create(s)).ToArray());
 				return null;
 			});
