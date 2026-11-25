@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Management;
 
 namespace ToolRunner;
 
@@ -20,24 +19,83 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 
 	// (a WMI start cannot reach a hidden desktop: its WinstationDesktop setting was ignored and the window opened on the player's
 	// screen - measured; a hidden start goes through HiddenDesktop.Start, which watches for exactly that)
-	public static int StartDetached(string a_commandLine, string a_cwd)
+	public static int StartDetached(string a_commandLine, string a_cwd) => StartDetached(a_commandLine, a_cwd, ShowNoActivate);
+
+	// Windows' SW_SHOWNOACTIVATE: the window shows, but never takes the front from what the player is doing
+	const int ShowNoActivate = 4;
+
+	// how long Windows' management service is given to answer one start
+	static readonly TimeSpan StartAnswer = TimeSpan.FromMinutes(2);
+
+	// The start is asked of Windows' management service (Win32_Process.Create): what is started is that service's child
+	// and none of this process's. It is asked through Windows' own scripting objects for the service (wbemdisp.dll), each
+	// member by its name. The System.Management package made this same one call, and put itself and System.CodeDom - half
+	// a megabyte, a sixth of the program file - into the program for it. Those objects live in a single-threaded apartment:
+	// a thread of its own makes them, asks, and lets them go. a_show: how the program's window is shown (Windows' ShowWindow
+	// numbers; 0 is hidden)
+	public static int StartDetached(string a_commandLine, string a_cwd, int a_show)
 	{
-		using var cls = new ManagementClass(@"root\cimv2", "Win32_Process", null);
-		// both WMI objects released at once (each holds a COM reference into the WMI service until it is disposed)
-		using var startupClass = new ManagementClass(@"root\cimv2", "Win32_ProcessStartup", null);
-		using var startup = startupClass.CreateInstance();
-		// SW_SHOWNOACTIVATE: the window shows, but never takes the front from what the player is doing
-		startup["ShowWindow"] = (ushort)4;
-		using var inParams = cls.GetMethodParameters("Create");
-		inParams["CommandLine"] = a_commandLine;
-		inParams["CurrentDirectory"] = a_cwd;
-		inParams["ProcessStartupInformation"] = startup;
-		using var outParams = cls.InvokeMethod("Create", inParams, null);
-		var rc = Convert.ToUInt32(outParams["ReturnValue"], InvariantCulture);
-		if (rc != 0) {
-			throw new InvalidOperationException($"Windows could not start {a_commandLine} (code {rc})");
+		var pid = 0;
+		Exception? failed = null;
+		var asker = new Thread(() => {
+			// every object the service hands out holds a reference into it until it is let go: each is, the last one first
+			var held = new List<object>();
+			object Keep(object? a_o)
+			{
+				held.Add(a_o ?? throw new InvalidOperationException("its management service gave nothing back"));
+				return a_o;
+			}
+			static object? Ask(object a_on, string a_name, params object?[] a_args) => a_on.GetType().InvokeMember(a_name,
+				System.Reflection.BindingFlags.InvokeMethod | System.Reflection.BindingFlags.GetProperty, null, a_on, a_args, InvariantCulture);
+			static void Put(object a_on, string a_name, object? a_value) =>
+				a_on.GetType().InvokeMember(a_name, System.Reflection.BindingFlags.SetProperty, null, a_on, [a_value], InvariantCulture);
+			object Property(object a_of, string a_name) => Keep(Ask(Keep(Ask(a_of, "Properties_")), "Item", a_name));
+			try {
+				var locator = Keep(Activator.CreateInstance(Type.GetTypeFromProgID("WbemScripting.SWbemLocator", true)!));
+				// (with the caller's own rights, whatever this PC's default for scripts is set to)
+				Put(Keep(Ask(locator, "Security_")), "ImpersonationLevel", 3);
+				var services = Keep(Ask(locator, "ConnectServer", ".", @"root\cimv2"));
+				var startup = Keep(Ask(Keep(Ask(services, "Get", "Win32_ProcessStartup")), "SpawnInstance_"));
+				Put(Property(startup, "ShowWindow"), "Value", a_show);
+				var process = Keep(Ask(services, "Get", "Win32_Process"));
+				var create = Keep(Ask(Keep(Ask(process, "Methods_")), "Item", "Create"));
+				var asked = Keep(Ask(Keep(Ask(create, "InParameters")), "SpawnInstance_"));
+				Put(Property(asked, "CommandLine"), "Value", a_commandLine);
+				Put(Property(asked, "CurrentDirectory"), "Value", a_cwd);
+				Put(Property(asked, "ProcessStartupInformation"), "Value", startup);
+				var answer = Keep(Ask(process, "ExecMethod_", "Create", asked));
+				var rc = Convert.ToUInt32(Ask(Property(answer, "ReturnValue"), "Value"), InvariantCulture);
+				if (rc != 0) {
+					throw new InvalidOperationException($"code {rc}");
+				}
+				pid = Convert.ToInt32(Ask(Property(answer, "ProcessId"), "Value"), InvariantCulture);
+				if (pid == 0) {
+					throw new InvalidOperationException("no process number came back");
+				}
+			} catch (OutOfMemoryException e) {
+				// (nothing may leave this thread: an error that does ends the whole program, and a run that ends that way
+				// never puts the profile back)
+				failed = e;
+			} catch (Exception e) when (e is not OutOfMemoryException) {
+				// an error of the object that was asked comes wrapped in the asking's own
+				failed = e is System.Reflection.TargetInvocationException { InnerException: { } inner } ? inner : e;
+			} finally {
+				for (var i = held.Count - 1; i >= 0; --i) {
+					if (System.Runtime.InteropServices.Marshal.IsComObject(held[i])) {
+						System.Runtime.InteropServices.Marshal.ReleaseComObject(held[i]);
+					}
+				}
+			}
+		}) { IsBackground = true, Name = "start by Windows' management service" };
+		asker.SetApartmentState(ApartmentState.STA);
+		asker.Start();
+		if (!asker.Join(StartAnswer)) {
+			throw new InvalidOperationException($"Windows could not start {a_commandLine} (its management service did not answer within {StartAnswer.TotalMinutes:0} minutes)");
 		}
-		return Convert.ToInt32(outParams["ProcessId"], InvariantCulture);
+		if (failed != null) {
+			throw new InvalidOperationException($"Windows could not start {a_commandLine} ({failed.Message})", failed);
+		}
+		return pid;
 	}
 
 	// a global instance named on every command line (else MO2 opens the instance it used last)

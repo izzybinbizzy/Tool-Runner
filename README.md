@@ -123,7 +123,7 @@ The tools it runs belong to their authors. Tool Runner only starts the copy the 
 - DevBench - alandtse
 - Mod Organizer 2 - the Mod Organizer 2 team
 
-Built on Microsoft .NET and System.Management (MIT).
+Built on Microsoft .NET (MIT).
 
 ## License
 

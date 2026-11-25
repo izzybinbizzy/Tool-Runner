@@ -10450,6 +10450,48 @@ public static class Program
 	// a window that takes messages only: never on anyone's screen
 	static nint MessageWindow(string a_text) => CreateWindowExW(0, "STATIC", a_text, 0, 0, 0, 0, 0, -3, 0, 0, 0);
 
+	// Mod Organizer is started through Windows' management service, so it is that service's child and none of the run's (a
+	// child of a job-limited process makes it fail to start the script extender). The start itself, with a command that
+	// shows nothing and ends by itself: where it runs, under whom, and what a program that is not there comes to
+	static void T_ADetachedStartIsNoChildOfTheProgram()
+	{
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "detached " + Guid.NewGuid().ToString("N")[..8]);
+		Directory.CreateDirectory(dir);
+		try {
+			var file = Path.Combine(dir, "ran in.txt");
+			var cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+			var pid = Mo2Control.StartDetached($"\"{cmd}\" /c cd > \"{file}\" & ping -n 3 127.0.0.1 > nul", Environment.SystemDirectory, 0);
+			Check(pid > 0 && pid != Environment.ProcessId, $"Windows gave the process's number: {pid}");
+			var parent = Procs.Snapshot().FirstOrDefault(r => r.Pid == pid).Parent;
+			Check(parent != 0 && parent != Environment.ProcessId, $"it is no child of this process (its parent: {parent})");
+			using (var host = Process.GetProcessById(parent)) {
+				Check(host.ProcessName.StartsWith("WmiPrvSE", StringComparison.OrdinalIgnoreCase), "its parent is Windows' own management host: " + host.ProcessName);
+			}
+			var sw = Stopwatch.StartNew();
+			while (sw.Elapsed < TimeSpan.FromSeconds(10) && !(File.Exists(file) && new FileInfo(file).Length > 0)) {
+				Thread.Sleep(100);
+			}
+			Check(File.Exists(file) && string.Equals(File.ReadAllText(file).Trim(), Environment.SystemDirectory, StringComparison.OrdinalIgnoreCase),
+				"it ran in the folder it was given, with its command line whole");
+			var gone = Path.Combine(dir, "no such folder", "none.exe");
+			try {
+				Mo2Control.StartDetached($"\"{gone}\"", dir, 0);
+				Check(false, "a program that is not there is not started");
+			} catch (InvalidOperationException e) {
+				Check(e.Message.StartsWith("Windows could not start \"" + gone, StringComparison.Ordinal) && e.Message.Contains("(code ", StringComparison.Ordinal),
+					"a program that is not there is said, with Windows' own code: " + e.Message);
+			}
+			// (the command's own two seconds: its folder is free once it has ended)
+			try {
+				using var left = Process.GetProcessById(pid);
+				left.WaitForExit(10_000);
+			} catch (ArgumentException) {
+			}
+		} finally {
+			Directory.Delete(dir, true);
+		}
+	}
+
 	// A tool whose window thread hangs never holds the step that reads it: a message to it has a time limit, no answer reads as
 	// no text, and the step's own clock goes on (a plain send once sat there for as long as the tool hung)
 	static void T_AHungWindowNeverHoldsAStep()
