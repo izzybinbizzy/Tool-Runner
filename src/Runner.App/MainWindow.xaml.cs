@@ -747,12 +747,13 @@ public partial class MainWindow : Window
 			var end = at < 0 ? -1 : box.Text.IndexOf('\n', at);
 			Reveal(at, at < 0 ? 0 : (end < 0 ? box.Text.Length : end) - at, "No line of this log is marked as a problem.");
 		}
-		problem.Click += (_, _) => {
+		problem.Click += async (_, _) => {
 			// the simple log marks no line (only the detailed one says "!" and "!!!"): the detailed log is shown first, and the
-			// search runs once its text is in (CodeRabbit on pull request #38)
+			// search runs once its text is in the box (it is read on a worker)
 			if (!_vm.DetailedLog) {
 				_vm.DetailedLog = true;
-				Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, ShowFirstProblem);
+				await _vm.LogRead;
+				await Dispatcher.InvokeAsync(ShowFirstProblem, System.Windows.Threading.DispatcherPriority.Background);
 				return;
 			}
 			ShowFirstProblem();

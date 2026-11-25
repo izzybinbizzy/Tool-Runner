@@ -185,7 +185,7 @@ public sealed partial class MainViewModel : Observable
 	public string EstimateText { get; set => Set(ref field, value); } = "";
 	public bool StopAfterAsked { get; set => Set(ref field, value); }
 	// the LOG box shows the detailed log (every line) when ticked, else the simple step-by-step one
-	public bool DetailedLog { get; set { if (Set(ref field, value)) { _logTail.Restart(); TailLog(); } } }
+	public bool DetailedLog { get; set { if (Set(ref field, value)) { TailLog(true); } } }
 	// the step the setup's last run stopped at ("" = nothing to run again): the "Run again from ..." button
 	public string RetryFrom { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(RetryText)); } } = "";
 	public string RetryText => RetryFrom == "" ? "" : "Run _again from " + StepCatalog.Name(RetryFrom);
@@ -906,9 +906,30 @@ public sealed partial class MainViewModel : Observable
 		return !a_detailed && File.Exists(simple) && new FileInfo(simple).Length > 0 ? simple : Path.Combine(a_folder, "log.txt");
 	}
 
-	void TailLog()
+	// The log is read on a worker - a slow disk never holds the window - one read at a time, its text handed over on the window's
+	// thread. A look while a read is still going is left to the next one; a switch between the simple and the detailed log
+	// (a_restart) waits for that read and then reads the other log from its start. LogRead: the newest read, so what needs its
+	// text (First problem) can wait for it
+	Task _tailing = Task.CompletedTask;
+	public Task LogRead => _tailing;
+
+	void TailLog(bool a_restart = false)
 	{
-		var (text, reset) = _logTail.Read(_run == null ? null : LogFile(_run.Folder, DetailedLog));
+		if (!a_restart && !_tailing.IsCompleted) {
+			return;
+		}
+		_tailing = TailLogAfter(_tailing, _run == null ? null : LogFile(_run.Folder, DetailedLog), a_restart);
+	}
+
+	async Task TailLogAfter(Task a_before, string? a_file, bool a_restart)
+	{
+		await a_before;
+		var (text, reset) = await Task.Run(() => {
+			if (a_restart) {
+				_logTail.Restart();
+			}
+			return _logTail.Read(a_file);
+		});
 		if (reset) {
 			LogChanged?.Invoke("", true);
 		}
