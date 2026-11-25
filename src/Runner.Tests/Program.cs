@@ -5279,6 +5279,26 @@ public static class Program
 	// as it is, and its file is let go either way (a theme's folder must stay free to move or remove)
 	static void T_AThemesPictureIsKeptSmall()
 	{
+		// (on a single-threaded apartment of its own, as the window reads a theme's picture and as every other test here that
+		// makes WPF objects runs)
+		Exception? failed = null;
+		var t = new Thread(() => {
+			try {
+				ThemesPictureIsKeptSmall();
+			} catch (Exception e) when (e is not OutOfMemoryException) {
+				failed = e;
+			}
+		});
+		t.SetApartmentState(ApartmentState.STA);
+		t.Start();
+		t.Join();
+		if (failed != null) {
+			throw new InvalidOperationException("a theme's picture: " + failed.Message, failed);
+		}
+	}
+
+	static void ThemesPictureIsKeptSmall()
+	{
 		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "icon " + Guid.NewGuid().ToString("N")[..8]);
 		Directory.CreateDirectory(dir);
 		try {
