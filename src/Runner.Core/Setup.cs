@@ -51,8 +51,15 @@ public sealed class Setup
 		new Dictionary<string, string>();
 
 	public IReadOnlyList<Profile.PlaceRule> Placement =>
-		(Root["placement"] as JsonArray)?.OfType<JsonArray>().Where(a => a.Count >= 2)
+		// (a setup file comes from anywhere: an entry whose two names are not both given is no rule - a null there threw at the
+		// end of the put-back, the one place this is read; the check names such an entry)
+		(Root["placement"] as JsonArray)?.OfType<JsonArray>().Where(IsPlace)
 			.Select(a => new Profile.PlaceRule(a[0]!.ToString(), a[1]!.ToString(), a.Count > 2 && a[2]?.ToString() == "active")).ToList() ?? [];
+
+	// a plugin place: two plugin names, each a string with something in it (a number, a true or "" names no plugin)
+	static bool IsPlace(JsonArray a_entry) => a_entry.Count >= 2 && PluginName(a_entry[0]) && PluginName(a_entry[1]);
+
+	static bool PluginName(JsonNode? a_n) => a_n is JsonValue v && v.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s);
 
 	// UseOld: the step is not run and the output it made before is used (OldOutput) - it counts only for a step that is on
 	public sealed record StepEntry(string Key, bool On, JsonObject Settings, bool UseOld = false);
@@ -72,14 +79,20 @@ public sealed class Setup
 	// a step that is on, is not left out, and is set to use the output it made before: its tool does not run (OldOutput)
 	public bool UsesOld(StepEntry a_s) => a_s.On && a_s.UseOld && !LeftOutForNewGame(a_s.Key) && OldOutput.CanKeep(a_s.Key, new StepSettings(a_s.Settings));
 
-	// the steps that are switched on (and not left out for a new game), whether a run runs them or uses their old output
-	public List<StepEntry> OnSteps => Steps.Where(s => s.On && !LeftOutForNewGame(s.Key)).ToList();
+	// the steps that are switched on (and not left out for a new game), whether a run runs them or uses their old output. A step
+	// this program does not have (one an older version had, or a name it never knew) is left out of every run: an older setup
+	// file still loads, and the check says what it leaves out (NotKnown)
+	public List<StepEntry> OnSteps => Steps.Where(s => s.On && !LeftOutForNewGame(s.Key) && (StepCatalog.Known(s.Key) || s.Key is "snowfixer" or "autoblend")).ToList();
+
+	// the steps the setup names that this program does not have, each once
+	public List<string> NotKnown => Steps.Select(s => s.Key).Where(k => !StepCatalog.Known(k) && k is not "snowfixer" and not "autoblend").Distinct().ToList();
 
 	// the steps a run runs
 	public List<StepEntry> EnabledSteps => OnSteps.Where(s => !UsesOld(s)).ToList();
 
 	// the steps a run does not run, because the output each made before is used
-	public List<StepEntry> KeptSteps => Steps.Where(UsesOld).ToList();
+	// (only of steps this version has: a removed step's old output is not managed - CodeRabbit on pull request #40)
+	public List<StepEntry> KeptSteps => OnSteps.Where(UsesOld).ToList();
 
 	public const string PgLiteMod = "PGLite";
 
@@ -130,7 +143,7 @@ public sealed class Setup
 		a_o[a_key] is JsonValue v && v.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s) ? s : null;
 
 	public static int? Int(JsonObject a_o, string a_key) =>
-		a_o[a_key] is JsonValue v ? (v.TryGetValue<int>(out var i) ? i : v.TryGetValue<double>(out var d) ? (int)d : null) : null;
+		a_o[a_key] is JsonValue v ? (v.TryGetValue<int>(out var i) ? i : v.TryGetValue<double>(out var d) && d >= int.MinValue && d <= int.MaxValue ? (int)d : null) : null;
 
 	public static double? Num(JsonObject a_o, string a_key) =>
 		a_o[a_key] is JsonValue v ? (v.TryGetValue<double>(out var d) ? d : v.TryGetValue<int>(out var i) ? i : null) : null;
@@ -183,6 +196,7 @@ public sealed class Setup
 		}
 		if (Steps.Count == 0) p.Add("the setup has no steps");
 		if (EnabledSteps.Count == 0) p.Add(KeptSteps.Count > 0 ? "every step that is switched on uses its old output - nothing would run" :
+			Steps.Any(s => s.On) && Steps.Where(s => s.On).All(s => NotKnown.Contains(s.Key)) ? "none of the steps it has switched on is one this version has: " + string.Join(", ", NotKnown) :
 			Steps.Any(s => s.On) ? "only the save steps are switched on, and they are left out for a new game" : "every step is switched off");
 		var dup = Steps.GroupBy(s => s.Key).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
 		if (dup.Count > 0) p.Add("a step is listed twice: " + string.Join(", ", dup));
@@ -190,13 +204,18 @@ public sealed class Setup
 		foreach (var gone in Steps.Select(s => s.Key).Where(k => k is "snowfixer" or "autoblend").Distinct()) {
 			p.Add($"{(gone == "snowfixer" ? "SnowFixer" : "AutoBlend")} is no longer supported - Landscape Fixer replaced it: add Landscape Fixer and take this step out");
 		}
-		var unknown = Steps.Where(s => !StepCatalog.Known(s.Key) && s.Key is not "snowfixer" and not "autoblend").Select(s => s.Key).ToList();
-		if (unknown.Count > 0) p.Add("unknown step(s): " + string.Join(", ", unknown));
 		// A setup file comes from anywhere (a guide, a Discord). What it gives as a mod's name is joined to Mod Organizer's mods
 		// folder as it stands: with a folder part in it ("..\..\profiles\Default") or a whole path, a meta.ini was written there,
 		// a line put into the mod list and everything in that folder moved into the run's backup. Only a plain folder name is a mod
 		foreach (var (where, name) in ModNames().Where(m => !PlainName(m.Name)).DistinctBy(m => m.Name).Take(5)) {
 			p.Add($"{where} is not a mod's name (one plain folder name: no \\ / : and no \"..\"): {name}");
+		}
+		// its own name names the run's folder and its backup: with a folder part in it those landed outside the program's data
+		if (Str(Root, "name") is { } own && !PlainName(own)) {
+			p.Add($"the setup's name is not a plain name (one folder name: no \\ / : * ? \" < > | and no \"..\"): {own}");
+		}
+		if (Root["placement"] is JsonArray places && places.Any(e => e is not JsonArray a || !IsPlace(a))) {
+			p.Add("the setup's \"placement\" holds an entry that is not [plugin, after this plugin]");
 		}
 		return p;
 	}
@@ -246,6 +265,39 @@ public sealed class Setup
 		Root.Remove("beforeRun");
 		Root.Remove("afterRun");
 		return n;
+	}
+
+	// the files Windows starts as a program
+	static readonly string[] ProgramKinds = [".exe", ".bat", ".cmd", ".com", ".ps1", ".vbs"];
+
+	// A setup that came from somewhere else never starts a program on this PC that the player did not point it at, and never
+	// allows an add-on for them: every program path it names is taken out (Mod Organizer's and each step's), and with it every
+	// add-on step's approval and the setting that turns the add-on question off. Returns what went, in words
+	public List<string> TakeOutWhatStartsPrograms()
+	{
+		var gone = new List<string>();
+		static bool Program(string a_key, string a_value) =>
+			a_key is "exe" || a_key.EndsWith("_exe", StringComparison.Ordinal) ||
+			ProgramKinds.Any(x => a_value.Trim().Trim('"').EndsWith(x, StringComparison.OrdinalIgnoreCase));
+		if (Root["mo2"] is JsonObject mo2 && Str(mo2, "exe") is { Length: > 0 }) {
+			mo2["exe"] = "";
+			gone.Add("which Mod Organizer it starts (mo2.exe)");
+		}
+		if (Root.Remove(AddOns.NoAskSetting)) {
+			gone.Add($"the setting that allows every add-on without asking ({AddOns.NoAskSetting})");
+		}
+		foreach (var s in Steps) {
+			foreach (var (key, value) in s.Settings.ToList()) {
+				if (value is JsonValue v && v.TryGetValue<string>(out var text) && text.Trim() != "" && Program(key, text)) {
+					s.Settings.Remove(key);
+					gone.Add($"the program {StepCatalog.Name(s.Key)} starts ({key})");
+				}
+			}
+			if (s.Key.StartsWith(AddOns.KeyPrefix, StringComparison.Ordinal) && s.Settings.Remove("sha")) {
+				gone.Add($"the approval of the add-on {s.Key[AddOns.KeyPrefix.Length..]} (allow it again in Settings > Tools > ADD-ONS)");
+			}
+		}
+		return gone;
 	}
 
 	// the folders the setup itself names (empty ones included): its backups, its scratch, each step's output (a_running: only the

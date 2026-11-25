@@ -40,8 +40,11 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 	static (List<string> Lines, string Nl, Encoding How) ReadLines(string a_path)
 	{
 		var text = Files.DecodeText(Files.ReadShared(a_path), out var how);
-		var nl = text.Contains("\r\n") ? "\r\n" : "\n";
-		return (text.Split(nl).ToList(), nl, how);
+		// A list with both kinds of line ending (one edited by hand) is still read line by line - split by one kind alone, two
+		// mods came back as one line - and is written back in the kind most of its lines have. Mod Organizer writes one kind
+		var windows = text.Split("\r\n").Length - 1;
+		var plain = text.Count(c => c == '\n') - windows;
+		return (text.Replace("\r\n", "\n").Split('\n').ToList(), windows > 0 && windows >= plain ? "\r\n" : "\n", how);
 	}
 
 	static void WriteLines(string a_path, List<string> a_lines, string a_nl, Encoding a_how) => Files.WriteAtomic(a_path, Files.EncodeText(string.Join(a_nl, a_lines), a_how));
@@ -190,6 +193,11 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 			}
 		}
 		var missing = en.Concat(dis).Where(m => !seen.Contains(m)).ToList();
+		// a "*" line is Mod Organizer's own (the base game, a Creation Club file): in the list, and never switched by anyone
+		var its = States().Where(s => s.Value == '*').Select(s => s.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+		if (missing.FirstOrDefault(its.Contains) is { } own) {
+			throw new KeyNotFoundException($"\"{own}\" is one of Mod Organizer's own entries (the game's or a Creation Club file's) and cannot be switched on or off");
+		}
 		if (missing.Count > 0) {
 			throw new KeyNotFoundException("not in the mod list: " + string.Join(", ", missing));
 		}
@@ -209,12 +217,25 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 	public void EnsureMod(string a_mod, RunLog? a_log = null)
 	{
 		var d = Mo2.ModDir(a_mod);
-		if (!Directory.Exists(d)) {
+		var made = !Directory.Exists(d);
+		if (made) {
 			Directory.CreateDirectory(d);
 			Files.WriteAtomic(Path.Combine(d, "meta.ini"), $"[General]\r\nmodid=0\r\nversion=\r\ncomments={MadeBy}{Brand.Name}\r\n");
 			a_log?.Detail($"made the output mod {a_mod}");
 		}
-		ListMod(a_mod, a_log);
+		try {
+			ListMod(a_mod, a_log);
+		} catch (Exception e) when (made && e is IOException or UnauthorizedAccessException or InvalidOperationException) {
+			// its line could not be written (Mod Organizer open, a name the list cannot hold): what this call made a moment ago goes
+			// again - left there, it was an empty mod nothing had on record. Only its own meta.ini, then the folder only while it is
+			// empty: whatever another program put there meanwhile stays
+			try {
+				File.Delete(Path.Combine(d, "meta.ini"));
+				Directory.Delete(d, false);
+			} catch (Exception again) when (again is IOException or UnauthorizedAccessException) {
+			}
+			throw;
+		}
 		Added.Add(a_mod);
 	}
 
@@ -480,72 +501,6 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 		return moved;
 	}
 
-	// LOOT's sorted list laid onto plugins.txt and loadorder.txt; the ticks stay. Returns the files that changed
-	public List<string> SortPlugins(IReadOnlyList<string> a_sorted)
-	{
-		MustBeClosed("the plugin list");
-		var paths = PluginPaths();
-		IReadOnlyList<string> MastersOf(string a_plugin) => paths.TryGetValue(a_plugin, out var p) && File.Exists(p) ? Plugins.Masters(p) : [];
-		var changed = new List<string>();
-		foreach (var fn in new[] { "plugins.txt", "loadorder.txt" }) {
-			var p = Path.Combine(Dir, fn);
-			if (!File.Exists(p)) {
-				continue;
-			}
-			var (lines, nl, how) = ReadPluginFile(p);
-			var sorted = InLootOrder(lines, a_sorted, MastersOf);
-			if (!sorted.SequenceEqual(lines)) {
-				WritePluginFile(p, sorted, nl, how);
-				changed.Add(fn);
-			}
-		}
-		return changed;
-	}
-
-	// a plugin LOOT did not see (its mod is off for this run, or no file is behind the line) stays right below the plugin it was below, and never above one of
-	// its masters; a plugin the file does not list is not added
-	public static List<string> InLootOrder(IReadOnlyList<string> a_lines, IReadOnlyList<string> a_sorted, Func<string, IReadOnlyList<string>> a_masters)
-	{
-		var rank = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-		foreach (var plugin in a_sorted) {
-			rank.TryAdd(plugin, rank.Count);
-		}
-		var entries = a_lines.Where(l => !l.StartsWith('#')).ToList();
-		var followers = new Dictionary<string, List<string>>();
-		var above = "";
-		foreach (var line in entries) {
-			if (rank.ContainsKey(Bare(line))) {
-				above = Bare(line);
-			} else if (followers.TryGetValue(above, out var list)) {
-				list.Add(line);
-			} else {
-				followers[above] = [line];
-			}
-		}
-		var result = new List<string>(entries.Count);
-		result.AddRange(followers.GetValueOrDefault("") ?? []);
-		foreach (var line in entries.Where(l => rank.ContainsKey(Bare(l))).OrderBy(l => rank[Bare(l)])) {
-			result.Add(line);
-			result.AddRange(followers.GetValueOrDefault(Bare(line)) ?? []);
-		}
-		// in the file's own order: a master that also moves has gone first. The unseen plugins right below it go with it, so two plugins LOOT said nothing
-		// about never swap places
-		foreach (var line in entries.Where(l => !rank.ContainsKey(Bare(l)))) {
-			var lastMaster = a_masters(Bare(line)).Select(m => result.FindIndex(l => string.Equals(Bare(l), m, StringComparison.OrdinalIgnoreCase))).DefaultIfEmpty(-1).Max();
-			var at = result.IndexOf(line);
-			if (lastMaster > at) {
-				var count = 1;
-				while (at + count < lastMaster && !rank.ContainsKey(Bare(result[at + count]))) {
-					++count;
-				}
-				var block = result.GetRange(at, count);
-				result.RemoveRange(at, count);
-				result.InsertRange(lastMaster - count + 1, block);
-			}
-		}
-		return [.. a_lines.Where(l => l.StartsWith('#')), .. result];
-	}
-
 	// tick the plugins of these (just switched on) mods; a plugin the files do not list yet gets a place in BOTH files
 	// (the setup's place_after anchor, else masters at the end of the master block, else the very end) - left to MO2 it
 	// moves a neighbour
@@ -758,8 +713,9 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 					if (!mastersCache.TryGetValue(full, out var ms)) {
 						try {
 							ms = Plugins.Masters(full);
-						} catch (IOException) {
-							ms = [];
+						} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+							// a plugin whose masters are not known may need one that goes off: it is never left on as if it needed none
+							throw new IOException($"the plugin {p} of the mod {name} could not be read to see which plugins it needs ({e.Message}) - close whatever holds it, or put a whole copy of it back if the file is damaged, then start again", e);
 						}
 						mastersCache[full] = ms;
 					}

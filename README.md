@@ -4,7 +4,7 @@
 
 Runs the generators of a Mod Organizer 2 setup for Skyrim Special Edition / Anniversary Edition in the right order, unattended, and puts your profile back exactly as it was.
 
-Shader caches, DynDOLOD's clean save, LOOT's sort, Wrye Bash and four more patchers (guided), Synthesis, Landscape Fixer, PGPatcher, xLODGen with ACMOS roads, the grass cache, TreeLODGen, TexGen, DynDOLOD or AnvilLOD, Pandora, and a save to play at the end.
+Shader caches, DynDOLOD's clean save, Synthesis, Landscape Fixer, PGPatcher, xLODGen with ACMOS roads, the grass cache, TreeLODGen, TexGen, DynDOLOD or AnvilLOD, Pandora, and a save to play at the end.
 
 - **Download:** the Nexus page (the zip holds the program, its readme, its changelog and the licence).
 - **The full guide:** [the wiki](https://github.com/izzybinbizzy/Tool-Runner/wiki).
@@ -35,8 +35,6 @@ Shader caches, DynDOLOD's clean save, LOOT's sort, Wrye Bash and four more patch
 |---|---|---|
 | `shaders` | Shader caches | The game builds the cache of the shader mod your profile runs at its main menu (Community Shaders, Open Shaders, Bottled Shaders), only when that shader mod, its settings or the game changed. |
 | `cleansave` | Clean save | DynDOLOD's clean save, done in game. Off in a new setup. |
-| `loot` | LOOT sort | Your plugins sorted the way Mod Organizer's Sort button does. Off in a new setup. |
-| `easynpc`, `upf`, `smash`, `wryebash`, `reqtificator` | EasyNPC, zEdit's patchers, Mator Smash, Wrye Bash, ReqTificator | Guided: you build the patch in the tool and press Done. Off in a new setup. |
 | `synthesis` | Synthesis | Your saved Synthesis pipeline. |
 | `landscapefixer` | Landscape Fixer | Snow and blend fixes for the game's landscape meshes, in one plugin. |
 | `pgpatcher` | PGPatcher | Parallax, complex material and PBR patching. |
@@ -121,9 +119,6 @@ The tools it runs belong to their authors. Tool Runner only starts the copy the 
 - AnvilLOD - Julio005
 - Synthesis - Noggog and the Mutagen team
 - Pandora Behaviour Engine Plus - the Pandora team
-- Wrye Bash - the Wrye Bash team
-- EasyNPC - focustense; zEdit and Mator Smash - Mator; ReqTificator - the Requiem Dungeon Masters
-- LOOT - the LOOT team (through the lootcli that ships inside Mod Organizer)
 - DevBench - alandtse
 - Mod Organizer 2 - the Mod Organizer 2 team
 

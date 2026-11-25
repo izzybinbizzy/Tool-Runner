@@ -72,7 +72,7 @@ public partial class App : Application
 			// the themed box over the window (every pop-up wears the theme); Windows' own box only when the window cannot carry one
 			try {
 				if (MainWindow is { IsLoaded: true } owner && Ask.Show(owner, "Something went wrong", text, "Open the data folder", "Close")) {
-					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(AppPaths.Data) { UseShellExecute = true });
+					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(AppPaths.Data) { UseShellExecute = true })?.Dispose();
 				} else if (MainWindow is not { IsLoaded: true }) {
 					MessageBox.Show(text, Brand.Name, MessageBoxButton.OK, MessageBoxImage.Warning);
 				}
@@ -221,7 +221,7 @@ public partial class App : Application
 		// past runs: their logs written into a scratch folder for the history view to read, removed after
 		var runs = Path.Combine(Path.GetTempPath(), $"Tool Runner page runs {Guid.NewGuid():N}");
 		try {
-			var steps = StepCatalog.DefaultOrder.Where(k => k is not ("loot" or "wryebash" or "anvillod" or "easynpc" or "upf" or "smash" or "reqtificator")).ToList();
+			var steps = StepCatalog.DefaultOrder.Where(k => k is not "anvillod").ToList();
 			var full = new List<string> { "21:02:10  Tool Runner - " + name + " (profile " + name + "), " + steps.Count + " steps",
 				"21:02:10  every output switched off - each back on once its tool rebuilt it" };
 			var at = new DateTime(2026, 10, 27, 21, 2, 22);
@@ -378,6 +378,21 @@ public partial class App : Application
 		Pump(w, 300);
 		Save("7e a step that uses its old output");
 		w.DemoUsesOld("dyndolod", false);
+		Pump(w, 200);
+		// a newer version of the program: the banner with "Download and install", and the box before the install
+		w.DemoNewVersion(true);
+		Pump(w, 300);
+		Save("7f a new version is out");
+		var installBox = w.DemoInstallBox();
+		installBox.ShowActivated = false;
+		installBox.WindowStartupLocation = WindowStartupLocation.Manual;
+		installBox.Left = -30000;
+		installBox.Top = -30000;
+		installBox.Show();
+		Pump(installBox, 600);
+		Save("7g install a new version", installBox);
+		installBox.Close();
+		w.DemoNewVersion(false);
 		Pump(w, 200);
 		// the smallest window the program allows: nothing may be cut off there
 		w.Width = w.MinWidth;

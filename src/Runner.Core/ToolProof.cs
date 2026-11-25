@@ -106,16 +106,23 @@ public static class ToolProof
 				buttons = [.. Uia.All(window, ControlType.Button).Select(b => (Uia.Name(b), Uia.AutomationId(b), Uia.Usable(b)))];
 				missing = Missing(a_look, buttons, others) ?? "";
 				if (missing != "") {
-					Thread.Sleep(1500);
+					a_ct.WaitHandle.WaitOne(1500);
 				}
 			} while (missing != "" && look.Elapsed < TimeSpan.FromSeconds(30));
 			return new Result(a_look.Step, missing == "", missing == "" ? $"{tool}: what a run presses is there" : $"{tool}: {missing}");
 		} finally {
 			try {
 				StepKit.CloseTool(control, image, a_log);
+				// a Stop is never held up by Mod Organizer: after one, its close waits half a minute at most (a game or a download can
+				// hold it for half an hour); without one, a Stop pressed during this close ends the wait
+				// (its token a little later than that half minute, so the close's own limit is reached first and names the box that
+				// holds Mod Organizer open)
+				using var quick = a_ct.IsCancellationRequested ? new CancellationTokenSource(TimeSpan.FromSeconds(45)) : null;
 				try {
-					control.Close(null, CancellationToken.None);
-				} catch (Exception e) when (e is Mo2BusyException or IOException or UnauthorizedAccessException or InvalidOperationException) {
+					control.Close(quick == null ? null : TimeSpan.FromSeconds(30), quick?.Token ?? a_ct);
+				} catch (OperationCanceledException) {
+					a_log.Warn("Mod Organizer was left open - close it yourself");
+				} catch (Exception e) when (e is Mo2BusyException or StepFailedException or IOException or UnauthorizedAccessException or InvalidOperationException) {
 					a_log.Warn($"Mod Organizer could not be closed ({e.Message})");
 				}
 			} finally {
