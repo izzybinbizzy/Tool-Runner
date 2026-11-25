@@ -179,11 +179,14 @@ public static partial class ConsoleAttach
 			// UTF-8, as before
 			var encoding = Console.IsOutputRedirected ? new System.Text.UTF8Encoding(false) : Console.OutputEncoding;
 			Console.SetOut(new ReaderGone(new StreamWriter(Console.OpenStandardOutput(), encoding) { AutoFlush = true }));
+			Console.SetError(Console.Out);
 		} else {
+			// (started with no console to join - a script, a scheduled task: what it reads from the error stream stays apart
+			// from what it reads from the output)
 			Console.SetOut(new ReaderGone(Console.Out));
+			Console.SetError(new ReaderGone(Console.Error));
 		}
 #pragma warning restore CA2000
-		Console.SetError(Console.Out);
 	}
 
 	// What is printed goes to whoever reads it, and a write fails once that reader is gone (a pipe closed early:

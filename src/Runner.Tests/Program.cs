@@ -12044,6 +12044,16 @@ public static class Program
 			"both are named, with the mod: " + found[0].Text);
 		Equal("TR-324", RunnerErrors.Find(found[0].Text)?.Code, "... and it comes with what to do");
 		Equal(0, Preflight.SharedOutputs(one, ["texgen", "dyndolod"]).Count(), "a run of only one of the two is no clash");
+		// a shader cache's own output mod counts too: two caches set to one mod, or a cache set to another step's output
+		static JsonObject Caches(params string[] a_outputs) => new() { ["step"] = "shaders", ["on"] = true, ["settings"] = new JsonObject {
+			["caches"] = new JsonArray([.. a_outputs.Select(o => (JsonNode)new JsonObject { ["shader_mod"] = "Shaders " + o, ["output_mod"] = o })]) } };
+		var twoCaches = Setup.FromJson(new JsonObject { ["steps"] = new JsonArray(Caches("Shader Cache", "shader cache")) });
+		var cacheFound = Preflight.SharedOutputs(twoCaches, ["shaders"]).ToList();
+		Check(cacheFound.Count == 1 && cacheFound[0].Text.StartsWith(StepCatalog.Name("shaders") + " have the same output mod", StringComparison.Ordinal),
+			"two caches with one output mod: " + string.Join(" | ", cacheFound.Select(i => i.Text)));
+		var cacheAndStep = Setup.FromJson(new JsonObject { ["steps"] = new JsonArray(Caches("Shared Output"), Step("synthesis", "output_mod", "Shared Output")) });
+		Equal(1, Preflight.SharedOutputs(cacheAndStep, ["shaders", "synthesis"]).Count(), "a cache and another step with one output mod");
+		Equal(0, Preflight.SharedOutputs(Setup.FromJson(new JsonObject { ["steps"] = new JsonArray(Caches("One", "Two")) }), ["shaders"]).Count(), "two caches of their own");
 		// what a pattern without {output} makes of a new setup's names
 		Equal(SetupMaker.OutputName("{profile} outputs", "TexGen Output", "P"), SetupMaker.OutputName("{profile} outputs", "DynDOLOD Output", "P"), "a pattern without {output} names every output alike");
 	}

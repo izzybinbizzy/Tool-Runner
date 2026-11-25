@@ -806,7 +806,8 @@ public sealed class ShaderStep : IStep
 			a_ctx.Log.Detail($"starting the game again to carry on (the setup's \"on_crash\" is \"restart\") - start {a_start + 1}");
 			return;
 		}
-		var wait = TimeSpan.FromMinutes(a_s.Num("crash_wait_min", 30));
+		// (no minutes at all is the usual wait: a question cancelled the moment it is asked would end the step on the first crash)
+		var wait = TimeSpan.FromMinutes(a_s.Num("crash_wait_min", 30) is > 0 and var minutes ? minutes : 30);
 		a_ctx.Log.Warn($"waiting up to {wait.TotalMinutes:0} minutes for your answer: Done (the window's button, or the command \"continue\") starts the game again, Stop ends the run");
 		using var asked = CancellationTokenSource.CreateLinkedTokenSource(a_ctx.Cancel);
 		asked.CancelAfter(wait);

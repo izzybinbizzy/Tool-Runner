@@ -15,10 +15,25 @@ public static class Preflight
 	// the roads painted into it are one output, made by two steps.) A pattern for the output names without {output} in it
 	// gives every tool the same mod; so does a name typed twice in Settings
 	public static IEnumerable<Issue> SharedOutputs(Setup a_setup, IReadOnlyCollection<string> a_steps) =>
-		a_setup.EnabledSteps.Where(s => a_steps.Contains(s.Key)).Select(s => (s.Key, Mod: new StepSettings(s.Settings).OutputMod)).Where(x => x.Mod != null)
-			.GroupBy(x => x.Mod!, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1 && !g.All(x => x.Key is "xlodgen" or "acmos"))
-			.Select(g => new Issue("", true, $"{string.Join(" and ", g.Select(x => StepCatalog.Name(x.Key)))} have the same output mod, \"{g.Key}\" - " +
+		a_setup.EnabledSteps.Where(s => a_steps.Contains(s.Key)).SelectMany(OutputsOf)
+			.GroupBy(x => x.Mod, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1 && !g.All(x => x.Key is "xlodgen" or "acmos"))
+			.Select(g => new Issue("", true, $"{string.Join(" and ", g.Select(x => StepCatalog.Name(x.Key)).Distinct())} have the same output mod, \"{g.Key}\" - " +
 				"the one that runs later would move the other's new output into the backup: give each a mod of its own"));
+
+	// the mods a step builds: its output mod, and each shader cache's own (the shader step keeps them in its list of caches)
+	static IEnumerable<(string Key, string Mod)> OutputsOf(Setup.StepEntry a_s)
+	{
+		if (new StepSettings(a_s.Settings).OutputMod is { } mod) {
+			yield return (a_s.Key, mod);
+		}
+		if (a_s.Settings["caches"] is System.Text.Json.Nodes.JsonArray caches) {
+			foreach (var cache in caches.OfType<System.Text.Json.Nodes.JsonObject>()) {
+				if (Setup.Str(cache, "output_mod") is { } own) {
+					yield return (a_s.Key, own);
+				}
+			}
+		}
+	}
 
 	public static List<Issue> Run(Setup a_setup, Mo2Instance a_mo2, IReadOnlyList<string> a_steps)
 	{

@@ -980,6 +980,10 @@ public static class SettingsPanel
 					        "Open it", "Not now")) {
 						return;
 					}
+					// (the tool opens through the setup's Mod Organizer: what the setup starts is asked about first)
+					if (!a_vm.StartsFirst(setupNow)) {
+						return;
+					}
 					using var now = new ToolOpen();
 					s_learning = now;
 					s_learningSetup = setupNow.File;
