@@ -455,6 +455,14 @@ public static class Program
 		Check(w.Any(x => x.StartsWith("Landscape Fixer runs after xLODGen", StringComparison.Ordinal)), "Landscape Fixer after xLODGen is warned");
 		Equal(2, w.Count, "those two warnings and no other: " + string.Join(" | ", w));
 		Equal(0, StepCatalog.OrderWarnings(StepCatalog.DefaultOrder.ToList()).Count, "the default order is safe");
+		// AnvilLOD stands where DynDOLOD stands: before the patches it reads is warned about, as it is for DynDOLOD
+		var anvil = StepCatalog.OrderWarnings(["anvillod", "pgpatcher", "grass", "playsave"]);
+		Check(anvil.Count == 2 && anvil.Any(x => x.StartsWith("PGPatcher runs after AnvilLOD", StringComparison.Ordinal)) && anvil.Any(x => x.StartsWith("Grass cache runs after AnvilLOD", StringComparison.Ordinal)),
+			"AnvilLOD before PGPatcher and the grass cache: " + string.Join(" | ", anvil));
+		Equal(StepCatalog.OrderWarnings(old).Count, StepCatalog.OrderBreaks(old).Count, "each warning is one broken rule");
+		var first = StepCatalog.OrderBreaks(old)[0];
+		Equal(StepCatalog.OrderWarnings(old)[0], StepCatalog.RunsAfter.Replace("{0}", StepCatalog.Name(first.Before), StringComparison.Ordinal)
+			.Replace("{1}", StepCatalog.Name(first.After), StringComparison.Ordinal).Replace("{2}", first.Why, StringComparison.Ordinal), "the window's text with its three places filled is the check's own line");
 	}
 
 	static void T_PlanOnlyFromUntil()
@@ -5224,7 +5232,8 @@ public static class Program
 	// entries - is in every shipped language as well, not only what a picture of the window showed
 	static void T_EveryShippedLanguageHasTheSettingsTexts()
 	{
-		string[] more = [.. ToolFinder.WhereTexts, "LOD output mods switched off before the first step (one per line)", "Plugin places after a run (each: the plugin, then last_master, after:<plugin> or end)", "A plugin's place when a run first ticks it (the plugin: the plugin it goes below)",
+		string[] more = [.. ToolFinder.WhereTexts, .. StepCatalog.All.Select(s => s.About), StepCatalog.Info(AddOns.KeyPrefix + "x").About, StepCatalog.RunsAfter,
+			.. StepCatalog.MustPrecede.Select(r => r.Why).Distinct(), "LOD output mods switched off before the first step (one per line)", "Plugin places after a run (each: the plugin, then last_master, after:<plugin> or end)", "A plugin's place when a run first ticks it (the plugin: the plugin it goes below)",
 			"{0} (default {1})", "Show setup: {0}", "Settings of {0}", "Run only {0}", "Find in the settings: \"{0}\"", "Stop the test", "Most recent save (any character)",
 			"leave it to me (unanswered, the step stops)", "every run", "never", "skip it during the run (it asks in my own game)",
 			"new cache at every game start", "leave it alone - warn me only", "off", "on", "none", "the step's own", "Data folder (setups, runs, backups): {0}", ToolRunner.App.MainWindow.FooterText, "Data folder: {0}"];

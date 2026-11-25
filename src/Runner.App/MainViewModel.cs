@@ -428,7 +428,7 @@ public sealed partial class MainViewModel : Observable
 		var n = 0;
 		foreach (var s in Setup.Steps) {
 			var info = StepCatalog.Info(s.Key);
-			Steps.Add(new StepRow { Key = s.Key, Name = info.Name, About = info.About, On = s.On, Number = ++n,
+			Steps.Add(new StepRow { Key = s.Key, Name = info.Name, About = WindowWords.Word(info.About), On = s.On, Number = ++n,
 				Usual = _usual.TryGetValue(s.Key, out var t) ? Short(t) : "" });
 		}
 		MarkLeftOut();
@@ -1571,12 +1571,14 @@ public sealed partial class MainViewModel : Observable
 		if (i < 0 || a_to < 0 || a_to >= rows.Count || a_to == i) {
 			return [];
 		}
-		var before = StepCatalog.OrderWarnings(rows.Where(r => r.On).Select(r => r.Key).ToList()).ToHashSet();
+		var before = StepCatalog.OrderBreaks(rows.Where(r => r.On).Select(r => r.Key).ToList()).ToHashSet();
 		var moved = rows[i];
 		rows.RemoveAt(i);
 		rows.Insert(a_to, moved);
 		var on = rows.Where(r => r.On).Select(r => r.Key).ToList();
-		return StepCatalog.OrderWarnings(on).Where(w => !before.Contains(w)).ToList();
+		// (the steps keep their names; the rule's reason is said in the window's language)
+		return [.. StepCatalog.OrderBreaks(on).Where(b => !before.Contains(b))
+			.Select(b => WindowWords.Format(StepCatalog.RunsAfter, StepCatalog.Name(b.Before), StepCatalog.Name(b.After), WindowWords.Word(b.Why)))];
 	}
 
 	public Task Move(StepRow a_row, int a_delta) => MoveTo(a_row, Steps.IndexOf(a_row) + a_delta);

@@ -51,16 +51,30 @@ public static class StepCatalog
 		("texgen", "dyndolod", "TexGen's output is DynDOLOD's input"),
 		("texgen", "anvillod", "TexGen's output is AnvilLOD's input"),
 		("dyndolod", "playsave", "the final save loads every new output"),
+		// AnvilLOD stands in DynDOLOD's place, and what must come before the one must come before the other
+		("synthesis", "anvillod", "AnvilLOD builds its LOD from the load order, so every other patch comes first"),
+		("landscapefixer", "anvillod", "AnvilLOD builds its LOD from the load order, so every other patch comes first"),
+		("pgpatcher", "anvillod", "AnvilLOD builds its LOD from the load order, so every other patch comes first"),
+		("grass", "anvillod", "grass LOD needs a current grass cache (dyndolod.info)"),
+		("anvillod", "playsave", "the final save loads every new output"),
 	];
 
+	// the words of a broken rule as a text with places for its three parts: the window says them in its own language
+	// (OrderWarnings writes the same words out for the check and the log)
+	public const string RunsAfter = "{0} runs after {1} - {2}.";
+
 	// the order rules a setup breaks (an empty list = the order is safe)
-	public static List<string> OrderWarnings(IReadOnlyList<string> a_order)
+	public static List<string> OrderWarnings(IReadOnlyList<string> a_order) =>
+		[.. OrderBreaks(a_order).Select(b => $"{Name(b.Before)} runs after {Name(b.After)} - {b.Why}.")];
+
+	// the rules themselves that an order breaks
+	public static List<(string Before, string After, string Why)> OrderBreaks(IReadOnlyList<string> a_order)
 	{
-		var outList = new List<string>();
-		foreach (var (before, after, why) in MustPrecede) {
-			int i = IndexOf(a_order, before), j = IndexOf(a_order, after);
+		var outList = new List<(string Before, string After, string Why)>();
+		foreach (var rule in MustPrecede) {
+			int i = IndexOf(a_order, rule.Before), j = IndexOf(a_order, rule.After);
 			if (i >= 0 && j >= 0 && i > j) {
-				outList.Add($"{Name(before)} runs after {Name(after)} - {why}.");
+				outList.Add(rule);
 			}
 		}
 		return outList;
