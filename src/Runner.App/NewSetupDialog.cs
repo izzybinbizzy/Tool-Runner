@@ -222,6 +222,12 @@ public static class NewSetupDialog
 				return;
 			}
 			var file = Path.Combine(AppPaths.Setups, Safe(name.Text.Trim()) + ".json");
+			// (a run started elsewhere while this box stood open reads the setup of that name)
+			if (File.Exists(file) && Engine.Active() is { } going && string.Equals(going.SetupFile, file, StringComparison.OrdinalIgnoreCase)) {
+				note.Text = WindowWords.Word("A run is using the setup of that name right now. Give this one another name, or wait for the run to end.");
+				note.Foreground = Brushes2.Get("Bad");
+				return;
+			}
 			if (File.Exists(file) && !Ask.Show(w, "Replace that setup?", WindowWords.F($"A setup called {name.Text.Trim()} exists. Replace it?"), "Replace", "Keep it")) {
 				return;
 			}
@@ -234,7 +240,11 @@ public static class NewSetupDialog
 			note.Foreground = Brushes2.Get("Muted");
 			try {
 				var s = await Task.Run(() => SetupMaker.Make(exeText, inst, p, setupName, AppPaths.Data, pat));
-				s.Save(file);
+				// the setup it replaces goes to the setups' earlier copies first, as with every save
+				var text = s.Text();
+				if (await Task.Run(() => Setup.WriteKeepingACopy(file, text, Path.Combine(AppPaths.Data, "Setup backups"))) is { } notWritten) {
+					throw new IOException(notWritten);
+				}
 				made = file;
 			} catch (Exception e) {
 				note.Text = WindowWords.Format("Not made: {0}", e.Message);

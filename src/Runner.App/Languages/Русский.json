@@ -25,6 +25,7 @@
   "A run is going: set its tools up when the run is done.": "Идёт прогон: настройте его инструменты, когда прогон завершится.",
   "A run is starting": "Прогон запускается",
   "A run is the engine's own and is stopped cleanly when the window closes; a put-back or an undo is this window's own work and is never cut off": "Прогон принадлежит движку и корректно останавливается при закрытии окна; восстановление или отмена — работа этого окна и никогда не прерывается",
+  "A run is using the setup of that name right now. Give this one another name, or wait for the run to end.": "Набор с таким именем сейчас используется прогоном. Дайте этому набору другое имя или дождитесь конца прогона.",
   "A setup called {0} exists. Replace it?": "Набор с именем {0} уже есть. Заменить его?",
   "A small window for a second screen: the step, the clock, the progress bar and Stop (Ctrl+J)": "Маленькое окно для второго экрана: шаг, часы, полоса прогресса и «Стоп» (Ctrl+J)",
   "A theme is one file: drop one here (yours or someone else's) and press Look again": "Тема — это один файл: положите его сюда (свой или чужой) и нажмите «Искать снова»",

@@ -25,6 +25,7 @@
   "A run is going: set its tools up when the run is done.": "正在运行：请在运行结束后设置其工具。",
   "A run is starting": "运行正在启动",
   "A run is the engine's own and is stopped cleanly when the window closes; a put-back or an undo is this window's own work and is never cut off": "运行属于引擎，窗口关闭时会干净地停止；恢复或撤销是此窗口自身的工作，绝不会被中断",
+  "A run is using the setup of that name right now. Give this one another name, or wait for the run to end.": "该名称的方案正在被一次运行使用。请为此方案换一个名称，或等待运行结束。",
   "A setup called {0} exists. Replace it?": "名为 {0} 的方案已存在。要替换它吗？",
   "A small window for a second screen: the step, the clock, the progress bar and Stop (Ctrl+J)": "用于第二块屏幕的小窗口：步骤、计时、进度条和停止（Ctrl+J）",
   "A theme is one file: drop one here (yours or someone else's) and press Look again": "主题就是一个文件：把它放到这里（你自己的或别人的），然后按“再次查找”",

@@ -25,6 +25,7 @@
   "A run is going: set its tools up when the run is done.": "Триває запуск: налаштуйте його інструменти, коли запуск завершиться.",
   "A run is starting": "Запуск починається",
   "A run is the engine's own and is stopped cleanly when the window closes; a put-back or an undo is this window's own work and is never cut off": "Запуск належить рушію і чисто зупиняється, коли вікно закривається; відновлення чи скасування — робота цього вікна, і її ніколи не переривають",
+  "A run is using the setup of that name right now. Give this one another name, or wait for the run to end.": "Набір із такою назвою зараз використовує запуск. Дайте цьому набору іншу назву або дочекайтеся кінця запуску.",
   "A setup called {0} exists. Replace it?": "Набір із назвою {0} уже є. Замінити його?",
   "A small window for a second screen: the step, the clock, the progress bar and Stop (Ctrl+J)": "Маленьке вікно для другого екрана: крок, годинник, смуга прогресу і «Стоп» (Ctrl+J)",
   "A theme is one file: drop one here (yours or someone else's) and press Look again": "Тема — це один файл: покладіть його сюди (свій чи чужий) і натисніть «Шукати знову»",

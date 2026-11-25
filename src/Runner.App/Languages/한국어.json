@@ -25,6 +25,7 @@
   "A run is going: set its tools up when the run is done.": "실행 중입니다: 실행이 끝나면 도구를 설정하세요.",
   "A run is starting": "실행을 시작하는 중입니다",
   "A run is the engine's own and is stopped cleanly when the window closes; a put-back or an undo is this window's own work and is never cut off": "실행은 엔진의 것이며 창이 닫히면 깔끔하게 멈춥니다. 복원이나 실행 취소는 이 창 자체의 작업이므로 절대 중간에 끊기지 않습니다",
+  "A run is using the setup of that name right now. Give this one another name, or wait for the run to end.": "지금 실행이 그 이름의 구성을 사용 중입니다. 이 구성에 다른 이름을 주거나 실행이 끝날 때까지 기다리세요.",
   "A setup called {0} exists. Replace it?": "{0}(이)라는 구성이 이미 있습니다. 바꿀까요?",
   "A small window for a second screen: the step, the clock, the progress bar and Stop (Ctrl+J)": "두 번째 화면용 작은 창: 단계, 시계, 진행 막대, 중지 (Ctrl+J)",
   "A theme is one file: drop one here (yours or someone else's) and press Look again": "테마는 파일 하나입니다: 여기에 하나를 놓고(본인 것이든 다른 사람 것이든) 다시 찾기를 누르세요",

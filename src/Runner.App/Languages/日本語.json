@@ -25,6 +25,7 @@
   "A run is going: set its tools up when the run is done.": "実行中です: 実行が終わったらツールを設定してください。",
   "A run is starting": "実行を開始しています",
   "A run is the engine's own and is stopped cleanly when the window closes; a put-back or an undo is this window's own work and is never cut off": "実行はエンジンのものであり、ウィンドウが閉じるときれいに停止します。復元や元に戻す操作はこのウィンドウ自身の作業なので、途中で止まることはありません",
+  "A run is using the setup of that name right now. Give this one another name, or wait for the run to end.": "その名前の構成は今、実行に使われています。別の名前を付けるか、実行が終わるまでお待ちください。",
   "A setup called {0} exists. Replace it?": "{0} という構成が既にあります。置き換えますか?",
   "A small window for a second screen: the step, the clock, the progress bar and Stop (Ctrl+J)": "2 台目の画面用の小さなウィンドウ: ステップ、時計、進行状況バー、停止 (Ctrl+J)",
   "A theme is one file: drop one here (yours or someone else's) and press Look again": "テーマは 1 つのファイルです: ここに置いて (自分のものでも他の人のものでも)「再検索」を押してください",

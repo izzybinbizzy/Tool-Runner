@@ -25,6 +25,7 @@
   "A run is going: set its tools up when the run is done.": "Trwa przebieg: skonfiguruj jego narzędzia, gdy przebieg się zakończy.",
   "A run is starting": "Przebieg się rozpoczyna",
   "A run is the engine's own and is stopped cleanly when the window closes; a put-back or an undo is this window's own work and is never cut off": "Przebieg należy do silnika i jest czysto zatrzymywany, gdy okno się zamyka; przywracanie lub cofanie to praca tego okna i nigdy nie jest przerywane",
+  "A run is using the setup of that name right now. Give this one another name, or wait for the run to end.": "Przebieg właśnie używa zestawu o tej nazwie. Nadaj temu inną nazwę albo poczekaj, aż przebieg się skończy.",
   "A setup called {0} exists. Replace it?": "Zestaw o nazwie {0} już istnieje. Zastąpić go?",
   "A small window for a second screen: the step, the clock, the progress bar and Stop (Ctrl+J)": "Małe okno na drugi ekran: krok, zegar, pasek postępu i Zatrzymaj (Ctrl+J)",
   "A theme is one file: drop one here (yours or someone else's) and press Look again": "Motyw to jeden plik: upuść go tutaj (swój lub czyjś) i naciśnij Szukaj ponownie",

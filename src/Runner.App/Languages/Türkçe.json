@@ -25,6 +25,7 @@
   "A run is going: set its tools up when the run is done.": "Bir çalıştırma sürüyor: araçlarını çalıştırma bitince ayarlayın.",
   "A run is starting": "Bir çalıştırma başlıyor",
   "A run is the engine's own and is stopped cleanly when the window closes; a put-back or an undo is this window's own work and is never cut off": "Bir çalıştırma motora aittir ve pencere kapandığında düzgünce durdurulur; geri yükleme ya da geri alma bu pencerenin kendi işidir ve asla yarıda kesilmez",
+  "A run is using the setup of that name right now. Give this one another name, or wait for the run to end.": "Şu anda bir çalıştırma o addaki kurulumu kullanıyor. Buna başka bir ad verin ya da çalıştırmanın bitmesini bekleyin.",
   "A setup called {0} exists. Replace it?": "{0} adında bir kurulum var. Değiştirilsin mi?",
   "A small window for a second screen: the step, the clock, the progress bar and Stop (Ctrl+J)": "İkinci bir ekran için küçük bir pencere: adım, saat, ilerleme çubuğu ve Durdur (Ctrl+J)",
   "A theme is one file: drop one here (yours or someone else's) and press Look again": "Bir tema tek bir dosyadır: buraya bir tane bırakın (sizin ya da başkasının) ve Yeniden bak'a basın",

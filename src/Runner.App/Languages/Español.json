@@ -25,6 +25,7 @@
   "A run is going: set its tools up when the run is done.": "Hay una ejecución en curso: configura sus herramientas cuando termine.",
   "A run is starting": "Una ejecución está empezando",
   "A run is the engine's own and is stopped cleanly when the window closes; a put-back or an undo is this window's own work and is never cut off": "Una ejecución pertenece al motor y se detiene limpiamente al cerrar la ventana; restaurar o deshacer es trabajo de esta ventana y nunca se interrumpe",
+  "A run is using the setup of that name right now. Give this one another name, or wait for the run to end.": "Una ejecución está usando ahora mismo la configuración de ese nombre. Dale otro nombre a esta, o espera a que termine la ejecución.",
   "A setup called {0} exists. Replace it?": "Ya existe una configuración llamada {0}. ¿Reemplazarla?",
   "A small window for a second screen: the step, the clock, the progress bar and Stop (Ctrl+J)": "Una ventana pequeña para una segunda pantalla: el paso, el reloj, la barra de progreso y Detener (Ctrl+J)",
   "A theme is one file: drop one here (yours or someone else's) and press Look again": "Un tema es un archivo: deja uno aquí (tuyo o de otra persona) y pulsa Buscar de nuevo",
