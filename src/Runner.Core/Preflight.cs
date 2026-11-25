@@ -10,6 +10,16 @@ public static class Preflight
 	// which game processes run now (the offline tests answer "none": a game may be running on the PC they run on)
 	public static Func<List<string>> GameCheck { get; set; } = () => Mo2Control.GameRunning();
 
+	// Two tools set to write into one mod. Each moves what its output mod holds into the run's backup before it fills it:
+	// the one that ran later put the earlier one's new output away, and the run said both were built. (The terrain LOD and
+	// the roads painted into it are one output, made by two steps.) A pattern for the output names without {output} in it
+	// gives every tool the same mod; so does a name typed twice in Settings
+	public static IEnumerable<Issue> SharedOutputs(Setup a_setup, IReadOnlyCollection<string> a_steps) =>
+		a_setup.EnabledSteps.Where(s => a_steps.Contains(s.Key)).Select(s => (s.Key, Mod: new StepSettings(s.Settings).OutputMod)).Where(x => x.Mod != null)
+			.GroupBy(x => x.Mod!, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1 && !g.All(x => x.Key is "xlodgen" or "acmos"))
+			.Select(g => new Issue("", true, $"{string.Join(" and ", g.Select(x => StepCatalog.Name(x.Key)))} have the same output mod, \"{g.Key}\" - " +
+				"the one that runs later would move the other's new output into the backup: give each a mod of its own"));
+
 	public static List<Issue> Run(Setup a_setup, Mo2Instance a_mo2, IReadOnlyList<string> a_steps)
 	{
 		var outList = new List<Issue>();
@@ -23,6 +33,7 @@ public static class Preflight
 		if (a_steps.Contains("dyndolod") && a_steps.Contains("anvillod")) {
 			outList.Add(new Issue("", true, "DynDOLOD and AnvilLOD are both switched on - each makes the LOD the other makes: untick one of the two"));
 		}
+		outList.AddRange(SharedOutputs(a_setup, a_steps));
 		var control = new Mo2Control(a_mo2, a_setup.Profile, RunLog.Null);
 		var profile = new Profile(a_mo2, a_setup.Profile, () => control.Running);
 		if (!profile.Exists) {

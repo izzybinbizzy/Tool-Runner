@@ -255,6 +255,13 @@ public static class NewSetupDialog
 			if (File.Exists(file) && !Ask.Show(w, "Replace that setup?", WindowWords.F($"A setup called {name.Text.Trim()} exists. Replace it?"), "Replace", "Keep it")) {
 				return;
 			}
+			// (each tool's output mod is named by this pattern: without {output} every tool was given one and the same mod, and
+			// each run's later tools moved the earlier ones' new outputs into the backup)
+			if (pattern.Text.Trim() != "" && !pattern.Text.Contains("{output}", StringComparison.OrdinalIgnoreCase)) {
+				note.Text = WindowWords.Word("The output mod names need {output} in them: without it every tool would write into the same mod.");
+				note.Foreground = Brushes2.Get("Bad");
+				return;
+			}
 			// it looks through every mod (thousands on a big list): off the window's thread, the window says so
 			var (exeText, inst, setupName, pat) = (Typed(), InstanceDir(), Safe(name.Text.Trim()), pattern.Text.Trim() == "" ? "{output} - {profile}" : pattern.Text.Trim());
 			create.IsEnabled = false;

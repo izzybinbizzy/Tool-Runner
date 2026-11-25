@@ -536,6 +536,7 @@
   "The mod the tool writes into": "ツールが書き込む MOD",
   "The mods the tools made (the outputs) stay in Mod Organizer - they are part of your load order; remove them there if you want.": "ツールが作成した MOD (出力) は Mod Organizer に残ります - ロード順の一部です。不要ならそこで削除してください。",
   "The new name of \"{0}\". Its runs and their history, and the settings its tools learned, go with it.": "「{0}」の新しい名前です。その実行と履歴、およびツールが覚えた設定も一緒に移ります。",
+  "The output mod names need {output} in them: without it every tool would write into the same mod.": "出力 MOD の名前には {output} が必要です。これがないと、すべてのツールが同じ MOD に書き込みます。",
   "The program's data is in the Recycle Bin. The window closes now.": "プログラムのデータはごみ箱にあります。ウィンドウを閉じます。",
   "The queue ends at the first run that does not finish.": "キューは、完了しない最初の実行で終了します。",
   "The run and what was found": "実行と見つかった内容",

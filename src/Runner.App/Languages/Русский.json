@@ -536,6 +536,7 @@
   "The mod the tool writes into": "Мод, в который пишет инструмент",
   "The mods the tools made (the outputs) stay in Mod Organizer - they are part of your load order; remove them there if you want.": "Моды, созданные инструментами (результаты), остаются в Mod Organizer - они часть вашего порядка загрузки; удалите их там, если хотите.",
   "The new name of \"{0}\". Its runs and their history, and the settings its tools learned, go with it.": "Новое имя «{0}». Его прогоны и их история, а также настройки, которые запомнили его инструменты, переходят вместе с ним.",
+  "The output mod names need {output} in them: without it every tool would write into the same mod.": "В именах модов с результатом нужен {output}: без него все инструменты писали бы в один и тот же мод.",
   "The program's data is in the Recycle Bin. The window closes now.": "Данные программы в корзине. Окно сейчас закроется.",
   "The queue ends at the first run that does not finish.": "Очередь заканчивается на первом прогоне, который не завершился.",
   "The run and what was found": "Прогон и что было найдено",

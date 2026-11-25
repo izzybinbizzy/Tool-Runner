@@ -536,6 +536,7 @@
   "The mod the tool writes into": "Aracın yazdığı mod",
   "The mods the tools made (the outputs) stay in Mod Organizer - they are part of your load order; remove them there if you want.": "Araçların oluşturduğu modlar (çıktılar) Mod Organizer'da kalır - yükleme sıranızın parçasıdırlar; isterseniz orada kaldırın.",
   "The new name of \"{0}\". Its runs and their history, and the settings its tools learned, go with it.": "\"{0}\" kurulumunun yeni adı. Çalıştırmaları ve geçmişleri ile araçlarının öğrendiği ayarlar onunla birlikte gelir.",
+  "The output mod names need {output} in them: without it every tool would write into the same mod.": "Çıktı modu adlarında {output} bulunmalıdır: o olmadan her araç aynı moda yazardı.",
   "The program's data is in the Recycle Bin. The window closes now.": "Programın verileri Geri Dönüşüm Kutusu'nda. Pencere şimdi kapanıyor.",
   "The queue ends at the first run that does not finish.": "Sıra, bitmeyen ilk çalıştırmada sona erer.",
   "The run and what was found": "Çalıştırma ve bulunanlar",

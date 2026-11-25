@@ -141,6 +141,8 @@ public static class RunnerErrors
 			"Press F5 in Mod Organizer so it lists that mod again (or put the mod back in its mods folder), then start the run again the way you started it - the step stays set to use its old output."),
 		E("TR-323", "DynDOLOD and AnvilLOD are both switched on", "A profile uses one of the two LOD tools: each makes what the other makes, and keeps the other's output off.",
 			"Untick the DynDOLOD step or the AnvilLOD step in the list, then start again."),
+		E("TR-324", "have the same output mod", "Two steps are set to write into the same mod. A step moves what its output mod holds into the run's backup before it fills it, so the later one would put the earlier one's new output away.",
+			"Open Settings > Steps and give each of the two an output mod of its own (a new setup names them \"<the tool's output> - <profile>\"), then start again."),
 		E("TR-312", "is not in this profile's mod list", "A mod this step names is not in this profile's mod list.",
 			"Install the mod or correct its name: in Mod Organizer, or in Settings > Steps where the step names it."),
 

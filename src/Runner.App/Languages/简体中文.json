@@ -536,6 +536,7 @@
   "The mod the tool writes into": "工具写入的模组",
   "The mods the tools made (the outputs) stay in Mod Organizer - they are part of your load order; remove them there if you want.": "工具生成的模组（即输出）会留在 Mod Organizer 中——它们是你的加载顺序的一部分；如果需要，请在那里删除。",
   "The new name of \"{0}\". Its runs and their history, and the settings its tools learned, go with it.": "“{0}”的新名称。它的运行及其历史记录，以及其工具学到的设置，都会随之迁移。",
+  "The output mod names need {output} in them: without it every tool would write into the same mod.": "输出模组的名称需要包含 {output}：否则所有工具都会写入同一个模组。",
   "The program's data is in the Recycle Bin. The window closes now.": "程序的数据已在回收站中。窗口现在关闭。",
   "The queue ends at the first run that does not finish.": "队列会在第一次未完成的运行处结束。",
   "The run and what was found": "运行及发现的问题",

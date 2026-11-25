@@ -536,6 +536,7 @@
   "The mod the tool writes into": "Le mod dans lequel l'outil écrit",
   "The mods the tools made (the outputs) stay in Mod Organizer - they are part of your load order; remove them there if you want.": "Les mods créés par les outils (les sorties) restent dans Mod Organizer - ils font partie de votre ordre de chargement ; supprimez-les là-bas si vous le souhaitez.",
   "The new name of \"{0}\". Its runs and their history, and the settings its tools learned, go with it.": "Le nouveau nom de « {0} ». Ses traitements et leur historique, ainsi que les réglages appris par ses outils, le suivent.",
+  "The output mod names need {output} in them: without it every tool would write into the same mod.": "Les noms des mods de sortie doivent contenir {output} : sans cela, tous les outils écriraient dans le même mod.",
   "The program's data is in the Recycle Bin. The window closes now.": "Les données du programme sont dans la Corbeille. La fenêtre se ferme maintenant.",
   "The queue ends at the first run that does not finish.": "La file s'arrête au premier traitement qui ne se termine pas.",
   "The run and what was found": "Le traitement et ce qui a été trouvé",

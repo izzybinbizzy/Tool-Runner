@@ -11618,6 +11618,24 @@ public static class Program
 		Check(!Due(1e300) && !Due(double.NaN) && !Due(0) && !Due(6) && Due(5) && Due(1), "a reminder every 1e300 minutes is never due, and no error");
 	}
 
+	// two tools set to write into one output mod: refused before anything is switched - but the terrain LOD and its roads are one output
+	static void T_TwoToolsWithOneOutputModAreRefused()
+	{
+		static JsonObject Step(string a_key, string a_setting, string a_mod, bool a_on = true) =>
+			new() { ["step"] = a_key, ["on"] = a_on, ["settings"] = new JsonObject { [a_setting] = a_mod } };
+		var one = Setup.FromJson(new JsonObject { ["steps"] = new JsonArray(Step("synthesis", "output_mod", "My Outputs"), Step("xlodgen", "output_mod", "Terrain"),
+			Step("acmos", "then_move_to_mod", "terrain"), Step("texgen", "output_mod", "my outputs"), Step("dyndolod", "output_mod", "DynDOLOD Output"), Step("pandora", "output_mod", "My Outputs", false)) });
+		var all = one.EnabledSteps.Select(s => s.Key).ToList();
+		var found = Preflight.SharedOutputs(one, all).ToList();
+		Equal(1, found.Count, "one pair shares a mod; the terrain LOD and its roads are one output, and a step that is off writes nothing: " + string.Join(" | ", found.Select(i => i.Text)));
+		Check(found[0].Blocking && found[0].Text.StartsWith(StepCatalog.Name("synthesis") + " and " + StepCatalog.Name("texgen") + " have the same output mod, \"My Outputs\"", StringComparison.Ordinal),
+			"both are named, with the mod: " + found[0].Text);
+		Equal("TR-324", RunnerErrors.Find(found[0].Text)?.Code, "... and it comes with what to do");
+		Equal(0, Preflight.SharedOutputs(one, ["texgen", "dyndolod"]).Count(), "a run of only one of the two is no clash");
+		// what a pattern without {output} makes of a new setup's names
+		Equal(SetupMaker.OutputName("{profile} outputs", "TexGen Output", "P"), SetupMaker.OutputName("{profile} outputs", "DynDOLOD Output", "P"), "a pattern without {output} names every output alike");
+	}
+
 	// what a setup starts on this PC by itself is listed, and marked so that the window asks about it once
 	static void T_WhatASetupStartsIsListedAndMarked()
 	{
