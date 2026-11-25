@@ -15,9 +15,14 @@ public partial class MainWindow : Window
 {
 	readonly MainViewModel _vm = new();
 	// How often the window looks: every second while something is going (a run's clock and progress, a start being checked),
-	// seldom while nothing is, hardly at all while it is minimised. A change in the runs folder (RunsWatch) and the window
-	// coming back wake it at once, so a slow look loses nothing
-	static readonly TimeSpan Live = TimeSpan.FromSeconds(1), Calm = TimeSpan.FromSeconds(3), Away = TimeSpan.FromSeconds(20);
+	// seldom while nothing is, more seldom while another program is in front, hardly at all while it is minimised or the
+	// player's own game runs. A change in the runs folder (RunsWatch) and the program coming to the front wake it at once,
+	// so a slow look loses nothing. (Each look asks Windows for its whole list of processes - for the two lights that say
+	// whether Mod Organizer and the game are open: most of what an idle window costs, and all of it for nobody while the
+	// window stands behind the game.)
+	static readonly TimeSpan Live = TimeSpan.FromSeconds(1), Calm = TimeSpan.FromSeconds(3), Aside = TimeSpan.FromSeconds(10), Away = TimeSpan.FromSeconds(20);
+	// one of this program's windows is the one in front (Windows says when that changes)
+	bool _inFront = true;
 	readonly DispatcherTimer _timer = new() { Interval = Live };
 	RunsWatch? _watch;
 	int _woken;
@@ -98,6 +103,14 @@ public partial class MainWindow : Window
 		}
 		SayFooter();
 		PreviewKeyDown += OnKeys;
+		// the program in front or not, whichever of its windows it is (Settings and History are windows of their own)
+		if (Application.Current is { } app) {
+			app.Activated += (_, _) => {
+				_inFront = true;
+				Wake();
+			};
+			app.Deactivated += (_, _) => _inFront = false;
+		}
 		// a mod ticked in Mod Organizer while the window was in the background: each step's last run is worked out again
 		Activated += async (_, _) => {
 			Wake();
@@ -149,7 +162,11 @@ public partial class MainWindow : Window
 	public void WatchRuns(bool a_on)
 	{
 		_watch?.Dispose();
-		_watch = a_on && !App.Headless ? new RunsWatch(AppPaths.Runs, Wake) : null;
+		_watch = a_on && !App.Headless ? new RunsWatch(AppPaths.Runs, () => {
+			Engine.RunsChanged();
+			Wake();
+		}) : null;
+		Engine.RunsWatched(_watch?.Watching == true);
 	}
 
 	// one look, and the pace of the next ones set by what it found
@@ -160,11 +177,15 @@ public partial class MainWindow : Window
 		if (_vm.IsRunning || _tray?.Shown == true) {
 			_tray?.Show(Brand.Name + " - " + _vm.NowTitle + (_vm.FinishAt == "" ? "" : ", " + _vm.FinishAt));
 		}
-		var pace = _vm.Busy ? Live : WindowState == WindowState.Minimized ? Away : Calm;
+		var pace = Pace(_vm.Busy, WindowState == WindowState.Minimized, _vm.GameRunning, _inFront);
 		if (_timer.Interval != pace) {
 			_timer.Interval = pace;
 		}
 	}
+
+	// the time to the next look
+	public static TimeSpan Pace(bool a_busy, bool a_minimized, bool a_gameRuns, bool a_inFront) =>
+		a_busy ? Live : a_minimized || a_gameRuns ? Away : a_inFront ? Calm : Aside;
 
 	// from any thread: a look soon. Wakes that come before it has run are that one look
 	void Wake()

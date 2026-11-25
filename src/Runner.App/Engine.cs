@@ -134,6 +134,12 @@ public static class Engine
 	// every run record, newest first (read again only where a record changed)
 	public static List<Journal> Runs() => Cache.Read();
 
+	// The window watches the runs folder (RunsWatch) and says so here: what was read stands until the watcher names a
+	// change, this process writes a record, a run folder comes or goes, or a quarter of a minute is over (JournalCache)
+	public static void RunsWatched(bool a_on) => Cache.Watched = a_on;
+
+	public static void RunsChanged() => Cache.Touch();
+
 	// the run that is going: also one that has finished and is at its last chores (its game for the final save, the setup's
 	// after-run commands, packing the old outputs) - Stop and the close guard reach it until its engine has ended
 	public static Journal? Active(List<Journal>? a_runs = null) => (a_runs ?? Runs()).FirstOrDefault(j => j.Live && j.OwnerAlive);

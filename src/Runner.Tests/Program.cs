@@ -11618,6 +11618,72 @@ public static class Program
 		Check(!Due(1e300) && !Due(double.NaN) && !Due(0) && !Due(6) && Due(5) && Due(1), "a reminder every 1e300 minutes is never due, and no error");
 	}
 
+	// the window's look: every run folder is asked about only when something says a record changed - where the folder is watched
+	static void T_ALookDoesNotWalkEveryRunFolderWhileNothingChanged()
+	{
+		using var f = new FakeMo2();
+		var runs = Runner.RunsDir(f.Data);
+		Journal Record(string a_id, RunState a_state)
+		{
+			var j = new Journal { Id = a_id, Folder = Path.Combine(runs, a_id), SetupFile = f.SetupFile, SetupName = "walk", Started = DateTime.Now, State = a_state,
+				Steps = [new StepRecord { Key = "texgen", State = StepState.Done }] };
+			Directory.CreateDirectory(j.Folder);
+			j.Save();
+			return j;
+		}
+		var first = Record("2026-11-01 10-00-00 walk", RunState.Finished);
+		Record("2026-11-02 10-00-00 walk", RunState.Finished);
+		var every = JournalCache.WholeEvery;
+		try {
+			// a command: nothing watches, every read is whole
+			var plain = new JournalCache(runs);
+			Equal(2, plain.Read().Count, "both records");
+			_ = plain.Read();
+			Equal(2, plain.WholeReads, "with no watcher every read looks at every run folder, as it always did");
+			// the window: watched
+			var cache = new JournalCache(runs) { Watched = true };
+			Equal(2, cache.Read().Count, "both records, read whole the first time");
+			for (var i = 0; i < 5; ++i) {
+				Equal(2, cache.Read().Count, "... and handed out again");
+			}
+			Equal(1, cache.WholeReads, "while nothing changed the run folders are not looked at again");
+			var handed = cache.Read();
+			handed.Clear();
+			Equal(2, cache.Read().Count, "what a caller does to the list it was handed is its own");
+			// this process writes a record (an undo, a put-back): seen at once, without the watcher's word
+			first.Undone = true;
+			first.Save();
+			Check(cache.Read().First(j => j.Id == first.Id).Undone && cache.WholeReads == 2, "a record this process wrote is read at the very next look");
+			// a run folder comes: the runs folder's own time says so
+			var third = Record("2026-11-03 10-00-00 walk", RunState.Finished);
+			Equal(3, cache.Read().Count, "a new run is there at the next look");
+			var wholeNow = cache.WholeReads;
+			_ = cache.Read();
+			Equal(wholeNow, cache.WholeReads, "... and then nothing is looked at again");
+			// another program changed a record: the watcher says so
+			cache.Touch();
+			_ = cache.Read();
+			Equal(wholeNow + 1, cache.WholeReads, "the watcher's word makes the next look a whole one");
+			// a run folder goes
+			Directory.Delete(third.Folder, true);
+			Equal(2, cache.Read().Count, "a run that is gone is gone at the next look");
+			// the trusted time over: looked at whole again, watcher or not
+			JournalCache.WholeEvery = TimeSpan.Zero;
+			wholeNow = cache.WholeReads;
+			Thread.Sleep(20);
+			_ = cache.Read();
+			Equal(wholeNow + 1, cache.WholeReads, "past the trusted time every run folder is looked at again");
+		} finally {
+			JournalCache.WholeEvery = every;
+		}
+		// the look's pace
+		Equal(TimeSpan.FromSeconds(1), ToolRunner.App.MainWindow.Pace(true, false, true, false), "something going: every second, wherever the window is");
+		Equal(TimeSpan.FromSeconds(3), ToolRunner.App.MainWindow.Pace(false, false, false, true), "nothing going, the program in front");
+		Equal(TimeSpan.FromSeconds(10), ToolRunner.App.MainWindow.Pace(false, false, false, false), "another program in front");
+		Equal(TimeSpan.FromSeconds(20), ToolRunner.App.MainWindow.Pace(false, true, false, true), "minimised");
+		Equal(TimeSpan.FromSeconds(20), ToolRunner.App.MainWindow.Pace(false, false, true, true), "the player's own game running");
+	}
+
 	// two tools set to write into one output mod: refused before anything is switched - but the terrain LOD and its roads are one output
 	static void T_TwoToolsWithOneOutputModAreRefused()
 	{
