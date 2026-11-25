@@ -987,11 +987,17 @@ public static class Runner
 	public const int RunsKept = 100;
 
 	// all but the newest a_keep run records of this setup removed - never the running one, never one that did not finish (its
-	// put-back still needs it); returns the folders removed
+	// put-back still needs it); returns the folders removed. A record that does not read may be one of this setup's newest, so
+	// which ones are the newest is not known: nothing is removed
 	public static List<string> PruneRunRecords(string a_runsDir, string a_setupFile, string? a_current, int a_keep, RunLog a_log)
 	{
 		var removed = new List<string>();
-		var mine = Journal.All(a_runsDir).Where(j => string.Equals(j.SetupFile, a_setupFile, StringComparison.OrdinalIgnoreCase)).ToList();
+		var (runs, unread) = Journal.AllOrUnreadable(a_runsDir);
+		if (unread is { } bad) {
+			a_log.Warn($"old run records were not removed: the run record in \"{Path.GetFileName(bad.Folder)}\" could not be read ({bad.Why.Message})");
+			return removed;
+		}
+		var mine = runs.Where(j => string.Equals(j.SetupFile, a_setupFile, StringComparison.OrdinalIgnoreCase)).ToList();
 		foreach (var j in mine.Skip(a_keep).Where(j => !j.Unfinished && (a_current == null || !Files.SamePath(j.Folder, a_current)))) {
 			try {
 				var d = new DirectoryInfo(j.Folder);

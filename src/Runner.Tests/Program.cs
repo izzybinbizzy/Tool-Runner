@@ -10970,6 +10970,12 @@ public static class Program
 		Check(Directory.Exists(oldestUnfinished.Folder), "the run that did not finish stays (its put-back needs it)");
 		Check(Directory.Exists(other.Folder), "another setup's record stays");
 		Equal(101, Journal.All(runs).Count(j => j.SetupFile == f.SetupFile), "100 + the unfinished one");
+		// a record that does not read may be one of this setup's newest: which are the newest is not known, so none goes
+		var damaged = Path.Combine(runs, "2026-12-30 10-00-00 x");
+		Directory.CreateDirectory(damaged);
+		File.WriteAllText(Path.Combine(damaged, "journal.json"), "{ not a record");
+		Equal(0, Runner.PruneRunRecords(runs, f.SetupFile, null, 50, RunLog.Null).Count, "nothing removed while a record does not read");
+		Equal(101, Journal.All(runs).Count(j => j.SetupFile == f.SetupFile), "all of them still there");
 	}
 
 	// a PC low on memory is told before a run, never stopped (the LOD tools may still manage)
