@@ -281,8 +281,13 @@ public static class DataFolder
 				Files.DeleteDir(e);
 			}
 		}
-		Files.Delete(mark);
-		Directory.Delete(a_old);
+		// Only the mark is left. The folder leaves its data-folder name first: a stop between the mark and the folder going
+		// would leave an empty folder under that name, which a start takes for the data. Under another name it is no data
+		// folder of any copy, whatever happens next
+		var going = a_old + " (being removed " + Guid.NewGuid().ToString("N")[..8] + ")";
+		Directory.Move(a_old, going);
+		Files.Delete(Path.Combine(going, MovedMark));
+		Directory.Delete(going);
 	}
 
 	// Where a path really is: its deepest part that is there named as Windows names it (junctions, links, SUBST drive letters

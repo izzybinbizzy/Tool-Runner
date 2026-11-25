@@ -5879,7 +5879,11 @@ public static class Program
 				Check(File.Exists(Path.Combine(old4, DataFolder.MovedMark)), "a file that will not go keeps the mark beside it");
 			}
 			DataFolder.FinishMove(old4, to4);
-			Check(!Directory.Exists(old4), "and the next start removes the rest, the mark last");
+			Check(!Directory.Exists(old4) && !Directory.EnumerateDirectories(Path.GetDirectoryName(old4)!).Any(), "and the next start removes the rest, the mark last, nothing left beside it");
+			// the old folder leaves its data-folder name before its mark goes: what a stop at that moment leaves is no data folder
+			var beside8 = Path.Combine(root, "beside 8");
+			Directory.CreateDirectory(Path.Combine(beside8, Brand.Name + " Data (being removed 1a2b3c4d)"));
+			Check(!DataFolder.StandsIn(beside8, " Data"), "a folder left half way through its removal is never taken for the data");
 			// a setup written by hand (a comment, a comma after its last value, a path with forward slashes) is repointed too
 			var from5 = Path.Combine(root, "beside 5", Brand.Name + " Data");
 			var to5 = Path.Combine(root, "appdata 5", Brand.Name);
