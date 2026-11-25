@@ -7511,6 +7511,43 @@ public static class Program
 		}
 	}
 
+	// a setup renamed since its last runs: the backups those runs made carry its older name, and its run records still name them.
+	// They are counted and cleaned up with the rest; a folder no record of the setup names, or one that stands elsewhere, never is
+	static void T_BackupsMadeUnderAnOlderNameAreStillTheSetups()
+	{
+		using var f = new FakeMo2();
+		var setup = f.WriteSetup(("pandora", new JsonObject()));
+		var runs = Runner.RunsDir(f.Data);
+		string Named(string a_when, string a_name) => Path.Combine(setup.BackupDir, a_when + " " + a_name);
+		void Backup(string a_dir, string a_id, string a_name, bool a_record = true)
+		{
+			Directory.CreateDirectory(Path.Combine(a_dir, "profile " + setup.Profile));
+			File.WriteAllBytes(Path.Combine(a_dir, "x.bin"), new byte[1000]);
+			if (a_record) {
+				var j = new Journal { Id = a_id, Folder = Path.Combine(runs, a_id), SetupFile = f.SetupFile, SetupName = a_name, Profile = setup.Profile, Started = DateTime.Now,
+					State = RunState.Finished, BackupDir = a_dir };
+				Directory.CreateDirectory(j.Folder);
+				j.Save();
+			}
+		}
+		Backup(Named("2026-11-01 20-00-00", "Old Name"), "r1", "Old Name");
+		Backup(Named("2026-11-02 20-00-00", "Old Name"), "r2", "Old Name");
+		Backup(Named("2026-11-03 20-00-00", setup.Name), "r3", setup.Name);
+		Backup(Named("2026-11-04 20-00-00", setup.Name), "r4", setup.Name);
+		var stranger = Named("2026-10-01 20-00-00", "Old Name");
+		Backup(stranger, "none", "Old Name", false);
+		var elsewhere = Path.Combine(f.Root, "Elsewhere", "2026-10-02 20-00-00 Old Name");
+		Backup(elsewhere, "r0", "Old Name");
+		Equal(2, Runner.BackupsOf(setup).Count, "by their names alone: the ones under its name of today");
+		var listed = Runner.BackupsOf(setup, runs);
+		Equal(4, listed.Count, "with its run records: the ones made under its older name too - " + string.Join(", ", listed.Select(b => b.Dir.Name)));
+		Check(listed[0].Dir.Name.StartsWith("2026-11-04", StringComparison.Ordinal) && listed[3].Dir.Name.StartsWith("2026-11-01", StringComparison.Ordinal), "newest first, whatever the name");
+		var removed = Runner.PruneBackupsOf(setup, runs, null, 3, RunLog.Null);
+		Equal(1, removed.Count, "the oldest of the four goes: " + string.Join(", ", removed));
+		Check(!Directory.Exists(Named("2026-11-01 20-00-00", "Old Name")) && Directory.Exists(Named("2026-11-02 20-00-00", "Old Name")), "the oldest under the old name went, the newer one stays");
+		Check(Directory.Exists(stranger) && Directory.Exists(elsewhere), "a folder no record of the setup names, and one that stands elsewhere, are never touched");
+	}
+
 	// a setup's run backups are listed newest first with their size, and the clean-up keeps the newest few -
 	// never another setup's folder or one an unfinished run still needs
 	static void T_BackupCleanUpKeepsTheNewest()
@@ -10754,6 +10791,78 @@ public static class Program
 		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
 		Check(r.State == RunState.Failed && r.Folder == null && r.Verdict.Contains("not a plain name", StringComparison.Ordinal), "the run is refused before anything is made: " + r.Verdict);
 		Check(!Directory.EnumerateDirectories(f.Root, "*Elsewhere*", SearchOption.AllDirectories).Any(), "no folder of that name anywhere");
+	}
+
+	// what a plugin holds is read off its headers alone: its groups, a tree among its statics, a landscape inside a worldspace; a
+	// file cut short gives what could be read, and a file that is no plugin gives nothing
+	static void T_APluginsKindsAreReadOffItsHeaders()
+	{
+		static byte[] Rec(string a_type, uint a_flags, int a_data) =>
+			[.. Encoding.ASCII.GetBytes(a_type), .. BitConverter.GetBytes((uint)a_data), .. BitConverter.GetBytes(a_flags), .. new byte[12], .. new byte[a_data]];
+		static byte[] Grup(string a_label, params byte[][] a_inside)
+		{
+			var body = a_inside.SelectMany(b => b).ToArray();
+			return [.. Encoding.ASCII.GetBytes("GRUP"), .. BitConverter.GetBytes((uint)(24 + body.Length)), .. Encoding.ASCII.GetBytes(a_label), .. new byte[12], .. body];
+		}
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "kinds " + Guid.NewGuid().ToString("N")[..8]);
+		Directory.CreateDirectory(dir);
+		try {
+			var plain = Path.Combine(dir, "Plain.esp");
+			File.WriteAllBytes(plain, [.. Rec("TES4", 0, 10), .. Grup("STAT", Rec("STAT", 0, 7)), .. Grup("WRLD", Rec("WRLD", 0, 3), Grup("\0\0\0\0", Rec("CELL", 0, 0)))]);
+			var kinds = Plugins.Kinds(plain, true);
+			Check(kinds.SetEquals(["STAT", "WRLD"]), "statics with no tree and a worldspace with no landscape: " + string.Join(",", kinds.Order(StringComparer.Ordinal)));
+			var rich = Path.Combine(dir, "Rich.ESM");
+			byte[] richBytes = [.. Rec("TES4", 0, 10), .. Grup("GRAS", Rec("GRAS", 0, 4)), .. Grup("STAT", Rec("STAT", 0, 7), Rec("STAT", 0x40, 2)),
+				.. Grup("WRLD", Rec("WRLD", 0, 3), Grup("\0\0\0\0", Rec("CELL", 0, 0), Grup("\0\0\0\0", Rec("REFR", 0, 5), Rec("LAND", 0, 9))))];
+			File.WriteAllBytes(rich, richBytes);
+			kinds = Plugins.Kinds(rich, true);
+			Check(kinds.SetEquals(["GRAS", "STAT", "TREE", "WRLD", "LAND"]), "a tree among the statics and a landscape in the worldspace: " + string.Join(",", kinds.Order(StringComparer.Ordinal)));
+			Check(!Plugins.Kinds(rich, false).Contains("LAND"), "a landscape is looked for only when asked");
+			Check(Plugins.TopGroups(rich).SetEquals(["GRAS", "STAT", "WRLD"]), "the top groups alone");
+			var cut = Path.Combine(dir, "Cut.esp");
+			File.WriteAllBytes(cut, richBytes[..^12]);
+			kinds = Plugins.Kinds(cut, true);
+			Check(kinds.Contains("GRAS") && kinds.Contains("TREE") && kinds.Contains("WRLD") && !kinds.Contains("LAND"), "a plugin cut short gives what could be read: " + string.Join(",", kinds.Order(StringComparer.Ordinal)));
+			var none = Path.Combine(dir, "Not one.esp");
+			File.WriteAllText(none, "this is no plugin, only a file named like one");
+			Equal(0, Plugins.Kinds(none, true).Count, "a file that is no plugin holds nothing");
+			Equal(0, Plugins.TopGroups(none).Count, "nor any group");
+			File.WriteAllText(Path.Combine(dir, "readme.esp.txt"), "x");
+			Check(Plugins.IsPlugin("a.ESP") && Plugins.IsPlugin("b.esl") && Plugins.IsPlugin("c.Esm") && !Plugins.IsPlugin("d.esp.bak") && !Plugins.IsPlugin("e.bsa"), "a plugin by the end of its name");
+			Equal("Cut.esp|Not one.esp|Plain.esp|Rich.ESM", string.Join("|", Plugins.InMod(dir).Order(StringComparer.Ordinal)), "the plugins in a mod's folder");
+			Equal(0, Plugins.InMod(Path.Combine(dir, "not there")).Count, "a folder that is not there holds none");
+		} finally {
+			Directory.Delete(dir, true);
+		}
+	}
+
+	// small things each said once: a release file under the name GitHub gives it, an output's name from its pattern, a version
+	// with a number in it, a mod's page off Mod Organizer's own record
+	static void T_SmallNamesAndPages()
+	{
+		Check(ProgramUpdate.SameAssetName("Tool.Runner.1.1.zip", "Tool Runner 1.1.zip"), "GitHub's dots for our spaces");
+		Check(ProgramUpdate.SameAssetName("tool.runner.1.1.ZIP", "Tool Runner 1.1.zip"), "case does not count");
+		Check(!ProgramUpdate.SameAssetName("Tool.Runner.1.10.zip", "Tool Runner 1.1.zip"), "another version is another file");
+		Check(!ProgramUpdate.SameAssetName(null, "Tool Runner 1.1.zip"), "no name is no match");
+		Equal("DynDOLOD Output - My Profile", SetupMaker.OutputName("{output} - {profile}", "DynDOLOD Output", "My Profile"), "the usual pattern");
+		Equal("My Profile (DynDOLOD Output)", SetupMaker.OutputName("{PROFILE} ({Output})", "DynDOLOD Output", "My Profile"), "a pattern of the player's own, however it is cased");
+		Check(ToolUpdates.HasVersion("3.0.0.217") && ToolUpdates.HasVersion("Alpha-217") && !ToolUpdates.HasVersion("unknown") && !ToolUpdates.HasVersion(""), "a version has a number in it");
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "pages " + Guid.NewGuid().ToString("N")[..8]);
+		Directory.CreateDirectory(dir);
+		try {
+			Equal<string?>(null, LodGuide.NexusPage(dir), "a mod with no record has no page");
+			var meta = Path.Combine(dir, "meta.ini");
+			File.WriteAllText(meta, "[General]\r\ngameName=SkyrimSE\r\nmodid=68518\r\nversion=3.0.0.0\r\n[installedFiles]\r\n1\\modid=1\r\n");
+			Equal<string?>("https://www.nexusmods.com/skyrimspecialedition/mods/68518", LodGuide.NexusPage(dir), "its page on Nexus");
+			File.WriteAllText(meta, "[General]\r\ngameName=Skyrim\r\nmodid=12\r\n");
+			Equal<string?>("https://www.nexusmods.com/skyrim/mods/12", LodGuide.NexusPage(dir), "a mod made for the older game keeps its own page");
+			File.WriteAllText(meta, "[General]\r\ngameName=SkyrimSE\r\nmodid=0\r\n");
+			Equal<string?>(null, LodGuide.NexusPage(dir), "a mod installed by hand (no number) has none");
+			File.WriteAllText(meta, "[General]\r\ngameName=Fallout4\r\nmodid=7\r\n");
+			Equal<string?>(null, LodGuide.NexusPage(dir), "nor one of a game it does not know");
+		} finally {
+			Directory.Delete(dir, true);
+		}
 	}
 
 	// a link to another folder (a junction), inside a folder the run handles or as that folder itself: what it points at is never

@@ -80,7 +80,8 @@ public static class DataRemoval
 		return BackupsOf(a_backupDir, a_setupName, ref ignored);
 	}
 
-	static string? RunBackup(Journal a_j)
+	// the backup folder a run record names, when it is one: null for a record that points anywhere else
+	public static string? RunBackup(Journal a_j)
 	{
 		if (string.IsNullOrWhiteSpace(a_j.BackupDir) || string.IsNullOrWhiteSpace(a_j.SetupName)) {
 			return null;

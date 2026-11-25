@@ -177,7 +177,7 @@ public static class SettingsPanel
 		{
 			var all = await Task.Run(() => {
 				try {
-					return Runner.BackupsOf(setup);
+					return Runner.BackupsOf(setup, AppPaths.Runs);
 				} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 					return [];
 				}

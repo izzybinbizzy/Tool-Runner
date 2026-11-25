@@ -159,7 +159,8 @@ public static partial class ToolUpdates
 				var newest = src.NexusId != null ? await Nexus(http, src.NexusId, a_ct).ConfigureAwait(false) : await GitHub(http, src.GitHub!, a_ct).ConfigureAwait(false);
 				outList.Add(new Result(step.Key, tool, yours == "" ? "?" : yours, newest, exe != null && yours != "" && IsNewer(yours, newest), src.Page,
 					exe == null ? "its program was not found" : yours == "" ? "its version could not be read" : null));
-			} catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidOperationException) {
+				// (NotSupported: an answer that is no JSON at all - the sign-in page a hotel's or a school's network puts in front of every address)
+			} catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidOperationException or NotSupportedException) {
 				outList.Add(new Result(step.Key, tool, yours, "", false, src.Page, "could not ask its page: " + e.Message));
 			}
 		}

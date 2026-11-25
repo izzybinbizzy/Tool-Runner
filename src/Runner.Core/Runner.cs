@@ -1021,17 +1021,27 @@ public static class Runner
 	}
 
 	// this setup's own run backups (by the run-folder name the runner gives them), newest first, with their size in bytes
-	public static List<(DirectoryInfo Dir, long Bytes)> BackupsOf(Setup a_setup) => BackupDirsOf(a_setup).Select(d => (d, Files.SizeOf(d.FullName))).ToList();
+	// (a_runsDir: the program's runs folder - with it, the backups made under an earlier name of the setup count too)
+	public static List<(DirectoryInfo Dir, long Bytes)> BackupsOf(Setup a_setup, string? a_runsDir = null) =>
+		BackupDirsOf(a_setup, a_runsDir == null ? null : Journal.All(a_runsDir)).Select(d => (d, Files.SizeOf(d.FullName))).ToList();
 
 	// the same folders, newest first, without measuring them (pruning needs no sizes - a big LOD backup is never walked for it)
-	public static List<DirectoryInfo> BackupDirsOf(Setup a_setup)
+	// a_runs: the run records. A setup renamed since its last runs has backups under its older name, which no folder name ties to
+	// it any more; each of its run records still names its own, and those in the setup's backup folder count as its own
+	public static List<DirectoryInfo> BackupDirsOf(Setup a_setup, IEnumerable<Journal>? a_runs = null)
 	{
 		var root = a_setup.BackupDir;
 		if (root == "" || !Directory.Exists(root)) {
 			return [];
 		}
 		var own = new System.Text.RegularExpressions.Regex(@"^\d{4}-\d\d-\d\d \d\d-\d\d-\d\d " + System.Text.RegularExpressions.Regex.Escape(a_setup.Name) + "$");
-		return new DirectoryInfo(root).GetDirectories().Where(d => own.IsMatch(d.Name)).OrderByDescending(d => d.Name, StringComparer.Ordinal).ToList();
+		var dirs = new DirectoryInfo(root).GetDirectories().Where(d => own.IsMatch(d.Name)).ToList();
+		foreach (var dir in (a_runs ?? []).Where(j => Files.SamePath(j.SetupFile, a_setup.File)).Select(DataRemoval.RunBackup).OfType<string>()) {
+			if (Files.SamePath(Path.GetDirectoryName(dir) ?? "", root) && !dirs.Any(d => Files.SamePath(d.FullName, dir))) {
+				dirs.Add(new DirectoryInfo(dir));
+			}
+		}
+		return dirs.OrderByDescending(d => d.Name, StringComparer.Ordinal).ToList();
 	}
 
 	// all but the newest a_keep of this setup's run backups removed - never the running one (a_current) or one an unfinished run
@@ -1058,7 +1068,7 @@ public static class Runner
 			    .OrderByDescending(j => j.Started).FirstOrDefault() is { } last) {
 			needed.Add(Path.GetFullPath(last.BackupDir));
 		}
-		foreach (var d in BackupDirsOf(a_setup).Skip(a_keep).Where(b => !needed.Contains(b.FullName))) {
+		foreach (var d in BackupDirsOf(a_setup, runs).Skip(a_keep).Where(b => !needed.Contains(b.FullName))) {
 			try {
 				foreach (var f in Files.Under(d.FullName).Where(f => f.IsReadOnly)) {
 					f.IsReadOnly = false;
