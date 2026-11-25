@@ -401,10 +401,7 @@ public static class Cli
 		// file it makes printed hundreds of megabytes, all of it held in memory for the step's life). The file stays readable
 		// while the tool runs. A file that cannot be written must not hide why the step ended: said, and the step goes on
 		var tail = new Queue<string>();
-		using var kept = OpenOutput(a_outFile, out var notKept);
-		if (notKept != null) {
-			a_ctx.Log.Warn($"{Path.GetFileName(a_exe)}'s output could not be kept in {a_outFile} ({notKept})");
-		}
+		StreamWriter? kept = null;
 		// set once the step is done with the file: a line that comes after (a child that kept the pipe) is held, never written
 		var closed = false;
 		string? latest = null;
@@ -440,6 +437,10 @@ public static class Cli
 			}
 		}
 		try {
+			kept = OpenOutput(a_outFile, out var notKept);
+			if (notKept != null) {
+				a_ctx.Log.Warn($"{Path.GetFileName(a_exe)}'s output could not be kept in {a_outFile} ({notKept})");
+			}
 			p.OutputDataReceived += (_, e) => Add(e.Data, outEnd);
 			p.ErrorDataReceived += (_, e) => Add(e.Data, errEnd);
 			p.BeginOutputReadLine();
@@ -466,14 +467,17 @@ public static class Cli
 			}
 			// The last output lines: both streams read to their end (a wait on the process alone returns the moment it has ended,
 			// before its last lines have arrived - a finished tool's "Done" line was then missed). Never for long: a child process
-			// that kept the output pipe open would hold it
-			Task.WaitAll([outEnd.Task, errEnd.Task], TimeSpan.FromSeconds(30));
+			// that kept the output pipe open would hold it - and a Stop ends the wait at once
+			Task.WaitAll([outEnd.Task, errEnd.Task], 30000, a_ctx.Cancel);
 		} finally {
+			// the file is closed here, inside the guard: its last write can fail on a full disk, and that must never stand in
+			// for how the tool ended (or for a Stop or a time limit on its way out)
 			lock (tail) {
 				closed = true;
 				try {
-					kept?.Flush();
-				} catch (IOException) {
+					kept?.Dispose();
+				} catch (IOException e) {
+					a_ctx.Log.Warn($"{Path.GetFileName(a_exe)}'s output in {a_outFile} is incomplete ({e.Message})");
 				}
 			}
 		}

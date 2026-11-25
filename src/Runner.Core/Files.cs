@@ -407,9 +407,12 @@ public static partial class Files
 // only what was added since - a log of megabytes is not read and decoded again every few seconds for the lines at its start.
 // Whole lines are kept; a line still being written is given with the rest and read again at the next look, so a letter cut in
 // two by the look is never kept. A file that was replaced (another path, shorter, other first bytes) is read from its start again.
+// How the file is written (UTF-8, or the PC's own code page) is told by its whole lines alone, and told again when a later
+// line does not fit: a look that ends inside a letter settles nothing.
 public sealed class GrowingText
 {
 	const int HeadSize = 64;
+	const int Utf8 = 65001;
 
 	string? _path;
 	// the whole lines read so far, and where the next one starts in the file
@@ -425,30 +428,51 @@ public sealed class GrowingText
 		var headGot = fs.ReadAtLeast(head, head.Length, false);
 		var same = Math.Min(headGot, _head.Length);
 		// (two bytes a letter: a line's end found byte by byte would cut a letter in two - such a file is read whole each time)
-		var wide = _how.CodePage is 1200 or 1201;
-		var whole = wide || _pos == 0 || !string.Equals(a_path, _path, StringComparison.OrdinalIgnoreCase) || fs.Length < _pos || same < _head.Length ||
+		var whole = Wide(_how) || _pos == 0 || !string.Equals(a_path, _path, StringComparison.OrdinalIgnoreCase) || fs.Length < _pos || same < _head.Length ||
 			!head.AsSpan(0, same).SequenceEqual(_head.AsSpan(0, same));
-		var from = whole ? 0 : _pos;
-		fs.Position = from;
-		var added = new byte[fs.Length - from];
-		var read = fs.ReadAtLeast(added, added.Length, false);
-		var end = read == 0 ? 0 : Array.LastIndexOf(added, (byte)'\n', read - 1) + 1;
-		if (whole) {
-			// its start says how it is written (a byte-order mark, or text that is no UTF-8)
-			var text = Files.DecodeText(added[..read], out _how);
-			var cut = text.LastIndexOf('\n') + 1;
-			_path = a_path;
-			_lines = text[..cut];
-			_pos = end;
-			_head = added[..Math.Min(HeadSize, read)];
+		if (!whole) {
+			fs.Position = _pos;
+			var added = new byte[fs.Length - _pos];
+			var read = fs.ReadAtLeast(added, added.Length, false);
+			var end = LineEnd(added, read);
+			// New lines that are no UTF-8, in a file whose lines so far (plain letters only) had passed for it: the file is in
+			// the PC's own code page, and is read from its start again as that
+			if (_how.CodePage != Utf8 || IsUtf8(added[..end])) {
+				_lines += _how.GetString(added, 0, end);
+				_pos += end;
+				// (a file that was shorter than the head kept of it has grown past it: the head is filled up, so a replaced file is told)
+				if (_head.Length < HeadSize) {
+					_head = head[..headGot];
+				}
+				return end == read ? _lines : _lines + _how.GetString(added, end, read - end);
+			}
+		}
+		fs.Position = 0;
+		var all = new byte[fs.Length];
+		var got = fs.ReadAtLeast(all, all.Length, false);
+		var text = Files.DecodeText(all[..got], out var how);
+		var cut = Wide(how) ? 0 : LineEnd(all, got);
+		_path = a_path;
+		_head = all[..Math.Min(HeadSize, got)];
+		_pos = cut;
+		if (cut == 0) {
+			// no whole line yet, or two bytes a letter: nothing is kept, and the next look reads all of it again
+			_how = how;
+			_lines = "";
 			return text;
 		}
-		_lines += _how.GetString(added, 0, end);
-		_pos += end;
-		// (a file that was shorter than the head kept of it has grown past it: the head is filled up, so a replaced file is told)
-		if (_head.Length < HeadSize) {
-			_head = head[..headGot];
-		}
-		return end == read ? _lines : _lines + _how.GetString(added, end, read - end);
+		_lines = Files.DecodeText(all[..cut], out _how);
+		return cut == got ? _lines : _lines + _how.GetString(all, cut, got - cut);
+	}
+
+	static bool Wide(Encoding a_how) => a_how.CodePage is 1200 or 1201;
+
+	// where the last whole line ends (0: there is none)
+	static int LineEnd(byte[] a_bytes, int a_count) => a_count == 0 ? 0 : Array.LastIndexOf(a_bytes, (byte)'\n', a_count - 1) + 1;
+
+	static bool IsUtf8(byte[] a_bytes)
+	{
+		Files.DecodeText(a_bytes, out var how);
+		return how.CodePage == Utf8;
 	}
 }

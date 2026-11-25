@@ -357,6 +357,19 @@ public static partial class ToolSettings
 		return l;
 	}
 
+	// The first file of a learned record that lies in none of the folders this tool's settings are learned from - the tool's own
+	// folder, Mod Organizer's overwrite, a folder the step names - or null. Such a record was edited by hand, or learned before
+	// the tool moved to another folder: a run would write a file there every time, and the tool where it is now reads none of it
+	public static string? Outside(Learned a_learned, Mo2Instance a_mo2, StepSettings a_s)
+	{
+		var roots = new List<string> { a_mo2.OverwriteDir };
+		if (a_s.Str("executable") is { } title && a_mo2.Executable(title)?.Binary is { Length: > 0 } exe) {
+			roots.Add(Path.GetDirectoryName(exe)!);
+		}
+		roots.AddRange(a_s.List("settings_dirs"));
+		return a_learned.Files.FirstOrDefault(f => !roots.Any(r => Files.IsUnder(f.Live, r)))?.Live;
+	}
+
 	// a run: the learned settings in place before the tool starts (each live file in the run record first, so a crash puts the
 	// player's own back); returns the live files, which the step puts back after
 	public static List<string> Apply(RunContext a_ctx, string a_step)
@@ -371,17 +384,9 @@ public static partial class ToolSettings
 		if (bad != null) {
 			throw new StepFailedException($"its learned settings name a file outside their folder ({bad.Stored}) - learn its settings again");
 		}
-		// ... and never writes one anywhere but where this tool's settings are learned from: the tool's own folder, Mod Organizer's
-		// overwrite, a folder the step names. A record that names another place (edited by hand, or learned before the tool moved)
-		// would put a file there on every run
-		var s = new StepSettings(a_ctx.Setup.StepSettings(a_step) ?? []);
-		var roots = new List<string> { a_ctx.Mo2.OverwriteDir };
-		if (s.Str("executable") is { } title && a_ctx.Mo2.Executable(title)?.Binary is { Length: > 0 } exe) {
-			roots.Add(Path.GetDirectoryName(exe)!);
-		}
-		roots.AddRange(s.List("settings_dirs"));
-		if (l.Files.FirstOrDefault(f => !roots.Any(r => Files.IsUnder(f.Live, r))) is { } outside) {
-			throw new StepFailedException($"its learned settings name a file outside their folder: {outside.Live} is in none of the folders this tool's settings are learned from " +
+		// ... and never writes one anywhere but where this tool's settings are learned from (the check before a run says so first)
+		if (Outside(l, a_ctx.Mo2, new StepSettings(a_ctx.Setup.StepSettings(a_step) ?? [])) is { } outside) {
+			throw new StepFailedException($"its learned settings name a file outside their folder: {outside} is in none of the folders this tool's settings are learned from " +
 				"(has the tool moved?) - learn its settings again");
 		}
 		foreach (var f in l.Files) {
