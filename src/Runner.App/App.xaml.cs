@@ -517,6 +517,28 @@ public partial class App : Application
 		Pump(dryBox, 600);
 		Save("7b a dry run that would be refused", dryBox);
 		dryBox.Close();
+		// what a setup starts on this PC, asked about once before its first run from the window
+		var startsBox = w.StartsBox("My Profile", [@"Mod Organizer: D:\Games\Mod Organizer 2\ModOrganizer.exe", @"a command before each run: ""D:\Tools\copy my saves.cmd"" --quiet",
+			@"xLODGen (exe): D:\Games\Tools\xLODGen\xLODGenx64.exe", @"TexGen (exe): D:\Games\Tools\DynDOLOD\TexGenx64.exe", @"DynDOLOD (exe): D:\Games\Tools\DynDOLOD\DynDOLODx64.exe",
+			@"Pandora (exe): D:\Games\Tools\Pandora\Pandora Behaviour Engine+.exe", @"a command after each run: ""D:\Tools\tell me.cmd"""], _ => { });
+		startsBox.ShowActivated = false;
+		startsBox.WindowStartupLocation = WindowStartupLocation.Manual;
+		startsBox.Left = -30000;
+		startsBox.Top = -30000;
+		startsBox.Show();
+		Pump(startsBox, 600);
+		Save("7h what a setup starts", startsBox);
+		startsBox.Close();
+		// New setup as it opens, with its Import button
+		var newBox = NewSetupDialog.Build(w, (_, _) => { });
+		newBox.ShowActivated = false;
+		newBox.WindowStartupLocation = WindowStartupLocation.Manual;
+		newBox.Left = -30000;
+		newBox.Top = -30000;
+		newBox.Show();
+		Pump(newBox, 600);
+		Save("9f new setup", newBox);
+		newBox.Close();
 		// the window in a shipped language whose words run long: nothing may be cut off or overlap. Taken last: the labels it
 		// sets stay German, and no English picture or window word may come after it
 		if (WindowWords.ShippedText("Deutsch") is { } de && WindowWords.Read(de, out _) is { } german) {

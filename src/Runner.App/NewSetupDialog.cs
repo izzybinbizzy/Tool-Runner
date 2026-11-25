@@ -10,6 +10,17 @@ public static class NewSetupDialog
 	// a_imported: what an import said (what it took out of the file); null when the setup was made here
 	public static string? Run(Window a_owner, out IReadOnlyList<string>? a_imported)
 	{
+		string? file = null;
+		IReadOnlyList<string>? said = null;
+		Build(a_owner, (a_file, a_said) => (file, said) = (a_file, a_said)).ShowDialog();
+		a_imported = said;
+		return file;
+	}
+
+	// the box itself (the off-screen pictures draw it without waiting on it). a_made: called when it closes with a setup made
+	// or imported - the setup's file, and what an import said
+	public static Window Build(Window a_owner, Action<string, IReadOnlyList<string>?> a_made)
+	{
 		string? made = null;
 		List<string>? imported = null;
 		// its sizes held to the screen (a least size above the screen's would win over the size it is given)
@@ -133,7 +144,8 @@ public static class NewSetupDialog
 		};
 		// first guess: a Mod Organizer that runs now, else its usual install folder
 		var running = Procs.ByImage("ModOrganizer.exe").Select(p => { using (p) { return Procs.ExePath(p); } }).OfType<string>();
-		foreach (var guess in running.Append(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Mod Organizer 2", "ModOrganizer.exe"))
+		// (never for the off-screen pictures: they show the box as it opens where no Mod Organizer was found, on any PC)
+		foreach (var guess in App.Headless ? Enumerable.Empty<string>() : running.Append(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Mod Organizer 2", "ModOrganizer.exe"))
 			         .Append(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Mod Organizer", "ModOrganizer.exe"))) {
 			if (File.Exists(guess)) {
 				exe.Text = guess;
@@ -315,9 +327,12 @@ public static class NewSetupDialog
 		var fields = new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
 		System.Windows.Automation.AutomationProperties.SetName(fields, "New setup fields");
 		w.Content = fields;
-		w.ShowDialog();
-		a_imported = imported;
-		return made;
+		w.Closed += (_, _) => {
+			if (made != null) {
+				a_made(made, imported);
+			}
+		};
+		return w;
 	}
 
 	static string Safe(string a_name) => string.Concat(a_name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '-' : c));

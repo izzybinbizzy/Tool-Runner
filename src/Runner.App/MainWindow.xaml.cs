@@ -56,11 +56,11 @@ public partial class MainWindow : Window
 			return false;
 		};
 		_vm.OfferTools = (a_setup, a_tools) => ToolsDialog.Run(this, _vm, a_setup, a_tools, true);
-		_vm.ConfirmStarts = (a_name, a_lines) => Ask.Show(this, "This setup starts programs",
-			WindowWords.Format("Before \"{0}\" runs from this window, look at what it starts on this PC. This is asked once, and again only when one of these has changed outside the window:", a_name) +
-			"\n\n" + string.Join("\n", a_lines.Select(l => "- " + l)) + "\n\n" +
-			WindowWords.Word("Allow it only if you trust where the setup came from. A setup file from another player is brought in safely with New setup > Import a setup file, which takes all of this out."),
-			"Allow it", "Not now");
+		_vm.ConfirmStarts = (a_name, a_lines) => {
+			var allowed = false;
+			StartsBox(a_name, a_lines, a_yes => allowed = a_yes).ShowDialog();
+			return allowed;
+		};
 		// the header drops the word "Setup" where the window is narrow
 		SizeChanged += (_, e) => _vm.Roomy = e.NewSize.Width >= 1100;
 		_vm.Freed += () => {
@@ -1418,6 +1418,14 @@ public partial class MainWindow : Window
 			_ = _vm.StartQueue(q.Files, q.KeepGoing);
 		}
 	}
+
+	// the box that lists what a setup starts on this PC, asked about once before its first run from the window (the
+	// off-screen pictures draw it without waiting on it); "Not now" is its safe answer and has the keyboard
+	public Window StartsBox(string a_name, IReadOnlyList<string> a_lines, Action<bool> a_done) => Ask.Make(this, "This setup starts programs",
+		WindowWords.Format("Before \"{0}\" runs from this window, look at what it starts on this PC. This is asked once, and again only when one of these has changed outside the window:", a_name) +
+		"\n\n" + string.Join("\n", a_lines.Select(l => "- " + l)) + "\n\n" +
+		WindowWords.Word("Allow it only if you trust where the setup came from. A setup file from another player is brought in safely with New setup > Import a setup file, which takes all of this out."),
+		"Allow it", "Not now", a_done);
 
 	void NewSetup_Click(object a_s, RoutedEventArgs a_e)
 	{
