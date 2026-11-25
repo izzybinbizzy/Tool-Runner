@@ -468,7 +468,7 @@ public static class SettingsPanel
 				}
 			}
 		};
-		var makeLanguage = new Button { Content = "Make a language file ...", Style = (Style)a_w.FindResource("Ghost"), ToolTip = "A file with the texts this window shows now, ready to translate. Press it again with History open to add those too." };
+		var makeLanguage = new Button { Content = "Make a language file ...", Style = (Style)a_w.FindResource("Ghost"), ToolTip = "A file with every text of the window, ready to translate." };
 		makeLanguage.Click += (_, _) => {
 			try {
 				var file = WindowWords.WriteTemplate(a_w);
@@ -1664,7 +1664,7 @@ public static class SettingsPanel
 		}), TaskScheduler.Default);
 	}
 
-	const string NoSaves = " (no saves in this profile)";
+	static string NoSaves => " (" + WindowWords.Word("no saves in this profile") + ")";
 
 	static void Choice(Panel a_host, List<Func<string?>> a_apply, string a_label, JsonObject a_obj, string a_key, (string Value, string Text)[] a_options)
 	{
@@ -1673,14 +1673,15 @@ public static class SettingsPanel
 		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 		row.Children.Add(new TextBlock { Text = a_label, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) }
 			.Live(TextBlock.ForegroundProperty, "Accent"));
-		// shown in the window's language; what is saved is still each choice's own value, by its place in the list
-		var box = new ComboBox { ItemsSource = a_options.Select(o => WindowWords.Word(o.Text)).ToList() };
+		// shown in the window's language; what is saved is each choice's own value, by its place in the list. Each choice is an
+		// item of its own: as plain texts, two choices a language file gives the same words would count as one
+		var box = new ComboBox { ItemsSource = a_options.Select(o => new ComboBoxItem { Content = WindowWords.Word(o.Text) }).ToList() };
 		var cur = Setup.Str(a_obj, a_key);
 		box.SelectedIndex = Math.Max(0, Array.FindIndex(a_options, o => string.Equals(o.Value, cur, StringComparison.OrdinalIgnoreCase)));
 		// (the choice in whole words on hover: a box made narrow cuts a long one off)
-		box.ToolTip = box.SelectedItem as string;
+		box.ToolTip = (box.SelectedItem as ComboBoxItem)?.Content;
 		box.SelectionChanged += (_, _) => {
-			box.ToolTip = box.SelectedItem as string;
+			box.ToolTip = (box.SelectedItem as ComboBoxItem)?.Content;
 			Changed();
 		};
 		System.Windows.Automation.AutomationProperties.SetName(box, a_label);

@@ -12,7 +12,7 @@ public static class RunUndo
 
 	// what is in a run's backup as files (name relative to the folder -> size), the empty folders left out
 	static Dictionary<string, long> Sizes(string a_dir) =>
-		new DirectoryInfo(a_dir).EnumerateFiles("*", SearchOption.AllDirectories)
+		Files.Under(a_dir)
 			.ToDictionary(f => Path.GetRelativePath(a_dir, f.FullName).Replace('\\', '/'), f => f.Length, StringComparer.OrdinalIgnoreCase);
 
 	static long Mb(long a_bytes) => a_bytes / 1048576;
@@ -28,7 +28,12 @@ public static class RunUndo
 		var part = zip + ".part";
 		Dictionary<string, long> want;
 		try {
-			if (!Directory.Exists(dir) || !Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Any()) {
+			if (!Directory.Exists(dir) || !Files.Under(dir).Any()) {
+				return;
+			}
+			// a link to another folder among them cannot go into a zip as the link it is: the folder stays as it is
+			if (Files.LinksUnder(dir).Count > 0) {
+				a_log.Detail("the old outputs stay unpacked in this run's backup: a link to another folder is among them");
 				return;
 			}
 			Files.Delete(part);
@@ -118,7 +123,7 @@ public static class RunUndo
 		}
 		// the zip is the whole copy from here on: a folder that will not go only takes room, and Unpack writes over what is left of it
 		try {
-			foreach (var f in new DirectoryInfo(dir).EnumerateFiles("*", SearchOption.AllDirectories).Where(f => f.IsReadOnly)) {
+			foreach (var f in Files.Under(dir).Where(f => f.IsReadOnly)) {
 				f.IsReadOnly = false;
 			}
 			Files.DeleteDir(dir);

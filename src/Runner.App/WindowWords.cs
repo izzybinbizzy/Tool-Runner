@@ -223,7 +223,7 @@ public static class WindowWords
 		return [.. seen.Order(StringComparer.Ordinal)];
 	}
 
-	// a language file made from what the window shows: new words added with no translation, what a file already holds kept
+	// a language file with every text of the program: new words added with no translation, what a file already holds kept
 	public static string WriteTemplate(DependencyObject a_root, string a_name = "My language")
 	{
 		Directory.CreateDirectory(Folder);
@@ -238,6 +238,21 @@ public static class WindowWords
 		}
 		foreach (var s in Seen(a_root)) {
 			words.TryAdd(s, "");
+		}
+		// the other windows open now (Settings, where this is asked for, is one of them)
+		if (Application.Current is { } app && app.Dispatcher.CheckAccess()) {
+			foreach (var open in app.Windows.OfType<Window>().Where(o => !ReferenceEquals(o, a_root))) {
+				foreach (var s in Seen(open)) {
+					words.TryAdd(s, "");
+				}
+			}
+		}
+		// what the code puts together (a line a binding fills, a box that is not open) is in no window's walk: every shipped
+		// language lists those texts, so one of them names them all
+		if (Shipped().FirstOrDefault() is { } any && ShippedText(any) is { } text && Read(text, out _) is { } listed) {
+			foreach (var k in listed.Keys) {
+				words.TryAdd(k, "");
+			}
 		}
 		// two English texts with one translation read back as one: the language in use still has both
 		foreach (var k in s_words.Keys) {

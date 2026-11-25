@@ -173,7 +173,7 @@
                   <ColumnDefinition Width="22"/>
                 </Grid.ColumnDefinitions>
                 <CheckBox Grid.Column="0" IsChecked="{Binding On}" VerticalAlignment="Center" Margin="0,0,6,0"
-                          AutomationProperties.Name="{Binding Name, StringFormat='Run {0}'}" IsTabStop="False"/>
+                          AutomationProperties.Name="{Binding TickName}" IsTabStop="False"/>
                 <TextBlock x:Name="num" Grid.Column="1" Text="{Binding Number}" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"/>
                 <StackPanel Grid.Column="2" VerticalAlignment="Center">
                   <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>

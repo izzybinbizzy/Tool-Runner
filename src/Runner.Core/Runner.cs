@@ -1005,7 +1005,7 @@ public static class Runner
 		foreach (var j in mine.Skip(a_keep).Where(j => !j.Unfinished && (a_current == null || !Files.SamePath(j.Folder, a_current)))) {
 			try {
 				var d = new DirectoryInfo(j.Folder);
-				foreach (var f in d.EnumerateFiles("*", SearchOption.AllDirectories).Where(f => f.IsReadOnly)) {
+				foreach (var f in Files.Under(d.FullName).Where(f => f.IsReadOnly)) {
 					f.IsReadOnly = false;
 				}
 				d.Delete(true);
@@ -1060,7 +1060,7 @@ public static class Runner
 		}
 		foreach (var d in BackupDirsOf(a_setup).Skip(a_keep).Where(b => !needed.Contains(b.FullName))) {
 			try {
-				foreach (var f in d.EnumerateFiles("*", SearchOption.AllDirectories).Where(f => f.IsReadOnly)) {
+				foreach (var f in Files.Under(d.FullName).Where(f => f.IsReadOnly)) {
 					f.IsReadOnly = false;
 				}
 				d.Delete(true);

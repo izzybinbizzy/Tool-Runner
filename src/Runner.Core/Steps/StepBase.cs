@@ -349,7 +349,13 @@ public static class StepKit
 			a_ctx.Journal.Parked.Add(park);
 			a_ctx.Journal.Save();
 			try {
-				Files.MoveDirectory(a_path, dst);
+				// a folder that is a link to another place (kept on a bigger disk through a junction) keeps its place: only what
+				// it holds goes to the backup, and the tool writes where the player put the folder
+				if (Files.IsLink(a_path)) {
+					Files.MoveContents(a_path, dst);
+				} else {
+					Files.MoveDirectory(a_path, dst);
+				}
 			} catch (Exception e) when ((e is IOException or UnauthorizedAccessException) && !Directory.Exists(dst)) {
 				// nothing moved (a move on one drive is all or nothing): nothing to come back
 				a_ctx.Journal.Parked.Remove(park);

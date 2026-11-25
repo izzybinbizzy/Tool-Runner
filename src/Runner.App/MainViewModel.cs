@@ -32,6 +32,8 @@ public sealed partial class StepRow : Observable
 
 	// the row in words for a screen reader (the glyph and its color say it to the eye)
 	public string Status => A11y.StepStatus(On, LeftOut, State, Elapsed, Usual, Note, UsesOld, Needs);
+	// what a screen reader calls the row's tick
+	public string TickName => WindowWords.Format("Run {0}", Name);
 
 	public string Glyph => State switch {
 		StepState.Running => Theme.Glyph("Running"),

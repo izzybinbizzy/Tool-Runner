@@ -4995,6 +4995,38 @@ public static class Program
 		}
 	}
 
+	// "Make a language file" lists every text the program can show, also the ones no window holds at that moment
+	static void T_ALanguageFileListsEveryText()
+	{
+		var name = "a test " + Guid.NewGuid().ToString("N")[..8];
+		var mine = Path.Combine(ToolRunner.App.WindowWords.Folder, name + ".json");
+		try {
+			Exception? failed = null;
+			var t = new Thread(() => {
+				try {
+					ToolRunner.App.WindowWords.WriteTemplate(new System.Windows.Controls.StackPanel(), name);
+				} catch (Exception e) {
+					failed = e;
+				}
+			});
+			t.SetApartmentState(ApartmentState.STA);
+			t.Start();
+			t.Join();
+			if (failed != null) {
+				throw failed;
+			}
+			var made = ToolRunner.App.WindowWords.Read(File.ReadAllText(mine), out var problem) ?? [];
+			Check(problem == "", "the file made reads: " + problem);
+			var shipped = ToolRunner.App.WindowWords.Read(ToolRunner.App.WindowWords.ShippedText("Deutsch")!, out _)!;
+			var lacking = shipped.Keys.Where(k => !made.ContainsKey(k)).ToList();
+			Check(lacking.Count == 0, $"the file made lacks {lacking.Count} of the program's texts: {string.Join(" | ", lacking.Take(3))}");
+			Check(made.Count > 0 && made.Values.All(v => v == ""), "every text waits for its translation");
+			Equal("Run xLODGen", new ToolRunner.App.StepRow { Key = "xlodgen", Name = "xLODGen", About = "" }.TickName, "a step's tick, named for a screen reader");
+		} finally {
+			File.Delete(mine);
+		}
+	}
+
 	// a language file: a value left empty stays English, a name is only a name, and a file that does not read is not replaced
 	static void T_ALanguageFileCannotHarmTheWindow()
 	{
@@ -10722,6 +10754,74 @@ public static class Program
 		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
 		Check(r.State == RunState.Failed && r.Folder == null && r.Verdict.Contains("not a plain name", StringComparison.Ordinal), "the run is refused before anything is made: " + r.Verdict);
 		Check(!Directory.EnumerateDirectories(f.Root, "*Elsewhere*", SearchOption.AllDirectories).Any(), "no folder of that name anywhere");
+	}
+
+	// a link to another folder (a junction), inside a folder the run handles or as that folder itself: what it points at is never
+	// counted, changed or emptied behind the player's back, and a tool's folder that is a link keeps its place
+	static void T_ALinkToAnotherFolderIsLeftAsItIs()
+	{
+		using var f = new FakeMo2();
+		static bool Junction(string a_link, string a_to)
+		{
+			using var mk = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), $"/d /c mklink /J \"{a_link}\" \"{a_to}\"") { CreateNoWindow = true, UseShellExecute = false })!;
+			mk.WaitForExit();
+			return Directory.Exists(a_link);
+		}
+		var kept = Path.Combine(f.Root, "Kept elsewhere");
+		var holds = Path.Combine(f.Root, "Holds a link");
+		Directory.CreateDirectory(kept);
+		Directory.CreateDirectory(Path.Combine(holds, "sub"));
+		var theirs = Path.Combine(kept, "theirs.txt");
+		var own = Path.Combine(holds, "sub", "own.txt");
+		File.WriteAllText(theirs, "12345");
+		File.WriteAllText(own, "123");
+		if (!Junction(Path.Combine(holds, "link"), kept)) {
+			Console.WriteLine("      (no junction could be made here: skipped)");
+			return;
+		}
+		File.SetAttributes(theirs, FileAttributes.ReadOnly);
+		try {
+			Equal(1, Files.CountFiles(holds), "the files behind a link are not counted");
+			Equal(3L, Files.SizeOf(holds), "nor their size");
+			Equal(1, Files.LinksUnder(holds).Count, "the link is named");
+			// a read-only file of the folder's own does not stop its removal; the one behind the link keeps its mark
+			File.SetAttributes(own, FileAttributes.ReadOnly);
+			Files.DeleteDir(holds);
+			Check(!Directory.Exists(holds), "the folder is gone");
+			Check(File.Exists(theirs) && File.GetAttributes(theirs).HasFlag(FileAttributes.ReadOnly), "the file behind the link is there, read-only as it was");
+			// a folder that is itself a link moves as the link
+			var link = Path.Combine(f.Root, "A link");
+			Check(Junction(link, kept), "a second junction");
+			var moved = Path.Combine(f.Root, "Moved", "A link");
+			Files.MoveDirectory(link, moved);
+			Check(!Directory.Exists(link) && Files.IsLink(moved) && File.Exists(theirs), "moved as a link, what it points at untouched");
+			Directory.Delete(moved);
+		} finally {
+			File.SetAttributes(theirs, FileAttributes.Normal);
+		}
+		// a tool's own folder that is a link: its old content goes to the run's backup, the link stays for the tool to write into
+		var toolLink = Path.Combine(f.Root, "tool out link");
+		var toolReal = Path.Combine(f.Root, "tool out elsewhere");
+		Directory.CreateDirectory(toolReal);
+		File.WriteAllText(Path.Combine(toolReal, "old.txt"), "old");
+		Check(Junction(toolLink, toolReal), "a third junction");
+		var stays = false;
+		var inBackup = 0;
+		StepRegistry.Replace(new FakeStep("synthesis", (ctx, s) => {
+			StepKit.ParkDir(ctx, toolLink, "linked tool folder");
+			stays = Files.IsLink(toolLink) && !File.Exists(Path.Combine(toolReal, "old.txt"));
+			inBackup = Directory.GetFiles(Path.Combine(ctx.BackupFolder, "outputs"), "old.txt", SearchOption.AllDirectories).Length;
+		}));
+		f.WriteSetup(("synthesis", new JsonObject()));
+		try {
+			Equal(RunState.Finished, Runner.Run(new RunRequest(f.SetupFile, f.Data)).State, "the run finished");
+			Check(stays, "the link stays where it is, emptied");
+			Equal(1, inBackup, "its old content is in the backup");
+		} finally {
+			if (Directory.Exists(toolLink) && Files.IsLink(toolLink)) {
+				Directory.Delete(toolLink);
+			}
+		}
 	}
 
 	// the small faults of the file work: a link inside what is moved, a mod list with two kinds of line ending, an output mod

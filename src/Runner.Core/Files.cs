@@ -1,3 +1,4 @@
+using System.IO.Enumeration;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -110,7 +111,13 @@ public static partial class Files
 		var tail = new byte[a_most];
 		var got = fs.ReadAtLeast(tail, a_most, false);
 		var line = Array.IndexOf(tail, (byte)'\n', 0, got);
-		return DecodeText(tail[(line < 0 ? 0 : line + 1)..got]);
+		var from = line < 0 ? 0 : line + 1;
+		// (no line's end in the tail - one very long line: the rest of a letter cut in two at the tail's start is left out, or
+		// the whole tail would no longer read as UTF-8)
+		while (line < 0 && from < got && from < 3 && (tail[from] & 0xC0) == 0x80) {
+			++from;
+		}
+		return DecodeText(tail[from..got]);
 	}
 
 	static readonly UTF8Encoding StrictUtf8 = new(false, true);
@@ -191,18 +198,34 @@ public static partial class Files
 		try {
 			Directory.Delete(a_dir, true);
 		} catch (UnauthorizedAccessException) {
-			foreach (var f in new DirectoryInfo(a_dir).EnumerateFiles("*", SearchOption.AllDirectories).Where(f => f.IsReadOnly)) {
+			foreach (var f in Under(a_dir).Where(f => f.IsReadOnly)) {
 				f.IsReadOnly = false;
 			}
 			Directory.Delete(a_dir, true);
 		}
 	});
 
-	public static int CountFiles(string a_dir) =>
-		Directory.Exists(a_dir) ? Directory.EnumerateFiles(a_dir, "*", SearchOption.AllDirectories).Count() : 0;
+	static readonly EnumerationOptions Whole = new() { RecurseSubdirectories = true, AttributesToSkip = 0, IgnoreInaccessible = false };
 
-	public static long SizeOf(string a_dir) =>
-		Directory.Exists(a_dir) ? new DirectoryInfo(a_dir).EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length) : 0;
+	// Every file under a folder. A folder inside that is a link to another folder (a junction, a symbolic link) is not gone
+	// into: what it points at stands somewhere else and is no part of this folder, and a link to a folder above itself would
+	// never end. A folder that cannot be read stops the walk, as it stops Windows' own
+	public static IEnumerable<FileInfo> Under(string a_dir) =>
+		new FileSystemEnumerable<FileInfo>(a_dir, (ref FileSystemEntry a_e) => (FileInfo)a_e.ToFileSystemInfo(), Whole) {
+			ShouldIncludePredicate = (ref FileSystemEntry a_e) => !a_e.IsDirectory,
+			ShouldRecursePredicate = (ref FileSystemEntry a_e) => (a_e.Attributes & FileAttributes.ReparsePoint) == 0,
+		};
+
+	// the links to other folders under a folder: the ones Under does not go into
+	public static List<string> LinksUnder(string a_dir) =>
+		[.. new FileSystemEnumerable<string>(a_dir, (ref FileSystemEntry a_e) => a_e.ToFullPath(), Whole) {
+			ShouldIncludePredicate = (ref FileSystemEntry a_e) => a_e.IsDirectory && (a_e.Attributes & FileAttributes.ReparsePoint) != 0,
+			ShouldRecursePredicate = (ref FileSystemEntry a_e) => (a_e.Attributes & FileAttributes.ReparsePoint) == 0,
+		}];
+
+	public static int CountFiles(string a_dir) => Directory.Exists(a_dir) ? Under(a_dir).Count() : 0;
+
+	public static long SizeOf(string a_dir) => Directory.Exists(a_dir) ? Under(a_dir).Sum(f => f.Length) : 0;
 
 	public static DateTime NewestWrite(string a_dir)
 	{
@@ -210,7 +233,7 @@ public static partial class Files
 			return DateTime.MinValue;
 		}
 		var newest = DateTime.MinValue;
-		foreach (var f in new DirectoryInfo(a_dir).EnumerateFiles("*", SearchOption.AllDirectories)) {
+		foreach (var f in Under(a_dir)) {
 			if (f.LastWriteTimeUtc > newest) {
 				newest = f.LastWriteTimeUtc;
 			}
@@ -279,6 +302,11 @@ public static partial class Files
 	{
 		var parent = Path.GetDirectoryName(Path.GetFullPath(a_dst)) ?? throw new ArgumentException("no folder: " + a_dst);
 		Directory.CreateDirectory(parent);
+		// a folder that is itself a link goes as the link it is, like one found inside a folder that is moved
+		if (IsLink(a_src)) {
+			MoveLink(a_src, a_dst);
+			return;
+		}
 		// .NET refuses a rename between two paths whose roots read differently before Windows is even asked (one volume reached
 		// under two names: a junction on another drive, SUBST) - copied, like another volume
 		var oneRoot = string.Equals(Path.GetPathRoot(Path.GetFullPath(a_src)), Path.GetPathRoot(parent), StringComparison.OrdinalIgnoreCase);
