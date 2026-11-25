@@ -241,9 +241,17 @@ public static class RunnerErrors
 			"A question it asks every time: answer it once in the tool's own window (Tools, at the top of the window), then run again from this step."),
 	];
 
+	// what a tool said follows these words: its own words may hold any entry's ("could not start", "did not write"), so only
+	// the runner's words before them choose the entry
+	const string ToolSaid = " reported an error: ";
+
 	// the entry a refusal or failure text falls under (any letter case), or null when it is none of the runner's own
-	public static Entry? Find(string a_text) =>
-		All.FirstOrDefault(e => e.Any.Any(a => a_text.Contains(a, StringComparison.OrdinalIgnoreCase)));
+	public static Entry? Find(string a_text)
+	{
+		var cut = a_text.IndexOf(ToolSaid, StringComparison.OrdinalIgnoreCase);
+		var ours = cut < 0 ? a_text : a_text[..(cut + ToolSaid.Length)];
+		return All.FirstOrDefault(e => e.Any.Any(a => ours.Contains(a, StringComparison.OrdinalIgnoreCase)));
+	}
 }
 
 // what a problem means and what to do about it, whoever's it is: the runner's own first, then the tools' documented errors

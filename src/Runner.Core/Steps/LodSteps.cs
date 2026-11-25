@@ -23,6 +23,8 @@ public sealed class XLodGenStep : IStep
 		var image = a_s.Str("image") ?? "xLODGenx64.exe";
 		StepKit.ParkDir(a_ctx, outDir, "xLODGen output");
 		var deadline = a_s.Deadline(120);
+		// one limit for the whole step: the wait for its options and the generation after it share it
+		var clock = AwakeClock.StartNew();
 		using (new Toggle(a_ctx, [.. a_s.List("enable_during"), .. StepKit.ToolMods(a_ctx, a_s)], a_s.List("disable_during"), "xLODGen", a_ctx.Cancel)) {
 			try {
 				// xLODGen writes where its -o: says - and that is in Mod Organizer's entry for it, not here: the step puts its own
@@ -35,7 +37,7 @@ public sealed class XLodGenStep : IStep
 				a_ctx.Activity(Key, "xLODGen is reading the load order");
 				var logBox = new LogBox((nint)main.Current.NativeWindowHandle, 4000);
 				var opts = Find(a_ctx, main, e => Uia.Name(e) == "LODGen Options" && Uia.Type(e) == ControlType.Window, TimeSpan.FromMinutes(15), "xLODGen's options",
-					proc, logBox, deadline);
+					proc, logBox, (clock, deadline));
 				var list = WorldspaceList(a_ctx, opts, TimeSpan.FromSeconds(30));
 				var want = a_s.List("worldspaces");
 				CheckList.Set(a_ctx, list, n => want.Count == 0 || want.Contains("all", StringComparer.OrdinalIgnoreCase) || want.Contains(n.Split(' ')[0], StringComparer.OrdinalIgnoreCase));
@@ -63,7 +65,7 @@ public sealed class XLodGenStep : IStep
 						a_ctx.Activity(Key, "generating terrain LOD", double.Parse(m.Groups[1].Value, InvariantCulture) / Math.Max(1, double.Parse(m.Groups[2].Value, InvariantCulture)));
 					}
 					return Waits.Poll.Wait;
-				}, a_every: TimeSpan.FromSeconds(5));
+				}, a_every: TimeSpan.FromSeconds(5), a_clock: clock);
 				a_ctx.Log.Detail("xLODGen: LOD generation done");
 				Native.PostMessage((nint)main.Current.NativeWindowHandle, Native.WM_CLOSE, 0, 0);
 				StepKit.LetClose(a_ctx, Key, proc, TimeSpan.FromMinutes(2), "xLODGen");
@@ -202,16 +204,16 @@ public sealed class XLodGenStep : IStep
 	// used to look for the window alone and end, a quarter of an hour later, with "did not appear"
 	// a_timeout runs from the last time its log said something new: a tool still reading a large load order (a slow disk, a
 	// virus scanner reading every plugin with it) is waited for, one that has gone silent is not. a_most, the step's own
-	// limit, ends the wait either way
+	// limit on the step's own clock, ends the wait either way
 	internal static AutomationElement Find(RunContext a_ctx, AutomationElement a_root, Func<AutomationElement, bool> a_match, TimeSpan a_timeout, string a_what,
-		Process? a_proc = null, LogBox? a_log = null, TimeSpan? a_most = null)
+		Process? a_proc = null, LogBox? a_log = null, (AwakeClock Clock, TimeSpan Limit)? a_most = null)
 	{
 		var sw = Stopwatch.StartNew();
 		var quiet = Stopwatch.StartNew();
 		var read = TimeSpan.FromSeconds(-10);
 		var said = "";
 		var length = 0;
-		while (quiet.Elapsed < a_timeout && (a_most == null || sw.Elapsed < a_most)) {
+		while (quiet.Elapsed < a_timeout && (a_most is not { } most || most.Clock.Elapsed < most.Limit)) {
 			a_ctx.Cancel.ThrowIfCancellationRequested();
 			var hit = Uia.All(a_root).FirstOrDefault(a_match);
 			if (hit != null) {
@@ -243,7 +245,7 @@ public sealed class XLodGenStep : IStep
 		}
 		throw new StepFailedException((quiet.Elapsed >= a_timeout
 			? a_log == null ? $"{a_what} did not appear within {a_timeout.TotalMinutes:0.#} minutes" : $"{a_what} did not appear, and the tool's log said nothing new for {a_timeout.TotalMinutes:0.#} minutes"
-			: $"{a_what} did not appear within the step's {a_most!.Value.TotalMinutes:0.#} minute limit") + LastSaid(said));
+			: $"{a_what} did not appear within the step's {a_most!.Value.Limit.TotalMinutes:0.#} minute limit") + LastSaid(said));
 	}
 
 	static string LastSaid(string a_log) => LastLine(a_log) is { Length: > 0 } last ? $" - the last line of its log: {last}" : "";

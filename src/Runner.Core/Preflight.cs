@@ -89,15 +89,15 @@ public static class Preflight
 		}
 		outList.AddRange(pc);
 		foreach (var d in new[] { a_setup.BackupDir, a_mo2.ModsDir }.Where(d => d != "")) {
-			var root = Path.GetPathRoot(Path.GetFullPath(d)) ?? d;
-			// the disk the folder really stands on: a mods folder kept on another disk through a junction, a network path
+			// the disk the folder really stands on: a mods folder kept on another disk through a junction, a network path (so the
+			// folder is named, never its drive letter - that may be another disk)
 			if (Files.FreeOn(d) is not { } bytes) {
-				outList.Add(new Issue("", false, $"the free room on {root} could not be read, so the {a_setup.MinFreeGb} GB a run needs there was not checked"));
+				outList.Add(new Issue("", false, $"the free room on the disk that holds {d} could not be read, so the {a_setup.MinFreeGb} GB a run needs there was not checked"));
 				continue;
 			}
 			var free = bytes / (1024.0 * 1024 * 1024);
 			if (free < a_setup.MinFreeGb) {
-				outList.Add(new Issue("", true, $"only {free:0.0} GB free on {root} - the run needs at least {a_setup.MinFreeGb} GB for its outputs and backups"));
+				outList.Add(new Issue("", true, $"only {free:0.0} GB free on the disk that holds {d} - the run needs at least {a_setup.MinFreeGb} GB for its outputs and backups"));
 			}
 		}
 		// what the run is about to remake, added up per disk (the floor above knows nothing of how big this setup's outputs are)

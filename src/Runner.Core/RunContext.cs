@@ -388,14 +388,15 @@ public static class Waits
 	// a_progress: for a tool driven through its window - what its window says; a change counts as work, and so does CPU its CHILD
 	// processes use (a long patcher shows nothing new for minutes), never the window process's own (a
 	// window drawing itself uses CPU while the tool does nothing - Synthesis sat 4 min on its main screen)
+	// a_clock: the step's own clock, when an earlier wait of the step counts against the same limit
 	public static void Tool(RunContext a_ctx, string a_step, Process a_proc, TimeSpan a_deadline, Func<Poll> a_poll,
-		Func<bool>? a_onIdle = null, TimeSpan? a_every = null, Func<string>? a_progress = null)
+		Func<bool>? a_onIdle = null, TimeSpan? a_every = null, Func<string>? a_progress = null, AwakeClock? a_clock = null)
 	{
 		string? lastSeen = null;
 		var every = a_every ?? TimeSpan.FromSeconds(2);
 		// time the PC was awake: a closed lid or the player's own Sleep in the middle of a long tool is not time the tool had,
 		// and on waking neither its limit nor the idle rule may have run out
-		var sw = AwakeClock.StartNew();
+		var sw = a_clock ?? AwakeClock.StartNew();
 		TimeSpan? goneAt = null;
 		var idleLimit = IdleForTests ?? TimeSpan.FromMinutes(Math.Max(1, a_ctx.Setup.IdleMinutes));
 		var lastCpu = TimeSpan.Zero;

@@ -12285,6 +12285,8 @@ public static class Program
 		Equal("TR-411", RunnerErrors.Find("the grass cache looks empty (3 files)")?.Code, "almost nothing made");
 		Equal("TR-433", RunnerErrors.Find("DynDOLOD: no Start button in its options window (DynDOLOD needs Expert mode)")?.Code, "the window, not the tool's own words");
 		Equal(RunnerErrors.ToolsOwnWords, RunnerErrors.Find("Pandora: something only Pandora would say")?.Code, "what a tool itself said");
+		Equal(RunnerErrors.ToolsOwnWords, RunnerErrors.Find("DynDOLOD reported an error: Error: could not start the export, did not write the file")?.Code,
+			"the tool's own words choose no entry of the runner's");
 		Equal(RunnerErrors.ToolsOwnWords, RunnerErrors.All[^1].Code, "and that entry is the last one asked");
 		// a tool's own documented error goes before the catalog's general words for "the tool said so"
 		var memory = Explain.For("dyndolod", "DynDOLOD: Error: Out of memory");

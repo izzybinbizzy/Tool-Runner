@@ -153,12 +153,13 @@ public static class Cli
 				"--help" or "-h" or "/?" => Help(),
 				_ => Unknown(a_args),
 			};
-		} catch (Exception e) when (e is ArgumentException or FileNotFoundException or DirectoryNotFoundException or InvalidDataException or System.Text.Json.JsonException) {
-			// what was typed is wrong: an option left out, a file that is not there or is no setup
+		} catch (ArgumentException e) {
+			// what was typed is wrong: an option left out, a file it names that is not there or is no setup (Named)
 			Said(a_args, e.Message);
 			return 3;
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
-			// the disk or Windows refused: its plain reason, and no crash note for what is no fault of the program
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException) {
+			// the disk or Windows refused, or a file the command reads on its way is damaged (a run's record, Mod Organizer's own):
+			// its plain reason, and no crash note for what is no fault of the program
 			Said(a_args, e.Message);
 			return 1;
 		} catch (Exception e) {
@@ -199,7 +200,7 @@ public static class Cli
 	static int ShareCmd(string[] a_args)
 	{
 		var file = Opt(a_args, "--setup") ?? throw new ArgumentException("--setup <file> is needed");
-		var setup = Setup.Load(Path.GetFullPath(file));
+		var setup = Named(() => Setup.Load(Path.GetFullPath(file)));
 		var (outFile, removed) = SetupShare.Write(setup, Opt(a_args, "--out") is { } o ? Path.GetFullPath(o) : Path.Combine(AppPaths.Data, "Shared setups"), MainWindow.AppVersion);
 		Console.WriteLine($"shared copy: {outFile}");
 		foreach (var r in removed) {
@@ -221,6 +222,17 @@ public static class Cli
 
 	static string SetupArg(string[] a_args) =>
 		Opt(a_args, "--setup") is { } s ? Path.GetFullPath(s) : throw new ArgumentException("--setup <setup file> is needed");
+
+	// what the command line names, read: a file that is not there or is no setup is what was typed (exit 3), never a fault found
+	// while the command works (exit 1)
+	static T Named<T>(Func<T> a_read)
+	{
+		try {
+			return a_read();
+		} catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException or InvalidDataException or System.Text.Json.JsonException) {
+			throw new ArgumentException(e.Message, e);
+		}
+	}
 
 	// every value of an option given more than once (queue --setup a --setup b)
 	static List<string> Opts(string[] a_args, string a_name)
@@ -329,7 +341,7 @@ public static class Cli
 
 	static int Check(string[] a_args)
 	{
-		var setup = Setup.Load(SetupArg(a_args));
+		var setup = Named(() => Setup.Load(SetupArg(a_args)));
 		var mo2 = Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance);
 		var issues = Preflight.Run(setup, mo2, setup.EnabledSteps.Select(s => s.Key).ToList());
 		var ready = !issues.Any(i => i.Blocking);
@@ -393,7 +405,7 @@ public static class Cli
 
 	static int Preview(string[] a_args)
 	{
-		var setup = Setup.Load(SetupArg(a_args));
+		var setup = Named(() => Setup.Load(SetupArg(a_args)));
 		var mo2 = Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance);
 		var usual = Engine.UsualTimes(setup.File);
 		var p = RunPreview.Build(setup, mo2, Runner.Plan(setup, Opt(a_args, "--only"), Opt(a_args, "--from"), Opt(a_args, "--until")), DryRun.LastOf(setup, mo2, AppPaths.Data));
@@ -408,7 +420,7 @@ public static class Cli
 
 	static int Lod(string[] a_args)
 	{
-		var setup = Setup.Load(SetupArg(a_args));
+		var setup = Named(() => Setup.Load(SetupArg(a_args)));
 		var step = Opt(a_args, "--step") ?? throw new ArgumentException("--step <step> is needed (grass, texgen, dyndolod, treelodgen, xlodgen, anvillod)");
 		if (!LodGuide.Applies(step)) {
 			throw new ArgumentException($"\"{step}\" is not a LOD step");
@@ -428,7 +440,7 @@ public static class Cli
 
 	static int Updates(string[] a_args)
 	{
-		var setup = Setup.Load(SetupArg(a_args));
+		var setup = Named(() => Setup.Load(SetupArg(a_args)));
 		var mo2 = Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance);
 		var res = Task.Run(() => ToolUpdates.Check(setup, mo2, CancellationToken.None)).GetAwaiter().GetResult();
 		if (Json(a_args)) {
@@ -443,7 +455,7 @@ public static class Cli
 	// --look notes what changed since the last look first (refused while a run goes: its changes would read as made outside it)
 	static int Changes(string[] a_args)
 	{
-		var setup = Setup.Load(SetupArg(a_args));
+		var setup = Named(() => Setup.Load(SetupArg(a_args)));
 		var mo2 = Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance);
 		var dir = Mo2Changes.Dir(AppPaths.Data, mo2);
 		int? looked = null;
@@ -471,7 +483,7 @@ public static class Cli
 	// test-tools --setup <file>, exit 0 = what a run presses is there in every tool
 	static int TestToolsCmd(string[] a_args)
 	{
-		var results = ToolProof.TestAll(Setup.Load(SetupArg(a_args)), RunLog.Null, CancellationToken.None);
+		var results = ToolProof.TestAll(Named(() => Setup.Load(SetupArg(a_args))), RunLog.Null, CancellationToken.None);
 		foreach (var r in results) {
 			Console.WriteLine((r.Good ? "good  " : "LOOK  ") + r.Text);
 		}
@@ -555,7 +567,7 @@ public static class Cli
 	static int Import(string[] a_args)
 	{
 		var file = Opt(a_args, "--file") ?? throw new ArgumentException("--file <setup file> is needed");
-		var got = SetupShare.BringIn(file, Opt(a_args, "--name"), AppPaths.Setups, false, AppPaths.Data);
+		var got = Named(() => SetupShare.BringIn(file, Opt(a_args, "--name"), AppPaths.Setups, false, AppPaths.Data));
 		if (got.NoName) {
 			throw new ArgumentException(got.Lines[0] + ": give it a name with --name <setup name>");
 		}
