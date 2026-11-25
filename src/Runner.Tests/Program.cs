@@ -5930,7 +5930,11 @@ public static class Program
 				Check(File.Exists(Path.Combine(old4, DataFolder.MovedMark)), "a file that will not go keeps the mark beside it");
 			}
 			DataFolder.FinishMove(old4, to4);
-			Check(!Directory.Exists(old4), "and the next start removes the rest, the mark last");
+			Check(!Directory.Exists(old4) && !Directory.EnumerateDirectories(Path.GetDirectoryName(old4)!).Any(), "and the next start removes the rest, the mark last, nothing left beside it");
+			// the old folder leaves its data-folder name before its mark goes: what a stop at that moment leaves is no data folder
+			var beside8 = Path.Combine(root, "beside 8");
+			Directory.CreateDirectory(Path.Combine(beside8, Brand.Name + " Data (being removed 1a2b3c4d)"));
+			Check(!DataFolder.StandsIn(beside8, " Data"), "a folder left half way through its removal is never taken for the data");
 			// a setup written by hand (a comment, a comma after its last value, a path with forward slashes) is repointed too
 			var from5 = Path.Combine(root, "beside 5", Brand.Name + " Data");
 			var to5 = Path.Combine(root, "appdata 5", Brand.Name);
@@ -5957,6 +5961,21 @@ public static class Program
 			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from5 + " again", link), "a link is refused as the new place");
 			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from5 + " again", Path.Combine(link, "deeper")), "a folder reached through a link into the data is refused");
 			Directory.Delete(link);
+			// a SUBST drive letter that stands for a folder inside the data is that folder too
+			var letter = Enumerable.Range('G', 19).Select(c => (char)c).FirstOrDefault(c => !Directory.Exists(c + @":\"));
+			Check(letter != default, "a free drive letter for the test");
+			void Subst(string a_args)
+			{
+				using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("subst.exe", a_args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true })!;
+				p.WaitForExit();
+			}
+			Subst($"{letter}: \"{Path.Combine(from5 + " again", "inside")}\"");
+			try {
+				Check(Directory.Exists(letter + @":\"), "the test's drive letter stands");
+				Throws<InvalidOperationException>(() => DataFolder.MoveTo(from5 + " again", $@"{letter}:\deeper"), "a folder on a drive letter that stands for one inside the data is refused");
+			} finally {
+				Subst($"{letter}: /d");
+			}
 		} finally {
 			if (Directory.Exists(root)) {
 				Directory.Delete(root, true);

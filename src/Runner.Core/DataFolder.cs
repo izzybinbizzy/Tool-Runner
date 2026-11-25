@@ -175,8 +175,14 @@ public static class DataFolder
 		if (Directory.Exists(to) && Files.IsLink(to)) {
 			throw new InvalidOperationException($"{to} is a link to another folder - pick the folder itself");
 		}
-		var realFrom = Physical(from);
-		var realTo = Physical(to);
+		// (a folder Windows will not name, or one on a network folder - another PC's share may be this data folder under
+		// another name - is no place whose relation to the data can be known: refused)
+		if (Physical(from) is not { } realFrom || Physical(to) is not { } realTo) {
+			throw new InvalidOperationException($"where {to} really is could not be told apart from the data folder - pick a folder on this PC");
+		}
+		if (realTo.StartsWith(@"\\", StringComparison.Ordinal) && !realFrom.StartsWith(@"\\", StringComparison.Ordinal)) {
+			throw new InvalidOperationException($"{to} is a network folder - pick a folder on this PC");
+		}
 		if (Files.SamePath(from, to) || Files.SamePath(realFrom, realTo)) {
 			throw new InvalidOperationException("the data is in that folder already");
 		}
@@ -275,28 +281,34 @@ public static class DataFolder
 				Files.DeleteDir(e);
 			}
 		}
-		Files.Delete(mark);
-		Directory.Delete(a_old);
+		// Only the mark is left. The folder leaves its data-folder name first: a stop between the mark and the folder going
+		// would leave an empty folder under that name, which a start takes for the data. Under another name it is no data
+		// folder of any copy, whatever happens next
+		var going = a_old + " (being removed " + Guid.NewGuid().ToString("N")[..8] + ")";
+		Directory.Move(a_old, going);
+		Files.Delete(Path.Combine(going, MovedMark));
+		Directory.Delete(going);
 	}
 
-	// where a path really is: each part of it that is a link or a junction followed to its target (a part not there yet is
-	// taken as written)
-	static string Physical(string a_path)
+	// Where a path really is: its deepest part that is there named as Windows names it (junctions, links, SUBST drive letters
+	// and mapped network drives followed - Files.FinalPath), the parts not there yet added as written. Null when Windows will
+	// not name it: where the folder is cannot then be known
+	static string? Physical(string a_path)
 	{
 		var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(a_path));
-		var root = Path.GetPathRoot(full) ?? "";
-		var now = root;
-		foreach (var part in full[root.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries)) {
-			now = Path.Combine(now, part);
-			try {
-				if (Directory.Exists(now) && new DirectoryInfo(now).ResolveLinkTarget(true) is { } target) {
-					now = Path.TrimEndingDirectorySeparator(Path.GetFullPath(target.FullName));
-				}
-			} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
-				// a link that cannot be followed is taken as written
-			}
+		var rest = new Stack<string>();
+		var at = full;
+		while (!Directory.Exists(at) && Path.GetDirectoryName(at) is { } up) {
+			rest.Push(Path.GetFileName(at));
+			at = up;
 		}
-		return now;
+		if (!Directory.Exists(at) || Files.FinalPath(at) is not { } real) {
+			return null;
+		}
+		foreach (var part in rest) {
+			real = Path.Combine(real, part);
+		}
+		return Path.TrimEndingDirectorySeparator(real);
 	}
 
 	static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };

@@ -1665,6 +1665,11 @@ public static class SettingsPanel
 		};
 		foreach (var b in a_mo2) {
 			b.TextChanged += (_, _) => {
+				// a character picked from the saves of the values before is no pick for these: back to any character at once,
+				// so a Save pressed before the new list is read never writes one profile's character for another
+				if (box.SelectedIndex > 0) {
+					box.SelectedIndex = 0;
+				}
 				pause.Stop();
 				pause.Start();
 			};
