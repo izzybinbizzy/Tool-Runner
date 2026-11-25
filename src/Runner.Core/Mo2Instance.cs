@@ -156,8 +156,8 @@ public sealed partial class Mo2Instance
 		}
 	}
 
-	// The instance of ModOrganizer.exe: the instance folder the setup names (a_instanceDir), else a ModOrganizer.ini beside the
-	// exe (portable)
+	// The instance of ModOrganizer.exe: the instance folder the setup names (a_instanceDir); with none named, a ModOrganizer.ini
+	// beside the exe (portable)
 	public static Mo2Instance Load(string a_mo2Exe, string? a_instanceDir = null)
 	{
 		if (!File.Exists(a_mo2Exe)) {
@@ -165,8 +165,13 @@ public sealed partial class Mo2Instance
 		}
 		var exeDir = Path.GetDirectoryName(Path.GetFullPath(a_mo2Exe))!;
 		string? ini = null;
-		if (!string.IsNullOrWhiteSpace(a_instanceDir) && File.Exists(Path.Combine(a_instanceDir, "ModOrganizer.ini"))) {
+		if (!string.IsNullOrWhiteSpace(a_instanceDir)) {
+			// the instance the setup names, or none: with its file gone (the folder moved or renamed), the instance beside the
+			// program is never read in its place - a profile of the same name there is another player's load order
 			ini = Path.Combine(a_instanceDir, "ModOrganizer.ini");
+			if (!File.Exists(ini)) {
+				throw new FileNotFoundException($"No ModOrganizer.ini in the instance folder {a_instanceDir} - pick the instance folder again in the setup");
+			}
 		} else if (File.Exists(Path.Combine(exeDir, "ModOrganizer.ini"))) {
 			ini = Path.Combine(exeDir, "ModOrganizer.ini");
 		}

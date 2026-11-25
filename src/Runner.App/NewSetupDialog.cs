@@ -117,7 +117,7 @@ public static class NewSetupDialog
 		};
 		instance.SelectionChanged += (_, _) => Fill();
 		browse.Click += (_, _) => {
-			var d = new OpenFileDialog { Filter = "Mod Organizer|ModOrganizer.exe", Title = "Mod Organizer's program" };
+			var d = new OpenFileDialog { Filter = "Mod Organizer|ModOrganizer.exe", Title = WindowWords.Word("Mod Organizer's program") };
 			if (d.ShowDialog(w) == true) {
 				exe.Text = d.FileName;
 				FillInstances();

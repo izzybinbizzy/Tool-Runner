@@ -663,25 +663,25 @@ public sealed partial class MainViewModel : Observable
 	public static string Short(TimeSpan a_t)
 	{
 		if (a_t.TotalSeconds < 59.5) {
-			return $"{Math.Max(0, a_t.TotalSeconds):0}s";
+			return WindowWords.F($"{Math.Max(0, a_t.TotalSeconds):0}s");
 		}
 		var minutes = Times.WholeMinutes(a_t);
-		return minutes < 60 ? $"{minutes}m" : $"{minutes / 60}h {minutes % 60:00}m";
+		return minutes < 60 ? WindowWords.F($"{minutes}m") : WindowWords.F($"{minutes / 60}h {minutes % 60:00}m");
 	}
 
 	public static string Long(TimeSpan a_t)
 	{
 		var minutes = Math.Max(1, Times.WholeMinutes(a_t));
-		return minutes < 60 ? $"{minutes} min" : $"{minutes / 60} h {minutes % 60:00} min";
+		return minutes < 60 ? WindowWords.F($"{minutes} min") : WindowWords.F($"{minutes / 60} h {minutes % 60:00} min");
 	}
 
 	void LoadHistory()
 	{
 		History.Clear();
 		foreach (var j in Engine.Runs().Where(j => SelectedSetup == null || string.Equals(j.SetupFile, SelectedSetup.File, StringComparison.OrdinalIgnoreCase)).Take(100)) {
-			var took = j.Ended is { } e ? Short(Times.Between(j.Started, e)) : j.OwnerAlive ? "going" : "-";
+			var took = j.Ended is { } e ? Short(Times.Between(j.Started, e)) : j.OwnerAlive ? WindowWords.Word("going") : "-";
 			History.Add(new HistoryRow(j.Started.ToString("ddd MMM d  HH:mm", InvariantCulture), j.SetupName, took,
-				j.Verdict == "" ? (j.Unfinished ? (j.OwnerAlive ? "running" : "did not finish") : "") : j.Verdict, j.State is RunState.Finished or RunState.Restored, j.Folder));
+				j.Verdict == "" ? (j.Unfinished ? WindowWords.Word(j.OwnerAlive ? "running" : "did not finish") : "") : j.Verdict, j.State is RunState.Finished or RunState.Restored, j.Folder));
 		}
 	}
 
@@ -694,8 +694,9 @@ public sealed partial class MainViewModel : Observable
 		TaskbarState = System.Windows.Shell.TaskbarItemProgressState.None;
 		NowTitle = WindowWords.Word("Ready");
 		var on = Steps.Count(s => s.Runs);
-		NowActivity = SelectedSetup == null ? "Make a setup first (New setup)." :
-			$"Press START to run the {on} step(s) that will run{(EstimateText == "" ? "" : ", " + EstimateText)}. Press Check (F5) first to see that every tool is found.";
+		var about = EstimateText == "" ? "" : ", " + EstimateText;
+		NowActivity = SelectedSetup == null ? WindowWords.Word("Make a setup first (New setup).") :
+			WindowWords.F($"Press START to run the {on} step(s) that will run{about}. Press Check (F5) first to see that every tool is found.");
 	}
 
 	public void Say(string a_text, string a_kind = "")
@@ -1843,7 +1844,7 @@ public sealed partial class MainViewModel : Observable
 		EstimateText = "";
 		Summary = null;
 		RetryFrom = "";
-		NowActivity = "Make a setup first (New setup).";
+		NowActivity = WindowWords.Word("Make a setup first (New setup).");
 		Guide = FirstSteps(false, false, false);
 	}
 

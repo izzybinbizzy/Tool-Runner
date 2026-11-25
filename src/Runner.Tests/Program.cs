@@ -3250,6 +3250,47 @@ public static class Program
 		Check(!Journal.Load(run.Folder).Unfinished, "and the profile is not held up by it");
 	}
 
+	// the instance folder a setup names is the one read, or none: with its ModOrganizer.ini gone, the instance beside the program is
+	// never taken in its place
+	static void T_TheInstanceASetupNamesIsNeverSwappedForAnother()
+	{
+		using var f = new FakeMo2();
+		var moved = Path.Combine(f.Root, "Instance moved away");
+		Directory.CreateDirectory(moved);
+		var refused = "";
+		try {
+			Mo2Instance.Load(f.Exe, moved);
+		} catch (FileNotFoundException e) {
+			refused = e.Message;
+		}
+		Check(refused.Contains("instance folder", StringComparison.Ordinal), "an instance folder with no ModOrganizer.ini is refused, and said: " + refused);
+		var beside = Path.Combine(f.Instance, "ModOrganizer.ini");
+		Check(Files.SamePath(Mo2Instance.Load(f.Exe).IniPath, beside), "with no instance named, the one beside the program");
+		Check(Files.SamePath(Mo2Instance.Load(f.Exe, "  ").IniPath, beside), "a blank names none");
+	}
+
+	// an undo works in the Mod Organizer the run used, also when the setup names another one by now: that other one's profile of
+	// the same name is never written
+	static void T_AnUndoWorksInTheModOrganizerTheRunUsed()
+	{
+		using var f = new FakeMo2();
+		using var other = new FakeMo2();
+		File.WriteAllText(Path.Combine(f.Mods, "Output A", "old.txt"), "old A");
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp")));
+		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		Equal(RunState.Finished, Runner.Run(new RunRequest(f.SetupFile, f.Data)).State, "the run finished");
+		var j = Journal.All(Runner.RunsDir(f.Data)).First();
+		Check(Files.SamePath(j.Mo2Exe, f.Exe), "the run's record names the Mod Organizer it worked in");
+		var root = Setup.Load(f.SetupFile).Root;
+		root["mo2"] = new JsonObject { ["exe"] = other.Exe, ["instance"] = other.Instance, ["profile"] = "Test" };
+		File.WriteAllText(f.SetupFile, Setup.TextOf(root));
+		var theirs = File.ReadAllBytes(Path.Combine(other.ProfileDir, "modlist.txt"));
+		var r = Runner.Undo(Journal.Load(j.Folder));
+		Equal(RunState.Restored, r.State, "undone: " + r.Verdict);
+		Check(theirs.AsSpan().SequenceEqual(File.ReadAllBytes(Path.Combine(other.ProfileDir, "modlist.txt"))), "the other Mod Organizer's profile is as it was");
+		Equal("old A", File.ReadAllText(Path.Combine(f.Mods, "Output A", "old.txt")), "the old output is back where the run took it from");
+	}
+
 	// two steps writing one output each keep what they wrote; a tool folder's label never passes for a mod of that name; what a move that
 	// failed left in a tool folder is never taken for the run's
 	static void T_AnUndoKeepsEveryOutputAside()
@@ -4057,6 +4098,30 @@ public static class Program
 		text = string.Join("; ", rows.Select(x => $"{x.Mod} {x.What} ({x.Who})"));
 		Check(rows.Any(x => x.Mod == "Master Mod" && x.What == "unticked" && x.Who.StartsWith("the run of", StringComparison.Ordinal)), "the before-run command's change is the run's: " + text);
 		Check(!rows.Any(x => x.Mod == "Master Mod" && x.Who == Mo2Changes.Outside), "never as made outside the runner: " + text);
+	}
+
+	// a run cut off whose setup is gone since: the profile is put back all the same - the run's record names its Mod Organizer and
+	// its profile - so no start is refused for a put-back that could never be made
+	static void T_AProfileIsPutBackWithoutItsSetup()
+	{
+		using var f = new FakeMo2();
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
+			ctx.Journal.Pid = 999999;
+			ctx.Journal.Save();
+			throw new CrashForTest();
+		}));
+		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		var before = f.Text("modlist.txt");
+		try {
+			RunUntilCrash(f);
+		} catch (CrashForTest) {
+		}
+		Check(f.Text("modlist.txt") != before, "the cut-off run left its output switched off");
+		File.Delete(f.SetupFile);
+		var r = Runner.Restore(Journal.Interrupted(Runner.RunsDir(f.Data))!);
+		Equal(RunState.Restored, r.State, "put back without its setup: " + r.Verdict);
+		Equal(before, f.Text("modlist.txt"), "the mod list is as it was before the run");
+		Check(Journal.Interrupted(Runner.RunsDir(f.Data)) == null, "nothing is left to put back");
 	}
 
 	// a put-back after a crash: what changed before it (the cut-off run, the player since) is noted apart from the put-back's own
@@ -8196,6 +8261,16 @@ public static class Program
 		// a setup file may hold a setting with no name at all: it has no label, and nothing fails over it
 		steps.Add(new() { ["step"] = "acmos", ["settings"] = new JsonObject { [""] = "nameless" } });
 		Equal("ACMOS Road Generator", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "nameless", -1)), "a setting with an empty name is still searched");
+		// in another language the label is searched by the words the window shows, and still by its English ones
+		try {
+			ToolRunner.App.WindowWords.Use(new Dictionary<string, string> { ["Output mod"] = "Ausgabe-Mod", ["{0} min"] = "{0} Minuten" });
+			Equal("TexGen", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "ausgabe", -1)), "a label in the window's language");
+			Equal("TexGen", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "output mod", -1)), "and in English all the same");
+			Equal("5 Minuten", ToolRunner.App.MainViewModel.Long(TimeSpan.FromMinutes(5)), "a time's unit in the window's language");
+		} finally {
+			ToolRunner.App.WindowWords.Use(new Dictionary<string, string>());
+		}
+		Equal("5 min", ToolRunner.App.MainViewModel.Long(TimeSpan.FromMinutes(5)), "and in English");
 	}
 
 	// a step dragged to any place, a check that also looks for updates, windows that keep their size

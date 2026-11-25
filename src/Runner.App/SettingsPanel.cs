@@ -592,7 +592,7 @@ public static class SettingsPanel
 			}
 		};
 		checkAddOn.Click += (_, _) => {
-			var d = new Microsoft.Win32.OpenFileDialog { Filter = "Add-on file|*.json", Title = "Your add-on file" };
+			var d = new Microsoft.Win32.OpenFileDialog { Filter = WindowWords.Word("Add-on file").Replace("|", "", StringComparison.Ordinal) + "|*.json", Title = WindowWords.Word("Your add-on file") };
 			if (d.ShowDialog(a_w) != true) {
 				return;
 			}
@@ -827,7 +827,7 @@ public static class SettingsPanel
 			if (HelpPage(aboutKey) is { } help) {
 				var page = new Button { Content = "Its own page", Style = (Style)a_w.FindResource("Ghost"), Margin = new Thickness(10, 0, 0, 0), ToolTip = help.Url,
 					VerticalAlignment = VerticalAlignment.Top };
-				System.Windows.Automation.AutomationProperties.SetHelpText(page, help.What);
+				System.Windows.Automation.AutomationProperties.SetHelpText(page, WindowWords.Word(help.What));
 				page.Click += (_, _) => Opened(a_w, help.Url);
 				DockPanel.SetDock(page, Dock.Right);
 				aboutRow.Children.Add(page);
@@ -1253,6 +1253,8 @@ public static class SettingsPanel
 	public static List<string> StepsWith(IReadOnlyList<JsonObject> a_steps, string a_q, int a_skip)
 	{
 		bool Has(string? a_t) => (a_t ?? "").Contains(a_q, StringComparison.OrdinalIgnoreCase);
+		// a setting's label as the window shows it: its English words, and the words of the language in use
+		bool Named(string a_key, string a_step) => Label(a_key, a_step) is var label && (Has(label) || Has(WindowWords.Word(label)));
 		bool Holds(JsonNode? a_v) => a_v switch {
 			JsonValue v => v.TryGetValue<string>(out var s) && Has(s),
 			JsonArray a => a.Any(Holds),
@@ -1262,7 +1264,7 @@ public static class SettingsPanel
 			return [];
 		}
 		return a_steps.Select((s, i) => (s, i)).Where(x => x.i != a_skip && x.s["settings"] is JsonObject o &&
-				o.Any(p => Has(p.Key) || Has(Label(p.Key)) || Holds(p.Value)))
+				o.Any(p => Has(p.Key) || Named(p.Key, Setup.Str(x.s, "step") ?? "") || Holds(p.Value)))
 			.Select(x => StepCatalog.Name(Setup.Str(x.s, "step") ?? "")).Distinct(StringComparer.Ordinal).ToList();
 	}
 
@@ -1466,14 +1468,14 @@ public static class SettingsPanel
 					return null;
 				}
 				if (!double.TryParse(t.Text.Trim().Replace(',', '.'), System.Globalization.NumberStyles.Float, InvariantCulture, out var d) || !(d >= 0)) {
-					return $"{a_label}: needs a number, 0 or more";
+					return WindowWords.Format("{0}: needs a number, 0 or more", WindowWords.Word(a_label));
 				}
 				// (a whole number is kept as one: past what one holds, the number kept would not be the number typed)
 				if (d > 2_000_000_000) {
-					return $"{a_label}: needs a number below 2,000,000,000";
+					return WindowWords.Format("{0}: needs a number below 2,000,000,000", WindowWords.Word(a_label));
 				}
 				if (d < 1 && a_key.EndsWith("_min", StringComparison.Ordinal)) {
-					return $"{a_label}: needs 1 minute or more";
+					return WindowWords.Format("{0}: needs 1 minute or more", WindowWords.Word(a_label));
 				}
 				a_obj[a_key] = d == Math.Floor(d) ? JsonValue.Create((long)d) : JsonValue.Create(d);
 				return null;
@@ -1495,7 +1497,7 @@ public static class SettingsPanel
 					a_obj[a_key] = JsonNode.Parse(t.Text);
 					return null;
 				} catch (JsonException e) {
-					return $"{a_label}: not valid ({e.Message})";
+					return WindowWords.Format("{0}: not valid ({1})", WindowWords.Word(a_label), e.Message);
 				}
 			});
 			t.TextChanged += (_, _) => Changed();
@@ -1504,7 +1506,7 @@ public static class SettingsPanel
 			var t = new TextBox { Text = cur?.ToString() ?? "" };
 			a_apply.Add(() => {
 				if (a_key is "output_mod" or "then_move_to_mod" or "executable" && t.Text.Trim() == "") {
-					return $"{a_label}: cannot be empty";
+					return WindowWords.Format("{0}: cannot be empty", WindowWords.Word(a_label));
 				}
 				if (t.Text == "" && cur == null) {
 					return null;
@@ -1521,14 +1523,17 @@ public static class SettingsPanel
 		if (edit is TextBox pathBox && kind == JsonValueKind.String && PathKind(a_key, a_step) is { } pick) {
 			var browse = new Button { Content = WindowWords.Word("Browse ..."), Style = (Style)Application.Current.FindResource("Ghost"), Margin = new Thickness(8, 0, 0, 0),
 				ToolTip = WindowWords.Word(pick switch { PathPick.Folder => "Choose the folder", PathPick.File => "Choose the file", _ => "Choose the program" }) };
-			System.Windows.Automation.AutomationProperties.SetName(browse, "Browse for " + a_label);
+			// (the five settings of the first page have their own words for it; every other one is named by its label)
+			var browseFor = "Browse for " + a_label;
+			System.Windows.Automation.AutomationProperties.SetName(browse, WindowWords.Word(browseFor) is var named && named != browseFor ? named :
+				WindowWords.Format("Browse for {0}", WindowWords.Word(a_label)));
 			browse.Click += async (_, _) => {
 				browse.IsEnabled = false;
 				try {
 					var now = pathBox.Text.Trim();
 					// (a folder on a network share that is gone can take a while to answer: never on the window's thread)
 					var start = await Task.Run(() => StartFolder(pick, now));
-					if (Browse(Window.GetWindow(browse), pick, start, a_label) is { } chosen) {
+					if (Browse(Window.GetWindow(browse), pick, start, WindowWords.Word(a_label)) is { } chosen) {
 						pathBox.Text = chosen;
 					}
 				} finally {

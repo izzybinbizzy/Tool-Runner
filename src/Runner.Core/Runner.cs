@@ -1608,20 +1608,41 @@ public static class Runner
 		return hold == null ? new RunOutcome(a_j.State, "a run or another put-back is going - try again when it is done", a_j.Folder) : RestoreLocked(a_j);
 	}
 
+	// The setup a put-back or an undo works with. One that is gone or does not read must not leave a profile that can never be
+	// put back (and every later start refused for it): the run's record names its Mod Organizer and its profile, and the
+	// setup adds only where its plugins are placed. Null, with why, only for a record that names no Mod Organizer
+	static Setup? SetupOf(Journal a_j, out string? a_why)
+	{
+		a_why = null;
+		try {
+			return Setup.Load(a_j.SetupFile);
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException or ArgumentException) {
+			a_why = e.Message;
+		}
+		return a_j.Mo2Exe == "" ? null : Setup.FromJson(new System.Text.Json.Nodes.JsonObject {
+			["name"] = a_j.SetupName,
+			["mo2"] = new System.Text.Json.Nodes.JsonObject { ["exe"] = a_j.Mo2Exe, ["instance"] = a_j.Mo2Instance, ["profile"] = a_j.Profile },
+		}, a_j.SetupFile);
+	}
+
+	// The Mod Organizer a run worked in, for putting that run back or undoing it: the one its own record names. The setup may
+	// name another by now (its Mod Organizer changed in Settings, or a new setup made under the same name), and a run's lists
+	// must never be written into another Mod Organizer's profile of the same name. Where the record names none, or its
+	// Mod Organizer is no longer there (the folder was moved), the setup's is the one
+	static Mo2Instance Mo2Of(Journal a_j, Setup a_setup) =>
+		a_j.Mo2Exe != "" && File.Exists(a_j.Mo2Exe) ? Mo2Instance.Load(a_j.Mo2Exe, a_j.Mo2Instance) : Mo2Instance.Load(a_setup.Mo2Exe, a_setup.Mo2Instance);
+
 	static RunOutcome RestoreLocked(Journal a_j)
 	{
 		// when the cut-off run last wrote its record, read before this put-back writes it again: the time that run died
 		var lastWritten = File.GetLastWriteTime(a_j.File);
-		Setup setup;
-		try {
-			setup = Setup.Load(a_j.SetupFile);
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException) {
-			return new RunOutcome(RunState.Failed, "the setup does not read: " + e.Message, a_j.Folder);
+		if (SetupOf(a_j, out var noSetup) is not { } setup) {
+			return new RunOutcome(RunState.Failed, "the setup does not read: " + noSetup, a_j.Folder);
 		}
 		// a Mod Organizer that moved, a run folder that cannot be written: said in words, never a crash of the command line
 		Mo2Instance mo2;
 		try {
-			mo2 = Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance);
+			mo2 = Mo2Of(a_j, setup);
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) {
 			return new RunOutcome(RunState.Failed, "could not put the profile back: " + e.Message, a_j.Folder);
 		}
@@ -1637,6 +1658,9 @@ public static class Runner
 			Cancel = CancellationToken.None, BackupFolder = a_j.BackupDir,
 		};
 		log.Say("RESTORE: putting the profile back after the run that did not finish");
+		if (noSetup != null) {
+			log.Warn($"this run's setup does not read ({noSetup}) - the profile is put back all the same, without the setup's own plugin places");
+		}
 		// what the cut-off run last wrote: anything else in the mod list now - changed during the run or since - is the player's,
 		// kept by the put-back as at the end of a run (an older run left no such file: nothing is kept, as before)
 		ctx.Profile.OursFile = Path.Combine(a_j.Folder, Profile.WatchFileName);
@@ -1707,15 +1731,12 @@ public static class Runner
 		if (RunUndo.WhyNot(a_j, Journal.All(Path.GetDirectoryName(Path.GetFullPath(a_j.Folder))!).ToList()) is { } why) {
 			return new RunOutcome(a_j.State, why, a_j.Folder);
 		}
-		Setup setup;
-		try {
-			setup = Setup.Load(a_j.SetupFile);
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException) {
-			return new RunOutcome(a_j.State, "the setup does not read: " + e.Message, a_j.Folder);
+		if (SetupOf(a_j, out var noSetup) is not { } setup) {
+			return new RunOutcome(a_j.State, "the setup does not read: " + noSetup, a_j.Folder);
 		}
 		Mo2Instance mo2;
 		try {
-			mo2 = Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance);
+			mo2 = Mo2Of(a_j, setup);
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) {
 			return new RunOutcome(a_j.State, "nothing was undone: " + e.Message, a_j.Folder);
 		}
@@ -1731,6 +1752,9 @@ public static class Runner
 		};
 		ctx.Profile.LoadOurs();
 		log.Say("UNDO: putting things back as they were before this run");
+		if (noSetup != null) {
+			log.Warn($"this run's setup does not read ({noSetup}) - the run is undone all the same, without the setup's own plugin places");
+		}
 		try {
 			control.Close();
 			if (data != null) {

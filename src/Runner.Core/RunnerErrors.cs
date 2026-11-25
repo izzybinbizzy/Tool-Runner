@@ -34,7 +34,7 @@ public static class RunnerErrors
 			"Name the earlier step first, or move the steps in the list."),
 		E("TR-109", "the check before the run could not finish", "Something the check must read could not be read (a drive that is not there, a folder with no access).",
 			"Read the reason in the message, make that drive or folder reachable, and press Check (F5) to see that it now passes."),
-		E("TR-110", "Mod Organizer was not found at|No ModOrganizer.ini beside Mod Organizer", "The setup points at a Mod Organizer that is not there (moved, renamed, or on a drive that is not plugged in).",
+		E("TR-110", "Mod Organizer was not found at|No ModOrganizer.ini beside Mod Organizer|No ModOrganizer.ini in the instance folder", "The setup points at a Mod Organizer that is not there (moved, renamed, or on a drive that is not plugged in).",
 			"Open Settings and set Mod Organizer's program and its instance folder again, or make a new setup (New setup)."),
 		E("TR-111", "Mod Organizer's program is not set|the MO2 profile is not set|the backup folder is not set|must be a whole path on this PC",
 			"The setup is missing a folder or names one that is not a whole path on this PC.", "Open Settings, fill it in with a whole path (like D:\\Modding\\Backups), and save."),
