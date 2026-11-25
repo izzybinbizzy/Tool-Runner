@@ -733,9 +733,14 @@ public static class SettingsPanel
 			using var hand = a_w.Working("your tools are being tested");
 			try {
 				var results = await Task.Run(() => ToolProof.TestAll(testSetup, RunLog.Null, stop.Token));
-				// (into the drawing on screen now: Settings may have been drawn again since the test began)
-				foreach (var r in results) {
-					s_testRows?.Children.Add(new TextBlock { Text = r.Text, TextWrapping = TextWrapping.Wrap, Foreground = Brushes2.Get(r.Good ? "Text" : "Bad"), Margin = new Thickness(0, 2, 0, 2) });
+				// (into the drawing on screen now: Settings may have been drawn again since the test began, or closed - then the
+				// results are said where the window says its messages)
+				if (s_testRows is { } rows) {
+					foreach (var r in results) {
+						rows.Children.Add(new TextBlock { Text = r.Text, TextWrapping = TextWrapping.Wrap, Foreground = Brushes2.Get(r.Good ? "Text" : "Bad"), Margin = new Thickness(0, 2, 0, 2) });
+					}
+				} else {
+					a_vm.Say("The test of your tools: " + string.Join(" | ", results.Select(r => r.Text)), results.All(r => r.Good) ? "good" : "bad");
 				}
 			} catch (OperationCanceledException) {
 				a_vm.Say("The test of your tools was stopped; the tool it had opened is closed again.", "warn");

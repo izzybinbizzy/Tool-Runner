@@ -157,6 +157,18 @@ public static partial class Files
 		}
 	}
 
+	// the first a_count bytes as text when they are valid UTF-8 (a_text is "" when they are not)
+	public static bool TryStrictUtf8(byte[] a_bytes, int a_count, out string a_text)
+	{
+		try {
+			a_text = StrictUtf8.GetString(a_bytes, 0, a_count);
+			return true;
+		} catch (DecoderFallbackException) {
+			a_text = "";
+			return false;
+		}
+	}
+
 	// a text's bytes for a file, with the mark its encoding writes (UTF-16 and UTF-8-with-mark files keep theirs)
 	public static byte[] EncodeText(string a_text, Encoding a_encoding) => [.. a_encoding.GetPreamble(), .. a_encoding.GetBytes(a_text)];
 
@@ -437,8 +449,9 @@ public sealed class GrowingText
 			var end = LineEnd(added, read);
 			// New lines that are no UTF-8, in a file whose lines so far (plain letters only) had passed for it: the file is in
 			// the PC's own code page, and is read from its start again as that
-			if (_how.CodePage != Utf8 || IsUtf8(added[..end])) {
-				_lines += _how.GetString(added, 0, end);
+			string? lines = null;
+			if (_how.CodePage != Utf8 || Files.TryStrictUtf8(added, end, out lines)) {
+				_lines += lines ?? _how.GetString(added, 0, end);
 				_pos += end;
 				// (a file that was shorter than the head kept of it has grown past it: the head is filled up, so a replaced file is told)
 				if (_head.Length < HeadSize) {
@@ -450,17 +463,17 @@ public sealed class GrowingText
 		fs.Position = 0;
 		var all = new byte[fs.Length];
 		var got = fs.ReadAtLeast(all, all.Length, false);
-		var text = Files.DecodeText(all[..got], out var how);
-		var cut = Wide(how) ? 0 : LineEnd(all, got);
+		// (two bytes a letter, told by its mark: a line's end found byte by byte would cut a letter in two)
+		var cut = Files.HasMark(all) && all[0] != 0xEF ? 0 : LineEnd(all, got);
 		_path = a_path;
 		_head = all[..Math.Min(HeadSize, got)];
 		_pos = cut;
 		if (cut == 0) {
 			// no whole line yet, or two bytes a letter: nothing is kept, and the next look reads all of it again
-			_how = how;
 			_lines = "";
-			return text;
+			return Files.DecodeText(all[..got], out _how);
 		}
+		// each part decoded once: the whole lines, which alone tell how the file is written, then what follows them
 		_lines = Files.DecodeText(all[..cut], out _how);
 		return cut == got ? _lines : _lines + _how.GetString(all, cut, got - cut);
 	}
@@ -469,10 +482,4 @@ public sealed class GrowingText
 
 	// where the last whole line ends (0: there is none)
 	static int LineEnd(byte[] a_bytes, int a_count) => a_count == 0 ? 0 : Array.LastIndexOf(a_bytes, (byte)'\n', a_count - 1) + 1;
-
-	static bool IsUtf8(byte[] a_bytes)
-	{
-		Files.DecodeText(a_bytes, out var how);
-		return how.CodePage == Utf8;
-	}
 }

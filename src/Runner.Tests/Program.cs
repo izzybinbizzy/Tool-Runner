@@ -432,6 +432,12 @@ public static class Program
 		Throws<IOException>(() => Plugins.Masters(odd), "a field that runs past the header's end");
 		File.WriteAllText(odd, "x");
 		Equal(0, Plugins.Masters(odd).Count, "a file that is no plugin needs none");
+		File.WriteAllBytes(odd, "TE"u8.ToArray());
+		Throws<IOException>(() => Plugins.Masters(odd), "a plugin cut down to its first two bytes");
+		var longer = (byte[])head.Clone();
+		BitConverter.GetBytes((uint)body.Length + 3).CopyTo(longer, 4);
+		File.WriteAllBytes(odd, [.. longer, .. body.ToArray(), 1, 2, 3]);
+		Throws<IOException>(() => Plugins.Masters(odd), "bytes left over after the header's last field");
 		File.WriteAllBytes(Path.Combine(f.Mods, "Needs B", "NeedsB.esp"), whole[..30]);
 		Throws<IOException>(() => ProfileOf(f).Dependents(["Output A"]), "what goes off with a mod is not worked out past a plugin cut short");
 	}
