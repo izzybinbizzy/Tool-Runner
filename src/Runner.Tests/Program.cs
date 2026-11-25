@@ -11594,6 +11594,27 @@ public static class Program
 		Check(Setup.Int(read, "keepBackups") == 20 && Setup.Num(read, "keepBackups") == 20d && Setup.Num(read, "guidedReminderMin") == 2.5 && Setup.Int(read, "name") == null,
 			"read from a file, the same answers");
 		Equal(20, new StepSettings(new JsonObject { ["min_files"] = JsonValue.Create(20L) }).Int("min_files", 100), "a step's number typed in Settings too");
+		// written by hand: quotes round a number or a switch, one name where a list is read, a number past every time
+		var hand = Setup.RootOf("""
+			{ "deadline_min": "90", "wait_s": " 45 ", "crash_wait_min": "2.5", "on": "false", "newGame": "True", "replaces": "Old Output", "enable_during": ["A", "B", ""],
+			  "word": "ninety", "comma": "1,5", "nan": "NaN", "far": "1e400", "huge": 1e300, "list": 7, "empty": "  ", "yes": "yes" }
+			""")!;
+		Check(Setup.Int(hand, "deadline_min") == 90 && Setup.Int(hand, "wait_s") == 45 && Setup.Num(hand, "crash_wait_min") == 2.5, "a number in quotes is that number");
+		Check(Setup.Bool(hand, "on") == false && Setup.Bool(hand, "newGame") == true, "a switch in quotes is that switch");
+		Check(Setup.Bool(hand, "yes") == null && Setup.Bool(hand, "deadline_min") == null && Setup.Bool(hand, "none") == null, "any other word is no switch");
+		Check(Setup.Num(hand, "word") == null && Setup.Num(hand, "comma") == null && Setup.Num(hand, "nan") == null && Setup.Num(hand, "far") == null && Setup.Num(hand, "empty") == null,
+			"a word, a comma, and what is no number are none");
+		Equal("Old Output", string.Join("|", Setup.List(hand, "replaces")), "one name where a list is read is a list of it");
+		Equal("A|B", string.Join("|", Setup.List(hand, "enable_during")), "a list as before");
+		Check(Setup.List(hand, "list").Count == 0 && Setup.List(hand, "empty").Count == 0 && Setup.List(hand, "none").Count == 0, "a number, blanks and nothing are no list");
+		Equal(30.0, new StepSettings(hand).Num("huge", 30), "a wait past every time: the default");
+		Equal(TimeSpan.FromMinutes(90), new StepSettings(hand).Deadline(60), "the time limit in quotes is the step's");
+		var byHand = Setup.FromJson(new JsonObject { ["beforeRun"] = "start.bat", ["steps"] = new JsonArray(new JsonObject { ["step"] = "texgen", ["on"] = "false" }) });
+		Check(!byHand.Steps[0].On, "a step switched \"false\" is off");
+		Equal(1, SetupShare.Share(byHand, "1.0", []).Removed.Count(r => r.Contains("beforeRun", StringComparison.Ordinal)), "one command given as a word is named when the setup is shared");
+		Equal(1, byHand.TakeOutCommands(), "... and taken out of a setup that is brought in");
+		bool Due(double a_every) => ToolRunner.App.MainViewModel.ReminderDue(a_every, new DateTime(2026, 1, 1), new DateTime(2026, 1, 1, 0, 5, 0));
+		Check(!Due(1e300) && !Due(double.NaN) && !Due(0) && !Due(6) && Due(5) && Due(1), "a reminder every 1e300 minutes is never due, and no error");
 	}
 
 	// ... and every text a step fails with: its own words, or the tool's, come with a code and what to do

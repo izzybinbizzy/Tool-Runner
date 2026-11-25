@@ -919,7 +919,8 @@ public sealed partial class MainViewModel : Observable
 	}
 
 	// a reminder is due once every a_everyMin minutes (0 or less = never)
-	public static bool ReminderDue(double a_everyMin, DateTime a_last, DateTime a_now) => a_everyMin > 0 && a_now - a_last >= TimeSpan.FromMinutes(a_everyMin);
+	// (compared as minutes: a number of a setup file past every span of time is never due, and never an error)
+	public static bool ReminderDue(double a_everyMin, DateTime a_last, DateTime a_now) => a_everyMin > 0 && (a_now - a_last).TotalMinutes >= a_everyMin;
 
 	// the watched run's newest record (the cache re-reads it only when its file changed)
 	static Journal Fresh(List<Journal> a_runs, Journal a_j) =>

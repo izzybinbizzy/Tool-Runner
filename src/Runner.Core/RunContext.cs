@@ -215,7 +215,8 @@ public sealed class StepSettings(JsonObject a_o)
 	// holds a typed number to the same two rules; a number read past them made a step fail at once on "its -5 minute limit"
 	public int Int(string a_key, int a_default) =>
 		Setup.Int(Raw, a_key) is { } n && n >= 0 ? (a_key.EndsWith("_min", StringComparison.Ordinal) ? Math.Max(1, n) : n) : a_default;
-	public double Num(string a_key, double a_default) => Setup.Num(Raw, a_key) is { } d && d >= 0 ? d : a_default;
+	// (nor is one past what a whole number holds: as minutes it was more time than there is, and the step ended on that)
+	public double Num(string a_key, double a_default) => Setup.Num(Raw, a_key) is { } d && d >= 0 && d <= int.MaxValue ? d : a_default;
 	public bool Bool(string a_key, bool a_default) => Setup.Bool(Raw, a_key) ?? a_default;
 	public List<string> List(string a_key) => Setup.List(Raw, a_key);
 	public string? OutputMod => Str("output_mod") ?? Str("then_move_to_mod");

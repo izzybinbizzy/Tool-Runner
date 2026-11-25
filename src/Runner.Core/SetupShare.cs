@@ -35,7 +35,7 @@ public static partial class SetupShare
 			removed.Add("the backup folder (backups)");
 		}
 		foreach (var key in new[] { "beforeRun", "afterRun" }) {
-			if (root[key] is JsonArray { Count: > 0 }) {
+			if (Setup.List(root, key).Count > 0) {
 				removed.Add($"the commands run {(key == "beforeRun" ? "before" : "after")} a run ({key}) - a shared setup never runs a command on another PC");
 			}
 			root.Remove(key);
