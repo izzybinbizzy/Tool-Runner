@@ -303,7 +303,7 @@ public static class NewSetupDialog
 			making = true;
 			try {
 				// (its own name; one that is taken gets a number after it - nothing of the player's is ever written over)
-				var got = await Task.Run(() => SetupShare.BringIn(from, null, AppPaths.Setups, true));
+				var got = await Task.Run(() => SetupShare.BringIn(from, null, AppPaths.Setups, true, AppPaths.Data));
 				if (got.File == null) {
 					note.Text = WindowWords.Format("Not imported: {0}", string.Join(" ", got.Lines));
 					note.Foreground = Brushes2.Get("Bad");

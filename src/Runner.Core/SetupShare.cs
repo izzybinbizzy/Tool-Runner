@@ -155,8 +155,10 @@ public static partial class SetupShare
 	// A setup file from elsewhere written into a_setups under a_name (its own name when none is given, its file's when that
 	// is no name), with everything taken out that would start something on this PC: its commands, every program it names,
 	// every path of the PC it came from, every add-on approval. a_freeName: a name that is taken gets a number after it
-	// ("Name (2)") - the window, which asks for no name; else that is said and nothing is written
-	public static Brought BringIn(string a_file, string? a_name, string a_setups, bool a_freeName = false)
+	// ("Name (2)") - the window, which asks for no name; else that is said and nothing is written. a_data: the program's
+	// data folder - the setup's backups and scratch are kept in it, where a new setup keeps them (the other PC's folders
+	// were taken out, and without a backup folder no run of it starts)
+	public static Brought BringIn(string a_file, string? a_name, string a_setups, bool a_freeName = false, string? a_data = null)
 	{
 		var s = Setup.Load(Path.GetFullPath(a_file));
 		if (s.Root["steps"] is not JsonArray || s.Root["mo2"] is not JsonObject) {
@@ -188,9 +190,16 @@ public static partial class SetupShare
 		var commands = s.TakeOutCommands();
 		var programs = s.TakeOutWhatStartsPrograms();
 		programs.AddRange(TakeOutPaths(s.Root));
+		if (a_data != null) {
+			s.Root["backups"] = Path.Combine(a_data, "Backups");
+			s.Root["scratch"] = Path.Combine(a_data, "Scratch");
+		}
 		Directory.CreateDirectory(a_setups);
 		s.Save(dst);
 		var lines = new List<string> { "setup written: " + dst };
+		if (a_data != null) {
+			lines.Add("its backups and its scratch folder are kept where a new setup keeps them: " + a_data);
+		}
 		if (commands > 0) {
 			lines.Add($"its {commands} own command(s) to run before or after a run were taken out - a setup from elsewhere runs no command on this PC; add your own in Settings");
 		}

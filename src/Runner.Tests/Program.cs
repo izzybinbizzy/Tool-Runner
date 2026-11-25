@@ -11688,6 +11688,9 @@ public static class Program
 			Equal("Their Setup (2)", Setup.Load(free.File!).Name, "... which is its name inside too");
 			Equal<string?>(Path.Combine(setups, "Their Setup (3).json"), SetupShare.BringIn(from, null, setups, true).File, "and the one after it");
 			Equal<string?>(Path.Combine(setups, "Mine.json"), SetupShare.BringIn(from, "Mine", setups).File, "a name given for it");
+			var kept = SetupShare.BringIn(from, "Kept Here", setups, false, dir);
+			Check(Setup.Load(kept.File!).BackupDir == Path.Combine(dir, "Backups") && Setup.Str(Setup.Load(kept.File!).Root, "scratch") == Path.Combine(dir, "Scratch") &&
+				kept.Lines.Any(l => l.Contains("where a new setup keeps them", StringComparison.Ordinal)), "its backups and scratch are this program's own, as a new setup's are");
 			var store = SetupShare.BringIn(from, "output sizes", setups);
 			Check(store.File == null && store.NoName && !File.Exists(Path.Combine(setups, "output sizes.json")), "the name of one of the program's own files is no setup's name");
 			Equal<string?>(Path.Combine(setups, "output sizes (2).json"), SetupShare.BringIn(from, "output sizes", setups, true).File, "... the window gives it the next free one");

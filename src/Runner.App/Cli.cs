@@ -555,7 +555,7 @@ public static class Cli
 	static int Import(string[] a_args)
 	{
 		var file = Opt(a_args, "--file") ?? throw new ArgumentException("--file <setup file> is needed");
-		var got = SetupShare.BringIn(file, Opt(a_args, "--name"), AppPaths.Setups);
+		var got = SetupShare.BringIn(file, Opt(a_args, "--name"), AppPaths.Setups, false, AppPaths.Data);
 		if (got.NoName) {
 			throw new ArgumentException(got.Lines[0] + ": give it a name with --name <setup name>");
 		}

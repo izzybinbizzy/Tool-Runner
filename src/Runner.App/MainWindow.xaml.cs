@@ -1448,7 +1448,7 @@ public partial class MainWindow : Window
 				_vm.Say("Setup made. Press Check (F5) to see that every tool is found, then Start.", "good");
 			} else {
 				// what the file brought along that starts something was taken out: said once, with what the player sets now
-				_vm.Say("Setup imported. Set your Mod Organizer, profile and backup folder in Settings, then press Check (F5).", "good");
+				_vm.Say("Setup imported. Set your Mod Organizer and profile in Settings, then press Check (F5): it names what else a step needs.", "good");
 				Ask.Tell(this, "Setup imported", string.Join("\n", imported), "Close");
 			}
 		}
