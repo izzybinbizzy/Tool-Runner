@@ -48,6 +48,8 @@ public static class Program
 			.Where(m => m.Name.StartsWith("T_", StringComparison.Ordinal) && m.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)).OrderBy(m => m.MetadataToken);
 		foreach (var t in tests) {
 			var sw = Stopwatch.StartNew();
+			// every test begins with the program's own steps: a stand-in an earlier test put in is never this one's
+			StepRegistry.PutBackOwn();
 			try {
 				t.Invoke(null, null);
 				++s_pass;

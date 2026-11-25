@@ -23,11 +23,13 @@ public sealed class CheckContext
 
 public static class StepRegistry
 {
-	static readonly Dictionary<string, IStep> Steps = new IStep[] {
+	static IStep[] Own() => [
 		new ShaderStep(), new CleanSaveStep(), new SynthesisStep(), new LandscapeFixerStep(), new PgPatcherStep(),
 		new XLodGenStep(), new AcmosStep(), new GrassStep(), new TreeLodGenStep(), new TexGenStep(), new DynDolodStep(),
 		new AnvilLodStep(), new PandoraStep(), new PlaySaveStep(),
-	}.ToDictionary(s => s.Key);
+	];
+
+	static readonly Dictionary<string, IStep> Steps = Own().ToDictionary(s => s.Key);
 
 	public static IReadOnlyDictionary<string, IStep> All => Steps;
 
@@ -35,6 +37,15 @@ public static class StepRegistry
 
 	// the offline tests put their own steps in (a step that writes files, fails or waits) to drive the whole run
 	public static void Replace(IStep a_step) => Steps[a_step.Key] = a_step;
+
+	// the program's own steps again, every stand-in gone: the tests call it before each test, so none meets another's
+	public static void PutBackOwn()
+	{
+		Steps.Clear();
+		foreach (var s in Own()) {
+			Steps[s.Key] = s;
+		}
+	}
 }
 
 // what the steps share
