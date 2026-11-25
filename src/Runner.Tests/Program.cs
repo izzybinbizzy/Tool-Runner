@@ -4955,6 +4955,188 @@ public static class Program
 		}
 	}
 
+	// Every text the window's code hands to WindowWords - Word("..."), Format("...", values), F($"...") - has its words in every
+	// shipped language. Read off Runner.App's own source: a text added without its words fails here, not in front of a player
+	static void T_EveryTextTheCodeShowsIsInEveryLanguage()
+	{
+		var app = Path.Combine(Path.GetDirectoryName(SourceDir())!, "Runner.App");
+		if (!Directory.Exists(app)) {
+			Console.WriteLine($"  (skipped: the source is not at {app})");
+			return;
+		}
+		var keys = new SortedDictionary<string, string>(StringComparer.Ordinal);
+		foreach (var file in Directory.GetFiles(app, "*.cs")) {
+			var name = Path.GetFileName(file);
+			var code = File.ReadAllText(file);
+			// (in its own file the calls stand without the class's name: the ones its properties make, never a method's own first line)
+			var own = name == "WindowWords.cs";
+			foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(code, own ? @"(?<![A-Za-z_.])(Word|Format)\(" : @"WindowWords\.(Word|Format|F)\(")) {
+				if (own && code[Math.Max(0, m.Index - 30)..m.Index].TrimEnd().EndsWith("string", StringComparison.Ordinal)) {
+					continue;
+				}
+				var start = m.Index + m.Length;
+				var where = $"{name}:{code.AsSpan(0, start).Count('\n') + 1}";
+				if (m.Groups[1].Value == "F") {
+					var at = start;
+					while (char.IsWhiteSpace(code[at])) {
+						++at;
+					}
+					Check(code[at] == '$' && code[at + 1] == '"', $"{where}: F( takes one $\"...\" text");
+					keys.TryAdd(SourceInterpolated(code, at).Format, where);
+				} else {
+					var end = SourceSkip(code, start, m.Groups[1].Value == "Format" ? ")," : ")");
+					foreach (var text in SourceLiterals(code, start, end).Where(x => x.Trim() != "")) {
+						keys.TryAdd(text, where);
+					}
+				}
+			}
+		}
+		Check(keys.Count > 250, "the texts were found in the source: " + keys.Count);
+		foreach (var language in ToolRunner.App.WindowWords.Shipped()) {
+			var words = ToolRunner.App.WindowWords.Read(ToolRunner.App.WindowWords.ShippedText(language)!, out _)!;
+			var missing = keys.Where(k => !words.ContainsKey(k.Key)).Select(k => $"\"{k.Key}\" ({k.Value})").ToList();
+			Check(missing.Count == 0, $"{language} lacks {missing.Count} text(s) the code shows: {string.Join(" | ", missing.Take(4))}");
+		}
+	}
+
+	// --- C# source read for its texts: a string, an interpolated string, and the code between them
+	// a_s[a_i] opens a plain string: what it holds, and the place after its closing quote
+	static (string Value, int After) SourceString(string a_s, int a_i)
+	{
+		var sb = new StringBuilder();
+		var i = a_i + 1;
+		while (a_s[i] != '"') {
+			if (a_s[i] != '\\') {
+				sb.Append(a_s[i++]);
+				continue;
+			}
+			var n = a_s[i + 1];
+			if (n == 'u') {
+				sb.Append((char)int.Parse(a_s.AsSpan(i + 2, 4), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture));
+				i += 6;
+			} else {
+				sb.Append(n switch { 'n' => '\n', 't' => '\t', 'r' => '\r', '0' => '\0', _ => n });
+				i += 2;
+			}
+		}
+		return (sb.ToString(), i + 1);
+	}
+
+	// from a_i on, code is stepped over - strings, characters, comments, and brackets with all they hold - to the first of
+	// a_closers that stands outside every one of them: its place
+	static int SourceSkip(string a_s, int a_i, string a_closers)
+	{
+		var depth = 0;
+		for (var i = a_i; ; ++i) {
+			var c = a_s[i];
+			if (depth == 0 && a_closers.Contains(c)) {
+				return i;
+			}
+			if (c is '(' or '[' or '{') {
+				++depth;
+			} else if (c is ')' or ']' or '}') {
+				--depth;
+			} else if (c == '"') {
+				i = SourceString(a_s, i).After - 1;
+			} else if (c == '$' && a_s[i + 1] == '"') {
+				i = SourceInterpolated(a_s, i).After - 1;
+			} else if (c == '\'') {
+				i += a_s[i + 1] == '\\' ? 3 : 2;
+			} else if (c == '/' && a_s[i + 1] == '/') {
+				i = a_s.IndexOf('\n', i);
+			}
+		}
+	}
+
+	// a_s[a_i] is the $ of $"...": the text as a FormattableString gives it ({0}, {1:00} where the values stand), and the
+	// place after its closing quote
+	static (string Format, int After) SourceInterpolated(string a_s, int a_i)
+	{
+		var sb = new StringBuilder();
+		var holes = 0;
+		var i = a_i + 2;
+		while (a_s[i] != '"') {
+			var c = a_s[i];
+			if (c == '\\') {
+				var n = a_s[i + 1];
+				sb.Append(n switch { 'n' => '\n', 't' => '\t', 'r' => '\r', _ => n });
+				i += 2;
+			} else if ((c == '{' || c == '}') && a_s[i + 1] == c) {
+				sb.Append(c).Append(c);
+				i += 2;
+			} else if (c == '{') {
+				// (a value ends at its bracket, or at the comma or colon that begins how it is laid out)
+				var end = SourceSkip(a_s, i + 1, "},:");
+				var spec = "";
+				if (a_s[end] != '}') {
+					var close = SourceSkip(a_s, end, "}");
+					spec = a_s[end..close];
+					end = close;
+				}
+				sb.Append('{').Append(holes.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(spec).Append('}');
+				++holes;
+				i = end + 1;
+			} else {
+				sb.Append(c);
+				++i;
+			}
+		}
+		return (sb.ToString(), i + 1);
+	}
+
+	// the texts in the expression a_s[a_i..a_stop]: literals joined by + are one text, the two sides of a choice are two, and a
+	// literal a comparison stands right before is none (it is compared with, not shown)
+	static List<string> SourceLiterals(string a_s, int a_i, int a_stop)
+	{
+		var found = new List<string>();
+		string? cur = null;
+		var joined = false;
+		var compared = false;
+		for (var i = a_i; i < a_stop; ++i) {
+			var c = a_s[i];
+			if (c == '"') {
+				var (value, after) = SourceString(a_s, i);
+				if (compared) {
+					compared = false;
+				} else if (cur != null && joined) {
+					cur += value;
+				} else {
+					if (cur != null) {
+						found.Add(cur);
+					}
+					cur = value;
+				}
+				joined = false;
+				i = after - 1;
+			} else if (c == '$' && a_s[i + 1] == '"') {
+				Check(false, "a text with values in it goes through F($\"...\"), never Word or Format: " + a_s[i..Math.Min(a_s.Length, i + 60)]);
+			} else if (c == '/' && a_s[i + 1] == '/') {
+				i = a_s.IndexOf('\n', i);
+			} else if (c == '+') {
+				joined = true;
+			} else if (c is '=' or '!' && a_s[i + 1] == '=') {
+				var next = i + 2;
+				while (char.IsWhiteSpace(a_s[next])) {
+					++next;
+				}
+				compared = a_s[next] == '"';
+				++i;
+			} else if (!char.IsWhiteSpace(c)) {
+				if (c is '?' or ':' or ',') {
+					joined = false;
+				}
+				if ((char.IsLetter(c) || c is '_' or '(') && cur != null && !joined) {
+					found.Add(cur);
+					cur = null;
+				}
+			}
+		}
+		if (cur != null) {
+			found.Add(cur);
+		}
+		return found;
+	}
+
 	// a part of a window drawn again is walked again: a translation that is another text's English, with a translation of its
 	// own, would then be translated twice. And every value a text takes ({0}, {1:0.0}) is in its translation
 	static void T_NoTranslationIsAnotherTextsEnglish()

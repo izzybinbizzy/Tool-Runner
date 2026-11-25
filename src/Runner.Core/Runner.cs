@@ -1628,9 +1628,10 @@ public static class Runner
 	// The Mod Organizer a run worked in, for putting that run back or undoing it: the one its own record names. The setup may
 	// name another by now (its Mod Organizer changed in Settings, or a new setup made under the same name), and a run's lists
 	// must never be written into another Mod Organizer's profile of the same name. Where the record names none, or its
-	// Mod Organizer is no longer there (the folder was moved), the setup's is the one
+	// Mod Organizer or its instance folder is no longer there (moved since), the setup's is the one
 	static Mo2Instance Mo2Of(Journal a_j, Setup a_setup) =>
-		a_j.Mo2Exe != "" && File.Exists(a_j.Mo2Exe) ? Mo2Instance.Load(a_j.Mo2Exe, a_j.Mo2Instance) : Mo2Instance.Load(a_setup.Mo2Exe, a_setup.Mo2Instance);
+		a_j.Mo2Exe != "" && File.Exists(a_j.Mo2Exe) && (string.IsNullOrWhiteSpace(a_j.Mo2Instance) || File.Exists(Path.Combine(a_j.Mo2Instance, "ModOrganizer.ini")))
+			? Mo2Instance.Load(a_j.Mo2Exe, a_j.Mo2Instance) : Mo2Instance.Load(a_setup.Mo2Exe, a_setup.Mo2Instance);
 
 	static RunOutcome RestoreLocked(Journal a_j)
 	{

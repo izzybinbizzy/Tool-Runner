@@ -1332,7 +1332,8 @@ public static class SettingsPanel
 			break;
 		case ItemsControl items:
 			foreach (var i in items.Items.OfType<object>()) {
-				yield return i.ToString() ?? "";
+				// (an item that is a control says its class before its words: only its words are a row's words)
+				yield return i is ContentControl { Content: string said } ? said : i.ToString() ?? "";
 			}
 			break;
 		}
