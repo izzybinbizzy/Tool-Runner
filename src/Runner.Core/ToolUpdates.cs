@@ -90,8 +90,8 @@ public static partial class ToolUpdates
 	}
 
 	// is "newest" newer than "yours"? Versions are written many ways ("2.3.1.0" / "2.3.1", "3.0.0.217" / "Alpha-217"): equal
-	// numbers, or the page's numbers ending the program's, count as the same; else the numbers compare left to right. Unsure
-	// (no numbers) = not called newer.
+	// numbers count as the same; a page that shows one number alone is held against the program's last number; else the
+	// numbers compare left to right. Unsure (no numbers) = not called newer.
 	public static bool IsNewer(string a_yours, string a_newest)
 	{
 		var y = Parts(a_yours);
@@ -99,13 +99,10 @@ public static partial class ToolUpdates
 		if (y.Count == 0 || n.Count == 0 || y.SequenceEqual(n)) {
 			return false;
 		}
-		// the two short-form rules only for a page version written short ("Alpha-217"), never one shortened by its zeros ("2.0")
-		var shortForm = n.Count == Numbers().Count(a_newest);
-		if (shortForm && n.Count < y.Count && y.Skip(y.Count - n.Count).SequenceEqual(n)) {
-			return false;
-		}
-		if (shortForm && n.Count < y.Count && n.Count == 1) {
-			// one number on the page ("Alpha-218") against a full version: the last part decides
+		// One number on the page ("Alpha-218") against a full version: the last part decides. Only for a page version written
+		// as one number, never one shortened by its zeros ("2.0") - and never for two numbers or more: "1.2" ends "1.1.2"
+		// and is still the newer version
+		if (n.Count == 1 && y.Count > 1 && Numbers().Count(a_newest) == 1) {
 			return n[0] > y[^1];
 		}
 		for (var i = 0; i < Math.Max(y.Count, n.Count); ++i) {

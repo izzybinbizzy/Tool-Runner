@@ -4517,6 +4517,9 @@ public static class Program
 		Check(!ToolUpdates.IsNewer("", "1.0"), "no version of ours: never called newer");
 		Check(ToolUpdates.IsNewer("1.9.2", "2.0"), "2.0 (its zero trimmed) is newer than 1.9.2");
 		Check(!ToolUpdates.IsNewer("2.1.0", "2.0"), "2.0 is not newer than 2.1.0");
+		Check(ToolUpdates.IsNewer("1.1.2", "1.2"), "1.2 is newer than 1.1.2, though its numbers end it");
+		Check(ToolUpdates.IsNewer("1.2.1", "2.1"), "2.1 is newer than 1.2.1");
+		Check(!ToolUpdates.IsNewer("1.2", "1.1.2"), "and 1.1.2 is not newer than 1.2");
 		// the line under the rows counts every tool a row names (TexGen and DynDOLOD share one row)
 		var both = new ToolUpdates.Result("texgen", "TexGen / DynDOLOD", "3.0", "", false, "page", "could not ask its page: x", 2);
 		var one = new ToolUpdates.Result("pgpatcher", "PGPatcher", "1.0", "1.0", false, "page2", null);
@@ -7793,6 +7796,45 @@ public static class Program
 		Equal(1, removed.Count, "the oldest of the four goes: " + string.Join(", ", removed));
 		Check(!Directory.Exists(Named("2026-11-01 20-00-00", "Old Name")) && Directory.Exists(Named("2026-11-02 20-00-00", "Old Name")), "the oldest under the old name went, the newer one stays");
 		Check(Directory.Exists(stranger) && Directory.Exists(elsewhere), "a folder no record of the setup names, and one that stands elsewhere, are never touched");
+	}
+
+	// the program's own versions are compared number by number - never by the tools' rule, which reads a short version as the
+	// end of a long one
+	static void T_TheProgramsOwnVersionsCompareNumberByNumber()
+	{
+		Check(ProgramUpdate.IsNewer("1.1.2", "1.2"), "1.2 comes after 1.1.2");
+		Check(ProgramUpdate.IsNewer("1.2.1", "v2.1"), "2.1 comes after 1.2.1");
+		Check(ProgramUpdate.IsNewer("1.0.0.0", "v1.0.1"), "a third number");
+		Check(ProgramUpdate.IsNewer("1.9", "1.10"), "ten comes after nine");
+		Check(!ProgramUpdate.IsNewer("1.1.0.0", "v1.1"), "the same version written two ways");
+		Check(!ProgramUpdate.IsNewer("1.2", "1.1.9"), "an older one");
+		Check(!ProgramUpdate.IsNewer("1.2", "unknown") && !ProgramUpdate.IsNewer("", "1.2"), "a value with no number says nothing");
+	}
+
+	// a tool's version is remembered for the very program a step runs: a setup whose step runs another copy of the tool never
+	// reads the first one's version as its own tool having changed, and a store that does not read holds nothing
+	static void T_AToolsVersionIsKeptForTheProgramItIs()
+	{
+		using var f = new FakeMo2();
+		var mo2 = Mo2Instance.Load(f.Exe, f.Instance);
+		var one = Path.Combine(f.Root, "Tool one", "tool.exe");
+		var two = Path.Combine(f.Root, "Tool two", "tool.exe");
+		foreach (var (exe, at) in new[] { (one, new DateTime(2026, 1, 1, 10, 0, 0, DateTimeKind.Utc)), (two, new DateTime(2026, 2, 2, 10, 0, 0, DateTimeKind.Utc)) }) {
+			Directory.CreateDirectory(Path.GetDirectoryName(exe)!);
+			File.WriteAllText(exe, "x");
+			File.SetLastWriteTimeUtc(exe, at);
+		}
+		var setup = f.WriteSetup(("pandora", new JsonObject { ["exe"] = one }));
+		var first = new StepSettings(new JsonObject { ["exe"] = one });
+		var second = new StepSettings(new JsonObject { ["exe"] = two });
+		Equal(0, ToolVersions.Check(setup, mo2, "pandora", first).Count(), "nothing is known yet");
+		ToolVersions.Remember(setup, mo2, ["pandora"]);
+		Equal(0, ToolVersions.Check(setup, mo2, "pandora", first).Count(), "the same program at the same version");
+		Equal(0, ToolVersions.Check(setup, mo2, "pandora", second).Count(), "another copy of the tool is another program: nothing is known of it");
+		File.SetLastWriteTimeUtc(one, new DateTime(2026, 3, 3, 10, 0, 0, DateTimeKind.Utc));
+		Equal(1, ToolVersions.Check(setup, mo2, "pandora", first).Count(), "the program itself changed: said");
+		File.WriteAllText(Path.Combine(Path.GetDirectoryName(f.SetupFile)!, "tool versions.json"), "{ broken");
+		Equal(0, ToolVersions.Check(setup, mo2, "pandora", first).Count(), "a store that does not read holds nothing");
 	}
 
 	// a setup's run backups are listed newest first with their size, and the clean-up keeps the newest few -

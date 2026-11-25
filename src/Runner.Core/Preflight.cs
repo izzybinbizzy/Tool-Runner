@@ -216,7 +216,8 @@ public static class ToolVersions
 			var v = FileVersionInfo.GetVersionInfo(a_exe);
 			var ver = v.ProductVersion ?? v.FileVersion;
 			return string.IsNullOrWhiteSpace(ver) ? File.GetLastWriteTimeUtc(a_exe).ToString("yyyy-MM-dd HH:mm", InvariantCulture) : ver.Trim();
-		} catch (FileNotFoundException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			// not there, or not to be read right now (a scanner holds it): no version is known
 			return "";
 		}
 	}
@@ -230,18 +231,27 @@ public static class ToolVersions
 			yield break;
 		}
 		var now = Version(exe);
+		if (now == "") {
+			yield break;
+		}
 		var known = Load(a_setup);
-		if (known.TryGetValue(a_key, out var was) && was != now) {
+		if (known.TryGetValue(KeyOf(a_key, exe), out var was) && was != now) {
 			yield return new Issue(a_key, false, $"{StepCatalog.Name(a_key)} changed since the last run that finished ({was} -> {now}) - read its update notes if it fails");
 		}
 	}
+
+	// One store serves every setup in the folder, so a version is kept under the step AND the program's own place: two setups
+	// whose step runs two copies of a tool (two Mod Organizers) keep a version each, and a run of one never reads as the
+	// other's tool having changed
+	static string KeyOf(string a_step, string a_exe) => a_step + " | " + Path.GetFullPath(a_exe).ToUpperInvariant();
 
 	public static Dictionary<string, string> Load(Setup a_setup)
 	{
 		var f = StoreFile(a_setup);
 		try {
 			return File.Exists(f) ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(Files.ReadShared(f)) ?? [] : [];
-		} catch (System.Text.Json.JsonException) {
+		} catch (Exception e) when (e is System.Text.Json.JsonException or IOException or UnauthorizedAccessException) {
+			// a store that does not read is no store: a notice the check would have added is never what stops a start
 			return [];
 		}
 	}
@@ -251,8 +261,10 @@ public static class ToolVersions
 		var known = Load(a_setup);
 		foreach (var k in a_doneSteps) {
 			var s = new StepSettings(a_setup.StepSettings(k) ?? []);
-			if (ProgramOf(a_mo2, s) is { } exe && File.Exists(exe)) {
-				known[k] = Version(exe);
+			if (ProgramOf(a_mo2, s) is { } exe && File.Exists(exe) && Version(exe) is { Length: > 0 } version) {
+				known[KeyOf(k, exe)] = version;
+				// (a version an earlier build kept under the step alone)
+				known.Remove(k);
 			}
 		}
 		Files.WriteAtomic(StoreFile(a_setup), System.Text.Json.JsonSerializer.Serialize(known, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
