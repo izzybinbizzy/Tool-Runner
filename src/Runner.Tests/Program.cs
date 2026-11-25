@@ -11618,6 +11618,77 @@ public static class Program
 		Check(!Due(1e300) && !Due(double.NaN) && !Due(0) && !Due(6) && Due(5) && Due(1), "a reminder every 1e300 minutes is never due, and no error");
 	}
 
+	// a shader log is asked by what it says, kept as it grows: the answer is the whole log's, and the log itself is never kept
+	static void T_AShaderLogIsKeptAsWhatItSays()
+	{
+		static ShaderStep.Look Of(string a_text, int a_files = 500) => new(a_text, a_files, 400, TimeSpan.FromSeconds(40), TimeSpan.FromSeconds(40), 0.2, 6.0, TimeSpan.FromSeconds(40), true);
+		var noise = string.Concat(Enumerable.Range(0, 3000).Select(i => $"[12:00:{i % 60:00}.000] [info] compiled shader {i} in 12 ms\n"));
+		var timing = string.Concat(Enumerable.Range(0, 500).Select(i => $"[12:01:{i % 60:00}.000] [info] [ShaderTiming] slow shader {i}: 900 ms, remaining={500 - i}\n"));
+		// Open Shaders: its own lines open and close a compile
+		var open = "Open Shaders 2.20.0\nLoading Settings Complete\n" + noise + "[12:00:05] Shader compilation started\n" + noise;
+		var closed = open + "[12:20:00] Shader compilation completed in 1200 s\n";
+		// Bottled Shaders: a count of what is left
+		var counting = "Loaded theme\n" + noise + timing;
+		var counted = counting + "[12:30:00.000] [info] [ShaderTiming] slow shader: 900 ms, remaining=0\n";
+		foreach (var (name, log) in new[] { ("a compile still open", open), ("a compile that closed", closed), ("a count still above none", counting), ("a count at none", counted),
+			         ("a shader mod that stood down", "Incompatible DLL found: Remove it to use this mod\n" + noise), ("a log that says nothing", noise) }) {
+			// fed as it grows: in pieces that end anywhere, the last line not yet whole at some looks
+			var digest = new ShaderStep.LogDigest();
+			var whole = "";
+			for (var at = 0; at < log.Length; at += 7919) {
+				var piece = log[at..Math.Min(log.Length, at + 7919)];
+				var before = whole.Length - (whole.LastIndexOf('\n') + 1);
+				whole += piece;
+				// (the lines this piece made whole: from the end of the last whole line before it to the last line end now)
+				var from = whole.Length - piece.Length - before;
+				var end = whole.LastIndexOf('\n') + 1;
+				if (end > from) {
+					digest.Take(whole[from..end]);
+				}
+				var text = digest.TextWith(whole[end..]);
+				Equal(ShaderStep.Done(Of(whole), 50, TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(30)), ShaderStep.Done(Of(text), 50, TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(30)),
+					$"{name}, {whole.Length} letters in: is the compile over - asked of what is kept as of the whole log");
+				Equal(InGame.RemainingIn(whole), InGame.RemainingIn(text), $"{name}: the last count of what is left");
+			}
+			var kept = digest.Text;
+			Check(kept.Length < 60_000 && kept.Length <= log.Length, $"{name}: what is kept stays small ({kept.Length} letters of {log.Length})");
+			Equal(System.Text.RegularExpressions.Regex.IsMatch(log, "Loading Settings Complete|Loaded theme|Shader compilation started|ShaderTiming"),
+				System.Text.RegularExpressions.Regex.IsMatch(kept, "Loading Settings Complete|Loaded theme|Shader compilation started|ShaderTiming"), $"{name}: whether the shader mod shows it runs");
+			Equal(System.Text.RegularExpressions.Regex.Match(log, @"^.*(Incompatible DLL|Remove it to use|disabled itself|will not run).*$", System.Text.RegularExpressions.RegexOptions.Multiline).Value,
+				System.Text.RegularExpressions.Regex.Match(kept, @"^.*(Incompatible DLL|Remove it to use|disabled itself|will not run).*$", System.Text.RegularExpressions.RegexOptions.Multiline).Value,
+				$"{name}: the line it stood down with");
+			digest.Restart();
+			Equal("", digest.Text, "a log that began anew is asked anew");
+		}
+		// the reader that feeds it: only what a look found new, the log never kept
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "digest " + Guid.NewGuid().ToString("N")[..8]);
+		Directory.CreateDirectory(dir);
+		try {
+			var file = Path.Combine(dir, "shader.log");
+			File.WriteAllText(file, "first line\nsecond li");
+			var reader = new GrowingText { KeepAll = false };
+			Equal("first line\n", reader.Read(file), "the first look: every whole line");
+			Check(reader.Restarted && reader.Added == "first line\n" && reader.Unfinished == "second li", "... told as a new beginning, with the line still being written apart");
+			File.AppendAllText(file, "ne\nthird\n");
+			Equal("second line\nthird\n", reader.Read(file), "the next look: only what it found new");
+			Check(!reader.Restarted && reader.Unfinished == "", "... and no new beginning");
+			Equal("", reader.Read(file), "a look that finds nothing new gives nothing");
+			File.WriteAllText(file, "another log\n");
+			Equal("another log\n", reader.Read(file), "a file that was replaced is read from its start");
+			Check(reader.Restarted, "... and told as a new beginning");
+			// files counted, summed and dated off the walk itself
+			File.WriteAllBytes(Path.Combine(dir, "five.bin"), new byte[5]);
+			Directory.CreateDirectory(Path.Combine(dir, "sub"));
+			File.WriteAllBytes(Path.Combine(dir, "sub", "seven.bin"), new byte[7]);
+			Equal(3, Files.CountFiles(dir), "every file under a folder is counted");
+			Equal(Files.Under(dir).Sum(f => f.Length), Files.SizeOf(dir), "their sizes add up to what the files themselves say");
+			Equal(Files.Under(dir).Max(f => f.LastWriteTimeUtc), Files.NewestWrite(dir), "and the newest of them is found");
+			Equal(0, Files.CountFiles(Path.Combine(dir, "not there")), "a folder that is not there holds none");
+		} finally {
+			Directory.Delete(dir, true);
+		}
+	}
+
 	// the window's look: every run folder is asked about only when something says a record changed - where the folder is watched
 	static void T_ALookDoesNotWalkEveryRunFolderWhileNothingChanged()
 	{

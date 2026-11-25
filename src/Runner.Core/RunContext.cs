@@ -240,9 +240,12 @@ public sealed class Toggle : IDisposable
 		// a Stop already asked for: nothing is switched and nothing started
 		a_ct.ThrowIfCancellationRequested();
 		var st = a_ctx.Profile.States();
-		var en = a_enable.Where(m => st.ContainsKey(m)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-		var dis = a_disable.Where(m => st.ContainsKey(m) && !en.Contains(m, StringComparer.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-		foreach (var m in a_enable.Concat(a_disable).Where(m => !st.ContainsKey(m)).Distinct()) {
+		// (each list gone through once, whatever the caller handed in: one that is worked out as it is read was worked out
+		// three times)
+		var (enable, disable) = (a_enable.ToList(), a_disable.ToList());
+		var en = enable.Where(m => st.ContainsKey(m)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+		var dis = disable.Where(m => st.ContainsKey(m) && !en.Contains(m, StringComparer.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+		foreach (var m in enable.Concat(disable).Where(m => !st.ContainsKey(m)).Distinct()) {
 			a_ctx.Log.Detail($"(not in this profile, skipped: {m})");
 		}
 		a_ctx.Control.Close(null, a_ct);

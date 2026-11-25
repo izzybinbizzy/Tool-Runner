@@ -1475,7 +1475,8 @@ public sealed partial class MainViewModel : Observable
 		} finally {
 			Restoring = false;
 		}
-		Poll();
+		// (off the window's thread, as every other look: it reads Windows' process list and the run records)
+		await PollAsync();
 		LoadHistory();
 	}
 
@@ -1496,7 +1497,8 @@ public sealed partial class MainViewModel : Observable
 		} finally {
 			Restoring = false;
 		}
-		Poll();
+		// (off the window's thread, as every other look: it reads Windows' process list and the run records)
+		await PollAsync();
 		LoadHistory();
 		_ = LoadLastRuns();
 	}

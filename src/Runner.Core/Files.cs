@@ -210,11 +210,14 @@ public static partial class Files
 	// Every file under a folder. A folder inside that is a link to another folder (a junction, a symbolic link) is not gone
 	// into: what it points at stands somewhere else and is no part of this folder, and a link to a folder above itself would
 	// never end. A folder that cannot be read stops the walk, as it stops Windows' own
-	public static IEnumerable<FileInfo> Under(string a_dir) =>
-		new FileSystemEnumerable<FileInfo>(a_dir, (ref FileSystemEntry a_e) => (FileInfo)a_e.ToFileSystemInfo(), Whole) {
-			ShouldIncludePredicate = (ref FileSystemEntry a_e) => !a_e.IsDirectory,
-			ShouldRecursePredicate = (ref FileSystemEntry a_e) => (a_e.Attributes & FileAttributes.ReparsePoint) == 0,
-		};
+	public static IEnumerable<FileInfo> Under(string a_dir) => Under<FileInfo>(a_dir, (ref FileSystemEntry a_e) => (FileInfo)a_e.ToFileSystemInfo());
+
+	// ... each as what the caller asks of it, taken off the walk's own entry: a count, a size or a time needs no object and
+	// no path made for every file
+	static FileSystemEnumerable<T> Under<T>(string a_dir, FileSystemEnumerable<T>.FindTransform a_as) => new(a_dir, a_as, Whole) {
+		ShouldIncludePredicate = (ref FileSystemEntry a_e) => !a_e.IsDirectory,
+		ShouldRecursePredicate = (ref FileSystemEntry a_e) => (a_e.Attributes & FileAttributes.ReparsePoint) == 0,
+	};
 
 	// the links to other folders under a folder: the ones Under does not go into
 	public static List<string> LinksUnder(string a_dir) =>
@@ -223,9 +226,32 @@ public static partial class Files
 			ShouldRecursePredicate = (ref FileSystemEntry a_e) => (a_e.Attributes & FileAttributes.ReparsePoint) == 0,
 		}];
 
-	public static int CountFiles(string a_dir) => Directory.Exists(a_dir) ? Under(a_dir).Count() : 0;
+	// (A cache step counts its cache at every look, every few seconds for as long as it runs: a grass cache is tens of
+	// thousands of files, a shader cache thousands. Counted through Under, each look made an object and a path for every one
+	// of them, only to throw them away)
+	public static int CountFiles(string a_dir)
+	{
+		if (!Directory.Exists(a_dir)) {
+			return 0;
+		}
+		var n = 0;
+		foreach (var _ in Under<byte>(a_dir, (ref FileSystemEntry a_e) => 0)) {
+			++n;
+		}
+		return n;
+	}
 
-	public static long SizeOf(string a_dir) => Directory.Exists(a_dir) ? Under(a_dir).Sum(f => f.Length) : 0;
+	public static long SizeOf(string a_dir)
+	{
+		if (!Directory.Exists(a_dir)) {
+			return 0;
+		}
+		long sum = 0;
+		foreach (var length in Under<long>(a_dir, (ref FileSystemEntry a_e) => a_e.Length)) {
+			sum += length;
+		}
+		return sum;
+	}
 
 	public static DateTime NewestWrite(string a_dir)
 	{
@@ -233,9 +259,9 @@ public static partial class Files
 			return DateTime.MinValue;
 		}
 		var newest = DateTime.MinValue;
-		foreach (var f in Under(a_dir)) {
-			if (f.LastWriteTimeUtc > newest) {
-				newest = f.LastWriteTimeUtc;
+		foreach (var written in Under<DateTime>(a_dir, (ref FileSystemEntry a_e) => a_e.LastWriteTimeUtc.UtcDateTime)) {
+			if (written > newest) {
+				newest = written;
 			}
 		}
 		return newest;
@@ -449,6 +475,22 @@ public sealed class GrowingText
 	byte[] _head = [];
 	Encoding _how = new UTF8Encoding(false);
 
+	// False: the lines read so far are not kept, and Read gives only what the look added (Added). For a reader that takes
+	// what it needs from each addition: kept whole, a log of megabytes was made anew as one text at every look that found
+	// a new line
+	public bool KeepAll { get; init; } = true;
+
+	// what the last Read found new: the whole lines that were not there at the look before - every whole line, when the
+	// file was read from its start (Restarted)
+	public string Added { get; private set; } = "";
+
+	// the line still being written at the last Read (it has no end yet, and is read again at the next look)
+	public string Unfinished { get; private set; } = "";
+
+	// the last Read began the file from its start: its first look, a file that was replaced, or one that turned out to be
+	// written another way than its first lines said
+	public bool Restarted { get; private set; }
+
 	public string Read(string a_path)
 	{
 		using var fs = new FileStream(a_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -466,13 +508,17 @@ public sealed class GrowingText
 			// New lines that are no UTF-8, in a file whose lines so far (plain letters only) had passed for it: the file is in
 			// the PC's own code page, and is read from its start again as that
 			if (_how.CodePage != Utf8 || IsUtf8(added[..end])) {
-				_lines += _how.GetString(added, 0, end);
+				(Added, Unfinished, Restarted) = (_how.GetString(added, 0, end), end == read ? "" : _how.GetString(added, end, read - end), false);
 				_pos += end;
 				// (a file that was shorter than the head kept of it has grown past it: the head is filled up, so a replaced file is told)
 				if (_head.Length < HeadSize) {
 					_head = head[..headGot];
 				}
-				return end == read ? _lines : _lines + _how.GetString(added, end, read - end);
+				if (!KeepAll) {
+					return Added;
+				}
+				_lines += Added;
+				return Unfinished == "" ? _lines : _lines + Unfinished;
 			}
 		}
 		fs.Position = 0;
@@ -483,14 +529,22 @@ public sealed class GrowingText
 		_path = a_path;
 		_head = all[..Math.Min(HeadSize, got)];
 		_pos = cut;
+		Restarted = true;
 		if (cut == 0) {
 			// no whole line yet, or two bytes a letter: nothing is kept, and the next look reads all of it again
 			_how = how;
 			_lines = "";
+			(Added, Unfinished) = Wide(how) ? (text, "") : ("", text);
 			return text;
 		}
-		_lines = Files.DecodeText(all[..cut], out _how);
-		return cut == got ? _lines : _lines + _how.GetString(all, cut, got - cut);
+		var lines = Files.DecodeText(all[..cut], out _how);
+		(Added, Unfinished) = (lines, cut == got ? "" : _how.GetString(all, cut, got - cut));
+		if (!KeepAll) {
+			_lines = "";
+			return Added;
+		}
+		_lines = lines;
+		return Unfinished == "" ? _lines : _lines + Unfinished;
 	}
 
 	static bool Wide(Encoding a_how) => a_how.CodePage is 1200 or 1201;

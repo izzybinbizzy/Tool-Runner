@@ -676,6 +676,56 @@ public sealed class ShaderStep : IStep
 	// LowFor: how long it has stayed under IdleLine of its peak
 	public sealed record Look(string LogText, int Files, int NewThisStart, TimeSpan SinceNewFile, TimeSpan SinceLogWrite, double? Cores, double PeakCores, TimeSpan LowFor, bool Sane);
 
+	// What the step asks a shader log, kept as the log grows - never the log itself. The step looks every five seconds for
+	// as long as the compile runs (twenty minutes and more), and asked the whole log each time: it was kept as one text that
+	// was made anew at every look that found a new line, and split into its lines again to find the last one that matters -
+	// megabytes made and thrown away at each look. Of every line the log gains, only these are kept: one that says a compile
+	// began or ended, one by which the shader mod shows it runs or that it stood down, and the last count of what is left.
+	// Its Text answers Done, and the step's own two questions, as the whole log did.
+	public sealed class LogDigest
+	{
+		// (lines that say the same thing over and over are kept once: a "[ShaderTiming]" line comes for every shader)
+		const int Most = 400;
+
+		readonly List<string> _kept = [];
+		string? _timing, _remaining;
+
+		// the words the step and Done look for in a log
+		static readonly string[] Marks = ["Shader compilation started", "Shader compilation completed", "Loading Settings Complete", "Loaded theme", "Incompatible DLL", "Remove it to use",
+			"disabled itself", "will not run"];
+
+		public void Restart()
+		{
+			_kept.Clear();
+			(_timing, _remaining) = (null, null);
+		}
+
+		// the whole lines a look found new
+		public void Take(string a_added)
+		{
+			foreach (var raw in a_added.Split('\n', StringSplitOptions.RemoveEmptyEntries)) {
+				var line = raw.TrimEnd('\r');
+				if (InGame.RemainingIn(line) != null) {
+					_remaining = line;
+				} else if (Marks.Any(m => line.Contains(m, StringComparison.Ordinal))) {
+					// (never without end: the oldest go first, and the newest are the ones that are asked about)
+					if (_kept.Count >= Most) {
+						_kept.RemoveAt(0);
+					}
+					_kept.Add(line);
+				} else if (_timing == null && line.Contains("ShaderTiming", StringComparison.Ordinal)) {
+					_timing = line;
+				}
+			}
+		}
+
+		// what is kept, as lines in the order the log has them (the last count stands last: it is the newest of its kind)
+		public string Text => string.Join("\n", new[] { _timing }.Concat(_kept).Append(_remaining).OfType<string>());
+
+		// ... with the line still being written, which may be the one that says the compile ended
+		public string TextWith(string a_unfinished) => a_unfinished == "" ? Text : Text + "\n" + a_unfinished;
+	}
+
 	// a compile was seen working once the game used this many cores
 	public const double BusyCores = 1.5;
 
@@ -803,16 +853,25 @@ public sealed class ShaderStep : IStep
 					var peak = 0.0;
 					double? cores = null;
 					Stopwatch? low = null;
-					// this start's shader log, whole (its first lines say whether the shader mod runs and whether a compile is
-					// open), read as it grows
-					var grown = new GrowingText();
+					// this start's shader log, read as it grows and asked by what it says (LogDigest): its first lines say whether
+					// the shader mod runs and whether a compile is open
+					var grown = new GrowingText { KeepAll = false };
+					var said = new LogDigest();
 					while (!g.HasExited) {
 						a_ctx.Cancel.ThrowIfCancellationRequested();
 						// (looked up again at every look: a mapped log folder may only be made during this start)
 						logs = InGame.LogFolders(a_ctx.Setup, a_ctx.Mo2);
 						var log = InGame.NewestShaderLog(logs);
 						var logFresh = log != null && File.GetLastWriteTimeUtc(log) >= started.AddSeconds(-5);
-						var text = logFresh ? grown.Read(log!) : "";
+						var text = "";
+						if (logFresh) {
+							grown.Read(log!);
+							if (grown.Restarted) {
+								said.Restart();
+							}
+							said.Take(grown.Added);
+							text = said.TextWith(grown.Unfinished);
+						}
 						var n = Files.CountFiles(owCache);
 						// the shader mod must show it runs within a few minutes (it stands down beside a DLL it refuses).
 						// Shaders arriving in the cache ARE that sign: a log can be elsewhere (SKSE's log folder moved) or late - a
