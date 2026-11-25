@@ -4,12 +4,10 @@ using ToolRunner.Steps;
 namespace ToolRunner;
 
 // His checklist 456: the tools' output plugins against the place each tool's OWN documents give them, and nothing else - a warning, never
-// a refusal, naming the plugin that is in the way. LOOT sorts all of these by itself, so the advice is LOOT's.
+// a refusal, naming the plugin that is in the way.
 //   DynDOLOD.esm the ESM with the highest priority, DynDOLOD.esp and Occlusion.esp the last plugins, Occlusion.esp after DynDOLOD.esp
 //     (dyndolod.info/Help/Load-Overwrite-Orders);
-//   PG_1.esp and its fellows loaded last except for the DynDOLOD and TexGen outputs (PGPatcher's wiki, Basic Usage);
-//   the Bashed Patch last unless a plugin says it must load last (Wrye Bash's readme) - so it is in the way of the plugins above only,
-//     and those rules name it, whatever its number.
+//   PG_1.esp and its fellows loaded last except for the DynDOLOD and TexGen outputs (PGPatcher's wiki, Basic Usage).
 // Synthesis.esp, PGPatcher.esp and LandscapeFixer.esp have no documented place: they are not checked.
 public static partial class PluginPlaces
 {
@@ -38,7 +36,7 @@ public static partial class PluginPlaces
 		void Say(string a_plugin, string a_text)
 		{
 			if (named.Add(a_plugin)) {
-				outList.Add(new Issue("", false, a_text + " - LOOT sorts it there"));
+				outList.Add(new Issue("", false, a_text + " - move it there in your plugin order"));
 			}
 		}
 		bool LastOnes(string a_p) => Is(a_p, DynEsp) || Is(a_p, Occlusion);

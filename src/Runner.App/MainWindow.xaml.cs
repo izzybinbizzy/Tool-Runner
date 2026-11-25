@@ -108,6 +108,9 @@ public partial class MainWindow : Window
 		// (never for the off-screen pictures: no web question, no file written into that data folder, no banner in a picture)
 		Loaded += async (_, _) => {
 			if (!App.Headless) {
+				// what an install of a new version set aside is removed now, and what that version brings is said once
+				_ = Task.Run(() => ProgramUpdate.CleanUp(AppPaths.Data));
+				await SayWhatIsNew();
 				await _vm.LookForNewVersion(AppVersion);
 			}
 		};
@@ -746,12 +749,13 @@ public partial class MainWindow : Window
 			var end = at < 0 ? -1 : box.Text.IndexOf('\n', at);
 			Reveal(at, at < 0 ? 0 : (end < 0 ? box.Text.Length : end) - at, "No line of this log is marked as a problem.");
 		}
-		problem.Click += (_, _) => {
+		problem.Click += async (_, _) => {
 			// the simple log marks no line (only the detailed one says "!" and "!!!"): the detailed log is shown first, and the
-			// search runs once its text is in (CodeRabbit on pull request #38)
+			// search runs once its text is in the box (it is read on a worker)
 			if (!_vm.DetailedLog) {
 				_vm.DetailedLog = true;
-				Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, ShowFirstProblem);
+				await _vm.LogRead;
+				await Dispatcher.InvokeAsync(ShowFirstProblem, System.Windows.Threading.DispatcherPriority.Background);
 				return;
 			}
 			ShowFirstProblem();
@@ -824,6 +828,21 @@ public partial class MainWindow : Window
 		!_panels.ContainsKey("settings") || !SettingsPanel.HasChanges ||
 		Ask.Show(Over("settings"), "Settings not saved", "You changed settings and did not press Save. Leave without saving them?", "Leave without saving", "Keep editing");
 
+	// the settings window closed without its question: it was asked and answered a line before
+	void CloseSettingsUnasked()
+	{
+		if (!_panels.TryGetValue("settings", out var open)) {
+			return;
+		}
+		var all = _closingAll;
+		_closingAll = true;
+		try {
+			open.Close();
+		} finally {
+			_closingAll = all;
+		}
+	}
+
 	// the off-screen pictures only: the live view stops and a made-up run is shown (a_frame moves it on a minute a frame)
 	public void Demo(bool a_waiting, int a_frame = 0)
 	{
@@ -884,7 +903,8 @@ public partial class MainWindow : Window
 			_panels[group] = w;
 			w.PreviewKeyDown += OnKeys;
 			w.Closing += (_, e) => {
-				if (group == "settings" && !_closingAll && !LeaveSettings()) {
+				// (a tool opened from it to learn its settings is stopped first, or the window stays - never left with nothing to stop it)
+				if (group == "settings" && ((!_closingAll && !LeaveSettings()) || !SettingsPanel.LeaveLearning(Over("settings")))) {
 					e.Cancel = true;
 				}
 			};
@@ -1206,6 +1226,175 @@ public partial class MainWindow : Window
 		new("xlodgen", "xLODGen", null), new("texgen", "TexGen", new ToolSettings.Learned { At = new DateTime(2026, 10, 27, 20, 14, 0, DateTimeKind.Local), Files = [new()] }),
 		new("dyndolod", "DynDOLOD", null), new("pandora", "Pandora", null)], true, out _);
 
+	// ---------------------------------------------------------------- a new version of the program itself
+	// The first start of another version than the last one started here: its own lines of the changelog, and every setup key it
+	// reads differently, in one box - once. A first start ever shows nothing (there is no version before to compare with).
+	async Task SayWhatIsNew()
+	{
+		var before = UiState.Text("version.seen");
+		if (before == AppVersion) {
+			return;
+		}
+		if (before == "") {
+			UiState.Set("version.seen", AppVersion);
+			return;
+		}
+		// read off the window's thread (the program's folder may be slow to answer); a changelog that does not read leaves the
+		// version unmarked, so its notice is tried again at the next start instead of lost
+		var changelog = Path.Combine(Path.GetDirectoryName(AppPaths.Exe) ?? "", "CHANGELOG.txt");
+		var now = AppVersion;
+		var lines = await Task.Run(() => ProgramUpdate.ReadWhatsNew(changelog, before, now));
+		if (lines == null || UiState.Text("version.seen") != before) {
+			return;
+		}
+		UiState.Set("version.seen", AppVersion);
+		if (lines.Count > 0) {
+			Ask.Tell(this, $"New in {Brand.Name} {AppVersion}", $"You had version {before} before.\n\n" + string.Join("\n", lines), "Close");
+		}
+	}
+
+	// what the box before an install says: where the new version comes from, where it goes, and what is never touched
+	static string InstallText(ProgramUpdate.Release a_release, string a_folder) =>
+		$"{Brand.Name} {a_release.Version} is taken from its GitHub release{(a_release.Size > 0 ? $" ({a_release.Size / 1024.0 / 1024:0.0} MB)" : "")}, checked, " +
+		$"and put in place of this version in:\n{a_folder}\n\n" +
+		"Your setups, run records and backups are not touched - they stay in the data folder.\n\n" +
+		"This version's files are set aside beside the new ones until the next start, and every step is taken back if one fails. " +
+		"The program then closes and starts again by itself.";
+
+	// the off-screen pictures: the banner of a made-up newer version, and the box before its install
+	public void DemoNewVersion(bool a_show) => _vm.DemoNewVersion(a_show ? "1.1" : "");
+
+	public Window DemoInstallBox() => Ask.Make(this, $"Install {Brand.Name} 1.1?",
+		InstallText(new ProgramUpdate.Release("1.1", $"{Brand.Name} 1.1.zip", "", 1_290_000, null), Path.Combine("D:", "Modding", "Tools", Brand.Name)), "Download and install", "Not now", _ => { });
+
+	// His list of 2026-11-16, point 1: a new version taken and installed from inside the program. Only from the program's own
+	// GitHub release, checked before anything is replaced, and never while a run goes. The data folder is no part of it.
+	bool _installing;
+
+	async void InstallNew_Click(object a_s, RoutedEventArgs a_e)
+	{
+		if (_installing) {
+			return;
+		}
+		// a run, or the window's own work (a put-back, an undo, a tool's settings being learned): either may be using the
+		// program's files, so nothing is replaced under it - asked again after each wait below, where such work can begin
+		// (CodeRabbit on pull request #37)
+		bool Busy()
+		{
+			if (_vm.IsRunning || _vm.Starting) {
+				_vm.Say("A run is going: install the new version when it is done.", "bad");
+				return true;
+			}
+			if (_vm.InHand != "") {
+				_vm.Say($"Not now: {_vm.InHand}. Install the new version when that is done.", "bad");
+				return true;
+			}
+			return false;
+		}
+		if (Busy()) {
+			return;
+		}
+		_installing = true;
+		try {
+			ProgramUpdate.Release release;
+			try {
+				release = await Task.Run(() => ProgramUpdate.Latest(CancellationToken.None));
+			} catch (Exception e) when (e is System.Net.Http.HttpRequestException or TaskCanceledException or InvalidOperationException or JsonException or NotSupportedException) {
+				_vm.Say($"The new version could not be looked up ({e.Message}) - its download page has it.", "bad");
+				return;
+			}
+			if (Busy()) {
+				return;
+			}
+			var folder = Path.GetDirectoryName(AppPaths.Exe) ?? AppContext.BaseDirectory;
+			if (!Ask.Show(this, $"Install {Brand.Name} {release.Version}?", InstallText(release, folder), "Download and install", "Not now")) {
+				return;
+			}
+			// settings typed and not saved are asked about now, before anything is taken down (the program closes at the end);
+			// on "leave" their window goes at once, so nothing more is typed into it meanwhile
+			if (!LeaveSettings() || Busy()) {
+				return;
+			}
+			CloseSettingsUnasked();
+			string exe;
+			// The window stays until the new files are in place AND the restart is decided (WorkInHand): closed half way, the program
+			// would stand half replaced, and a close asked for meanwhile must not cut off the start of the new version. A close
+			// asked for while it went happens when the hand is let go - at once on a failure, after the decision on a success
+			var hand = Working($"{Brand.Name} {release.Version} is being installed");
+			var restarted = false;
+			try {
+				try {
+					var progress = new Progress<long>(n => _vm.Say($"Downloading {Brand.Name} {release.Version}: {n / 1024.0 / 1024:0.0} MB ...", ""));
+					var zip = await Task.Run(() => ProgramUpdate.Download(release, AppPaths.Data, progress, CancellationToken.None));
+					_vm.Say("Putting the new version in place ...", "");
+					exe = await Task.Run(() => ProgramUpdate.Install(zip, folder, AppPaths.Data));
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or InvalidDataException or System.Net.Http.HttpRequestException or TaskCanceledException) {
+					// (InvalidDataException: a file of the download that does not unpack - Install has put everything back first)
+					_vm.Say($"Not installed: {e.Message}. Nothing of this version was changed - its download page has the new one.", "bad");
+					return;
+				}
+				restarted = await RestartInto(exe, release.Version);
+			} finally {
+				if (restarted) {
+					// this window closes itself now; a close asked for meanwhile is that same close
+					_closeWhenFree = false;
+				}
+				hand.Dispose();
+			}
+			if (restarted) {
+				Close();
+			}
+		} finally {
+			_installing = false;
+		}
+	}
+
+	// after an install: settings asked about once more, what this window remembers written, and the new version started -
+	// true when it started and this window is to close
+	async Task<bool> RestartInto(string a_exe, string a_version)
+	{
+		// (settings opened and changed again while the download ran: asked once more - on "keep editing" this window
+		// stays, and the new version starts when the player starts it)
+		if (!LeaveSettings()) {
+			_vm.Say($"{Brand.Name} {a_version} is installed - close this window when you are done here and start it again.", "warn");
+			return false;
+		}
+		// What this window remembers goes into its file NOW, before the new version starts. Both programs read and write
+		// that one file: started first, the new one wrote "the version last seen", and this window's own write as it
+		// closed put the old value back over it - what is new was then shown a second time. With everything written
+		// here (waited for), its close a moment later finds nothing left to write
+		var logWasOut = _logWindow != null;
+		_closingAll = true;
+		KeepSize();
+		ClosePanels();
+		await Task.Run(UiState.Save);
+		// a write that failed is tried once more; still not written, the new version is not started from here: this window's
+		// own write as it closed would put the old values back over the new version's (CodeRabbit on pull request #37)
+		if (UiState.Unsaved) {
+			await Task.Run(UiState.Save);
+		}
+		if (UiState.Unsaved) {
+			_closingAll = false;
+			if (logWasOut) {
+				ShowLogHere(_logWasHere);
+			}
+			_vm.Say($"{Brand.Name} {a_version} is installed, but this window's own settings could not be written just now - close this window and start the new version yourself.", "warn");
+			return false;
+		}
+		try {
+			System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(a_exe) { UseShellExecute = true })?.Dispose();
+		} catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) {
+			// this window stays after all: the log, when it was in a window of its own, is shown here again
+			_closingAll = false;
+			if (logWasOut) {
+				ShowLogHere(_logWasHere);
+			}
+			_vm.Say($"{Brand.Name} {a_version} is installed, but it did not start by itself ({e.Message}) - close this window and start it again.", "warn");
+			return false;
+		}
+		return true;
+	}
+
 	// ---------------------------------------------------------------- a new setup
 	void Queue_Click(object a_s, RoutedEventArgs a_e)
 	{
@@ -1410,13 +1599,30 @@ public static class Ask
 		var why = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0), Foreground = Brushes2.Get("Bad") };
 		var yes = new Button { Content = a_yes, Style = (Style)a_owner.FindResource("Primary"), Margin = new Thickness(0, 0, 10, 0), IsDefault = true };
 		var no = new Button { Content = "Cancel", Style = (Style)a_owner.FindResource("Ghost"), IsCancel = true };
-		void Judge() => why.Text = a_bad(box.Text) ?? "";
-		box.TextChanged += (_, _) => Judge();
-		yes.Click += (_, _) => {
-			Judge();
-			if (why.Text == "") {
-				result = box.Text.Trim();
-				w.Close();
+		// The check looks at the disk (a setup of that name there already): never on the window's thread, where a slow folder
+		// would hold the box at every letter typed. Only the newest look's answer is shown; the button looks once more itself
+		var looks = 0;
+		async Task<string> Judge()
+		{
+			var look = ++looks;
+			var text = box.Text;
+			var said = await Task.Run(() => a_bad(text)) ?? "";
+			if (look == looks) {
+				why.Text = said;
+			}
+			return said;
+		}
+		box.TextChanged += async (_, _) => await Judge();
+		yes.Click += async (_, _) => {
+			yes.IsEnabled = false;
+			try {
+				var text = box.Text;
+				if (await Judge() == "" && box.Text == text && w.IsVisible) {
+					result = text.Trim();
+					w.Close();
+				}
+			} finally {
+				yes.IsEnabled = true;
 			}
 		};
 		var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 18, 0, 0) };

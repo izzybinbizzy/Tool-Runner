@@ -128,6 +128,14 @@ public sealed class RunLog : IDisposable
 
 	RunLog() { }
 
+	// a log kept in no file: each line only told to a_line (a window that shows what a wait is on)
+	public static RunLog Listening(Action<string, Level> a_line)
+	{
+		var log = new RunLog();
+		log.Line += a_line;
+		return log;
+	}
+
 	public RunLog(string a_folder)
 	{
 		Directory.CreateDirectory(a_folder);

@@ -36,12 +36,15 @@ public static partial class InGame
 	public static void NoGameRunning(RunContext a_ctx)
 	{
 		var sw = Stopwatch.StartNew();
-		while (AnyGame()) {
+		// (a process list Windows would not give is no answer: "no Skyrim runs" was not learned, and the look is made again)
+		bool unknown;
+		while (AnyGame() | (unknown = Procs.LookFailed)) {
 			a_ctx.Cancel.ThrowIfCancellationRequested();
 			if (sw.Elapsed > TimeSpan.FromSeconds(30)) {
-				throw new StepFailedException("Skyrim is already running - close it first");
+				throw new StepFailedException(unknown ? "Windows would not list the running programs, so it is not known whether Skyrim is running - start the run again in a moment" :
+					"Skyrim is already running - close it first");
 			}
-			Thread.Sleep(1000);
+			a_ctx.Pause(TimeSpan.FromSeconds(1));
 		}
 	}
 
@@ -521,7 +524,7 @@ public static partial class InGame
 				} catch (Exception e) when (e is HttpRequestException or TaskCanceledException or InvalidOperationException or FormatException or System.Text.Json.JsonException) {
 				}
 			}
-			Thread.Sleep(1000);
+			a_ctx.Pause(TimeSpan.FromSeconds(1));
 		}
 	}
 
@@ -816,10 +819,12 @@ public static partial class InGame
 		throw new StepFailedException("the new place did not finish loading within 5 minutes");
 	}
 
+	// false only when a list Windows gave shows the run's game gone: a list it would not give is no answer, and the game counts
+	// as still up (never "closed" on a failed look)
 	static bool GameUp(RunContext a_ctx)
 	{
 		using var g = Game(a_ctx);
-		return g != null;
+		return g != null || Procs.LookFailed;
 	}
 
 	// a step that only helps (the horse check, the marker removal, DynDOLOD back on): any DevBench failure is a warning, a real
@@ -1062,6 +1067,11 @@ public static partial class InGame
 				a_ctx.DevBench.Call("game", new { action = "load", name = a_save });
 				break;
 			} catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException) {
+				a_ctx.Cancel.ThrowIfCancellationRequested();
+				// a game that went in the meantime is said as gone, with its crash report - never as a load it would not take
+				if (!GameUp(a_ctx)) {
+					throw GameClosed(a_ctx, $"before it took the load of \"{a_save}\"");
+				}
 				if (t.Elapsed > TimeSpan.FromMinutes(3)) {
 					throw new StepFailedException($"the game never accepted the load of \"{a_save}\": {e.Message}");
 				}
@@ -1291,7 +1301,7 @@ public static partial class InGame
 			if (sw.Elapsed > TimeSpan.FromMinutes(10)) {
 				throw new StepFailedException($"the save at {a_path} kept changing for 10 minutes");
 			}
-			Thread.Sleep(1500);
+			a_ctx.Pause(TimeSpan.FromMilliseconds(1500));
 		}
 	}
 
@@ -1321,7 +1331,7 @@ public static partial class InGame
 					break;
 				}
 			} else {
-				Thread.Sleep(1000);
+				a_ctx.Pause(TimeSpan.FromSeconds(1));
 			}
 		}
 		a_ctx.Log.Detail($"saved \"{a_name}\" ({new FileInfo(path).Length / 1024} KB{(File.Exists(cosave) ? ", its SKSE co-save too" : "")})");
@@ -1334,7 +1344,12 @@ public static partial class InGame
 		if (g == null) {
 			return;
 		}
-		Procs.KillTree(g.Id);
+		// through the process in hand (this run's very game, found by its number and start time): never by its number alone
+		try {
+			g.Kill(true);
+		} catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException) {
+			// it had ended already, or a program under it would not go: the wait below says how it stands
+		}
 		// Waited for by the process in hand. Listed again, a game that is still going away no longer says when it started and so
 		// reads as not this run's: it was called closed while it ran on for most of a minute (a big load order lets go slowly)
 		var sw = Stopwatch.StartNew();
@@ -1366,7 +1381,7 @@ public static partial class InGame
 			if (sw.Elapsed > TimeSpan.FromMinutes(2)) {
 				throw new StepFailedException("the game is still running - quit it, then start the step again");
 			}
-			Thread.Sleep(1000);
+			a_ctx.Pause(TimeSpan.FromSeconds(1));
 		}
 		var save = NewestSave(a_ctx.Profile, before) ?? throw new StepFailedException("no new save was made");
 		a_ctx.Log.Detail($"your save: \"{save}\"");
@@ -1591,7 +1606,8 @@ public static partial class InGame
 			a_ctx.Journal.Save();
 			a_ctx.Log.Detail("the place you stood at before the clean save is taken from the run that made that save");
 		}
-		a_ctx.Control.Close();
+		// a Stop ends this wait too (a download can hold Mod Organizer open for half an hour)
+		a_ctx.Control.Close(null, a_ctx.Cancel);
 		if (!Auto(a_ctx)) {
 			GuidedSave(a_ctx, "playsave", a_s, $"In the game: load \"{from}\" and wait a full minute. Go back to the place you noted at the start" +
 				" (the console: coc <that place>) and let your followers catch up, check DynDOLOD is on in its menu (MCM), and save.");

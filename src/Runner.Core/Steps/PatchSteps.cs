@@ -36,23 +36,53 @@ public abstract class LauncherStep : IStep
 	// (the game's folder too: renamed, the tool would read its own new key and build for a game folder it was given before)
 	static readonly string[] Pointing = ["Mo2InstancePath", "Mo2ProfileName", "GameLocation", "OutputLocation"];
 
+	// and the field that tells it which mod manager the mods are in (PointedAt writes it as Mod Organizer's every run)
+	const string Manager = "ModManager";
+
 	// the first of those fields a settings file the tool already wrote does not hold (null: all there, or no file yet - a new
-	// one gets them all)
+	// one gets them all). A file that holds no object, or an empty one, holds none of them
 	public static string? MissingField(string? a_settings)
 	{
-		if (a_settings is not { Length: > 0 } || JsonNode.Parse(a_settings) is not JsonObject held || held.Count == 0) {
+		if (a_settings == null) {
 			return null;
 		}
-		return Pointing.FirstOrDefault(k => !held.ContainsKey(k));
+		if (a_settings.Trim().Length == 0) {
+			return Pointing[0];
+		}
+		var held = JsonNode.Parse(a_settings) as JsonObject;
+		return held == null ? Pointing[0] : Pointing.Append(Manager).FirstOrDefault(k => !held.ContainsKey(k));
+	}
+
+	// What stops the step in the tool's settings file before anything of it changes (null: nothing - no file yet is fine, a new
+	// one gets every field): a file that is there but blank, one that does not read as settings, one that lost a field this
+	// program points
+	public static string? SettingsProblem(string? a_settings, string a_name)
+	{
+		if (a_settings != null && a_settings.Trim().Length == 0) {
+			return $"{a_name}'s settings file is empty - nothing was changed and {a_name} was not started. Open {a_name} once through Mod Organizer, let it save its settings, then run the step again.";
+		}
+		string? gone;
+		try {
+			gone = MissingField(a_settings);
+		} catch (JsonException) {
+			return $"{a_name}'s settings file does not read as settings - nothing was changed and {a_name} was not started." + OursToFix(a_name);
+		}
+		var why = gone == Manager ? "tell it the mods are in Mod Organizer" : "point it at this profile and this output";
+		return gone == null ? null : $"{a_name}'s settings file no longer holds \"{gone}\", which Tool Runner sets to {why} - nothing was changed and {a_name} was not started." + OursToFix(a_name);
+	}
+
+	// the tool's settings file still holds every field this program points: looked at before anything of the step is changed
+	void CheckSettings(RunContext a_ctx)
+	{
+		var file = SettingsFile(a_ctx);
+		if (SettingsProblem(File.Exists(file) ? Files.ReadSharedText(file) : null, StepCatalog.Name(Key)) is { } why) {
+			throw new StepFailedException(why);
+		}
 	}
 
 	void PointAtThisRun(RunContext a_ctx, string a_output)
 	{
 		var file = SettingsFile(a_ctx);
-		var name = StepCatalog.Name(Key);
-		if (MissingField(File.Exists(file) ? File.ReadAllText(file) : null) is { } gone) {
-			throw new StepFailedException($"{name}'s settings file no longer holds \"{gone}\", which Tool Runner sets to point it at this profile and this output - nothing was changed and {name} was not started." + OursToFix(name));
-		}
 		// the instance is the folder that holds ModOrganizer.ini (its base folder can point elsewhere - a mods folder moved off it)
 		var text = PointedAt(File.Exists(file) ? File.ReadAllText(file) : null, Path.GetDirectoryName(a_ctx.Mo2.IniPath)!, a_ctx.Profile.Name, a_ctx.Mo2.GameDir, a_output);
 		StepKit.KeepFile(a_ctx, file);
@@ -123,6 +153,7 @@ public abstract class LauncherStep : IStep
 		var name = StepCatalog.Name(Key);
 		// the process to watch: the setup's own, else the program MO2's entry starts (its title need not be the file's name)
 		var image = a_s.Str("image") ?? (a_ctx.Mo2.Executable(a_s.Req("executable"))?.Binary is { Length: > 0 } binary ? Path.GetFileName(binary) : a_s.Req("executable") + ".exe");
+		CheckSettings(a_ctx);
 		StepKit.ParkMod(a_ctx, Key, mod);
 		var tw = a_s.Str("tool_writes");
 		var toolDir = tw is { Length: > 0 } ? a_ctx.Mo2.ModDir(tw) : null;
@@ -143,7 +174,7 @@ public abstract class LauncherStep : IStep
 					throw new StepFailedException($"{name}'s window did not appear within 3 minutes." + OursToFix(name));
 				// its button, once its window has finished laying itself out (usable, on screen)
 				System.Windows.Automation.AutomationElement? go = null;
-				for (var sw = System.Diagnostics.Stopwatch.StartNew(); go == null; Thread.Sleep(1000)) {
+				for (var sw = System.Diagnostics.Stopwatch.StartNew(); go == null; a_ctx.Pause(TimeSpan.FromSeconds(1))) {
 					a_ctx.Cancel.ThrowIfCancellationRequested();
 					go = Uia.Button(w, names) is { } b && Uia.Usable(b) ? b : null;
 					if (go == null && (Exited(proc) || sw.Elapsed > TimeSpan.FromMinutes(1))) {
@@ -153,7 +184,7 @@ public abstract class LauncherStep : IStep
 				Uia.Press(go);
 				// it started = its button goes grey while it works. Landscape Fixer refuses a run it cannot do (no game, no profile)
 				// only on its status line - never a box - so that line is what the step names
-				for (var sw = System.Diagnostics.Stopwatch.StartNew(); Uia.Usable(go); Thread.Sleep(500)) {
+				for (var sw = System.Diagnostics.Stopwatch.StartNew(); Uia.Usable(go); a_ctx.Pause(TimeSpan.FromMilliseconds(500))) {
 					a_ctx.Cancel.ThrowIfCancellationRequested();
 					UnknownBox(name, image);
 					// a run so short its button went grey and back between two looks has still written its output
@@ -480,8 +511,7 @@ public sealed class SynthesisStep : IStep
 			}
 			var until = DateTime.UtcNow.AddSeconds(45);
 			while (DateTime.UtcNow < until) {
-				a_ctx.Cancel.ThrowIfCancellationRequested();
-				Thread.Sleep(1500);
+				a_ctx.Pause(TimeSpan.FromMilliseconds(1500));
 				StillOpen("right after Run was pressed");
 				if (Uia.TextOf(a_w(), int.MaxValue) != before || Buttons().Count == 0) {
 					a_ctx.Log.Detail("Synthesis: Run pressed, its patchers started");
@@ -587,122 +617,6 @@ public sealed class SynthesisStep : IStep
 			throw new StepFailedException($"Synthesis did not finish building within {a_s.Int("build_min", 15)} minutes. Its window shows: {(last.Length > 300 ? last[^300..] : last)}");
 		} finally {
 			StepKit.CloseTool(a_ctx, a_image);
-		}
-	}
-}
-
-// Wrye Bash's Bashed Patch, guided: Wrye Bash has no unattended build (every route of its command line opens its window), so
-// it is started through MO2 and the player builds the patch and closes it; done = a new bashed patch, moved out of overwrite
-// into the step's output mod with the files Wrye Bash wrote beside it
-public sealed class WryeBashStep : IStep
-{
-	public string Key => "wryebash";
-
-	public IEnumerable<Issue> Check(CheckContext a_c, StepSettings a_s)
-	{
-		foreach (var i in StepKit.CheckExecutable(a_c, Key, a_s.Str("executable"))) yield return i;
-		if (a_s.OutputMod == null) yield return new Issue(Key, true, "no output mod is set");
-	}
-
-	public void Run(RunContext a_ctx, StepSettings a_s)
-	{
-		var image = a_s.Str("image") ?? "Wrye Bash.exe";
-		var patch = a_s.Str("patch") ?? "Bashed Patch, 0.esp";
-		var t0 = DateTime.UtcNow;
-		// every time after the first, Wrye Bash rewrites the patch where it stands in the output mod
-		StepKit.KeepInPlace(a_ctx, a_s.OutputMod!, patch);
-		using var toolMod = StepKit.ToolModOn(a_ctx, a_s);
-		try {
-			a_ctx.Control.RunExecutable(a_s.Req("executable"), image, null, a_ctx.Cancel).Dispose();
-			a_ctx.Guide.Ask(Key, $"In Wrye Bash: right-click \"{patch}\" in the Mods tab, Rebuild Patch, build it with your options, then close Wrye Bash and press Done.", a_ctx.Cancel);
-			var sw = System.Diagnostics.Stopwatch.StartNew();
-			while (Procs.Running(image)) {
-				a_ctx.Cancel.ThrowIfCancellationRequested();
-				if (sw.Elapsed > TimeSpan.FromMinutes(2)) {
-					throw new StepFailedException("Wrye Bash is still open - close it, then start the step again");
-				}
-				Thread.Sleep(1000);
-			}
-		} finally {
-			StepKit.CloseTool(a_ctx, image);
-		}
-		Collect(a_ctx, Key, a_s.OutputMod!, patch, t0);
-		a_ctx.SetAfter(a_s.OutputMod!);
-	}
-
-	// the new patch in overwrite (MO2 catches a new file there) or already in the output mod (an existing one is written in place)
-	public static void Collect(RunContext a_ctx, string a_step, string a_mod, string a_patch, DateTime a_t0)
-	{
-		var inMod = Path.Combine(a_ctx.Mo2.ModDir(a_mod), a_patch);
-		var ow = a_ctx.Mo2.OverwriteDir;
-		if (File.Exists(Path.Combine(ow, a_patch)) && File.GetLastWriteTimeUtc(Path.Combine(ow, a_patch)) > a_t0) {
-			// the patch and what Wrye Bash wrote beside it under the same name (its Docs log), each at its own place in the mod
-			var stem = Path.GetFileNameWithoutExtension(a_patch) + ".";
-			var ours = Directory.EnumerateFiles(ow, "*", SearchOption.AllDirectories)
-				.Where(p => Path.GetFileName(p).StartsWith(stem, StringComparison.OrdinalIgnoreCase) && File.GetLastWriteTimeUtc(p) > a_t0).ToList();
-			StepKit.ParkMod(a_ctx, a_step, a_mod);
-			foreach (var p in ours) {
-				var dst = Path.Combine(a_ctx.Mo2.ModDir(a_mod), Path.GetRelativePath(ow, p));
-				Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
-				Files.Move(p, dst, true);
-			}
-			a_ctx.Log.Detail($"{a_patch} moved from overwrite into {a_mod} ({ours.Count} file(s))");
-		} else if (!File.Exists(inMod) || File.GetLastWriteTimeUtc(inMod) <= a_t0) {
-			throw new StepFailedException($"Wrye Bash wrote no new {a_patch}");
-		}
-		// the new patch stands: its old bytes (kept before the tool started) are what an undo puts back
-		StepKit.Settled(a_ctx, a_mod, [inMod]);
-	}
-}
-
-// His checklist 436: the patchers with no unattended route (their pages and sources read, sup audit's patchers research): each opened through Mod
-// Organizer, the player builds with it and closes it, what it wrote lands in overwrite and goes into its own output mod. Off in a new setup: a run
-// left alone should not wait for a player.
-public sealed class GuidedToolStep(string a_key, string a_tool, string a_ask, string? a_makes, bool a_writesElsewhere = false) : IStep
-{
-	public static readonly IReadOnlyList<GuidedToolStep> All = [
-		new("easynpc", "EasyNPC", "In EasyNPC: make your picks and build its merge, then close EasyNPC and press Done.", null, true),
-		// a patcher can name its own plugin, so any file it writes counts; a setup's "makes" holds it to one
-		new("upf", "zEdit", "In zEdit: open Manage Patchers, build your patchers, then close zEdit and press Done.", null),
-		new("smash", "Mator Smash", "In Mator Smash: right-click and build the Smashed Patch, then close Smash and press Done.", "Smashed Patch.esp"),
-		new("reqtificator", "ReqTificator", "In ReqTificator: press Patch and let it finish, then close it and press Done.", "Requiem for the Indifferent.esp"),
-	];
-
-	public string Key => a_key;
-
-	public IEnumerable<Issue> Check(CheckContext a_c, StepSettings a_s)
-	{
-		foreach (var i in StepKit.CheckExecutable(a_c, Key, a_s.Str("executable"))) yield return i;
-		if (a_s.OutputMod == null) yield return new Issue(Key, true, "no output mod is set");
-	}
-
-	public void Run(RunContext a_ctx, StepSettings a_s)
-	{
-		var image = a_s.Req("image");
-		var before = Runner.OverwriteFiles(a_ctx);
-		// a tool that rewrites its plugin where it stands in the output mod
-		StepKit.KeepInPlace(a_ctx, a_s.OutputMod!, a_s.Str("makes") ?? a_makes);
-		using (new Toggle(a_ctx, [.. a_s.List("enable_during"), .. StepKit.ToolMods(a_ctx, a_s)], a_s.List("disable_during"), a_tool, a_ctx.Cancel)) {
-			try {
-				a_ctx.Control.RunExecutable(a_s.Req("executable"), image, null, a_ctx.Cancel).Dispose();
-				a_ctx.Guide.Ask(Key, a_ask, a_ctx.Cancel);
-				var sw = System.Diagnostics.Stopwatch.StartNew();
-				while (StepKit.StartedRunning(a_ctx.Control, image).Count > 0) {
-					a_ctx.Cancel.ThrowIfCancellationRequested();
-					if (sw.Elapsed > TimeSpan.FromMinutes(2)) {
-						throw new StepFailedException($"{a_tool} is still open - close it, then start the step again");
-					}
-					Thread.Sleep(1000);
-				}
-			} finally {
-				StepKit.CloseTool(a_ctx, image);
-			}
-		}
-		// a tool that writes where the player told it to (EasyNPC's own folder) promises nothing here, and its output mod is not called rebuilt
-		if (AddOnStep.Collect(a_ctx, Key, a_s.OutputMod!, a_s.Str("makes") ?? a_makes, before, a_writesElsewhere)) {
-			a_ctx.SetAfter(a_s.OutputMod!);
-		} else {
-			a_ctx.OutputUntouched = true;
 		}
 	}
 }
