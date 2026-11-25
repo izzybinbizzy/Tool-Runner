@@ -182,7 +182,7 @@
                   <TextBlock x:Name="old" Text="not run: its old output is used" Style="{StaticResource MutedText}" TextWrapping="Wrap"
                              Foreground="{DynamicResource Warn}"
                              Visibility="{Binding UsesOld, Converter={StaticResource Vis}}"/>
-                  <TextBlock Text="{Binding Needs}" Style="{StaticResource MutedText}" TextWrapping="Wrap" Foreground="{DynamicResource Warn}"
+                  <TextBlock x:Name="needs" Text="{Binding Needs}" Style="{StaticResource MutedText}" TextWrapping="Wrap" Foreground="{DynamicResource Warn}"
                              Visibility="{Binding Needs, Converter={StaticResource NotEmpty}}"/>
                   <TextBlock x:Name="note" Text="{Binding Note}" Style="{StaticResource MutedText}" TextWrapping="Wrap"
                              Foreground="{Binding State, Converter={StaticResource StateBrush}}"
@@ -212,6 +212,7 @@
                   </MultiDataTrigger.Conditions>
                   <Setter TargetName="num" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"/>
                   <Setter TargetName="old" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"/>
+                  <Setter TargetName="needs" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"/>
                   <Setter TargetName="note" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"/>
                   <Setter TargetName="last" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"/>
                   <Setter TargetName="elapsed" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"/>
