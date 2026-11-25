@@ -89,7 +89,7 @@ Shader caches, DynDOLOD's clean save, Synthesis, Landscape Fixer, PGPatcher, xLO
 | 0 | finished / clean / would start / nothing going |
 | 1 | failed / refused / a run was cut off |
 | 2 | stopped |
-| 3 | wrong arguments |
+| 3 | wrong arguments (also an option the command does not have, or one typed without what it names: nothing runs) |
 | 4 | (`updates`) a tool has a newer version |
 | 5 | (`status`) a run is going |
 

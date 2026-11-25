@@ -11618,6 +11618,37 @@ public static class Program
 		Check(!Due(1e300) && !Due(double.NaN) && !Due(0) && !Due(6) && Due(5) && Due(1), "a reminder every 1e300 minutes is never due, and no error");
 	}
 
+	// the command line: an option its command does not have, one without what it names, a stray word - refused, never passed over
+	static void T_TheCommandLineRefusesWhatACommandDoesNotTake()
+	{
+		static string? Not(params string[] a_args) => ToolRunner.App.Cli.NotTaken(a_args);
+		Check(Not("run", "--setup", "x.json", "--form", "texgen")?.StartsWith("--form is no option of run (it takes: --setup, --only, --from, --until, --json)", StringComparison.Ordinal) == true,
+			"a misspelt option is said, with the ones the command has: " + Not("run", "--setup", "x.json", "--form", "texgen"));
+		Equal("--only needs what it names right after it", Not("run", "--setup", "x.json", "--only"), "an option at the end with nothing after it");
+		Equal("--setup needs what it names right after it", Not("run", "--setup", "--only", "texgen"), "an option followed by another option");
+		Check(Not("run", "--setup", "x.json", "texgen")?.StartsWith("\"texgen\" is not expected there", StringComparison.Ordinal) == true, "a word that belongs to no option");
+		Check(Not("check", "--setup", @"D:\My", @"Setups\x.json")?.Contains("goes in quotes", StringComparison.Ordinal) == true, "a path with a blank typed without quotes");
+		Equal("--setup is given twice", Not("run", "--setup", "a.json", "--setup", "b.json"), "one setup per run");
+		Equal<string?>(null, Not("queue", "--setup", "a.json", "--setup", "b.json", "--keep-going"), "a queue names as many as it runs");
+		Equal<string?>(null, Not("run", "--setup", @"D:\My Setups\x.json", "--only", "addon:My Tool", "--json"), "what the window itself starts a run with");
+		Equal<string?>(null, Not("run", "--setup", "x.json", "--from", "texgen", "--until", "dyndolod"), "a run from one step to another");
+		Equal<string?>(null, Not("tools", "--mo2", "ModOrganizer.exe", "--instance", "D:\\MO2", "--add", "--json"), "every option of a command at once");
+		Equal<string?>(null, Not("status"), "a command alone");
+		Equal<string?>(null, Not("addon-check", "my addon.json"), "the one command that takes a word of its own");
+		Check(Not("addon-check", "my", "addon.json") != null, "... and only one");
+		Equal("--json is no option of stop (it takes none)", Not("stop", "--json"), "a command that takes nothing");
+		Equal("--json is no option of lod (it takes: --setup, --step)", Not("lod", "--setup", "x.json", "--step", "grass", "--json"), "--json where a command prints no JSON");
+		Equal<string?>(null, Not("frobnicate", "--anything"), "a word that is no command is said to be none elsewhere");
+		Equal<string?>(null, Not(), "nothing typed");
+		// every command the help line names takes its options from the table (one left out would take anything again)
+		var cli = File.ReadAllText(Path.Combine(Path.GetDirectoryName(SourceDir())!, "Runner.App", "Cli.cs"));
+		var help = System.Text.RegularExpressions.Regex.Match(cli, "Console\\.WriteLine\\(\"Tool Runner - ([^\"]+)\"\\)").Groups[1].Value.Split('|').Select(c => c.Trim()).Where(c => c != "").ToList();
+		Check(help.Count >= 20, "the help line's commands were read: " + help.Count);
+		foreach (var command in help) {
+			Check(Not(command, "--no-such-option") is { } said && said.Contains("is no option of " + command, StringComparison.Ordinal), command + " refuses an option it does not have");
+		}
+	}
+
 	// a name written twice in one object: the file does not read, said where it is read - never an error at the first look into it
 	static void T_ANameTwiceInAFileIsAFileThatDoesNotRead()
 	{

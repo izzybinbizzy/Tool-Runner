@@ -23,7 +23,8 @@ namespace ToolRunner.App;
 //   "Tool Runner.exe" share --setup <file> [--out <folder>]                                 a copy of the setup to share: its paths and commands taken out
 // --json after run, retry, check, preview, dryrun, status, catalog, updates, changes or tools prints one JSON object and nothing else (Reports.cs)
 // exit 0 = finished / clean / would start / idle, 1 = failed / refused / a run was cut off, 2 = stopped, 3 = bad arguments
-//      (an unknown command, a missing option, a file that is not there or is no setup), 4 = (updates) a tool has a newer version,
+//      (an unknown command, a missing option, one the command does not have or one without what it names, a file that is not
+//      there or is no setup), 4 = (updates) a tool has a newer version,
 //      5 = (status) a run is going
 public static class Cli
 {
@@ -47,9 +48,73 @@ public static class Cli
 		return i >= 0 && i + 1 < a_args.Length ? a_args[i + 1] : null;
 	}
 
+	// What each command takes: the options that name something (what they name follows), its switches, and how many words
+	// of its own it takes with no option before them
+	static readonly Dictionary<string, (string[] Named, string[] Switches, int Words)> Takes = new(StringComparer.Ordinal) {
+		["run"] = (["--setup", "--only", "--from", "--until"], ["--json"], 0),
+		["retry"] = (["--setup"], ["--json"], 0),
+		["queue"] = (["--setup"], ["--keep-going"], 0),
+		["check"] = (["--setup"], ["--json"], 0),
+		["preview"] = (["--setup", "--only", "--from", "--until"], ["--json"], 0),
+		["dryrun"] = (["--setup", "--only", "--from", "--until"], ["--json"], 0),
+		["status"] = (["--setup"], ["--json"], 0),
+		["catalog"] = ([], ["--json"], 0),
+		["lod"] = (["--setup", "--step"], [], 0),
+		["restore"] = (["--setup"], [], 0),
+		["undo"] = (["--setup"], [], 0),
+		["stop"] = ([], [], 0),
+		["stop-after"] = ([], [], 0),
+		["import"] = (["--file", "--name"], [], 0),
+		["updates"] = (["--setup"], ["--json"], 0),
+		["changes"] = (["--setup"], ["--look", "--json"], 0),
+		["bugreport"] = (["--setup"], [], 0),
+		["tools"] = (["--mo2", "--instance"], ["--add", "--json"], 0),
+		["addon-check"] = ([], [], 1),
+		["test-tools"] = (["--setup"], [], 0),
+		["share"] = (["--setup", "--out"], [], 0),
+	};
+
+	// What was typed that its command does not take, in words (null: all of it is the command's, or the word is no command).
+	// It was passed over without a word: "run --setup x --form texgen" (a slip for --from) and "run --setup x --only" (the
+	// step forgotten) both ran every step of the setup
+	public static string? NotTaken(string[] a_args)
+	{
+		if (a_args.Length == 0 || !Takes.TryGetValue(a_args[0], out var takes)) {
+			return null;
+		}
+		var given = new HashSet<string>(StringComparer.Ordinal);
+		var words = 0;
+		for (var i = 1; i < a_args.Length; ++i) {
+			var a = a_args[i];
+			if (takes.Switches.Contains(a)) {
+				continue;
+			}
+			if (takes.Named.Contains(a)) {
+				if (i + 1 >= a_args.Length || a_args[i + 1].StartsWith("--", StringComparison.Ordinal)) {
+					return $"{a} needs what it names right after it";
+				}
+				// (a queue names a setup once per setup)
+				if (!given.Add(a) && !(a_args[0] == "queue" && a == "--setup")) {
+					return $"{a} is given twice";
+				}
+				++i;
+			} else if (a.StartsWith("--", StringComparison.Ordinal)) {
+				return $"{a} is no option of {a_args[0]} " + (takes.Named.Length + takes.Switches.Length == 0 ? "(it takes none)" : $"(it takes: {string.Join(", ", takes.Named.Concat(takes.Switches))})");
+			} else if (++words > takes.Words) {
+				return $"\"{a}\" is not expected there - what an option names goes right after the option, and a name or a path with a blank in it goes in quotes";
+			}
+		}
+		return null;
+	}
+
 	public static int Execute(string[] a_args)
 	{
 		ConsoleAttach.ToParent();
+		// before anything is looked at or started
+		if (NotTaken(a_args) is { } slip) {
+			Said(a_args, slip);
+			return 3;
+		}
 		// runs at a set time are gone: a task an older version left is cleared on the command line too (a player who never
 		// opens the window), before the command itself
 		// (never before a stop: Windows' task list can take half a minute, and a run is waiting on it)
