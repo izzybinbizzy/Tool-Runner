@@ -111,6 +111,10 @@ public partial class MainWindow
 		try {
 			var from = item.File;
 			var made = await Task.Run(() => SetupFiles.Duplicate(from, name)).ConfigureAwait(true);
+			// (a copy starts what the setup it was made from starts: allowed there, it is allowed here)
+			if (UiState.Text(MainViewModel.StartsAllowedKey(from)) is { Length: > 0 } allowed) {
+				UiState.Set(MainViewModel.StartsAllowedKey(made), allowed);
+			}
 			_vm.LoadSetups(made);
 			_vm.Say($"\"{name.Trim()}\" made: a copy of \"{item.Name}\". It has no runs of its own yet.", "good");
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or InvalidDataException or System.Text.Json.JsonException) {
@@ -165,6 +169,11 @@ public partial class MainWindow
 			if (UiState.Flag(was)) {
 				UiState.Set(MainViewModel.ToolsOfferedKey(done.File), true);
 				UiState.Set(was, false);
+			}
+			// (what was allowed for it goes along with its name)
+			if (UiState.Text(MainViewModel.StartsAllowedKey(item.File)) is { Length: > 0 } allowed) {
+				UiState.Set(MainViewModel.StartsAllowedKey(done.File), allowed);
+				UiState.Set(MainViewModel.StartsAllowedKey(item.File), "");
 			}
 			_vm.LoadSetups(done.File);
 			_vm.Say(done.NotRepointed.Count == 0 ? $"Renamed to \"{name.Trim()}\"." :

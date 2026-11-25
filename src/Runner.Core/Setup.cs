@@ -297,15 +297,42 @@ public sealed class Setup
 	// the files Windows starts as a program
 	static readonly string[] ProgramKinds = [".exe", ".bat", ".cmd", ".com", ".ps1", ".vbs"];
 
+	// a step's setting that names a program: by its key, or by what its value ends with
+	static bool NamesProgram(string a_key, string a_value) =>
+		a_key is "exe" || a_key.EndsWith("_exe", StringComparison.Ordinal) ||
+		ProgramKinds.Any(x => a_value.Trim().Trim('"').EndsWith(x, StringComparison.OrdinalIgnoreCase));
+
+	// What the setup starts on this PC by itself, one line each, in words: Mod Organizer, its own commands before and after
+	// a run, and every program a step names - what is taken out of a setup that is brought in from elsewhere. A step that is
+	// switched off counts too: switching it on is one click, and asks nothing
+	public List<string> Starts()
+	{
+		var lines = new List<string>();
+		if (Mo2Exe != "") {
+			lines.Add("Mod Organizer: " + Mo2Exe);
+		}
+		lines.AddRange(BeforeRun.Select(c => "a command before each run: " + c));
+		lines.AddRange(AfterRun.Select(c => "a command after each run: " + c));
+		foreach (var s in Steps) {
+			foreach (var (key, value) in s.Settings) {
+				if (value is JsonValue v && v.TryGetValue<string>(out var text) && text.Trim() != "" && NamesProgram(key, text)) {
+					lines.Add($"{StepCatalog.Name(s.Key)} ({key}): {text}");
+				}
+			}
+		}
+		return lines;
+	}
+
+	// a mark of what the setup starts: the same for as long as none of it changes, whatever else in the setup does
+	public string StartsMark() =>
+		Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(string.Join("\n", Starts()))));
+
 	// A setup that came from somewhere else never starts a program on this PC that the player did not point it at, and never
 	// allows an add-on for them: every program path it names is taken out (Mod Organizer's and each step's), and with it every
 	// add-on step's approval and the setting that turns the add-on question off. Returns what went, in words
 	public List<string> TakeOutWhatStartsPrograms()
 	{
 		var gone = new List<string>();
-		static bool Program(string a_key, string a_value) =>
-			a_key is "exe" || a_key.EndsWith("_exe", StringComparison.Ordinal) ||
-			ProgramKinds.Any(x => a_value.Trim().Trim('"').EndsWith(x, StringComparison.OrdinalIgnoreCase));
 		if (Root["mo2"] is JsonObject mo2 && Str(mo2, "exe") is { Length: > 0 }) {
 			mo2["exe"] = "";
 			gone.Add("which Mod Organizer it starts (mo2.exe)");
@@ -315,7 +342,7 @@ public sealed class Setup
 		}
 		foreach (var s in Steps) {
 			foreach (var (key, value) in s.Settings.ToList()) {
-				if (value is JsonValue v && v.TryGetValue<string>(out var text) && text.Trim() != "" && Program(key, text)) {
+				if (value is JsonValue v && v.TryGetValue<string>(out var text) && text.Trim() != "" && NamesProgram(key, text)) {
 					s.Settings.Remove(key);
 					gone.Add($"the program {StepCatalog.Name(s.Key)} starts ({key})");
 				}

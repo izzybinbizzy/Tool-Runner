@@ -56,6 +56,11 @@ public partial class MainWindow : Window
 			return false;
 		};
 		_vm.OfferTools = (a_setup, a_tools) => ToolsDialog.Run(this, _vm, a_setup, a_tools, true);
+		_vm.ConfirmStarts = (a_name, a_lines) => Ask.Show(this, "This setup starts programs",
+			WindowWords.Format("Before \"{0}\" runs from this window, look at what it starts on this PC. This is asked once, and again only when one of these has changed outside the window:", a_name) +
+			"\n\n" + string.Join("\n", a_lines.Select(l => "- " + l)) + "\n\n" +
+			WindowWords.Word("Allow it only if you trust where the setup came from. A setup file from another player is brought in safely with New setup > Import a setup file, which takes all of this out."),
+			"Allow it", "Not now");
 		// the header drops the word "Setup" where the window is narrow
 		SizeChanged += (_, e) => _vm.Roomy = e.NewSize.Width >= 1100;
 		_vm.Freed += () => {
@@ -1427,6 +1432,10 @@ public partial class MainWindow : Window
 		var made = NewSetupDialog.Run(this, out var imported);
 		if (made != null) {
 			_vm.LoadSetups(made);
+			// made or brought in here, by the player: what it starts is theirs, and is not asked about at its first START
+			if (_vm.Setup is { } own && Files.SamePath(own.File, made)) {
+				MainViewModel.AllowStarts(own);
+			}
 			if (imported == null) {
 				_vm.Say("Setup made. Press Check (F5) to see that every tool is found, then Start.", "good");
 			} else {

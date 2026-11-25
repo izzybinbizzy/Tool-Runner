@@ -1054,6 +1054,9 @@ public static class SettingsPanel
 				errors.Text = "Not saved: " + string.Join("; ", p);
 				return;
 			}
+			// (what the setup started before this change, allowed or not: a change made here to a setup whose programs and
+			// commands were the player's own leaves them the player's own - one never looked at stays to be asked about)
+			var known = MainViewModel.StartsKnown(a_vm.Setup);
 			foreach (var k in a_vm.Setup.Root.Select(x => x.Key).ToList()) {
 				a_vm.Setup.Root.Remove(k);
 			}
@@ -1080,6 +1083,9 @@ public static class SettingsPanel
 				if (byKeyboard) {
 					save.Focus();
 				}
+			}
+			if (saved && known) {
+				MainViewModel.AllowStarts(trial);
 			}
 			// The settings window was closed while this was being written - or closed and opened again, for this setup or
 			// another: what is on screen now is not the drawing this save was started from. It is left exactly as it is

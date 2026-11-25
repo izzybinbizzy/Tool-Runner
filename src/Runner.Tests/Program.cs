@@ -11618,6 +11618,32 @@ public static class Program
 		Check(!Due(1e300) && !Due(double.NaN) && !Due(0) && !Due(6) && Due(5) && Due(1), "a reminder every 1e300 minutes is never due, and no error");
 	}
 
+	// what a setup starts on this PC by itself is listed, and marked so that the window asks about it once
+	static void T_WhatASetupStartsIsListedAndMarked()
+	{
+		var s = Setup.FromJson(new JsonObject {
+			["mo2"] = new JsonObject { ["exe"] = @"D:\MO2\ModOrganizer.exe", ["profile"] = "P" }, ["beforeRun"] = new JsonArray("first.bat"), ["afterRun"] = "last.bat",
+			["steps"] = new JsonArray(
+				new JsonObject { ["step"] = "xlodgen", ["on"] = true, ["settings"] = new JsonObject { ["exe"] = @"D:\Tools\xLODGenx64.exe", ["output_mod"] = "xLODGen Output", ["executable"] = "xLODGen" } },
+				new JsonObject { ["step"] = "texgen", ["on"] = false, ["settings"] = new JsonObject { ["wrapper"] = @"D:\Tools\wrap.cmd", ["deadline_min"] = 30 } }) }, @"D:\Data\Setups\Mine.json");
+		var lines = s.Starts();
+		Equal(@"Mod Organizer: D:\MO2\ModOrganizer.exe|a command before each run: first.bat|a command after each run: last.bat|" +
+			StepCatalog.Name("xlodgen") + @" (exe): D:\Tools\xLODGenx64.exe|" + StepCatalog.Name("texgen") + @" (wrapper): D:\Tools\wrap.cmd", string.Join("|", lines),
+			"Mod Organizer, its commands, and each program a step names - of a step that is off too");
+		var mark = s.StartsMark();
+		((JsonObject)s.Root["steps"]![1]!)["on"] = true;
+		((JsonObject)s.Root["steps"]![0]!["settings"]!)["output_mod"] = "Another Output";
+		s.Root["minFreeGb"] = 30;
+		Equal(mark, s.StartsMark(), "a step switched, a mod's name, a number: what it starts is the same, and so is its mark");
+		s.Root["afterRun"] = "other.bat";
+		Check(s.StartsMark() != mark, "another command is another mark");
+		Equal("starts.allowed.mine", ToolRunner.App.MainViewModel.StartsAllowedKey(s.File), "kept per setup, by its file's name");
+		Equal(2, s.TakeOutCommands(), "brought in from elsewhere, its commands go");
+		s.TakeOutWhatStartsPrograms();
+		Equal(0, s.Starts().Count, "... and its programs: it starts nothing, and nothing is asked");
+		Equal(0, Setup.FromJson(new JsonObject { ["steps"] = new JsonArray() }).Starts().Count, "a setup with nothing in it starts nothing");
+	}
+
 	// a setup file from another player: brought in with nothing left that starts a program here, under a name that is free
 	static void T_ASetupFromElsewhereIsBroughtInUnderAFreeName()
 	{

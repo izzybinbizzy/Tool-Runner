@@ -961,6 +961,35 @@ public sealed partial class MainViewModel : Observable
 	// "went on from that box" is kept per setup, with the window's own state
 	public static string ToolsOfferedKey(string a_setupFile) => "tools.offered." + Path.GetFileNameWithoutExtension(a_setupFile).ToLowerInvariant();
 
+	// What a setup starts on this PC by itself (Mod Organizer, its own commands, each program a step names) is shown once
+	// before its first run from this window, and again only when one of them has changed outside it. A setup file put into
+	// the Setups folder by hand - from a guide, from another player - started all of that at its first START with nothing
+	// asked; one that is imported has it taken out. The window answers the box (true = go on). What the window itself made,
+	// imported, or saved over a setup that was allowed is the player's own, and is not asked about
+	public Func<string, IReadOnlyList<string>, bool>? ConfirmStarts { get; set; }
+
+	// what was allowed is kept per setup, by the mark of what it starts
+	public static string StartsAllowedKey(string a_setupFile) => "starts.allowed." + Path.GetFileNameWithoutExtension(a_setupFile).ToLowerInvariant();
+
+	// nothing to ask about: the setup starts nothing, or what it starts is what was allowed
+	public static bool StartsKnown(Setup a_setup) => a_setup.Starts().Count == 0 || UiState.Text(StartsAllowedKey(a_setup.File)) == a_setup.StartsMark();
+
+	public static void AllowStarts(Setup a_setup) => UiState.Set(StartsAllowedKey(a_setup.File), a_setup.StartsMark());
+
+	// true: go on with the start
+	bool StartsFirst(Setup a_setup)
+	{
+		if (ConfirmStarts == null || StartsKnown(a_setup)) {
+			return true;
+		}
+		if (!ConfirmStarts(a_setup.Name, a_setup.Starts())) {
+			Say("Not started - nothing was changed.", "");
+			return false;
+		}
+		AllowStarts(a_setup);
+		return true;
+	}
+
 	// True: go on with the start. Shown once, for a setup that has never run and has a tool to set up; what does not read here
 	// is the start's own first finding. a_cannot: what stops the start, asked again once the box has closed (a tool may have
 	// been open for minutes). a_stillPicked: a single run's setup is still the one picked in the window - asked once the
@@ -1085,6 +1114,11 @@ public sealed partial class MainViewModel : Observable
 				Say("Could not read the setup: " + e.Message, "bad");
 				return;
 			}
+			// (asked on the very bytes the preview is made from, which are the bytes the start is held to below)
+			if (!a_dryOnly && !StartsFirst(setup)) {
+				_previewing = false;
+				return;
+			}
 			var usual = _usual;
 			DryRunReport report;
 			string? profileDir = null;
@@ -1149,6 +1183,19 @@ public sealed partial class MainViewModel : Observable
 			return;
 		}
 		if (a_dryOnly) {
+			return;
+		}
+		// no preview: what the setup starts is asked about all the same, on its file as it stands now
+		try {
+			if (!StartsFirst(Setup.Parse(Files.ReadShared(pickedNow.File), pickedNow.File))) {
+				return;
+			}
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException) {
+			Say("Could not read the setup: " + e.Message, "bad");
+			return;
+		}
+		if (!string.Equals(SelectedSetup?.File, pickedNow.File, StringComparison.OrdinalIgnoreCase)) {
+			Say("Not started: another setup was picked meanwhile - press Start again.", "warn");
 			return;
 		}
 		// (no preview: looked at again here - the tools box may have waited on the player or on the disk, and a change to
@@ -1245,6 +1292,19 @@ public sealed partial class MainViewModel : Observable
 		try {
 			foreach (var f in a_files) {
 				if (!await ToolsFirst(f, () => Setup.Parse(Files.ReadShared(f), f), CannotStartAny)) {
+					return;
+				}
+			}
+			// ... and what each of them starts, as before a single run
+			foreach (var f in a_files) {
+				Setup asRead;
+				try {
+					asRead = Setup.Parse(Files.ReadShared(f), f);
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException) {
+					// (a setup that does not read is the queue's own first finding, below)
+					continue;
+				}
+				if (!StartsFirst(asRead)) {
 					return;
 				}
 			}
