@@ -343,6 +343,11 @@ public static partial class Files
 		try {
 			var name = new char[1024];
 			var n = GetFinalPathNameByHandle(h, name, (uint)name.Length, 0);
+			// (too small: Windows says how much it needs, and it is asked once more with that)
+			if (n >= name.Length) {
+				name = new char[n + 1];
+				n = GetFinalPathNameByHandle(h, name, (uint)name.Length, 0);
+			}
 			if (n == 0 || n >= name.Length) {
 				return null;
 			}

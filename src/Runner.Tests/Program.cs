@@ -43,6 +43,14 @@ public static class Program
 		SystemChecks.SteamRunning = () => false;
 		// nor this PC's own data: the tests' data folder stands beside them before anything asks for one, so an app-data
 		// folder this PC chose for every copy of the program is never taken for theirs
+		// (two runs from the same folder take turns: the data folder beside them is shared, and one run's clean-up would take it
+		// from under the other)
+		using var oneRun = new Mutex(false, "Local\\ToolRunnerTests " + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(AppContext.BaseDirectory.ToUpperInvariant())))[..16]);
+		try {
+			oneRun.WaitOne();
+		} catch (AbandonedMutexException) {
+			// the run before was stopped without letting go: the turn is this run's
+		}
 		var testData = Path.Combine(AppContext.BaseDirectory, Brand.Name + " Data");
 		var madeData = !Directory.Exists(testData);
 		Directory.CreateDirectory(testData);
@@ -5884,6 +5892,39 @@ public static class Program
 			var beside8 = Path.Combine(root, "beside 8");
 			Directory.CreateDirectory(Path.Combine(beside8, Brand.Name + " Data (being removed 1a2b3c4d)"));
 			Check(!DataFolder.StandsIn(beside8, " Data"), "a folder left half way through its removal is never taken for the data");
+			// the copy is made beside the new place and takes its name when whole: one left by a cut-off move is this move's and
+			// goes; a path that only looks as if it lies in the data ("../") is left as it was
+			var from7 = Path.Combine(root, "beside 7", Brand.Name + " Data");
+			var to7 = Path.Combine(root, "appdata 7", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from7, "Setups"));
+			File.WriteAllText(Path.Combine(from7, "Setups", "Up.json"), "{ \"mo2\": \"" + (from7 + "/../MO2").Replace("\\", "\\\\", StringComparison.Ordinal) + "\" }");
+			Directory.CreateDirectory(to7 + " (being copied)");
+			File.WriteAllText(Path.Combine(to7 + " (being copied)", "half.json"), "{}");
+			Check(DataFolder.MoveTo(from7, to7) == null && File.Exists(Path.Combine(to7, "Setups", "Up.json")) && !Directory.Exists(to7 + " (being copied)"),
+				"a copy left by a cut-off move is replaced, and the whole copy takes the new place's name");
+			Equal((from7 + "/../MO2").Replace("\\", "/", StringComparison.Ordinal),
+				JsonNode.Parse(File.ReadAllText(Path.Combine(to7, "Setups", "Up.json")))!["mo2"]!.GetValue<string>().Replace("\\", "/", StringComparison.Ordinal), "a path that leaves the data folder by \"..\" stays as it was");
+			// a copy of a move that never counted (its source still holds the data) is never taken for the data folder
+			var parent9 = Path.Combine(root, "appdata 9");
+			var source9 = Path.Combine(root, "beside 9", Brand.Name + " Data");
+			Directory.CreateDirectory(Path.Combine(source9, "Setups"));
+			Directory.CreateDirectory(Path.Combine(parent9, Brand.Name));
+			File.WriteAllText(Path.Combine(parent9, Brand.Name, ".renamed from.txt"), source9);
+			Check(Files.SamePath(DataFolder.Adopt(parent9, "", () => false), source9) && File.Exists(Path.Combine(parent9, Brand.Name, ".renamed from.txt")),
+				"the data stays where it came from, and the copy keeps its mark for the move to be made again");
+			// a folder inside the data that is a link to another folder stops the move: it would be copied as what it leads to
+			var from10 = Path.Combine(root, "beside 10", Brand.Name + " Data");
+			var elsewhere10 = Path.Combine(root, "backups elsewhere");
+			Directory.CreateDirectory(from10);
+			Directory.CreateDirectory(elsewhere10);
+			using (var mk10 = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/d /c mklink /J \"{Path.Combine(from10, "Backups")}\" \"{elsewhere10}\"") {
+				UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true })!) {
+				mk10.WaitForExit();
+			}
+			Check(Directory.Exists(Path.Combine(from10, "Backups")), "the test's junction inside the data was made");
+			Check(Thrown<InvalidOperationException>(() => DataFolder.MoveTo(from10, Path.Combine(root, "appdata 10", Brand.Name)), "a link inside the data").Message.Contains("is a link to another folder", StringComparison.Ordinal),
+				"a link inside the data stops the move, named");
+			Directory.Delete(Path.Combine(from10, "Backups"));
 			// a setup written by hand (a comment, a comma after its last value, a path with forward slashes) is repointed too
 			var from5 = Path.Combine(root, "beside 5", Brand.Name + " Data");
 			var to5 = Path.Combine(root, "appdata 5", Brand.Name);
@@ -5902,7 +5943,7 @@ public static class Program
 			// a link that leads into the data folder is that folder, whatever its own path says
 			var link = Path.Combine(root, "link into the data");
 			Directory.CreateDirectory(Path.Combine(from5 + " again", "inside"));
-			using (var mk = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{Path.Combine(from5 + " again", "inside")}\"") {
+			using (var mk = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/d /c mklink /J \"{link}\" \"{Path.Combine(from5 + " again", "inside")}\"") {
 				UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true })!) {
 				mk.WaitForExit();
 			}
@@ -5913,12 +5954,14 @@ public static class Program
 			// a SUBST drive letter that stands for a folder inside the data is that folder too
 			var letter = Enumerable.Range('G', 19).Select(c => (char)c).FirstOrDefault(c => !Directory.Exists(c + @":\"));
 			Check(letter != default, "a free drive letter for the test");
-			void Subst(string a_args)
+			bool Subst(string a_args)
 			{
 				using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("subst.exe", a_args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true })!;
 				p.WaitForExit();
+				return p.ExitCode == 0;
 			}
-			Subst($"{letter}: \"{Path.Combine(from5 + " again", "inside")}\"");
+			// (taken back only when this run made it: a letter another run took meanwhile stays that run's)
+			Check(Subst($"{letter}: \"{Path.Combine(from5 + " again", "inside")}\""), "the test's drive letter was made");
 			try {
 				Check(Directory.Exists(letter + @":\"), "the test's drive letter stands");
 				Throws<InvalidOperationException>(() => DataFolder.MoveTo(from5 + " again", $@"{letter}:\deeper"), "a folder on a drive letter that stands for one inside the data is refused");
@@ -8222,19 +8265,17 @@ public static class Program
 			var watched = Path.Combine(f.Root, "Data watched");
 			Directory.CreateDirectory(Path.Combine(watched, "Runs"));
 			using (var watch = new ToolRunner.App.RunsWatch(Path.Combine(watched, "Runs"), () => { })) {
-				var refused = !watch.Watching;
+				// (the watch must be on, or this proves nothing)
+				Check(watch.Watching, "the runs folder is watched");
+				var refused = false;
 				try {
-					if (watch.Watching) {
-						Directory.Move(watched, watched + " moved");
-					}
+					Directory.Move(watched, watched + " moved");
 				} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 					refused = true;
 				}
 				Check(refused, "a data folder whose runs folder is watched is not moved");
 			}
-			if (Directory.Exists(watched)) {
-				Directory.Move(watched, watched + " moved");
-			}
+			Directory.Move(watched, watched + " moved");
 			Check(Directory.Exists(watched + " moved") && !Directory.Exists(watched), "with the watch let go it is");
 		} finally {
 			ToolRunner.App.UiState.FileForTests = null;

@@ -15,8 +15,15 @@ public static class DataFolder
 	public static string Adopt(string a_parent, string a_suffix, Func<bool>? a_oldRunning = null)
 	{
 		var now = Path.Combine(a_parent, Brand.Name + a_suffix);
-		if (File.Exists(Path.Combine(now, Pending))) {
-			Repoint(now, File.ReadAllText(Path.Combine(now, Pending)).Trim());
+		var pending = Path.Combine(now, Pending);
+		if (File.Exists(pending)) {
+			var source = File.ReadAllText(pending).Trim();
+			// A copy made by a move that never counted (its source still holds the data, with no mark of a move): neither
+			// repointed nor used - the data is still where it came from, and the move can be made again from there
+			if (!Files.SamePath(source, now) && HasData(source) && MovedTo(source) == null) {
+				return source;
+			}
+			Repoint(now, source);
 		}
 		var olds = Brand.OldNames.Select(n => Path.Combine(a_parent, n + a_suffix)).Where(Directory.Exists).ToList();
 		if (olds.Count == 0) {
@@ -202,50 +209,73 @@ public static class DataFolder
 		if (HasData(to)) {
 			throw new InvalidOperationException($"{to} holds files already - move them away, then try again");
 		}
+		// A folder inside the data that is a link to another folder would be copied as the folder it leads to (and that folder's
+		// files would then stand twice): not moved while one is there
+		var (dirs, files, links) = Tree(from);
+		if (links.Count > 0) {
+			throw new InvalidOperationException($"{links[0]} inside the data folder is a link to another folder - move it out of the data folder, then try again");
+		}
 		// (an old rename's mark of the old folder is its own business: the copy carries this move's mark in its place)
-		var want = Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories).Where(f => !Files.SamePath(f, Path.Combine(from, Pending)))
+		var want = files.Where(f => !Files.SamePath(f, Path.Combine(from, Pending)))
 			.ToDictionary(f => Path.GetRelativePath(from, f), f => new FileInfo(f).Length, StringComparer.OrdinalIgnoreCase);
+		// The copy is made in a folder of the move's own beside the new place, and takes the new place's name only once it is
+		// whole, read back and repointed: a stop at any moment leaves the new place as it was, and taking a copy back removes
+		// only what this move made. One left by a move that was cut off is this move's too, and goes first
+		var staging = to + " (being copied)";
+		if (Directory.Exists(staging)) {
+			if (Files.IsLink(staging)) {
+				throw new InvalidOperationException($"{staging} is in the way - move it away, then try again");
+			}
+			Files.DeleteDir(staging);
+		}
 		[System.Diagnostics.CodeAnalysis.DoesNotReturn]
-		void TakeBack(Exception a_why, string a_what)
+		void TakeBack(string a_copy, Exception a_why, string a_what)
 		{
 			try {
-				Files.DeleteDir(to);
+				Files.DeleteDir(a_copy);
 			} catch (Exception e2) when (e2 is IOException or UnauthorizedAccessException) {
-				throw new IOException($"{a_what} ({a_why.Message}), and the part already copied could not be removed again ({to}) - delete that folder yourself; your data is still where it was", a_why);
+				throw new IOException($"{a_what} ({a_why.Message}), and the part already copied could not be removed again ({a_copy}) - delete that folder yourself; your data is still where it was", a_why);
 			}
 			throw new IOException($"{a_what} ({a_why.Message}) - it is still where it was", a_why);
 		}
 		try {
-			Directory.CreateDirectory(to);
+			Directory.CreateDirectory(staging);
 			// the copy says where it came from before anything is in it: a copy cut off half way is known for what it is
-			Files.WriteAtomic(Path.Combine(to, Pending), from);
-			foreach (var d in Directory.EnumerateDirectories(from, "*", SearchOption.AllDirectories)) {
-				Directory.CreateDirectory(Path.Combine(to, Path.GetRelativePath(from, d)));
+			Files.WriteAtomic(Path.Combine(staging, Pending), from);
+			foreach (var d in dirs) {
+				Directory.CreateDirectory(Path.Combine(staging, Path.GetRelativePath(from, d)));
 			}
 			foreach (var rel in want.Keys) {
-				Files.Copy(Path.Combine(from, rel), Path.Combine(to, rel), false);
+				Files.Copy(Path.Combine(from, rel), Path.Combine(staging, rel), false);
 			}
 			// each copy read back against its file, byte for byte, before anything of the old folder goes (its size alone says
 			// nothing of what was written)
 			foreach (var (rel, size) in want) {
-				var copy = new FileInfo(Path.Combine(to, rel));
+				var copy = new FileInfo(Path.Combine(staging, rel));
 				if (!copy.Exists || copy.Length != size || !SameBytes(Path.Combine(from, rel), copy.FullName)) {
 					throw new IOException($"{rel} did not copy whole");
 				}
 			}
-			// (the copy keeps its mark of where it came from until the move counts: a stop before that leaves a copy the next
-			// try knows as this move's, never as someone's data)
-			if (!Repoint(to, from, true)) {
+			// (repointed to where it will stand; it keeps its mark of where it came from until the move counts)
+			if (!Repoint(staging, from, true, to)) {
 				throw new IOException("a file of the copy could not be updated to its new place");
 			}
+			// its place: the new folder's name, only while nothing else is there (an empty folder of that name gives way)
+			if (Directory.Exists(to)) {
+				if (HasData(to)) {
+					throw new IOException($"{to} was filled by something else while the data was copied");
+				}
+				Directory.Delete(to);
+			}
+			Directory.Move(staging, to);
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
-			TakeBack(e, "the data could not be moved");
+			TakeBack(staging, e, "the data could not be moved");
 		}
 		// the move counts from here: one mark in the old folder
 		try {
 			Files.WriteAtomic(Path.Combine(from, MovedMark), to);
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
-			TakeBack(e, "the old folder could not be marked as moved");
+			TakeBack(to, e, "the old folder could not be marked as moved");
 		}
 		// what is left after the mark never takes the move back: a start that finds the mark finishes both
 		try {
@@ -264,6 +294,29 @@ public static class DataFolder
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			return $"The old folder could not all be removed ({e.Message}); the next start removes what is left of {from}.";
 		}
+	}
+
+	// every folder and file under a_dir, a folder that is a link (a junction, a symbolic link) named and never walked into
+	static (List<string> Dirs, List<string> Files, List<string> Links) Tree(string a_dir)
+	{
+		var dirs = new List<string>();
+		var files = new List<string>();
+		var links = new List<string>();
+		var todo = new Stack<string>();
+		todo.Push(a_dir);
+		while (todo.Count > 0) {
+			var d = todo.Pop();
+			files.AddRange(Directory.EnumerateFiles(d));
+			foreach (var sub in Directory.EnumerateDirectories(d)) {
+				if (ToolRunner.Files.IsLink(sub)) {
+					links.Add(sub);
+				} else {
+					dirs.Add(sub);
+					todo.Push(sub);
+				}
+			}
+		}
+		return (dirs, files, links);
 	}
 
 	// The old folder of a move that counts, emptied with its mark going LAST: while anything of it is left, the mark stays, and
@@ -325,10 +378,11 @@ public static class DataFolder
 	// every JSON file under the folder: a string value that is the old folder, or a path inside it, is written under the new one
 	// (compared as values, so escaping and letters outside English never matter; a sibling folder sharing the name is left).
 	// True when every file that could hold such a path was read and written; false leaves the mark for the next start
-	public static bool Repoint(string a_now, string a_old, bool a_keepMark = false)
+	// a_as: where the folder will stand when that is not where it is now (a copy made beside its place)
+	public static bool Repoint(string a_now, string a_old, bool a_keepMark = false, string? a_as = null)
 	{
 		var from = Path.TrimEndingDirectorySeparator(Path.GetFullPath(a_old));
-		var to = Path.TrimEndingDirectorySeparator(Path.GetFullPath(a_now));
+		var to = Path.TrimEndingDirectorySeparator(Path.GetFullPath(a_as ?? a_now));
 		var failed = false;
 		foreach (var f in Directory.EnumerateFiles(a_now, "*.json", SearchOption.AllDirectories)) {
 			try {
@@ -393,16 +447,25 @@ public static class DataFolder
 		return changed;
 	}
 
-	// (compared with every "/" read as "\\": Windows takes both, and a hand-written path may use either)
+	// A full path, resolved as Windows would before it is compared ("/" or "\\", and ".." taken back): a value that only
+	// looks as if it lies in the folder ("<folder>/../MO2") is left as it is. Anything that is no full path is no path to move
 	static string? Moved(string a_path, string a_from, string a_to)
 	{
-		var p = a_path.Replace('/', '\\');
-		var f = a_from.Replace('/', '\\');
+		string p;
+		try {
+			if (!Path.IsPathFullyQualified(a_path)) {
+				return null;
+			}
+			p = Path.TrimEndingDirectorySeparator(Path.GetFullPath(a_path));
+		} catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) {
+			return null;
+		}
+		var f = Path.TrimEndingDirectorySeparator(Path.GetFullPath(a_from));
 		if (p.Equals(f, StringComparison.OrdinalIgnoreCase)) {
 			return a_to;
 		}
 		return p.Length > f.Length && p.StartsWith(f, StringComparison.OrdinalIgnoreCase) && p[f.Length] == '\\'
-			? a_to + a_path[f.Length..]
+			? a_to + p[f.Length..]
 			: null;
 	}
 

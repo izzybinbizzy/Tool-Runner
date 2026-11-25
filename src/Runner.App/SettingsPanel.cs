@@ -341,8 +341,14 @@ public static class SettingsPanel
 				a_vm.Say($"Not shared: these are the settings of \"{openedName}\", and \"{current.Name}\" is picked in the main window now. Pick \"{openedName}\" again to share it.", "bad");
 				return;
 			}
+			// (it writes into the data folder: never while that folder is being moved)
+			if (a_vm.MovingData) {
+				a_vm.Say(a_vm.WhyNotWriting("shared")!, "bad");
+				return;
+			}
 			// the setup as it is this moment, written off the window's thread; one share at a time
 			share.IsEnabled = false;
+			a_vm.SharingSetup = true;
 			var text = System.Text.Encoding.UTF8.GetBytes(current.Root.ToJsonString());
 			var source = current.File;
 			try {
@@ -357,6 +363,7 @@ public static class SettingsPanel
 				a_vm.Say("The shared copy could not be made: " + e.Message, "bad");
 			} finally {
 				share.IsEnabled = true;
+				a_vm.SharingSetup = false;
 			}
 		};
 		stack.Children.Add(share);
@@ -1325,7 +1332,8 @@ public static class SettingsPanel
 		}
 		var to = AppPaths.AppDataFolder;
 		if (!Ask.Show(a_w, "Keep data through updates", $"Tool Runner's data (your setups, the run history, the settings learned from your tools) moves from\n{AppPaths.Data}\nto\n{to}\n\n" +
-			    "Every copy of Tool Runner on this PC then uses it, also a new version unzipped into another folder. Run backups stay where your setups put them.\n\n" +
+			    "Every copy of Tool Runner on this PC then uses it, also a new version unzipped into another folder. Run backups kept outside that folder stay where they are; " +
+			    "backups kept inside it move with the data.\n\n" +
 			    "Tool Runner closes when the move is done; start it again.", "Move my data", "Not now")) {
 			return;
 		}
@@ -1335,13 +1343,16 @@ public static class SettingsPanel
 		string? leftOver;
 		try {
 			// (a setup copy or rename under way finishes first: it reads and writes in the folder being moved)
-			while (!MainViewModel.PendingSetupSave.IsCompleted || a_vm.Saving || a_vm.CopyingSetup || a_vm.Renaming) {
+			while (!MainViewModel.PendingSetupSave.IsCompleted || a_vm.Saving || a_vm.CopyingSetup || a_vm.Renaming || a_vm.SharingSetup) {
 				try {
 					await MainViewModel.PendingSetupSave.ConfigureAwait(true);
 				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) {
 				}
 				await Task.Delay(50).ConfigureAwait(true);
 			}
+			// (Windows refuses to move or remove a folder while a folder inside it is watched: the window's watch of the runs
+			// folder lets go first, and comes back if the move is refused)
+			a_w.WatchRuns(false);
 			leftOver = await Task.Run(() => {
 				using var hold = Runner.HoldIfFree() ?? throw new InvalidOperationException("a run is going - move the data when it has ended");
 				string? left = null;
@@ -1351,6 +1362,7 @@ public static class SettingsPanel
 			});
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) {
 			a_vm.MovingData = false;
+			a_w.WatchRuns(true);
 			a_errors.Text = "Not moved: " + e.Message;
 			return;
 		}
@@ -1501,7 +1513,7 @@ public static class SettingsPanel
 					// (a folder on a network share that is gone can take a while to answer: never on the window's thread)
 					var start = await Task.Run(() => StartFolder(pick, now));
 					// (Settings may have closed while a slow folder answered: no picker opens over a window that is gone)
-					if (!browse.IsLoaded || Window.GetWindow(browse) is not { IsVisible: true } owner) {
+					if (!browse.IsLoaded || !browse.IsVisible || Window.GetWindow(browse) is not { IsVisible: true } owner) {
 						return;
 					}
 					if (Browse(owner, pick, start, a_label) is { } chosen) {
@@ -1656,8 +1668,14 @@ public static class SettingsPanel
 			pause.Stop();
 			Read();
 		};
+		// the values the list stands for: an edit that leaves them as they were (a space typed at an end) changes nothing
+		var shownFor = first;
 		foreach (var b in a_mo2) {
 			b.TextChanged += (_, _) => {
+				if (Typed() == shownFor) {
+					return;
+				}
+				shownFor = Typed();
 				// a character picked from the saves of the values before is no pick for these: back to any character at once,
 				// so a Save pressed before the new list is read never writes one profile's character for another
 				// and the list holds only that until the new one is read: no character of the old profile can be picked again
