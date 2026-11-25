@@ -96,7 +96,8 @@ public static class SetupFiles
 	static bool NameInside(string a_file, string a_was, string a_name)
 	{
 		// (a "name" that is no text is left as it is: it was never the file's name)
-		if (JsonNode.Parse(Files.ReadShared(a_file)) is not JsonObject root || root["name"] is not JsonValue v || !v.TryGetValue<string>(out var inside) ||
+		// (read as every setup is read: a comment or a comma after the last value is no reason to refuse it)
+		if (JsonNode.Parse(Files.ReadShared(a_file), documentOptions: Setup.ReadOptions) is not JsonObject root || root["name"] is not JsonValue v || !v.TryGetValue<string>(out var inside) ||
 		    !string.Equals(inside, Path.GetFileNameWithoutExtension(a_was), StringComparison.OrdinalIgnoreCase)) {
 			return false;
 		}
@@ -164,7 +165,8 @@ public static class SetupFiles
 		var to = Path.Combine(dir, a_name.Trim() + ".json");
 		var learned = LearnedDir(a_file);
 		var learnedTo = LearnedDir(to);
-		if (!Files.SamePath(learned, learnedTo) && Directory.Exists(learned) && Directory.Exists(learnedTo)) {
+		// (also when this setup has learned none: under the new name those leftovers would be taken for its own)
+		if (!Files.SamePath(learned, learnedTo) && Directory.Exists(learnedTo)) {
 			throw new InvalidOperationException($"a folder of learned tool settings for \"{a_name.Trim()}\" is there already ({learnedTo})");
 		}
 		File.Move(a_file, to);
@@ -186,14 +188,31 @@ public static class SetupFiles
 			}
 			nameChanged = NameInside(to, a_file, a_name.Trim());
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException) {
-			// (a folder half way through a change of letters goes back to its old name too)
-			if (folderMoved && Directory.Exists(learnedTo) && !Directory.Exists(origin)) {
-				MoveFolder(learnedTo, origin);
-			} else if (!string.Equals(learned, origin, StringComparison.Ordinal) && Directory.Exists(learned) && !Directory.Exists(origin)) {
-				Directory.Move(learned, origin);
+			Exception? stuck = null;
+			try {
+				// (a folder half way through a change of letters goes back to its old name too)
+				if (folderMoved && Directory.Exists(learnedTo) && !Directory.Exists(origin)) {
+					MoveFolder(learnedTo, origin);
+				} else if (!string.Equals(learned, origin, StringComparison.Ordinal) && Directory.Exists(learned) && !Directory.Exists(origin)) {
+					Directory.Move(learned, origin);
+				}
+				File.Move(to, a_file);
+			} catch (Exception b) when (b is IOException or UnauthorizedAccessException) {
+				stuck = b;
 			}
-			File.Move(to, a_file);
-			throw new IOException($"it could not be renamed whole ({e.Message}) - the setup keeps its old name", e);
+			if (stuck == null) {
+				throw new IOException($"it could not be renamed whole ({e.Message}) - the setup keeps its old name", e);
+			}
+			// The way back failed too: the setup stands under its new name. Its learned settings go with it and the run records
+			// follow below, so the three are never left apart; what cannot follow is named with where each one is
+			try {
+				if (Directory.Exists(origin) && !Directory.Exists(learnedTo)) {
+					MoveFolder(origin, learnedTo);
+				}
+			} catch (Exception e3) when (e3 is IOException or UnauthorizedAccessException) {
+				throw new IOException($"it could not be renamed whole ({e.Message}), and could not take its old name back ({stuck.Message}): the setup is now \"{to}\" and its " +
+					$"learned settings are still in \"{origin}\" - move that folder to \"{learnedTo}\"; its run records still name \"{a_file}\"", e);
+			}
 		}
 		// Every run record that names the setup follows it. One that cannot be written stops the rename: every record names the
 		// old file again and the setup goes back to its old name, so no run loses its setup in History. Where that cannot be

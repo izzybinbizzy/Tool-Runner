@@ -2966,6 +2966,15 @@ public static class Program
 		Throws<IOException>(() => SetupFiles.Rename(broken, "Mended", runs), "a setup whose file does not read is not renamed half way");
 		Check(File.Exists(broken) && !File.Exists(Path.Combine(setups, "Mended.json")) && Directory.Exists(Path.Combine(setups, "learned settings", "Broken", "texgen")) &&
 			!Directory.Exists(Path.Combine(setups, "learned settings", "Mended")), "the file and its learned settings keep the old name");
+		// a setup written by hand (a comment, a comma after its last value) is renamed as every setup reads: its name inside follows
+		var loose = Path.Combine(setups, "Loose.json");
+		File.WriteAllText(loose, "{\n  // made by hand\n  \"name\": \"Loose\",\n}");
+		var tidy = SetupFiles.Rename(loose, "Tidy", runs).File;
+		Equal("Tidy", JsonNode.Parse(File.ReadAllText(tidy))!["name"]!.GetValue<string>(), "a setup written by hand keeps its own name in step");
+		// leftover learned settings under the new name refuse a rename also of a setup that has learned none
+		Directory.CreateDirectory(Path.Combine(setups, "learned settings", "Taken", "texgen"));
+		Throws<InvalidOperationException>(() => SetupFiles.Rename(tidy, "Taken", runs), "a rename onto leftover learned settings is refused");
+		Check(File.Exists(tidy) && !File.Exists(Path.Combine(setups, "Taken.json")), "and nothing was renamed");
 		// a run record that does not read may be an unfinished run's: nothing is renamed until it reads
 		var unread = Path.Combine(runs, "2026-01-03 00-00-00 Test");
 		Directory.CreateDirectory(unread);
@@ -6669,7 +6678,12 @@ public static class Program
 		// Its author's word (Landscape Fixer, 2026-11-22): its settings file is no stable contract. A file it wrote that no longer
 		// holds a field this program points it with (renamed in a newer version) is not written over: the step stops, names
 		// the field, and says the fault is Tool Runner's to report - never the tool author's
-		Equal<string?>(null, LauncherStep.MissingField("{ \"Mo2InstancePath\": \"C:\\\\M\", \"Mo2ProfileName\": \"A\", \"GameLocation\": \"C:\\\\G\", \"OutputLocation\": \"C:\\\\O\" }"), "all four fields there");
+		Equal<string?>(null, LauncherStep.MissingField("{ \"ModManager\": 1, \"Mo2InstancePath\": \"C:\\\\M\", \"Mo2ProfileName\": \"A\", \"GameLocation\": \"C:\\\\G\", \"OutputLocation\": \"C:\\\\O\" }"), "all five fields there");
+		// the field that tells it the mods are Mod Organizer's is one too, and the stop says what it is for
+		const string noManager = "{ \"Mo2InstancePath\": \"C:\\\\M\", \"Mo2ProfileName\": \"A\", \"GameLocation\": \"C:\\\\G\", \"OutputLocation\": \"C:\\\\O\" }";
+		Equal("ModManager", LauncherStep.MissingField(noManager), "a file without the mod manager's field is found");
+		Check(LauncherStep.SettingsProblem(noManager, "Landscape Fixer")?.Contains("\"ModManager\", which Tool Runner sets to tell it the mods are in Mod Organizer", StringComparison.Ordinal) == true,
+			"and the stop names what that field is for");
 		Equal<string?>(null, LauncherStep.MissingField(null), "no file yet: a new one gets them all");
 		Equal("Mo2InstancePath", LauncherStep.MissingField("{}"), "a file the tool wrote with no fields holds none of them");
 		Equal("Mo2InstancePath", LauncherStep.MissingField("[1, 2]"), "a file that holds no settings object holds none of them");
