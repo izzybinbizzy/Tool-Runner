@@ -5931,6 +5931,20 @@ public static class Program
 			var viaNetwork = @"\\localhost\" + local[0] + "$" + local[2..];
 			Throws<InvalidOperationException>(() => DataFolder.MoveTo(viaNetwork, Path.Combine(local, "inside", "deeper")), "data reached by a network path is not moved");
 			Check(Directory.Exists(Path.Combine(local, "inside")) && !Directory.Exists(Path.Combine(local, "inside", "deeper")), "and nothing was copied");
+			// the same with Windows answering for the share (no share of this PC opens for certain): the refusal is the network one
+			var realName = DataFolder.FinalPathOf;
+			var elsewhere = Path.Combine(root, "appdata net", Brand.Name);
+			try {
+				DataFolder.FinalPathOf = a_dir => Files.SamePath(a_dir, local) ? @"\\localhost\share\Tool Runner Data" : realName(a_dir);
+				var fromNet = Thrown<InvalidOperationException>(() => DataFolder.MoveTo(local, elsewhere), "data whose folder Windows names on the network");
+				Check(fromNet.Message.Contains("the data is in a network folder", StringComparison.Ordinal), "is refused for that: " + fromNet.Message);
+				DataFolder.FinalPathOf = a_dir => Files.SamePath(a_dir, Path.GetDirectoryName(Path.GetDirectoryName(elsewhere)!)!) ? @"\\server\share" : realName(a_dir);
+				var toNet = Thrown<InvalidOperationException>(() => DataFolder.MoveTo(local, elsewhere), "a new place Windows names on the network");
+				Check(toNet.Message.Contains("is a network folder", StringComparison.Ordinal), "is refused for that: " + toNet.Message);
+			} finally {
+				DataFolder.FinalPathOf = realName;
+			}
+			Check(Directory.Exists(local) && !Directory.Exists(elsewhere), "and nothing was copied either way");
 		} finally {
 			if (Directory.Exists(root)) {
 				Directory.Delete(root, true);

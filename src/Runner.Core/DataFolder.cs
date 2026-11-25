@@ -298,6 +298,10 @@ public static class DataFolder
 	// Where a path really is: its deepest part that is there named as Windows names it (junctions, links, SUBST drive letters
 	// and mapped network drives followed - Files.FinalPath), the parts not there yet added as written. Null when Windows will
 	// not name it: where the folder is cannot then be known
+	// Windows' own name for a folder that is there (Files.FinalPath); the offline tests give a network answer through it, since
+	// no share of this PC can be counted on to open
+	public static Func<string, string?> FinalPathOf { get; set; } = Files.FinalPath;
+
 	static string? Physical(string a_path)
 	{
 		var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(a_path));
@@ -307,7 +311,7 @@ public static class DataFolder
 			rest.Push(Path.GetFileName(at));
 			at = up;
 		}
-		if (!Directory.Exists(at) || Files.FinalPath(at) is not { } real) {
+		if (!Directory.Exists(at) || FinalPathOf(at) is not { } real) {
 			return null;
 		}
 		foreach (var part in rest) {
