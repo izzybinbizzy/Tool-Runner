@@ -822,25 +822,74 @@ public static class SettingsPanel
 						$"Its settings were learned {learned.At.ToLocalTime().ToString("MMM d HH:mm", InvariantCulture)} ({learned.Files.Count} file(s)) - every run uses them." };
 				var learn = new Button { Content = "Learn its settings (opens its own window)", Style = (Style)a_w.FindResource("Ghost"),
 					HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 12) };
+				// while a tool is being opened (or is open) to learn its settings, this button stops that wait instead. The wait
+				// outlives this step's view - another step picked, Save, Undo - so every learn button stops the one that is going,
+				// and none starts a second
+				var learnText = learn.Content;
+				void ShowLearn()
+				{
+					if (s_learning is { } going) {
+						learn.Content = LearningHere(setupNow, stepKey) ? "Stop waiting" : $"Stop waiting for {s_learningName}";
+						learn.IsEnabled = !going.Stopping;
+					} else {
+						learn.Content = learnText;
+						learn.IsEnabled = true;
+					}
+				}
+				// the step whose tool is open: this view's line now says how it goes
+				if (s_learning is { } still && LearningHere(setupNow, stepKey)) {
+					s_learningSays = t => status.Text = t;
+					status.Text = still.Opened ? $"{name} is open - set it up, save, and close it ..." : $"waiting to open {name} ...";
+				}
+				s_showLearn = ShowLearn;
+				ShowLearn();
 				learn.Click += async (_, _) => {
+					if (s_learning is { } o) {
+						// (not open yet: stopped at once; open: only on the player's word - decided on the one state the opening sets)
+						if (!o.Stopping && (o.StopIfNotOpen() || AskStopLearning(a_w))) {
+							o.Stop();
+							learn.IsEnabled = false;
+						}
+						return;
+					}
 					if (!Ask.Show(a_w, "Learn its settings", $"{name} opens through Mod Organizer (Mod Organizer is closed first if it is open). Set it up the way every run " +
 					        "should use it, save, and close it - its settings are then kept with this setup. To change them later, do this again.", "Open it", "Not now")) {
 						return;
 					}
-					learn.IsEnabled = false;
-					status.Text = $"{name} is open - set it up, save, and close it ...";
-					using var hand = a_w.Working($"{name} is open to learn its settings");
-					// the mod its window was started from, when that could not be switched off again
-					string? stillOn = null;
+					using var now = new ToolOpen();
+					s_learning = now;
+					s_learningSetup = setupNow.File;
+					s_learningStep = stepKey;
+					s_learningName = name;
+					s_learningSays = t => status.Text = t;
+					s_showLearn?.Invoke();
+					status.Text = $"opening {name} ...";
+					ToolOpen.Result result;
 					try {
-						var l = await Task.Run(() => ToolSettings.Learn(setupNow, stepKey, RunLog.Null, CancellationToken.None, m => stillOn = m));
-						status.Text = $"Learned: {l.Files.Count} settings file(s) ({string.Join(", ", l.Files.Select(f => Path.GetFileName(f.Live)))}) - every run uses them.";
-					} catch (Exception e) {
-						status.Text = "Not learned: " + e.Message;
+						using (a_w.Working($"{name} is open to learn its settings")) {
+							result = await now.Go(setupNow, stepKey,
+								why => Ask.Show(a_w, $"{name} cannot open yet", $"{ToolsDialog.Capital(why)}.\n\n{name} opens through Mod Organizer, and Mod Organizer is closed first - " +
+								                     $"never while that is open. Close it and try again, or wait here: {name} opens by itself once it has ended, and you can stop " +
+								                     "waiting at any time.", "Wait for it", "Not now"),
+								line => a_w.Dispatcher.BeginInvoke(() => {
+									if (s_learning == now) {
+										s_learningSays?.Invoke(now.Opened ? $"{name} is open - set it up, save, and close it ..." : line);
+									}
+								}));
+						}
 					} finally {
-						learn.IsEnabled = true;
+						s_learning = null;
 					}
-					status.Text += ToolsDialog.StillOn(stillOn);
+					var says = s_learningSays;
+					s_learningSays = null;
+					var outcome = (result.Learned is { } l
+						? $"Learned: {l.Files.Count} settings file(s) ({string.Join(", ", l.Files.Select(f => Path.GetFileName(f.Live)))}) - every run uses them."
+						: result.How == ToolOpen.Ending.Failed ? "Not learned: " + result.Why : "Not learned: " + ToolsDialog.Outcome(name, result)) + ToolsDialog.StillOn(now.StillOn);
+					s_showLearn?.Invoke();
+					// on the view that shows that step now, and on the main window's message line too (the settings window may be
+					// on another step by now, or closed)
+					says?.Invoke(outcome);
+					a_vm.Say($"{name}: {outcome}", result.Learned != null ? "" : "warn");
 				};
 				stepHost.Children.Add(status);
 				stepHost.Children.Add(learn);
@@ -997,6 +1046,42 @@ public static class SettingsPanel
 	// late writes its failure there)
 	static TextBlock? s_errors;
 
+	// A tool opened to learn its settings, while the wait for it goes (one at a time): it outlives the step view that started it
+	// and the settings window, so it can always be stopped. s_learningSays: the line of the view that shows that step of that
+	// setup now; s_showLearn: the learn button of the view drawn last
+	static ToolOpen? s_learning;
+	static string s_learningSetup = "";
+	static string s_learningStep = "";
+	static string s_learningName = "";
+	static Action<string>? s_learningSays;
+	static Action? s_showLearn;
+
+	// the tool being learned is this setup's own step (another setup's step of the same tool learns into that setup only)
+	static bool LearningHere(Setup a_setup, string a_step) =>
+		s_learningStep == a_step && string.Equals(s_learningSetup, a_setup.File, StringComparison.OrdinalIgnoreCase);
+
+	static bool AskStopLearning(Window a_over) =>
+		Ask.Show(a_over, $"Stop waiting for {s_learningName}?", $"{s_learningName} is open. Its settings are kept once you save and close it there.\n\n" +
+			$"If you stop waiting, {s_learningName} stays open, but nothing it saves is kept with this setup.", "Stop waiting", "Keep waiting");
+
+	// The settings window is about to close: a wait for a tool opened from it would go on with nothing left to stop it, and keep
+	// the main window from closing. One still waiting for its window is stopped (nothing is lost); one whose tool is open is
+	// stopped only on the player's word - true when the window may close
+	public static bool LeaveLearning(Window a_over)
+	{
+		if (s_learning is not { } o || o.Stopping) {
+			return true;
+		}
+		if (o.StopIfNotOpen()) {
+			return true;
+		}
+		if (!AskStopLearning(a_over)) {
+			return false;
+		}
+		o.Stop();
+		return true;
+	}
+
 	// The test of the tools belongs to the window, not to one drawing of Settings: Undo changes draws Settings again while a
 	// test may still run, and the new drawing must stop that test, never start a second one beside it. s_showTest and
 	// s_testRows are the test buttons and the result rows of the drawing on screen; a test that ends writes there.
@@ -1007,6 +1092,8 @@ public static class SettingsPanel
 	// the settings window closed: nothing typed is left to ask about
 	public static void Closed()
 	{
+		s_showLearn = null;
+		s_learningSays = null;
 		++s_drawing;
 		HasChanges = false;
 		s_openedFor = null;
