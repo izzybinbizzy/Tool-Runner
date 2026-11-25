@@ -845,6 +845,10 @@ public static class SettingsPanel
 				"Nothing is pressed and nothing is built. Mod Organizer closes for it, and the LOD tools read your whole load order first, so it can take a while."), "Test them", "Not now")) {
 				return;
 			}
+			// (each tool is opened through the setup's Mod Organizer: what the setup starts is asked about first)
+			if (!a_vm.StartsFirst(testSetup)) {
+				return;
+			}
 			s_testRows?.Children.Clear();
 			using var stop = new CancellationTokenSource();
 			s_testing = stop;

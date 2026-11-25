@@ -976,8 +976,9 @@ public sealed partial class MainViewModel : Observable
 
 	public static void AllowStarts(Setup a_setup) => UiState.Set(StartsAllowedKey(a_setup.File), a_setup.StartsMark());
 
-	// true: go on with the start
-	bool StartsFirst(Setup a_setup)
+	// True: go on. Asked before anything of the setup is started from the window: a run, a queue, a tool opened for its
+	// settings (the Tools box opens it through the setup's Mod Organizer), Test my tools
+	public bool StartsFirst(Setup a_setup)
 	{
 		if (ConfirmStarts == null || StartsKnown(a_setup)) {
 			return true;
@@ -1081,6 +1082,11 @@ public sealed partial class MainViewModel : Observable
 				// (its tools are read from a copy made here: the worker never walks the shown setup's own step list, which a
 				// step dragged meanwhile rewrites under it)
 				var asItIs = mine.Clone();
+				// (before the tools box, which opens a tool through the setup's Mod Organizer; the file itself is asked
+				// about below, where it is read for the preview)
+				if (!StartsFirst(asItIs)) {
+					return;
+				}
 				var edits = _setupEdits;
 				if (!await ToolsFirst(mine.File, () => asItIs, CannotStart, () => string.Equals(SelectedSetup?.File, picked, StringComparison.OrdinalIgnoreCase), () => _setupEdits == edits)) {
 					return;
@@ -1290,12 +1296,7 @@ public sealed partial class MainViewModel : Observable
 		// each setup of the queue that has never run: its tools first, as before a single run
 		_previewing = true;
 		try {
-			foreach (var f in a_files) {
-				if (!await ToolsFirst(f, () => Setup.Parse(Files.ReadShared(f), f), CannotStartAny)) {
-					return;
-				}
-			}
-			// ... and what each of them starts, as before a single run
+			// what each of them starts, as before a single run - before any tool of it is opened
 			foreach (var f in a_files) {
 				Setup asRead;
 				try {
@@ -1305,6 +1306,11 @@ public sealed partial class MainViewModel : Observable
 					continue;
 				}
 				if (!StartsFirst(asRead)) {
+					return;
+				}
+			}
+			foreach (var f in a_files) {
+				if (!await ToolsFirst(f, () => Setup.Parse(Files.ReadShared(f), f), CannotStartAny)) {
 					return;
 				}
 			}

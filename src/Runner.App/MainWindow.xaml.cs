@@ -1225,6 +1225,10 @@ public partial class MainWindow : Window
 			// (read from a copy made here, on the window's thread: the worker never walks the setup's own step list, which a
 			// step dragged meanwhile rewrites under it)
 			var asItIs = setup.Clone();
+			// (a tool is opened through the setup's Mod Organizer: what the setup starts is asked about first)
+			if (!_vm.StartsFirst(asItIs)) {
+				return;
+			}
 			var tools = await Task.Run(() => ToolSettings.ToSetUp(asItIs));
 			ToolsDialog.Run(this, _vm, asItIs, tools, false);
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) {
