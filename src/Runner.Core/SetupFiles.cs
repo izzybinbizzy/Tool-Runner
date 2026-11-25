@@ -210,6 +210,8 @@ public static class SetupFiles
 			try {
 				if (standing != null && !Directory.Exists(learnedTo)) {
 					Directory.Move(standing, learnedTo);
+					// (on record as moved: a later way back for the run records takes it back with the setup)
+					folderMoved = true;
 				}
 			} catch (Exception e3) when (e3 is IOException or UnauthorizedAccessException) {
 				var records = runs.Where(j => Files.SamePath(j.SetupFile, a_file)).Select(j => Path.GetFileName(j.Folder)).ToList();

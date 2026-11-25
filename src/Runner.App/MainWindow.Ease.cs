@@ -92,8 +92,16 @@ public partial class MainWindow
 		if (_copying || _vm.IsRunning || _vm.SelectedSetup is not { } item) {
 			return;
 		}
+		// the name offered first is looked for on the disk too (a free "(copy n)"): on a worker, as every check of the name is
+		_copying = true;
+		string offered;
+		try {
+			offered = await Task.Run(() => SetupFiles.FreeCopyName(item.File));
+		} finally {
+			_copying = false;
+		}
 		var name = Ask.Input(this, "Copy this setup", $"A new setup with the steps and settings of \"{item.Name}\", and the settings its tools learned. Nothing of \"{item.Name}\" changes. The copy's name:",
-			SetupFiles.FreeCopyName(item.File), "Make the copy", n => SetupFiles.BadName(AppPaths.Setups, n));
+			offered, "Make the copy", n => SetupFiles.BadName(AppPaths.Setups, n));
 		if (name == null) {
 			return;
 		}
