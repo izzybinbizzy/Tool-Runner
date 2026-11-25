@@ -23,6 +23,17 @@ public static class AppPaths
 	// the player chose the app-data folder for every copy (Settings > Program)
 	public static bool AppDataChosen => DataFolder.Chosen(AppDataFolder);
 
+	// the folder beside the program is where the player's setups are
+	static bool HoldsSetups(string a_data)
+	{
+		try {
+			var setups = Path.Combine(a_data, "Setups");
+			return Directory.Exists(setups) && Directory.EnumerateFiles(setups, "*.json").Any();
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			return false;
+		}
+	}
+
 	static string Resolve()
 	{
 		try {
@@ -49,8 +60,15 @@ public static class AppPaths
 			var beside = DataFolder.Adopt(AppContext.BaseDirectory, " Data");
 			Directory.CreateDirectory(beside);
 			var probe = Path.Combine(beside, ".write test");
-			File.WriteAllText(probe, "");
-			File.Delete(probe);
+			try {
+				File.WriteAllText(probe, "");
+			} catch (Exception e) when ((e is IOException or UnauthorizedAccessException) && HoldsSetups(beside)) {
+				// the player's setups are in this folder: a file another program holds for a moment (a scanner) must not send
+				// this start to an empty folder elsewhere - tried again before the folder is given up
+				Files.Retry(() => File.WriteAllText(probe, ""));
+			}
+			// (the write proved the folder; its removal never decides where the data is)
+			Files.TryDelete(probe);
 			return beside;
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			var local = DataFolder.Adopt(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "");
@@ -107,7 +125,7 @@ public static class Engine
 	public static string? LastRefusal(DateTime a_since)
 	{
 		try {
-			return File.Exists(RefusalFile) && File.GetLastWriteTime(RefusalFile) >= a_since.AddSeconds(-5) ? Files.ReadSharedText(RefusalFile).Trim() : null;
+			return File.Exists(RefusalFile) && File.GetLastWriteTimeUtc(RefusalFile) >= a_since.ToUniversalTime().AddSeconds(-5) ? Files.ReadSharedText(RefusalFile).Trim() : null;
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			return null;
 		}
@@ -131,7 +149,7 @@ public static class Engine
 		var all = new Dictionary<string, List<double>>();
 		foreach (var j in (a_runs ?? Runs()).Where(j => string.Equals(j.SetupFile, a_setupFile, StringComparison.OrdinalIgnoreCase)).Take(30)) {
 			foreach (var s in j.Steps.Where(s => s.State == StepState.Done && s.Started != null && s.Ended != null)) {
-				(all.TryGetValue(s.Key, out var l) ? l : all[s.Key] = []).Add((s.Ended!.Value - s.Started!.Value).TotalSeconds);
+				(all.TryGetValue(s.Key, out var l) ? l : all[s.Key] = []).Add(Times.Between(s.Started!.Value, s.Ended!.Value).TotalSeconds);
 			}
 		}
 		return all.ToDictionary(p => p.Key, p => TimeSpan.FromSeconds(p.Value.Order().ElementAt(p.Value.Count / 2)));

@@ -532,7 +532,16 @@ public static class Cli
 	static int Stop(string a_what)
 	{
 		var j = Engine.Active();
+		// between two setups of a queue no run is going for a moment: the queue's next run is waited for, so the stop is not lost
+		for (var waited = System.Diagnostics.Stopwatch.StartNew(); j == null && QueueRun.Read(AppPaths.Data) != null && waited.Elapsed < TimeSpan.FromSeconds(15);) {
+			Thread.Sleep(250);
+			j = Engine.Active();
+		}
 		if (j == null) {
+			if (QueueRun.Read(AppPaths.Data) != null) {
+				Console.WriteLine("a queue of setups is going, and its next run has not started yet - nothing was asked to stop; try again in a moment");
+				return 1;
+			}
 			Console.WriteLine("no run is going");
 			return 0;
 		}

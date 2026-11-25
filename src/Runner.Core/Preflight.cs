@@ -58,11 +58,13 @@ public static class Preflight
 		}
 		outList.AddRange(pc);
 		foreach (var d in new[] { a_setup.BackupDir, a_mo2.ModsDir }.Where(d => d != "")) {
-			var root = Path.GetPathRoot(Path.GetFullPath(d));
-			if (root == null) {
+			var root = Path.GetPathRoot(Path.GetFullPath(d)) ?? d;
+			// the disk the folder really stands on: a mods folder kept on another disk through a junction, a network path
+			if (Files.FreeOn(d) is not { } bytes) {
+				outList.Add(new Issue("", false, $"the free room on {root} could not be read, so the {a_setup.MinFreeGb} GB a run needs there was not checked"));
 				continue;
 			}
-			var free = new DriveInfo(root).AvailableFreeSpace / (1024.0 * 1024 * 1024);
+			var free = bytes / (1024.0 * 1024 * 1024);
 			if (free < a_setup.MinFreeGb) {
 				outList.Add(new Issue("", true, $"only {free:0.0} GB free on {root} - the run needs at least {a_setup.MinFreeGb} GB for its outputs and backups"));
 			}

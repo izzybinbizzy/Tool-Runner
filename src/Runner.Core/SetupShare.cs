@@ -135,7 +135,7 @@ public static partial class SetupShare
 		if (a_setup.File != "" && Files.SamePath(file, a_setup.File)) {
 			file = Path.Combine(a_outDir, $"{name} (shared copy).json");
 		}
-		Files.WriteAtomic(file, r.Setup.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+		Files.WriteAtomic(file, Setup.TextOf(r.Setup));
 		return (file, r.Removed);
 	}
 }

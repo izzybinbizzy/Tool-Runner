@@ -171,8 +171,8 @@ public partial class App : Application
 
 	static void Pump(Window a_w, int a_ms)
 	{
-		var until = DateTime.Now.AddMilliseconds(a_ms);
-		while (DateTime.Now < until) {
+		var waited = System.Diagnostics.Stopwatch.StartNew();
+		while (waited.ElapsedMilliseconds < a_ms) {
 			a_w.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
 			Thread.Sleep(30);
 		}

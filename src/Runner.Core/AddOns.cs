@@ -83,7 +83,7 @@ public static class AddOns
 	static bool RelativeInside(string a_path) =>
 		!Path.IsPathRooted(a_path) && !a_path.Replace('\\', '/').Split('/').Contains("..");
 
-	static bool GoodFolderName(string a_name) => a_name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 && a_name != "." && a_name != ".." && !a_name.EndsWith('.');
+	static bool GoodFolderName(string a_name) => Setup.PlainName(a_name);
 
 	// what is wrong with an add-on file, in plain words for its author (none = it is right); a_modDir: also look for the program there
 	public static List<string> Problems(string a_text, string? a_modDir = null)
@@ -294,7 +294,7 @@ public sealed class AddOnStep(string a_key) : IStep
 		var fresh = Runner.OverwriteFiles(a_ctx).Where(n => (!a_before.TryGetValue(n.Key, out var t) || t != n.Value) && !Files.IsUnder(n.Key, root)).Select(n => n.Key).ToList();
 		if (fresh.Count == 0) {
 			// a tool told to write into the output mod itself: Mod Organizer's virtual folder passes that through
-			if (a_makes != null && a_ctx.Journal.Step(a_step)?.Started is { } since && Path.Combine(a_ctx.Mo2.ModDir(a_mod), a_makes) is var inMod && File.Exists(inMod) && File.GetLastWriteTime(inMod) >= since) {
+			if (a_makes != null && a_ctx.Journal.Step(a_step)?.Started is { } since && Path.Combine(a_ctx.Mo2.ModDir(a_mod), a_makes) is var inMod && File.Exists(inMod) && File.GetLastWriteTimeUtc(inMod) >= since.ToUniversalTime()) {
 				a_ctx.Log.Detail($"{StepCatalog.Name(a_step)} wrote {a_makes} straight into {a_mod}");
 				// its old bytes (kept before the tool started) are what an undo puts back
 				StepKit.Settled(a_ctx, a_mod, [inMod]);

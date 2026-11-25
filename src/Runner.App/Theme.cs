@@ -397,9 +397,6 @@ public static class Theme
 	// a pick that is still being read is not applied when it arrives
 	public static void DropPending() => ++s_asked;
 
-	static readonly string[] DeviceNames = ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"];
-
 	// A theme's name as a file's name: every character Windows refuses in a name taken out (a theme may be called "Ocean: dark",
 	// and a slash in a name would put the copy outside the Themes folder), and a name Windows keeps for a device given a word in
 	// front ("CON.demo copy.json" is still the console, whatever follows the dot)
@@ -409,7 +406,7 @@ public static class Theme
 		if (safe.Length == 0) {
 			return "Theme";
 		}
-		return DeviceNames.Contains(safe.Split('.')[0].Trim(), StringComparer.OrdinalIgnoreCase) ? "Theme " + safe : safe;
+		return Setup.IsDeviceName(safe) ? "Theme " + safe : safe;
 	}
 
 	// A font is named by its family ("Segoe UI", or several with commas between them). Windows Presentation Foundation also takes

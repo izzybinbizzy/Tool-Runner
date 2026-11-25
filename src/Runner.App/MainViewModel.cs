@@ -663,23 +663,21 @@ public sealed partial class MainViewModel : Observable
 		if (a_t.TotalSeconds < 59.5) {
 			return $"{Math.Max(0, a_t.TotalSeconds):0}s";
 		}
-		var minutes = WholeMinutes(a_t);
+		var minutes = Times.WholeMinutes(a_t);
 		return minutes < 60 ? $"{minutes}m" : $"{minutes / 60}h {minutes % 60:00}m";
 	}
 
 	public static string Long(TimeSpan a_t)
 	{
-		var minutes = Math.Max(1, WholeMinutes(a_t));
+		var minutes = Math.Max(1, Times.WholeMinutes(a_t));
 		return minutes < 60 ? $"{minutes} min" : $"{minutes / 60} h {minutes % 60:00} min";
 	}
-
-	static long WholeMinutes(TimeSpan a_t) => (long)Math.Round(Math.Max(0, a_t.TotalMinutes), MidpointRounding.AwayFromZero);
 
 	void LoadHistory()
 	{
 		History.Clear();
 		foreach (var j in Engine.Runs().Where(j => SelectedSetup == null || string.Equals(j.SetupFile, SelectedSetup.File, StringComparison.OrdinalIgnoreCase)).Take(100)) {
-			var took = j.Ended is { } e ? Short(e - j.Started) : j.OwnerAlive ? "going" : "-";
+			var took = j.Ended is { } e ? Short(Times.Between(j.Started, e)) : j.OwnerAlive ? "going" : "-";
 			History.Add(new HistoryRow(j.Started.ToString("ddd MMM d  HH:mm", InvariantCulture), j.SetupName, took,
 				j.Verdict == "" ? (j.Unfinished ? (j.OwnerAlive ? "running" : "did not finish") : "") : j.Verdict, j.State is RunState.Finished or RunState.Restored, j.Folder));
 		}
@@ -832,12 +830,12 @@ public sealed partial class MainViewModel : Observable
 			System.Windows.Shell.TaskbarItemProgressState.Paused => Math.Max(RunProgress, 0.1),
 			_ => RunProgress,
 		};
-		var elapsed = (_run.Ended ?? DateTime.Now) - _run.Started;
+		var elapsed = Times.Between(_run.Started, _run.Ended ?? DateTime.Now);
 		Clock = Long(elapsed);
 		// the running setup's own usual times, whichever setup is picked in the list
 		var usual = RunUsual(_run, runs);
 		var ahead = _run.Steps.Where(s => s.State is StepState.Pending or StepState.Running).ToList();
-		var leftT = ahead.Select(s => usual.TryGetValue(s.Key, out var t) ? (s.State == StepState.Running && s.Started != null ? Max(TimeSpan.Zero, t - (DateTime.Now - s.Started.Value)) : t) : TimeSpan.Zero)
+		var leftT = ahead.Select(s => usual.TryGetValue(s.Key, out var t) ? (s.State == StepState.Running && s.Started != null ? Max(TimeSpan.Zero, t - Times.Between(s.Started.Value, DateTime.Now)) : t) : TimeSpan.Zero)
 			.Aggregate(TimeSpan.Zero, (a, b) => a + b);
 		// a step still to come that never ran before has no usual time: what is left is then at least that much, and no
 		// finish time is promised
@@ -868,7 +866,7 @@ public sealed partial class MainViewModel : Observable
 				row.State = rec?.State;
 				row.IsCurrent = rec?.State == StepState.Running;
 				row.Note = rec?.Note ?? "";
-				row.Elapsed = rec?.Started is { } st ? Short((rec.Ended ?? DateTime.Now) - st) : "";
+				row.Elapsed = rec?.Started is { } st ? Short(Times.Between(st, rec.Ended ?? DateTime.Now)) : "";
 			}
 		}
 		TailLog();
@@ -1409,7 +1407,7 @@ public sealed partial class MainViewModel : Observable
 		LoadHistory();
 	}
 
-	// the setup's last run undone, from the History drawer (its own copy of the record, as Restore)
+	// the setup's last run undone, from History (its own copy of the record, as Restore)
 	public async Task Undo(string a_folder)
 	{
 		if (Restoring) {

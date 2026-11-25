@@ -6,7 +6,7 @@ using System.Windows.Controls;
 
 namespace ToolRunner.App;
 
-// The settings drawer: the setup's own settings and each step's, in plain names; edited on a copy, checked, saved with a
+// The settings window: the setup's own settings and each step's, in plain names; edited on a copy, checked, saved with a
 // backup (MainViewModel.SaveSetup) - never a hand-edited file.
 public static class SettingsPanel
 {
@@ -40,7 +40,7 @@ public static class SettingsPanel
 		["no_terrain_underside"] = "Never make a terrain underside",
 		["reads"] = "The terrain LOD folder it paints",
 		["tool_dir"] = "The tool's folder",
-		["tool_writes"] = "The folder the tool writes into",
+		["tool_writes"] = "The mod the tool writes into",
 		["min_files"] = "Fewest files that counts as a result",
 		["hidden"] = "Hidden (the tool runs where it never shows on your screen)",
 		["caches"] = "Shader caches (each: its shader mod, its cache mod)",
@@ -57,9 +57,9 @@ public static class SettingsPanel
 	};
 
 	// every label the step editor can show for a known setting (a shipped language must hold each)
-	public static IReadOnlyCollection<string> StepLabels => [.. Labels.Values.Distinct(StringComparer.Ordinal)];
+	public static IReadOnlyCollection<string> StepLabels => [.. Labels.Values.Append(AnvilPresetLabel).Distinct(StringComparer.Ordinal)];
 
-	// an edit not saved yet (the window asks before the drawer closes over it)
+	// an edit not saved yet (the window asks before Settings closes over it)
 	public static bool HasChanges { get; private set; }
 
 	static void Changed() => HasChanges = true;
@@ -183,7 +183,7 @@ public static class SettingsPanel
 			var keep = Setup.Int(setup.Root, "keepBackups") ?? 5;
 			say.Text = all.Count == 0 ? "This setup has no run backups yet." :
 				$"This setup's run backups: {all.Count} run(s), {Gb(all.Sum(b => b.Bytes))} in all - " +
-				(keep > 0 ? $"the newest {keep} are kept after each run." : "every one is kept (Backups kept is 0).");
+				(keep > 0 ? $"the newest {keep} are kept after each run." : "every one is kept (Backups to keep is 0).");
 			tidy.IsEnabled = keep > 0 && all.Count > keep;
 			tidy.ToolTip = $"Removes all but the newest {keep} now (the number saved above); a run's own backup and one an unfinished run needs are never touched";
 		}
@@ -233,6 +233,11 @@ public static class SettingsPanel
 	}
 
 	// (a setting saved under an empty key still gets a name: its editor is announced by it)
+	// AnvilLOD's "preset" is a word (its own low / medium / high), DynDOLOD's a file
+	const string AnvilPresetLabel = "AnvilLOD preset";
+
+	static string Label(string a_key, string a_step) => a_step == "anvillod" && a_key == "preset" ? AnvilPresetLabel : Label(a_key);
+
 	static string Label(string a_key) => Labels.TryGetValue(a_key, out var l) ? l : a_key.Length == 0 ? "Unnamed setting" : char.ToUpperInvariant(a_key[0]) + a_key[1..].Replace('_', ' ');
 
 	// the program's own new versions - kept for the whole program, saved the moment it is ticked
@@ -576,7 +581,7 @@ public static class SettingsPanel
 						$"{hit.File}: {string.Join("; ", hit.Problems)}" });
 					addOnRows.Children.Add(row);
 				}
-			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException) {
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) {
 				a_vm.Say("The add-ons could not be looked for: " + e.Message, "bad");
 			} finally {
 				lookAddOns.IsEnabled = true;
@@ -626,7 +631,7 @@ public static class SettingsPanel
 					};
 					stack.Children.Add(addMenu);
 				}
-			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException) {
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) {
 				a_vm.Say("Mod Organizer could not be read for its plugins: " + e.Message, "warn");
 			}
 		}
@@ -661,7 +666,7 @@ public static class SettingsPanel
 						stack.Children.Add(addOn);
 					}
 				}
-			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException) {
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) {
 				// a setup whose Mod Organizer does not read says so in its check: nothing to offer here
 				a_vm.Say("Mod Organizer could not be read for its plugins: " + e.Message, "warn");
 			}
@@ -828,7 +833,7 @@ public static class SettingsPanel
 					stepHost.Children.Add(new TextBlock { Text = val?.ToString() ?? "", Style = (Style)a_w.FindResource("MutedText"), Margin = new Thickness(0, 0, 0, 8) });
 					continue;
 				}
-				Field(stepHost, stepApply, Label(key), o, key, val?.GetValueKind() ?? JsonValueKind.String);
+				Field(stepHost, stepApply, Label(key, aboutKey), o, key, val?.GetValueKind() ?? JsonValueKind.String, a_step: aboutKey);
 			}
 			var stepKey = Setup.Str(steps[pick.SelectedIndex], "step") ?? "";
 			// the tool's settings from its OWN window, kept for every run (never a copy of its window here).
@@ -920,7 +925,7 @@ public static class SettingsPanel
 			}
 			foreach (var (key, kind, def) in Known.GetValueOrDefault(stepKey, []).Append((Key: "deadline_min", Kind: JsonValueKind.Number, Default: "the step's own"))
 				         .Where(k => !o.ContainsKey(k.Key))) {
-				Field(stepHost, stepApply, WindowWords.Format("{0} (default {1})", WindowWords.Word(Label(key)), WindowWords.Word(def)), o, key, kind, def == "on");
+				Field(stepHost, stepApply, WindowWords.Format("{0} (default {1})", WindowWords.Word(Label(key, stepKey)), WindowWords.Word(def)), o, key, kind, def == "on", stepKey);
 			}
 			// drawn after Settings opened (another step picked): into the window's language like the rest of it
 			WindowWords.Tree(stepHost);
@@ -1009,7 +1014,7 @@ public static class SettingsPanel
 				return;
 			}
 			if (!saved) {
-				// memory back to what is on disk; the drawer keeps what was typed for another try
+				// memory back to what is on disk; Settings keeps what was typed for another try
 				a_vm.LoadSteps();
 				errors.Text = "Not saved: " + a_vm.Message;
 				return;
@@ -1427,7 +1432,8 @@ public static class SettingsPanel
 
 	// one setting: its editor by its kind; the returned function writes it back (or says what is wrong)
 	// a_onUnlessSet: a switch the setup does not hold yet shows on (its default), so saving the page keeps it what it was
-	static void Field(Panel a_host, List<Func<string?>> a_apply, string a_label, JsonObject a_obj, string a_key, JsonValueKind a_kind = JsonValueKind.String, bool a_onUnlessSet = false)
+	static void Field(Panel a_host, List<Func<string?>> a_apply, string a_label, JsonObject a_obj, string a_key, JsonValueKind a_kind = JsonValueKind.String, bool a_onUnlessSet = false,
+		string? a_step = null)
 	{
 		var row = new Grid { Margin = new Thickness(0, 0, 0, 10) };
 		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(230) });
@@ -1497,18 +1503,18 @@ public static class SettingsPanel
 				if (t.Text == "" && cur == null) {
 					return null;
 				}
-				a_obj[a_key] = PathKind(a_key) == null ? t.Text : TypedPath(t.Text);
+				a_obj[a_key] = PathKind(a_key, a_step) == null ? t.Text : TypedPath(t.Text);
 				return null;
 			});
 			t.TextChanged += (_, _) => Changed();
 			edit = t;
 		}
 		System.Windows.Automation.AutomationProperties.SetName(edit, a_label);
-		// a setting that holds a folder or a program: picked with Windows' own picker, or typed
+		// a setting that holds a folder, a file or a program: picked with Windows' own picker, or typed
 		FrameworkElement shown = edit;
-		if (edit is TextBox pathBox && kind == JsonValueKind.String && PathKind(a_key) is { } pick) {
-			var browse = new Button { Content = "Browse ...", Style = (Style)Application.Current.FindResource("Ghost"), Margin = new Thickness(8, 0, 0, 0),
-				ToolTip = pick == PathPick.Folder ? "Choose the folder" : "Choose the program" };
+		if (edit is TextBox pathBox && kind == JsonValueKind.String && PathKind(a_key, a_step) is { } pick) {
+			var browse = new Button { Content = WindowWords.Word("Browse ..."), Style = (Style)Application.Current.FindResource("Ghost"), Margin = new Thickness(8, 0, 0, 0),
+				ToolTip = WindowWords.Word(pick switch { PathPick.Folder => "Choose the folder", PathPick.File => "Choose the file", _ => "Choose the program" }) };
 			System.Windows.Automation.AutomationProperties.SetName(browse, "Browse for " + a_label);
 			browse.Click += async (_, _) => {
 				browse.IsEnabled = false;
@@ -1546,14 +1552,17 @@ public static class SettingsPanel
 	{
 		Folder,
 		Program,
+		File,
 	}
 
-	// which settings hold a folder or a program (null: neither; a step's "executable" is the NAME of its entry in Mod Organizer's
-	// Executables list, no path)
-	static PathPick? PathKind(string a_key) => a_key switch {
-		"exe" => PathPick.Program,
+	// which settings hold a folder, a file or a program (null: none of them; a step's "executable" is the NAME of its entry in
+	// Mod Organizer's Executables list and "tool_writes" a mod's name, no paths). a_step: the step the setting is one of
+	static PathPick? PathKind(string a_key, string? a_step = null) => a_key switch {
+		"exe" or "exe_path" => PathPick.Program,
 		_ when a_key.EndsWith("_exe", StringComparison.Ordinal) => PathPick.Program,
-		"instance" or "backups" or "scratch" or "skseLogs" or "output_dir" => PathPick.Folder,
+		"instance" or "backups" or "scratch" or "skseLogs" or "output_dir" or "dyndolod" or "reads" => PathPick.Folder,
+		"live_settings" => PathPick.File,
+		"preset" when a_step != "anvillod" => PathPick.File,
 		_ when a_key.EndsWith("_dir", StringComparison.Ordinal) || a_key.EndsWith("Dir", StringComparison.Ordinal) => PathPick.Folder,
 		_ => null,
 	};
@@ -1577,7 +1586,7 @@ public static class SettingsPanel
 			var d = new Microsoft.Win32.OpenFolderDialog { Title = a_label, InitialDirectory = start ?? "" };
 			return (a_owner == null ? d.ShowDialog() : d.ShowDialog(a_owner)) == true ? d.FolderName : null;
 		}
-		var f = new Microsoft.Win32.OpenFileDialog { Title = a_label, Filter = "Programs (*.exe)|*.exe|All files|*.*", InitialDirectory = start ?? "" };
+		var f = new Microsoft.Win32.OpenFileDialog { Title = a_label, Filter = a_pick == PathPick.Program ? "Programs (*.exe)|*.exe|All files|*.*" : "All files|*.*", InitialDirectory = start ?? "" };
 		return (a_owner == null ? f.ShowDialog() : f.ShowDialog(a_owner)) == true ? f.FileName : null;
 	}
 

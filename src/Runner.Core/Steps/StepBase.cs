@@ -288,7 +288,9 @@ public static class StepKit
 			yield break;
 		}
 		foreach (var (root, what) in new[] { (a_c.Mo2.ModsDir, "Mod Organizer's mods folder"), (a_c.Mo2.OverwriteDir, "Mod Organizer's overwrite folder"),
-			         (a_c.Mo2.ProfilesDir, "Mod Organizer's profiles folder"), (a_c.Mo2.GameDir, "the game's folder") }) {
+			         (a_c.Mo2.ProfilesDir, "Mod Organizer's profiles folder"), (a_c.Mo2.GameDir, "the game's folder"),
+			         // (a run empties this folder into its backup: one that is, holds or lies in that backup would be moved into itself)
+			         (a_c.Setup.BackupDir, "this setup's backup folder") }) {
 			if (!string.IsNullOrEmpty(root) && (Files.IsUnder(a_dir, root) || Files.IsUnder(root, a_dir))) {
 				yield return new Issue(a_step, true, $"{a_label} {a_dir} is in (or holds) {what} - use an empty folder of its own");
 			}

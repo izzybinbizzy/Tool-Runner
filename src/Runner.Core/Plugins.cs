@@ -14,7 +14,7 @@ public static class Plugins
 	{
 		try {
 			return Directory.Exists(a_modDir) ? Directory.GetFiles(a_modDir).Select(Path.GetFileName).OfType<string>().Where(IsPlugin).ToList() : [];
-		} catch (IOException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			return [];
 		}
 	}

@@ -181,11 +181,12 @@ public static partial class InGame
 	public static List<string> CrashReports(IReadOnlyList<string> a_logFolders, string a_overwrite, DateTime a_since)
 	{
 		var found = new List<FileInfo>();
+		var since = a_since.ToUniversalTime();
 		void Look(string a_dir, string a_pattern, SearchOption a_how)
 		{
 			try {
 				if (Directory.Exists(a_dir)) {
-					found.AddRange(new DirectoryInfo(a_dir).EnumerateFiles(a_pattern, a_how).Where(f => f.LastWriteTime >= a_since && IsCrashReport(f.Name)));
+					found.AddRange(new DirectoryInfo(a_dir).EnumerateFiles(a_pattern, a_how).Where(f => f.LastWriteTimeUtc >= since && IsCrashReport(f.Name)));
 				}
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			}
@@ -196,7 +197,7 @@ public static partial class InGame
 		}
 		Look(Path.Combine(a_overwrite, "NetScriptFramework", "Crash"), "Crash*.txt", SearchOption.TopDirectoryOnly);
 		Look(Path.Combine(a_overwrite, "SKSE", "Plugins"), "SkyrimDiag_Crash_*_SkyrimDiagReport.txt", SearchOption.AllDirectories);
-		return found.OrderByDescending(f => f.LastWriteTime).Select(f => f.FullName).Distinct(StringComparer.OrdinalIgnoreCase)
+		return found.OrderByDescending(f => f.LastWriteTimeUtc).Select(f => f.FullName).Distinct(StringComparer.OrdinalIgnoreCase)
 			.GroupBy(f => Path.GetFileName(f).StartsWith("SkyrimDiag", StringComparison.OrdinalIgnoreCase) ? "t" : Path.GetExtension(f).ToLowerInvariant()).Select(g => g.First()).ToList();
 	}
 
@@ -409,7 +410,11 @@ public static partial class InGame
 	// a_openEnd: where a step with no end stops (now for the run going; its record's last write for a run that died)
 	public static IEnumerable<(DateTime From, DateTime To)> GameTimes(IEnumerable<StepRecord> a_steps, DateTime a_openEnd) =>
 		a_steps.Where(s => GameSteps.Contains(s.Key) && s.Started != null)
-			.Select(s => (s.Started!.Value.ToUniversalTime(), (s.Ended ?? (a_openEnd < s.Started.Value ? s.Started.Value : a_openEnd)).ToUniversalTime()));
+			.Select(s => {
+				var from = s.Started!.Value.ToUniversalTime();
+				var open = a_openEnd.ToUniversalTime();
+				return (from, s.Ended?.ToUniversalTime() ?? (open < from ? from : open));
+			});
 
 	// The place the player stood at before the clean save is on record in the run that MADE that save. A run that starts from an
 	// earlier run's clean save - "run again from the failed step" is a new run with a record of its own - takes the marker from
@@ -504,19 +509,23 @@ public static partial class InGame
 	static void Settle(RunContext a_ctx, string a_step, int a_seconds, string a_why)
 	{
 		a_ctx.Activity(a_step, a_why);
-		var plain = DateTime.UtcNow.AddSeconds(a_seconds);
+		// counted on a clock that only runs forward: the PC's clock being set (a time sync) never ends or stretches the wait
+		var began = DateTime.UtcNow;
+		var ran = Stopwatch.StartNew();
+		DateTime Now() => began + ran.Elapsed;
+		var plain = began.AddSeconds(a_seconds);
 		var until = plain;
-		var nextLook = DateTime.UtcNow;
-		while (DateTime.UtcNow < until) {
+		var nextLook = began;
+		while (Now() < until) {
 			a_ctx.Cancel.ThrowIfCancellationRequested();
 			if (!GameUp(a_ctx)) {
 				throw GameClosed(a_ctx, "while the save settled");
 			}
-			if (DateTime.UtcNow >= nextLook) {
-				nextLook = DateTime.UtcNow.AddSeconds(5);
+			if (Now() >= nextLook) {
+				nextLook = Now().AddSeconds(5);
 				try {
 					if (AnswerGameBox(a_ctx) is { } body) {
-						until = SettleUntil(plain, DateTime.UtcNow, body);
+						until = SettleUntil(plain, Now(), body);
 						if (PromisesBox(body)) {
 							a_ctx.Log.Detail("that box says another follows - waiting for it (up to 10 minutes)");
 						}
@@ -1491,11 +1500,9 @@ public static partial class InGame
 	public const string SavesCopyFolder = "saves before the run";
 
 	// the free bytes on a folder's drive (the offline tests answer for the disk)
-	public static Func<string, long> FreeBytes { get; set; } = a_path => {
-		var root = Path.GetPathRoot(Path.GetFullPath(a_path));
-		// a network folder's room cannot be read this way: not known, so the copy goes ahead (a failure there is said like any other)
-		return string.IsNullOrEmpty(root) || root.StartsWith(@"\\", StringComparison.Ordinal) ? long.MaxValue / 2 : new DriveInfo(root).AvailableFreeSpace;
-	};
+	// (the disk the folder really stands on, a junction followed; where Windows will not say - a share that does not answer - the
+	// room is not known and the copy goes ahead: a failure there is said like any other)
+	public static Func<string, long> FreeBytes { get; set; } = a_path => Files.FreeOn(a_path) ?? long.MaxValue / 2;
 
 	// a_lastStep: the run's work is behind it, so only a small margin is kept
 	public static string? CopySaves(RunContext a_ctx, bool a_lastStep = false)

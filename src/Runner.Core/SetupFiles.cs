@@ -9,9 +9,6 @@ namespace ToolRunner;
 // the settings learned from its tools' own windows.
 public static class SetupFiles
 {
-	static readonly string[] Reserved = ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"];
-
 	// What is wrong with a name a setup's file would take, in words; null = it can be used. a_self: the setup being renamed (its
 	// own name in other letters is no clash)
 	public static string? BadName(string a_setups, string a_name, string? a_self = null)
@@ -23,7 +20,7 @@ public static class SetupFiles
 		if (n.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || n.EndsWith('.')) {
 			return "A name cannot hold \\ / : * ? \" < > | or end with a dot.";
 		}
-		if (Reserved.Contains(n.Split('.')[0], StringComparer.OrdinalIgnoreCase)) {
+		if (Setup.IsDeviceName(n)) {
 			return $"Windows keeps the name \"{n}\" for itself.";
 		}
 		var file = Path.Combine(a_setups, n + ".json");
@@ -96,12 +93,13 @@ public static class SetupFiles
 	static bool NameInside(string a_file, string a_was, string a_name)
 	{
 		// (a "name" that is no text is left as it is: it was never the file's name)
-		if (JsonNode.Parse(Files.ReadShared(a_file)) is not JsonObject root || root["name"] is not JsonValue v || !v.TryGetValue<string>(out var inside) ||
+		// (read and written as the setup itself is: a file with a comment or a last comma in it is a setup too)
+		if (Setup.RootOf(Files.ReadSharedText(a_file)) is not { } root || root["name"] is not JsonValue v || !v.TryGetValue<string>(out var inside) ||
 		    !string.Equals(inside, Path.GetFileNameWithoutExtension(a_was), StringComparison.OrdinalIgnoreCase)) {
 			return false;
 		}
 		root["name"] = a_name;
-		Files.WriteAtomic(a_file, JsonSerializer.SerializeToUtf8Bytes(root, new JsonSerializerOptions { WriteIndented = true }));
+		Files.WriteAtomic(a_file, Setup.TextOf(root));
 		return true;
 	}
 

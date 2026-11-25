@@ -29,7 +29,7 @@ public static class RunnerErrors
 		E("TR-106", "is left out: this setup is set to a new game", "The save steps are left out while the setup is set to a new game.",
 			"Untick \"New game\" beside START to run the clean save or the final save."),
 		E("TR-107", "is not a step of this setup|is set to use its old output in this setup", "The step asked for is switched off in this setup, is not in it, or is set to use its old output.",
-			"Tick the step in the list (and switch \"Use old output\" off for it there), or name one of the steps the message lists."),
+			"Tick the step in the list (and press \"Build it again\" for it there), or name one of the steps the message lists."),
 		E("TR-108", "the first step comes after the last one", "The run was asked to go from a step to one that comes before it.",
 			"Name the earlier step first, or move the steps in the list."),
 		E("TR-109", "the check before the run could not finish", "Something the check must read could not be read (a drive that is not there, a folder with no access).",
@@ -57,6 +57,8 @@ public static class RunnerErrors
 			"Close any program that has the setup file open (an editor), make sure the data folder may be written, then start again."),
 		E("TR-120", "the setup's name is not a plain name", "The name inside the setup file holds a folder part or a character Windows does not allow in a folder name; the run's own folder is named after it.",
 			"Open Settings and give the setup a plain name, or bring a setup file from someone else in with the import command, which gives it one."),
+		E("TR-121", "is already on record under this very time", "A run of this setup is on record with the very second this one began. The PC's clock was set back, or it is the hour a daylight-saving change repeats.",
+			"Start again in a moment: the run's folder is named by its start time, and an earlier run's record is never written over."),
 
 		// ---- the check before a run: the PC, Mod Organizer, the game
 		E("TR-201", "Mod Organizer has no profile", "The profile this setup was made for is no longer in Mod Organizer (renamed or deleted).",
@@ -69,7 +71,7 @@ public static class RunnerErrors
 			"Let the download finish (or pause it in Mod Organizer's Downloads tab), then start again."),
 		E("TR-205", "GB free on|not enough room on", "A disk the run writes to has less room than the run needs for its new outputs and for the old ones it keeps.",
 			"Free room on that disk, or remove old run backups (Settings > Backups > Keep only the newest now), or point the backups or a tool's output folder at a roomier disk. " +
-			"The floor is the setup's \"Free space a run needs\" in Settings; with \"Stop a run that will not fit on its disks\" switched off the forecast is only told."),
+			"The floor is \"Free disk space needed (GB)\" in Settings > Run; with \"Do not start a run that will not fit on the disk\" switched off there the forecast is only told."),
 		E("TR-206", "this step is not available in this version", "The setup names a step this version of the program does not have.",
 			"Update the program, or untick that step."),
 		E("TR-207", "its check could not read a file|its check found a setting of the wrong kind", "A file the step's check needs is locked or missing, or one of its settings holds the wrong kind of value.",
@@ -102,7 +104,7 @@ public static class RunnerErrors
 		E("TR-305", "this profile has no save to start the clean save from", "The clean save needs one of your saves, and this profile has none.",
 			"Tick \"New game\" beside START if you will start a new character, or make a save in the game first."),
 		E("TR-306", "the game route needs NGIO's PrecacheGrass.txt", "Making the grass cache with the game itself needs a file in the game folder, and this setup does not allow writing there.",
-			"Use FasterNGIO for the grass step (Settings > Steps > Grass cache), or allow the game-folder file in that step's settings."),
+			"Use FasterNGIO for the grass step (Settings > Steps > Grass cache), or switch on Settings > Game steps > \"Allow writing into the game folder\"."),
 		E("TR-307", "none of the shader mods is in this profile", "The shader cache step names shader mods this profile does not have.",
 			"Untick the Shader caches step for this profile, or correct its shader mods in Settings > Steps."),
 		E("TR-308", "\"on_crash\" is", "A step's setting holds a word it does not know.",
@@ -126,10 +128,10 @@ public static class RunnerErrors
 		E("TR-311", "its add-on file is gone|its add-on file:|changed since you allowed it|the mod that holds it|its program could not be opened|its add-on file changed while it was being read","An add-on step's file is missing, changed, or its mod is switched off.",
 			"Tick the add-on's mod in Mod Organizer and look at the add-on again in Settings > Tools > ADD-ONS; allow it only if you trust what it starts."),
 		E("TR-320", "it is set to use its old output, and there is none to use", "A step is set to use the output its tool made before, and that output mod is missing or empty.",
-			"Select the step in the list and press \"Use old output\" again to switch it off, so the tool builds its output in this run. From the next run on that output can be used."),
+			"Select the step in the list and press \"Build it again\" under the steps, so the tool builds its output in this run. From the next run on that output can be used."),
 		E("TR-321", "its old output cannot be used:|its old output cannot be used in this run:",
 			"A plugin of the old output needs a plugin that is no longer in your load order, or one this run has switched off while its tools work: the game, or the tool that reads it, stops on a master that is missing.",
-			"Switch \"Use old output\" off for that step, so its output is built again for the load order you have now - or put the missing plugin's mod back in Mod Organizer. " +
+			"Select that step and press \"Build it again\" under the steps, so its output is built again for the load order you have now - or put the missing plugin's mod back in Mod Organizer. " +
 			"When the message says \"in this run\", leaving the tools after that step out of the run works too."),
 		E("TR-322", "could not be switched on: its line is no longer in the mod list|could not be switched on: their lines are no longer in the mod list",
 			"An old output was to be switched on at its step's place, and its line was gone from the profile's mod list by then (taken out while the run went on).",
@@ -178,7 +180,7 @@ public static class RunnerErrors
 		E("TR-503", "this run was undone already|this run built nothing to undo|only the last run can be undone", "Only the last run that changed a profile can be undone, and only once.",
 			"To go further back, bring an older output back by hand from that run's backup folder (History > Open its folder names it)."),
 		E("TR-504", "this run's copy of your mod and plugin lists is gone|this run's backup is gone", "The files an undo needs were removed (old backups are tidied after each run, or the folder was cleared by hand).",
-			"This run can no longer be undone. Raise \"Backups kept\" in Settings to keep more of them in future."),
+			"This run can no longer be undone. Raise \"Backups to keep\" in Settings > Backups to keep more of them in future."),
 	];
 
 	// the entry a refusal or failure text falls under (any letter case), or null when it is none of the runner's own

@@ -51,7 +51,7 @@ class RootBuilderProfiles(mobase.IPluginTool):
         return self.description()
 
     def version(self):
-        return mobase.VersionInfo(1, 4, 1)
+        return mobase.VersionInfo(1, 4, 2)
 
     def icon(self):
         try:
@@ -93,7 +93,7 @@ class RootBuilderProfiles(mobase.IPluginTool):
         organizer.onFinishedRun(lambda app, code: self._later(self._after_run))
         organizer.onProfileChanged(lambda old, new: self._later(self._check_game))
         organizer.onUserInterfaceInitialized(lambda window: self._later(self._startup))
-        self._say(f"loaded (version 1.4.1), profile '{organizer.profileName()}'")
+        self._say(f"loaded (version 1.4.2), profile '{organizer.profileName()}'")
         return True
 
     def _say(self, line):
@@ -120,6 +120,9 @@ class RootBuilderProfiles(mobase.IPluginTool):
     def _guard(self, fn):
         if not self.isActive() or self._busy:
             self._say(f"{fn.__name__}: skipped ({'turned off in MO2' if not self.isActive() else 'already working'})")
+            if fn == self._after_run:
+                # the look after a program closed did not happen: the next one reads the profile and its ticked mods anew
+                self._retries = 0
             return
         self._say(f"{fn.__name__}: running")
         self._busy = True
@@ -131,7 +134,9 @@ class RootBuilderProfiles(mobase.IPluginTool):
             fn()
         except Exception:
             self._say("ERROR\n" + traceback.format_exc())
-            QMessageBox.warning(None, TITLE, self.tr("Something went wrong - nothing more was changed. The log is in MO2's plugins\\data\\RootBuilderProfiles folder."))
+            # a run of Tool Runner may go on with nobody at the PC, and it leaves this add-on's boxes to the player: said in the log only
+            if not runner_running():
+                QMessageBox.warning(None, TITLE, self.tr("Something went wrong - nothing more was changed. The log is in MO2's plugins\\data\\RootBuilderProfiles folder."))
         finally:
             self._busy = False
 
@@ -229,7 +234,7 @@ class RootBuilderProfiles(mobase.IPluginTool):
                 else:
                     state["declined copies"] = ckey
                     self._core.save_state(state)
-                    self._say(f"{len(copies)} leftover copies of mods' Root files: he said no - not asked again until they change")
+                    self._say(f"{len(copies)} leftover copies of mods' Root files: the answer was no - not asked again until they change")
             for rel in copies:
                 files.pop(rel, None)
                 known.pop(rel, None)
@@ -238,7 +243,7 @@ class RootBuilderProfiles(mobase.IPluginTool):
             state = self._core.load_state() or {}
         key = sorted(k.lower() for k in files)
         if state.get("declined") == key:
-            self._say(f"{len(files)} unowned preset file(s) in the game folder - he said no to this set before, not asked")
+            self._say(f"{len(files)} unowned preset file(s) in the game folder - the answer to this set was no before, not asked")
             return
         names = "\n".join(sorted(files)[:10]) + ("\n..." if len(files) > 10 else "")
         answer = QMessageBox.question(None, TITLE, self.tr(
@@ -248,7 +253,7 @@ class RootBuilderProfiles(mobase.IPluginTool):
         if answer != QMessageBox.StandardButton.Yes:
             state["declined"] = key
             self._core.save_state(state)
-            self._say(f"{len(files)} unowned preset file(s): he said no - not asked again until they change (Tools menu asks again)")
+            self._say(f"{len(files)} unowned preset file(s): the answer was no - not asked again until they change (Tools menu asks again)")
             return
         mod = self._ask_name()
         if not mod:

@@ -31,7 +31,7 @@ public static class Runner
 				throw new ArgumentException($"{StepCatalog.Name(k)} is left out: this setup is set to a new game (untick \"New game\" to run it)");
 			}
 			if (a_setup.KeptSteps.Any(s => s.Key == k)) {
-				throw new ArgumentException($"{StepCatalog.Name(k)} is set to use its old output in this setup, so it does not run (switch \"Use old output\" off for it to run it)");
+				throw new ArgumentException($"{StepCatalog.Name(k)} is set to use its old output in this setup, so it does not run (press \"Build it again\" for it to run it)");
 			}
 			if (order.All(s => s.Key != k)) {
 				throw new ArgumentException($"\"{k}\" is not a step of this setup - its steps: {string.Join(", ", order.Select(s => s.Key))}");
@@ -232,6 +232,10 @@ public static class Runner
 		for (var tries = 0; tries < 12 && Directory.Exists(Path.Combine(runs, id)); ++tries) {
 			Thread.Sleep(100);
 			id = Named();
+		}
+		// (a clock set back, the hour a daylight change repeats: an earlier run's folder is never taken)
+		if (Directory.Exists(Path.Combine(runs, id))) {
+			return Refuse($"a run of this setup is already on record under this very time ({id}) - was the PC's clock set back? Start again in a moment");
 		}
 		var journal = new Journal {
 			Id = id, Folder = Path.Combine(runs, id), SetupFile = Path.GetFullPath(a_req.SetupFile), SetupName = setup.Name, Profile = setup.Profile,
@@ -501,7 +505,13 @@ public static class Runner
 					PruneBackups(ctx);
 					return new RunOutcome(journal.State, journal.Verdict, journal.Folder);
 				}
-				control.Close();
+				// the run is finished and the profile back: a Stop ends this wait (a download can hold Mod Organizer open for
+				// half an hour), and Mod Organizer is then left open
+				try {
+					control.Close(null, cts.Token);
+				} catch (OperationCanceledException) {
+					log.Warn("Stop: Mod Organizer is left open - the run had finished and your profile is back");
+				}
 			}
 			// The run has finished and the profile is back. Each chore from here stands on its own: one that fails is a note on a
 			// finished run - never a second put-back, never the after-run commands twice

@@ -285,11 +285,25 @@ class Core:
             return None
 
     # ---- 1: after a run, overwrite\Root -> the profile's own mod -----------------------------
-    def leftover_reason(self, rel, path, ticked_mods, own_mod):
+    def root_mods(self):
+        """Every mod folder that has a Root folder (the leftovers box left out): the only mods a file under Root can be a copy from.
+        Listed once per look - asking each of a big list's mods for every file kept Mod Organizer waiting."""
+        if not self.mods.is_dir():
+            return []
+        out = []
+        for mod_dir in self.mods.iterdir():
+            try:
+                if mod_dir.name != LEFTOVERS and (mod_dir / "Root").is_dir():
+                    out.append(mod_dir)
+            except OSError:
+                pass
+        return out
+
+    def leftover_reason(self, rel, path, ticked_mods, own_mod, root_mods=None):
         """Why a new overwrite\\Root file is NOT this profile's change, or None (1.2.0). `ticked_mods` None =
-        unknown: only the copy rule applies."""
+        unknown: only the copy rule applies. `root_mods`: root_mods() as the caller already listed it."""
         low = rel.lower()
-        for mod_dir in self.mods.iterdir() if self.mods.is_dir() else ():
+        for mod_dir in self.root_mods() if root_mods is None else root_mods:
             if mod_dir.name in (own_mod, LEFTOVERS):
                 continue
             twin = mod_dir / "Root" / rel
@@ -321,7 +335,8 @@ class Core:
         if not todo:
             return None, 0, False
         mod = f"Root Changes - {profile}"
-        stray = {rel: why for rel, p in todo.items() if (why := self.leftover_reason(rel, p, ticked_mods, mod))}
+        with_root = self.root_mods()
+        stray = {rel: why for rel, p in todo.items() if (why := self.leftover_reason(rel, p, ticked_mods, mod, with_root))}
         if stray:
             self._set_aside({rel: todo.pop(rel) for rel in stray}, profile, stray)
             for rel in stray:
@@ -443,7 +458,7 @@ class Core:
         ticked in the playing profile, and every start of it then loaded DXVK (the frame generation of the shader mod could
         not start and the game closed)."""
         out = {}
-        mod_dirs = [d for d in self.mods.iterdir() if d.is_dir() and d.name != LEFTOVERS] if self.mods.is_dir() else []
+        mod_dirs = self.root_mods()
         for rel, p in files.items():
             try:
                 size = p.stat().st_size

@@ -457,12 +457,12 @@ public static class OldOutput
 	{
 		foreach (var l in LookAt(a_setup, a_mo2, a_states, a_todo)) {
 			if (!l.There) {
-				yield return new Issue(l.Step, true, $"it is set to use its old output, and there is none to use: \"{l.Mod}\" is missing or holds nothing - build it once (switch \"Use old output\" off for this step)");
+				yield return new Issue(l.Step, true, $"it is set to use its old output, and there is none to use: \"{l.Mod}\" is missing or holds nothing - build it once (select the step and press \"Build it again\")");
 			} else if (l.MissingMaster is { } gone) {
-				yield return new Issue(l.Step, true, $"its old output cannot be used: {gone} - the game would not start with it. Build it again (switch \"Use old output\" off for this step)");
+				yield return new Issue(l.Step, true, $"its old output cannot be used: {gone} - the game would not start with it. Build it again (select the step and press \"Build it again\")");
 			} else if (l.OffInRun is { } away) {
 				yield return new Issue(l.Step, true, $"its old output cannot be used in this run: {away} - a tool that runs after it would find that plugin with a master missing. " +
-					"Build it again (switch \"Use old output\" off for this step), or leave the tools after it out of this run");
+					"Build it again (select the step and press \"Build it again\"), or leave the tools after it out of this run");
 			} else {
 				yield return new Issue(l.Step, false, $"not run - its old output \"{l.Mod}\" is used, as this setup says" +
 					(l.BuiltAgainBefore.Count > 0 ? $"; built again before it in this run: {string.Join(", ", l.BuiltAgainBefore)}" : ""));

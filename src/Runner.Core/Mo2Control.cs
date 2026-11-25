@@ -319,7 +319,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 			// a Stop already asked for never starts Mod Organizer (it would only have to be closed again for the put-back)
 			a_ct.ThrowIfCancellationRequested();
 			_log.Detail($"starting Mod Organizer (profile {ProfileName})");
-			_mo2LaunchedAt = DateTime.UtcNow;
+			_mo2LaunchedAt = Environment.TickCount64;
 			_lastStarted = Launch($"{Quote(Mo2.Exe)}{Instance} -p {Quote(ProfileName)}", Path.GetDirectoryName(Mo2.Exe)!);
 			_ownMo2.Add(_lastStarted.Value);
 		}
@@ -331,7 +331,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	int? _lastStarted;
 	public static TimeSpan StartingGrace { get; set; } = TimeSpan.FromSeconds(20);
 
-	bool OwnStarting() => _lastStarted is { } pid && _mo2LaunchedAt is { } at && DateTime.UtcNow - at < StartingGrace && Procs.Alive(pid);
+	bool OwnStarting() => _lastStarted is { } pid && _mo2LaunchedAt is { } at && TimeSpan.FromMilliseconds(Environment.TickCount64 - at) < StartingGrace && Procs.Alive(pid);
 
 	// the Mod Organizer processes this run started itself - any other one is the player's, and a run never fights the player
 	// over it. The player's is never closed mid-run:
@@ -441,9 +441,10 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	// a second ModOrganizer.exe started in the same second as another (an nxm link, the player's click): its own box, OK ends it.
 	// Answered only within a minute of a start this run sent - a box of a copy the player started is left to the player
 	const string AlreadyBox = "already running";
-	DateTime? _mo2LaunchedAt;
+	// (Windows' tick clock: it only runs forward, whatever the PC's clock is set to meanwhile)
+	long? _mo2LaunchedAt;
 
-	bool WeJustLaunched() => _mo2LaunchedAt is { } t && DateTime.UtcNow - t < TimeSpan.FromMinutes(1);
+	bool WeJustLaunched() => _mo2LaunchedAt is { } t && Environment.TickCount64 - t < 60_000;
 
 	ReadySignals ReadNow()
 	{
@@ -968,7 +969,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 			lines.AddRange(RawLinesSince(Mo2Log, a_logFrom).Select(s => "  " + s));
 			var logs = Path.GetDirectoryName(Mo2Log)!;
 			var vfs = Directory.Exists(logs)
-				? new DirectoryInfo(logs).EnumerateFiles("usvfs-*.log").Where(f => f.LastWriteTime >= a_asked.AddMinutes(-1)).OrderBy(f => f.LastWriteTime).ToList()
+				? new DirectoryInfo(logs).EnumerateFiles("usvfs-*.log").Where(f => f.LastWriteTimeUtc >= a_asked.ToUniversalTime().AddMinutes(-1)).OrderBy(f => f.LastWriteTimeUtc).ToList()
 				: new List<FileInfo>();
 			foreach (var f in vfs) {
 				lines.AddRange(["", $"Its virtual folder ({f.Name}):"]);
@@ -1092,12 +1093,12 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	{
 		for (var attempt = 0; attempt < 3; ++attempt) {
 			WaitReady(a_ct);
-			_mo2LaunchedAt = DateTime.UtcNow;
+			_mo2LaunchedAt = Environment.TickCount64;
 			// the second Mod Organizer that hands the request on is the run's own, never taken for the player's while it lives
 			_ownMo2.Add(Launch(a_cmd, Path.GetDirectoryName(Mo2.Exe)!));
-			var until = DateTime.UtcNow + a_limit;
+			var waited = Stopwatch.StartNew();
 			var lost = false;
-			while (DateTime.UtcNow < until && !lost) {
+			while (waited.Elapsed < a_limit && !lost) {
 				a_ct.ThrowIfCancellationRequested();
 				if (a_freshPid() is var pid && pid != 0) {
 					return pid;

@@ -295,7 +295,7 @@ public sealed class Journal
 		if (!Directory.Exists(a_runsDir)) {
 			yield break;
 		}
-		foreach (var d in Directory.GetDirectories(a_runsDir).OrderDescending()) {
+		foreach (var d in Directory.GetDirectories(a_runsDir).OrderDescending(StringComparer.Ordinal)) {
 			Journal? j = null;
 			try {
 				if (System.IO.File.Exists(Path.Combine(d, "journal.json"))) {
@@ -321,7 +321,7 @@ public sealed class Journal
 		if (!Directory.Exists(a_runsDir)) {
 			return null;
 		}
-		foreach (var d in Directory.GetDirectories(a_runsDir).OrderDescending()) {
+		foreach (var d in Directory.GetDirectories(a_runsDir).OrderDescending(StringComparer.Ordinal)) {
 			try {
 				if (HasRecord(d)) {
 					LoadPatiently(d);
@@ -345,7 +345,7 @@ public sealed class Journal
 		if (!Directory.Exists(a_runsDir)) {
 			return (runs, bad);
 		}
-		foreach (var d in Directory.GetDirectories(a_runsDir).OrderDescending()) {
+		foreach (var d in Directory.GetDirectories(a_runsDir).OrderDescending(StringComparer.Ordinal)) {
 			try {
 				if (HasRecord(d)) {
 					runs.Add(LoadPatiently(d));
@@ -398,7 +398,7 @@ public sealed class JournalCache(string a_runsDir)
 			return list;
 		}
 		var live = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		foreach (var d in Directory.GetDirectories(a_runsDir).OrderDescending()) {
+		foreach (var d in Directory.GetDirectories(a_runsDir).OrderDescending(StringComparer.Ordinal)) {
 			var f = new FileInfo(Path.Combine(d, "journal.json"));
 			if (!f.Exists) {
 				continue;

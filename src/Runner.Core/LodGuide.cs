@@ -39,8 +39,16 @@ public static class LodGuide
 
 	// a ticked mod ships Community Shaders' plugin (Community Shaders, Bottled Shaders, Open Shaders)
 	public static bool RunsCommunityShaders(Setup a_setup, Mo2Instance a_mo2) =>
-		new Profile(a_mo2, a_setup.Profile, () => false).States().Any(kv => kv.Value == '+' &&
-			File.Exists(Path.Combine(a_mo2.ModDir(kv.Key), "SKSE", "Plugins", "CommunityShaders.dll")));
+		new Profile(a_mo2, a_setup.Profile, () => false).States().Any(kv => kv.Value == '+' && HasShaderDll(Path.Combine(a_mo2.ModDir(kv.Key), "SKSE", "Plugins")));
+
+	static bool HasShaderDll(string a_dir)
+	{
+		try {
+			return Directory.Exists(a_dir) && Directory.EnumerateFiles(a_dir, "*.dll").Any(f => InGame.IsShaderDll(Path.GetFileName(f)));
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			return false;
+		}
+	}
 
 	// the step's help pages for THIS setup: on a Community Shaders setup DynDOLOD's own page for it comes first (there the
 	// far grass is made from DynDOLOD's Grass Optimizations assets, not grass LOD billboards)

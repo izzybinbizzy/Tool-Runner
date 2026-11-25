@@ -4,7 +4,7 @@
 
 Runs the generators of a Mod Organizer 2 setup for Skyrim Special Edition / Anniversary Edition in the right order, unattended, and puts your profile back exactly as it was.
 
-Shader caches, DynDOLOD's clean save, Synthesis, Landscape Fixer, PGPatcher, xLODGen with ACMOS roads, the grass cache, TreeLODGen, TexGen, DynDOLOD or AnvilLOD, Pandora, and a save to play at the end.
+Shader caches, DynDOLOD's clean save, Synthesis, Landscape Fixer, PGPatcher, xLODGen with ACMOS roads, the grass cache, TreeLODGen, TexGen, DynDOLOD or AnvilLOD, Pandora, and a final save at the end.
 
 - **Download:** the Nexus page (the zip holds the program, its readme, its changelog and the licence).
 - **The full guide:** [the wiki](https://github.com/izzybinbizzy/Tool-Runner/wiki).
@@ -19,7 +19,7 @@ Shader caches, DynDOLOD's clean save, Synthesis, Landscape Fixer, PGPatcher, xLO
 - **A dry run.** One press goes through everything a start would meet and then do, with nothing started and nothing changed.
 - **Hands off.** It notices a finished or stuck tool within 2 minutes. It stops on a question it does not know and shows it to you, and it never brings a window to the front.
 - **The tools keep their own settings.** "Learn its settings" opens a tool in its own window; you set it up and close it, and every run uses those settings. The runner never copies another author's window.
-- **In-game steps.** With DevBench the clean save and the save to play run by themselves. Without it they are guided step by step. Starting a new character? Tick **New game** beside START and both are left out.
+- **In-game steps.** With DevBench the clean save and the final save run by themselves. Without it they are guided step by step. Starting a new character? Tick **New game** beside START and both are left out.
 - **A summary when it ends:** what finished, what it built and how big, what to do next.
 - **Also:**
   - tool update checks (Nexus and GitHub)
@@ -28,6 +28,7 @@ Shader caches, DynDOLOD's clean save, Synthesis, Landscape Fixer, PGPatcher, xLO
   - undo the last run
   - a queue of setups
   - themes, light and dark
+  - the window in thirteen languages
 
 ## The steps
 
@@ -46,7 +47,7 @@ Shader caches, DynDOLOD's clean save, Synthesis, Landscape Fixer, PGPatcher, xLO
 | `dyndolod` | DynDOLOD | Object, tree and grass LOD. |
 | `anvillod` | AnvilLOD | Object, tree and grass LOD in place of DynDOLOD. |
 | `pandora` | Pandora Behaviour Engine+ | Behaviour files for animation mods. |
-| `playsave` | Save to play | The clean save loaded with every new output on, you taken back to where you stood, saved. Off in a new setup. |
+| `playsave` | Final save | The clean save loaded with every new output on, you taken back to where you stood, saved. Off in a new setup. |
 
 ## Requirements
 

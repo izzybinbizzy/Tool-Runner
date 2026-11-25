@@ -165,6 +165,12 @@ public sealed class Setup
 
 	public static Setup Load(string a_file) => FromText(Files.ReadSharedText(a_file), a_file);
 
+	// a setup file's text as its object, read as Load reads it (comments and a last comma allowed); null when it holds no object
+	public static JsonObject? RootOf(string a_text) => JsonNode.Parse(a_text, documentOptions: ReadOptions) as JsonObject;
+
+	// ... and written as Save writes it
+	public static string TextOf(JsonNode a_root) => a_root.ToJsonString(WriteOptions);
+
 	// the setup as these bytes say (the preview reads the file once and shows exactly what then runs)
 	public static Setup Parse(byte[] a_bytes, string a_file)
 	{
@@ -208,11 +214,11 @@ public sealed class Setup
 		// folder as it stands: with a folder part in it ("..\..\profiles\Default") or a whole path, a meta.ini was written there,
 		// a line put into the mod list and everything in that folder moved into the run's backup. Only a plain folder name is a mod
 		foreach (var (where, name) in ModNames().Where(m => !PlainName(m.Name)).DistinctBy(m => m.Name).Take(5)) {
-			p.Add($"{where} is not a mod's name (one plain folder name: no \\ / : and no \"..\"): {name}");
+			p.Add($"{where} is not a mod's name (one plain folder name: no \\ / : and no \"..\", and none Windows keeps for a device, like CON or NUL): {name}");
 		}
 		// its own name names the run's folder and its backup: with a folder part in it those landed outside the program's data
 		if (Str(Root, "name") is { } own && !PlainName(own)) {
-			p.Add($"the setup's name is not a plain name (one folder name: no \\ / : * ? \" < > | and no \"..\"): {own}");
+			p.Add($"the setup's name is not a plain name (one folder name: no \\ / : * ? \" < > | and no \"..\", and none Windows keeps for a device, like CON or NUL): {own}");
 		}
 		if (Root["placement"] is JsonArray places && places.Any(e => e is not JsonArray a || !IsPlace(a))) {
 			p.Add("the setup's \"placement\" holds an entry that is not [plugin, after this plugin]");
@@ -255,7 +261,13 @@ public sealed class Setup
 	// one plain folder (or file) name, as Windows takes one
 	public static bool PlainName(string a_name) =>
 		a_name.Trim() != "" && a_name is not "." and not ".." && !a_name.EndsWith('.') && !a_name.EndsWith(' ') &&
-		a_name.IndexOfAny(['\\', '/', ':', '*', '?', '"', '<', '>', '|']) < 0 && !a_name.Any(char.IsControl);
+		a_name.IndexOfAny(['\\', '/', ':', '*', '?', '"', '<', '>', '|']) < 0 && !a_name.Any(char.IsControl) && !IsDeviceName(a_name);
+
+	// the names Windows keeps for its devices: a file or folder called one of them, with an ending too ("NUL.txt"), is that device
+	static readonly string[] DeviceNames = ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"];
+
+	public static bool IsDeviceName(string a_name) => DeviceNames.Contains(a_name.Split('.')[0].Trim(), StringComparer.OrdinalIgnoreCase);
 
 	// A setup that came from somewhere else never runs a command on this PC: its own commands before and after a run are taken
 	// out (the sharing side takes them out too, but a file passed around need not have come through it). Returns how many went

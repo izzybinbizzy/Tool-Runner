@@ -174,7 +174,7 @@ public static class RunUndo
 	// folder, or another's on the same profile or with an output of a_j's - undoing a_j would lay its old lists and outputs over that run
 	static bool InTheWay(Journal a_later, Journal a_j, HashSet<string> a_folders)
 	{
-		if (a_later.Undone || a_later.Started <= a_j.Started || (!a_later.Unfinished && !LeftSomething(a_later))) {
+		if (a_later.Undone || a_later.Started.ToUniversalTime() <= a_j.Started.ToUniversalTime() || (!a_later.Unfinished && !LeftSomething(a_later))) {
 			return false;
 		}
 		static bool Same(string? a_a, string? a_b) => string.Equals(a_a, a_b, StringComparison.OrdinalIgnoreCase);

@@ -505,8 +505,8 @@ public sealed class SynthesisStep : IStep
 			if (!Uia.Press(b)) {
 				continue;
 			}
-			var until = DateTime.UtcNow.AddSeconds(45);
-			while (DateTime.UtcNow < until) {
+			var sincePress = System.Diagnostics.Stopwatch.StartNew();
+			while (sincePress.Elapsed < TimeSpan.FromSeconds(45)) {
 				a_ctx.Pause(TimeSpan.FromMilliseconds(1500));
 				StillOpen("right after Run was pressed");
 				if (Uia.TextOf(a_w(), int.MaxValue) != before || Buttons().Count == 0) {

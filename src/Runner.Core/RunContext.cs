@@ -215,7 +215,8 @@ public sealed class StepSettings(JsonObject a_o)
 	public bool Bool(string a_key, bool a_default) => Setup.Bool(Raw, a_key) ?? a_default;
 	public List<string> List(string a_key) => Setup.List(Raw, a_key);
 	public string? OutputMod => Str("output_mod") ?? Str("then_move_to_mod");
-	public TimeSpan Deadline(int a_defaultMin) => TimeSpan.FromMinutes(Int("deadline_min", a_defaultMin));
+	// (a setup written by hand may say 0 or less: a step then failed at once on "its -5 minute limit")
+	public TimeSpan Deadline(int a_defaultMin) => TimeSpan.FromMinutes(Math.Max(1, Int("deadline_min", a_defaultMin)));
 }
 
 // Mods on / off for one step (MO2 closed) and ALWAYS put back afterwards: the order files are saved before and written back

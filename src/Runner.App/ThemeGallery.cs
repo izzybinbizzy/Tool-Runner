@@ -11,7 +11,7 @@ namespace ToolRunner.App;
 // itself follows the theme it just applied.
 public static class ThemeGallery
 {
-	// three cards side by side in the drawer
+	// three cards side by side
 	const double CardWidth = 162;
 
 	static SolidColorBrush Fill(Color a_c)

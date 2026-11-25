@@ -59,7 +59,8 @@ public sealed partial class Mo2Instance
 		var exes = new List<Mo2Executable>();
 		if (a_sections.TryGetValue("customExecutables", out var ce)) {
 			_ = int.TryParse(ce.GetValueOrDefault("size"), out var n);
-			for (int i = 1; i <= n; ++i) {
+			// (never more rows than the section has keys: a damaged "size" is not counted to)
+			for (int i = 1; i <= Math.Min(n, ce.Count); ++i) {
 				var title = ce.GetValueOrDefault($"{i}\\title") ?? "";
 				if (title != "") {
 					exes.Add(new Mo2Executable(title, Full(ce.GetValueOrDefault($"{i}\\binary") ?? "", iniDir),
@@ -179,7 +180,12 @@ public sealed partial class Mo2Instance
 	public static IEnumerable<string> GlobalInstances()
 	{
 		var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ModOrganizer");
-		return Directory.Exists(root) ? Directory.GetDirectories(root).Where(d => File.Exists(Path.Combine(d, "ModOrganizer.ini"))) : [];
+		try {
+			return Directory.Exists(root) ? Directory.GetDirectories(root).Where(d => File.Exists(Path.Combine(d, "ModOrganizer.ini"))).ToList() : [];
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			// a folder that cannot be listed holds no instance this program could use
+			return [];
+		}
 	}
 
 	// Qt's INI flavour: [section], key=value, values may be @ByteArray(...) with backslashes doubled, keys may hold %20
