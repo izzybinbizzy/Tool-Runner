@@ -214,10 +214,10 @@ public static class SettingsPanel
 	// DynDOLOD's own help on the clean save
 	public static (string Url, string What)? HelpPage(string a_step) =>
 		a_step is "cleansave" or "playsave" ? ("https://dyndolod.info/Help/Clean-Save", "DynDOLOD's help on the clean save") :
-		a_step == Steps.LootStep.StepKey ? ("https://loot.github.io/", "LOOT's own page") :
 		ToolUpdates.Known.TryGetValue(a_step, out var src) ? (src.Page.Replace("?tab=files", "", StringComparison.Ordinal), "the tool's own page") : null;
 
-	static string Label(string a_key) => Labels.TryGetValue(a_key, out var l) ? l : char.ToUpperInvariant(a_key[0]) + a_key[1..].Replace('_', ' ');
+	// (a setting saved under an empty key still gets a name: its editor is announced by it)
+	static string Label(string a_key) => Labels.TryGetValue(a_key, out var l) ? l : a_key.Length == 0 ? "Unnamed setting" : char.ToUpperInvariant(a_key[0]) + a_key[1..].Replace('_', ' ');
 
 	// his checklist 471: the program's own new versions - kept for the whole program, saved the moment it is ticked
 	static void NewVersions(MainWindow a_w, StackPanel a_stack)
@@ -343,7 +343,7 @@ public static class SettingsPanel
 				if (Ask.Show(a_w, "Shared copy made", $"It is ready: {Path.GetFileName(file)}\n\nWhat the other player sets themselves:\n" +
 				    (gone.Count == 0 ? "nothing" : string.Join("\n", gone.Select(g => "- " + g))) + "\n\nThey bring it in with the import command (see the readme).",
 				    "Show the file", "Close")) {
-					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{file}\"") { UseShellExecute = true });
+					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{file}\"") { UseShellExecute = true })?.Dispose();
 				}
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or System.Text.Json.JsonException or InvalidDataException) {
 				a_vm.Say("The shared copy could not be made: " + e.Message, "bad");
@@ -407,6 +407,9 @@ public static class SettingsPanel
 		// his checklist 270 ("all 3."): the preview before a run
 		work["previewBeforeRun"] ??= true;
 		Field(runPage, apply, "Show the run preview before it starts", work, "previewBeforeRun", JsonValueKind.True);
+		// his checklist 650 ("user choice."): on by default - the tools after them build on what the skipped tools made
+		work[Runner.KeepEarlierSetting] ??= true;
+		Field(runPage, apply, "When a run starts at a later step, leave the earlier tools' outputs on (they are not run again)", work, Runner.KeepEarlierSetting, JsonValueKind.True);
 		Field(runPage, apply, "Check on a tool that sits idle for (minutes)", work, "idleMinutes", JsonValueKind.Number);
 		Field(runPage, apply, "Free disk space needed (GB)", work, "minFreeGb", JsonValueKind.Number);
 		// the forecast of the room a run takes: on, a run that will not fit is not started; off, it is only told
@@ -692,24 +695,60 @@ public static class SettingsPanel
 		// his checklist 445: what a tool's update may have moved, looked for before a run needs it
 		var testTools = new Button { Content = "Test my tools ...", Style = (Style)a_w.FindResource("Ghost"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 8),
 			ToolTip = "Opens each tool that is driven through its window, up to the window a run presses, and looks for what it would press" };
+		// While the tools are tested a button of its own stops the test: a LOD tool takes minutes to reach its window, and the
+		// main window does not close until the test is over. The two buttons take turns, so each keeps its own words
+		var testStop = new Button { Content = "Stop the test", Style = (Style)a_w.FindResource("Ghost"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 8) };
 		var testRows = new StackPanel();
+		void ShowTest()
+		{
+			var going = s_testing != null;
+			var (shown, hidden) = going ? (testStop, testTools) : (testTools, testStop);
+			var hadFocus = hidden.IsKeyboardFocused;
+			hidden.Visibility = Visibility.Collapsed;
+			shown.Visibility = Visibility.Visible;
+			testStop.IsEnabled = s_testing is { IsCancellationRequested: false };
+			if (hadFocus) {
+				shown.Focus();
+			}
+		}
+		s_showTest = ShowTest;
+		s_testRows = testRows;
+		ShowTest();
+		testStop.Click += (_, _) => {
+			s_testing?.Cancel();
+			testStop.IsEnabled = false;
+		};
 		testTools.Click += async (_, _) => {
+			if (s_testing != null) {
+				return;
+			}
 			if (a_vm.Setup is not { } testSetup || !Ask.Show(a_w, "Test my tools", "Each tool this program drives through its window opens through Mod Organizer, up to the window a run presses, and closes again. " +
 				"Nothing is pressed and nothing is built. Mod Organizer closes for it, and the LOD tools read your whole load order first, so it can take a while.", "Test them", "Not now")) {
 				return;
 			}
-			testTools.IsEnabled = false;
-			testRows.Children.Clear();
+			s_testRows?.Children.Clear();
+			using var stop = new CancellationTokenSource();
+			s_testing = stop;
+			s_showTest?.Invoke();
 			using var hand = a_w.Working("your tools are being tested");
 			try {
-				var results = await Task.Run(() => ToolProof.TestAll(testSetup, RunLog.Null, CancellationToken.None));
-				foreach (var r in results) {
-					testRows.Children.Add(new TextBlock { Text = r.Text, TextWrapping = TextWrapping.Wrap, Foreground = Brushes2.Get(r.Good ? "Text" : "Bad"), Margin = new Thickness(0, 2, 0, 2) });
+				var results = await Task.Run(() => ToolProof.TestAll(testSetup, RunLog.Null, stop.Token));
+				// (into the drawing on screen now: Settings may have been drawn again since the test began, or closed - then the
+				// results are said where the window says its messages)
+				if (s_testRows is { } rows) {
+					foreach (var r in results) {
+						rows.Children.Add(new TextBlock { Text = r.Text, TextWrapping = TextWrapping.Wrap, Foreground = Brushes2.Get(r.Good ? "Text" : "Bad"), Margin = new Thickness(0, 2, 0, 2) });
+					}
+				} else {
+					a_vm.Say("The test of your tools: " + string.Join(" | ", results.Select(r => r.Text)), results.All(r => r.Good) ? "good" : "bad");
 				}
+			} catch (OperationCanceledException) {
+				a_vm.Say("The test of your tools was stopped; the tool it had opened is closed again.", "warn");
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or StepFailedException) {
 				a_vm.Say("The tools could not be tested: " + e.Message, "bad");
 			} finally {
-				testTools.IsEnabled = true;
+				s_testing = null;
+				s_showTest?.Invoke();
 			}
 		};
 		// the look for updates first, its note right under its own button (the note turns into that look's answer) - standing
@@ -718,6 +757,7 @@ public static class SettingsPanel
 		stack.Children.Add(updNote);
 		stack.Children.Add(updRows);
 		stack.Children.Add(testTools);
+		stack.Children.Add(testStop);
 		stack.Children.Add(testRows);
 
 		stack = stepPage;
@@ -784,25 +824,74 @@ public static class SettingsPanel
 						$"Its settings were learned {learned.At.ToLocalTime().ToString("MMM d HH:mm", InvariantCulture)} ({learned.Files.Count} file(s)) - every run uses them." };
 				var learn = new Button { Content = "Learn its settings (opens its own window)", Style = (Style)a_w.FindResource("Ghost"),
 					HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 12) };
+				// while a tool is being opened (or is open) to learn its settings, this button stops that wait instead. The wait
+				// outlives this step's view - another step picked, Save, Undo - so every learn button stops the one that is going,
+				// and none starts a second
+				var learnText = learn.Content;
+				void ShowLearn()
+				{
+					if (s_learning is { } going) {
+						learn.Content = LearningHere(setupNow, stepKey) ? "Stop waiting" : $"Stop waiting for {s_learningName}";
+						learn.IsEnabled = !going.Stopping;
+					} else {
+						learn.Content = learnText;
+						learn.IsEnabled = true;
+					}
+				}
+				// the step whose tool is open: this view's line now says how it goes
+				if (s_learning is { } still && LearningHere(setupNow, stepKey)) {
+					s_learningSays = t => status.Text = t;
+					status.Text = still.Opened ? $"{name} is open - set it up, save, and close it ..." : $"waiting to open {name} ...";
+				}
+				s_showLearn = ShowLearn;
+				ShowLearn();
 				learn.Click += async (_, _) => {
+					if (s_learning is { } o) {
+						// (not open yet: stopped at once; open: only on the player's word - decided on the one state the opening sets)
+						if (!o.Stopping && (o.StopIfNotOpen() || AskStopLearning(a_w))) {
+							o.Stop();
+							learn.IsEnabled = false;
+						}
+						return;
+					}
 					if (!Ask.Show(a_w, "Learn its settings", $"{name} opens through Mod Organizer (Mod Organizer is closed first if it is open). Set it up the way every run " +
 					        "should use it, save, and close it - its settings are then kept with this setup. To change them later, do this again.", "Open it", "Not now")) {
 						return;
 					}
-					learn.IsEnabled = false;
-					status.Text = $"{name} is open - set it up, save, and close it ...";
-					using var hand = a_w.Working($"{name} is open to learn its settings");
-					// the mod its window was started from, when that could not be switched off again
-					string? stillOn = null;
+					using var now = new ToolOpen();
+					s_learning = now;
+					s_learningSetup = setupNow.File;
+					s_learningStep = stepKey;
+					s_learningName = name;
+					s_learningSays = t => status.Text = t;
+					s_showLearn?.Invoke();
+					status.Text = $"opening {name} ...";
+					ToolOpen.Result result;
 					try {
-						var l = await Task.Run(() => ToolSettings.Learn(setupNow, stepKey, RunLog.Null, CancellationToken.None, m => stillOn = m));
-						status.Text = $"Learned: {l.Files.Count} settings file(s) ({string.Join(", ", l.Files.Select(f => Path.GetFileName(f.Live)))}) - every run uses them.";
-					} catch (Exception e) {
-						status.Text = "Not learned: " + e.Message;
+						using (a_w.Working($"{name} is open to learn its settings")) {
+							result = await now.Go(setupNow, stepKey,
+								why => Ask.Show(a_w, $"{name} cannot open yet", $"{ToolsDialog.Capital(why)}.\n\n{name} opens through Mod Organizer, and Mod Organizer is closed first - " +
+								                     $"never while that is open. Close it and try again, or wait here: {name} opens by itself once it has ended, and you can stop " +
+								                     "waiting at any time.", "Wait for it", "Not now"),
+								line => a_w.Dispatcher.BeginInvoke(() => {
+									if (s_learning == now) {
+										s_learningSays?.Invoke(now.Opened ? $"{name} is open - set it up, save, and close it ..." : line);
+									}
+								}));
+						}
 					} finally {
-						learn.IsEnabled = true;
+						s_learning = null;
 					}
-					status.Text += ToolsDialog.StillOn(stillOn);
+					var says = s_learningSays;
+					s_learningSays = null;
+					var outcome = (result.Learned is { } l
+						? $"Learned: {l.Files.Count} settings file(s) ({string.Join(", ", l.Files.Select(f => Path.GetFileName(f.Live)))}) - every run uses them."
+						: result.How == ToolOpen.Ending.Failed ? "Not learned: " + result.Why : "Not learned: " + ToolsDialog.Outcome(name, result)) + ToolsDialog.StillOn(now.StillOn);
+					s_showLearn?.Invoke();
+					// on the view that shows that step now, and on the main window's message line too (the settings window may be
+					// on another step by now, or closed)
+					says?.Invoke(outcome);
+					a_vm.Say($"{name}: {outcome}", result.Learned != null ? "" : "warn");
 				};
 				stepHost.Children.Add(status);
 				stepHost.Children.Add(learn);
@@ -959,15 +1048,62 @@ public static class SettingsPanel
 	// late writes its failure there)
 	static TextBlock? s_errors;
 
+	// A tool opened to learn its settings, while the wait for it goes (one at a time): it outlives the step view that started it
+	// and the settings window, so it can always be stopped. s_learningSays: the line of the view that shows that step of that
+	// setup now; s_showLearn: the learn button of the view drawn last
+	static ToolOpen? s_learning;
+	static string s_learningSetup = "";
+	static string s_learningStep = "";
+	static string s_learningName = "";
+	static Action<string>? s_learningSays;
+	static Action? s_showLearn;
+
+	// the tool being learned is this setup's own step (another setup's step of the same tool learns into that setup only)
+	static bool LearningHere(Setup a_setup, string a_step) =>
+		s_learningStep == a_step && string.Equals(s_learningSetup, a_setup.File, StringComparison.OrdinalIgnoreCase);
+
+	static bool AskStopLearning(Window a_over) =>
+		Ask.Show(a_over, $"Stop waiting for {s_learningName}?", $"{s_learningName} is open. Its settings are kept once you save and close it there.\n\n" +
+			$"If you stop waiting, {s_learningName} stays open, but nothing it saves is kept with this setup.", "Stop waiting", "Keep waiting");
+
+	// The settings window is about to close: a wait for a tool opened from it would go on with nothing left to stop it, and keep
+	// the main window from closing. One still waiting for its window is stopped (nothing is lost); one whose tool is open is
+	// stopped only on the player's word - true when the window may close
+	public static bool LeaveLearning(Window a_over)
+	{
+		if (s_learning is not { } o || o.Stopping) {
+			return true;
+		}
+		if (o.StopIfNotOpen()) {
+			return true;
+		}
+		if (!AskStopLearning(a_over)) {
+			return false;
+		}
+		o.Stop();
+		return true;
+	}
+
+	// The test of the tools belongs to the window, not to one drawing of Settings: Undo changes draws Settings again while a
+	// test may still run, and the new drawing must stop that test, never start a second one beside it. s_showTest and
+	// s_testRows are the test buttons and the result rows of the drawing on screen; a test that ends writes there.
+	static CancellationTokenSource? s_testing;
+	static Action? s_showTest;
+	static StackPanel? s_testRows;
+
 	// the settings window closed: nothing typed is left to ask about
 	public static void Closed()
 	{
+		s_showLearn = null;
+		s_learningSays = null;
 		++s_drawing;
 		HasChanges = false;
 		s_openedFor = null;
 		s_find = null;
 		s_cats = null;
 		s_errors = null;
+		s_showTest = null;
+		s_testRows = null;
 		s_pick = null;
 		s_steps = null;
 	}
@@ -1194,8 +1330,12 @@ public static class SettingsPanel
 					a_obj.Remove(a_key);
 					return null;
 				}
-				if (!double.TryParse(t.Text.Trim().Replace(',', '.'), System.Globalization.NumberStyles.Float, InvariantCulture, out var d) || d < 0) {
+				if (!double.TryParse(t.Text.Trim().Replace(',', '.'), System.Globalization.NumberStyles.Float, InvariantCulture, out var d) || !(d >= 0)) {
 					return $"{a_label}: needs a number, 0 or more";
+				}
+				// (a whole number is kept as one: past what one holds, the number kept would not be the number typed)
+				if (d > 2_000_000_000) {
+					return $"{a_label}: needs a number below 2,000,000,000";
 				}
 				if (d < 1 && a_key.EndsWith("_min", StringComparison.Ordinal)) {
 					return $"{a_label}: needs 1 minute or more";

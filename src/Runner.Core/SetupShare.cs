@@ -84,8 +84,18 @@ public static partial class SetupShare
 		}
 	}
 
+	// A setup brought in from elsewhere keeps no path of the PC it came from: a folder a step empties into the run's backup, a
+	// file it writes over, a program it starts - each named there is the other PC's, and on this one it can be any folder of
+	// the player's. Taken out as the sharing side takes them out; returns what went, in words
+	public static List<string> TakeOutPaths(JsonObject a_root)
+	{
+		var removed = new List<string>();
+		Scrub(a_root, "", removed, "the PC it came from");
+		return removed;
+	}
+
 	// every string value that holds a path of this PC is taken out (a list keeps its other items); what went is named
-	static void Scrub(JsonNode a_node, string a_where, List<string> a_removed)
+	static void Scrub(JsonNode a_node, string a_where, List<string> a_removed, string a_whose = "the sharing PC")
 	{
 		switch (a_node) {
 		case JsonObject o:
@@ -93,9 +103,9 @@ public static partial class SetupShare
 				var where = a_where == "" ? key : a_where + "." + key;
 				if (value is JsonValue v && v.TryGetValue<string>(out var s) && HoldsPath(s)) {
 					o.Remove(key);
-					a_removed.Add($"a path of the sharing PC ({where})");
+					a_removed.Add($"a path of {a_whose} ({where})");
 				} else if (value != null) {
-					Scrub(value, where, a_removed);
+					Scrub(value, where, a_removed, a_whose);
 				}
 			}
 			break;
@@ -103,9 +113,9 @@ public static partial class SetupShare
 			for (var i = a.Count - 1; i >= 0; --i) {
 				if (a[i] is JsonValue v && v.TryGetValue<string>(out var s) && HoldsPath(s)) {
 					a.RemoveAt(i);
-					a_removed.Add($"a path of the sharing PC ({a_where}[{i}])");
+					a_removed.Add($"a path of {a_whose} ({a_where}[{i}])");
 				} else if (a[i] is { } child) {
-					Scrub(child, a_where + $"[{i}]", a_removed);
+					Scrub(child, a_where + $"[{i}]", a_removed, a_whose);
 				}
 			}
 			break;

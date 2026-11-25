@@ -13,6 +13,11 @@ public static class Preflight
 	public static List<Issue> Run(Setup a_setup, Mo2Instance a_mo2, IReadOnlyList<string> a_steps)
 	{
 		var outList = new List<Issue>();
+		// steps an older version had (or a name this program never knew): left out, and said - here, so F5, the window's check, the
+		// check command and a start all say it (CodeRabbit on pull request #40)
+		if (a_setup.NotKnown is { Count: > 0 } notKnown) {
+			outList.Add(new Issue("", false, $"this setup names step(s) this version does not have, left out of the run: {string.Join(", ", notKnown)} - take them out of the setup to stop this note"));
+		}
 		var control = new Mo2Control(a_mo2, a_setup.Profile, RunLog.Null);
 		var profile = new Profile(a_mo2, a_setup.Profile, () => control.Running);
 		if (!profile.Exists) {
@@ -26,6 +31,14 @@ public static class Preflight
 		// Enderal, the 2011 game or Fallout is told so before a tool is pointed at a game it was not made for
 		if (OtherGame(a_mo2) is { } other) {
 			outList.Add(new Issue("", true, $"this Mod Organizer manages another game ({other}) - Tool Runner works with Skyrim Special Edition and its Anniversary Edition only"));
+		}
+		// the game folder comes from Mod Organizer's own settings, and the checks and steps after this look into it (the game's
+		// plugins, its version): with none named, they would look into a folder "Data" wherever the program happens to stand
+		if (a_mo2.GameDir == "" || !Directory.Exists(a_mo2.GameDir)) {
+			outList.Add(new Issue("", true, a_mo2.GameDir == ""
+				? "Mod Organizer names no game folder (gamePath in its ModOrganizer.ini is empty) - open Mod Organizer once and pick the game"
+				: $"the game folder Mod Organizer names is not there: {a_mo2.GameDir}"));
+			return outList;
 		}
 		if (GameCheck() is { Count: > 0 } game) {
 			outList.Add(new Issue("", true, "the game is running (" + string.Join(", ", game) + ") - close it first"));
@@ -100,12 +113,17 @@ public static class Preflight
 				outList.Add(new Issue(key, true, "its check found a setting of the wrong kind: " + e.Message));
 			}
 			outList.AddRange(ToolVersions.Check(a_setup, a_mo2, key, s));
-			rivalsOff ??= Duplicates.Off(a_setup, c.States);
+			rivalsOff ??= Duplicates.Off(a_setup, c.States, selected);
 			outList.AddRange(Duplicates.Check(a_setup, a_mo2, c.States, key, rivalsOff));
 			// the settings learned from the tool's own window: a tool updated since may have changed what they mean
-			if (ToolSettings.CanLearn(s) && ToolSettings.Load(a_setup, key) is { } l && ToolUpdates.Yours(a_mo2, s).Exe is { } exe &&
-			    File.GetLastWriteTimeUtc(exe) > l.At) {
-				outList.Add(new Issue(key, false, "the tool was updated after its settings were learned - open its window once (Learn its settings) to check them"));
+			if (ToolSettings.CanLearn(s) && ToolSettings.Load(a_setup, key) is { } l) {
+				// learned for a tool that has moved since (or a record edited by hand): said here, before the run, not at its step
+				if (ToolSettings.Outside(l, a_mo2, s) is { } outside) {
+					outList.Add(new Issue(key, true, $"its learned settings name a file outside their folder: {outside} is in none of the folders this tool's settings are " +
+						"learned from (has the tool moved?) - learn its settings again"));
+				} else if (ToolUpdates.Yours(a_mo2, s).Exe is { } exe && File.GetLastWriteTimeUtc(exe) > l.At) {
+					outList.Add(new Issue(key, false, "the tool was updated after its settings were learned - open its window once (Learn its settings) to check them"));
+				}
 			}
 		}
 		return outList;
@@ -136,10 +154,6 @@ public static class Duplicates
 		["pgpatcher"] = ["PGPatcher.esp", "PG_1.esp"],
 		["synthesis"] = ["Synthesis.esp"],
 		["landscapefixer"] = ["LandscapeFixer.esp"],
-		["wryebash"] = ["Bashed Patch, 0.esp"],
-		["upf"] = ["zPatch.esp"],
-		["smash"] = ["Smashed Patch.esp"],
-		["reqtificator"] = ["Requiem for the Indifferent.esp"],
 	};
 
 	// what in a mod folder shows it holds a step's output: one of its own files, or (grass cache, terrain LOD) a file of its kind
@@ -164,8 +178,10 @@ public static class Duplicates
 
 	// the mods the run itself switches off are no rivals: every output of the setup, every mod a step replaces, its LOD outputs -
 	// the same for every step, so the pre-check works it out once
-	public static HashSet<string> Off(Setup a_setup, IReadOnlyDictionary<string, char> a_states) =>
-		Runner.OutputsToTurnOff(a_setup, a_states).Select(o => o.Mod).ToHashSet(StringComparer.OrdinalIgnoreCase);
+	// a_todo: the steps the run runs - a run from a later step keeps the earlier outputs on, and those are rivals then (CodeRabbit on
+	// pull request #40)
+	public static HashSet<string> Off(Setup a_setup, IReadOnlyDictionary<string, char> a_states, IReadOnlyList<Setup.StepEntry>? a_todo = null) =>
+		Runner.OutputsToTurnOff(a_setup, a_states, a_todo).Select(o => o.Mod).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
 	public static IEnumerable<Issue> Check(Setup a_setup, Mo2Instance a_mo2, IReadOnlyDictionary<string, char> a_states, string a_step, IReadOnlySet<string>? a_off = null)
 	{

@@ -220,6 +220,13 @@ public static partial class ToolSettings
 	// the mod "Learn its settings" switched on for the tool's window, named until it is off again: a crash in between leaves this for the next look
 	public static string SwitchRecord(Setup a_setup) => a_setup.File + ".tool on";
 
+	// The mod switched on for the tool's window stays on after a Stop only while the tool may be open under it: once the tool
+	// was started. A Stop before that puts it back
+	public static bool KeepsModOn(bool a_toolStarted, bool a_stopped) => a_toolStarted && a_stopped;
+
+	// how long putting that mod back may wait for Mod Organizer to close after a Stop (the offline tests shorten it)
+	public static TimeSpan PutBackWait { get; set; } = TimeSpan.FromSeconds(30);
+
 	// what a record holds: the mod, then the Mod Organizer and the profile it was switched on in (an older record holds the mod
 	// alone - it is its own setup's)
 	public static string SwitchText(string a_mod, Mo2Instance a_mo2, string a_profile) => a_mod + "\n" + a_mo2.BaseDir + "\n" + a_profile;
@@ -281,9 +288,20 @@ public static partial class ToolSettings
 		}
 	}
 
+	// What would make "Learn its settings" wait before the tool's window opens (null: nothing - it opens at once): this setup's
+	// Mod Organizer is open and cannot be closed under a game, a download, a repack or a program of the player's (his report of
+	// 2026-11-22: with the game open, the box greyed its window, the tool never came and the box would not close).
+	public static string? WhyNotNow(Setup a_setup, CancellationToken a_ct = default)
+	{
+		var mo2 = Mo2Instance.Load(a_setup.Mo2Exe, a_setup.Mo2Instance);
+		var control = new Mo2Control(mo2, a_setup.Profile, RunLog.Null) { AllowCloseTheirs = true };
+		return control.Running ? control.WhyNotClosable(a_ct) : null;
+	}
+
 	// a_stillOn: told the mod that was switched on for the tool's window when it could not be switched off again (the log
-	// says so too - a window that shows no log says it with this)
-	public static Learned Learn(Setup a_setup, string a_step, RunLog a_log, CancellationToken a_ct, Action<string>? a_stillOn = null)
+	// says so too - a window that shows no log says it with this). a_opened: told once the tool's window is up (before that,
+	// a_ct ends the wait at once; after it, a cancel stops waiting for the tool and keeps nothing of it)
+	public static Learned Learn(Setup a_setup, string a_step, RunLog a_log, CancellationToken a_ct, Action<string>? a_stillOn = null, Action? a_opened = null)
 	{
 		using var hold = Runner.HoldIfFree() ?? throw new StepFailedException("a run is going - learn a tool's settings when it is done");
 		var s = new StepSettings(a_setup.StepSettings(a_step) ?? throw new StepFailedException("this setup has no such step"));
@@ -313,27 +331,42 @@ public static partial class ToolSettings
 			Files.WriteAtomic(SwitchRecord(a_setup), SwitchText(toolMod, mo2, a_setup.Profile));
 			profile.SetMods([toolMod], [], a_log);
 		}
+		var started = false;
 		try {
 			using var proc = control.RunExecutable(title, image, null, a_ct, TimeSpan.FromMinutes(5));
+			started = true;
 			a_log.Say($"{tool} is open - set it up as you want it, save, and close it");
+			a_opened?.Invoke();
 			while (!proc.HasExited) {
 				a_ct.ThrowIfCancellationRequested();
-				Thread.Sleep(1000);
+				a_ct.WaitHandle.WaitOne(1000);
 			}
 			// a packed tool keeps its window in a child after its launcher ends: wait for the launcher's whole tree
 			var root = proc.Id;
 			while (Procs.Tree(root).Any(pid => pid != root && Procs.StartTime(pid) != null)) {
 				a_ct.ThrowIfCancellationRequested();
-				Thread.Sleep(1000);
+				a_ct.WaitHandle.WaitOne(1000);
 			}
 		} finally {
 			try {
-				if (toolMod != null) {
-					// even after a Stop; one that cannot go back is named, never left unsaid
+				if (toolMod != null && KeepsModOn(started, a_ct.IsCancellationRequested)) {
+					// the player stopped waiting: closing Mod Organizer now would wait on the very tool still open under it. The
+					// mod stays on record (SwitchRecord) and the next run, or the next tool set up, switches it off
+					a_log.Warn($"the mod \"{toolMod}\" stays on until the next run or the next tool set up here - or untick it in Mod Organizer");
+					a_stillOn?.Invoke(toolMod);
+				} else if (toolMod != null) {
+					// One that cannot go back is named, never left unsaid. A Stop pressed during this close ends its wait (a game or a
+					// download can hold it for half an hour): the mod stays on record, as above. A Stop that came before the tool was
+					// up leaves nothing open that needs the mod: it goes back with a wait of its own, PutBackWait at most, so the
+					// Stop is never held up by Mod Organizer
+					using var quick = a_ct.IsCancellationRequested ? new CancellationTokenSource(PutBackWait) : null;
 					try {
-						control.Close(null, CancellationToken.None);
+						control.Close(quick == null ? null : PutBackWait, quick?.Token ?? a_ct);
 						profile.SetMods([], [toolMod], a_log);
 						Files.Delete(SwitchRecord(a_setup));
+					} catch (OperationCanceledException) {
+						a_log.Warn($"the mod \"{toolMod}\" stays on until the next run or the next tool set up here - or untick it in Mod Organizer");
+						a_stillOn?.Invoke(toolMod);
 					} catch (Exception e) when (e is Mo2BusyException or StepFailedException or IOException or UnauthorizedAccessException or InvalidOperationException or KeyNotFoundException) {
 						// (StepFailedException: Mod Organizer would not close - a box of its own nobody answered. Left to
 						// fly, it hid that the mod is still on, and the settings the tool had just saved were not kept)
@@ -346,6 +379,8 @@ public static partial class ToolSettings
 				control.ReleaseOwned();
 			}
 		}
+		// a Stop that came while the tool ended (between two looks) keeps nothing of it, as one a moment earlier would have
+		a_ct.ThrowIfCancellationRequested();
 		var changed = Changed(before, Scan(roots, skip)).Where(f => !f.EndsWith("_Debug_log.txt", StringComparison.OrdinalIgnoreCase)).ToList();
 		// a tool that keeps its window's values in no file (TexGen, DynDOLOD) still writes them into its debug log when it runs
 		var values = VarsLog(exe, a_step) is { } vl && File.GetLastWriteTimeUtc(vl) >= opened ? ReadVars(vl) : [];
@@ -355,6 +390,19 @@ public static partial class ToolSettings
 		var l = Keep(a_setup, a_step, tool, changed, values);
 		a_log.Say($"{tool}: {changed.Count} settings file(s) kept{(values.Count > 0 ? $", {values.Count} values of its window read off its log" : "")}");
 		return l;
+	}
+
+	// The first file of a learned record that lies in none of the folders this tool's settings are learned from - the tool's own
+	// folder, Mod Organizer's overwrite, a folder the step names - or null. Such a record was edited by hand, or learned before
+	// the tool moved to another folder: a run would write a file there every time, and the tool where it is now reads none of it
+	public static string? Outside(Learned a_learned, Mo2Instance a_mo2, StepSettings a_s)
+	{
+		var roots = new List<string> { a_mo2.OverwriteDir };
+		if (a_s.Str("executable") is { } title && a_mo2.Executable(title)?.Binary is { Length: > 0 } exe) {
+			roots.Add(Path.GetDirectoryName(exe)!);
+		}
+		roots.AddRange(a_s.List("settings_dirs"));
+		return a_learned.Files.FirstOrDefault(f => !roots.Any(r => Files.IsUnder(f.Live, r)))?.Live;
 	}
 
 	// a run: the learned settings in place before the tool starts (each live file in the run record first, so a crash puts the
@@ -370,6 +418,11 @@ public static partial class ToolSettings
 		var bad = l.Files.FirstOrDefault(f => !Files.IsUnder(Path.Combine(dir, f.Stored), dir) || !Path.IsPathFullyQualified(f.Live));
 		if (bad != null) {
 			throw new StepFailedException($"its learned settings name a file outside their folder ({bad.Stored}) - learn its settings again");
+		}
+		// ... and never writes one anywhere but where this tool's settings are learned from (the check before a run says so first)
+		if (Outside(l, a_ctx.Mo2, new StepSettings(a_ctx.Setup.StepSettings(a_step) ?? [])) is { } outside) {
+			throw new StepFailedException($"its learned settings name a file outside their folder: {outside} is in none of the folders this tool's settings are learned from " +
+				"(has the tool moved?) - learn its settings again");
 		}
 		foreach (var f in l.Files) {
 			StepKit.KeepFile(a_ctx, f.Live);

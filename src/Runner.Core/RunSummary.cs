@@ -76,9 +76,6 @@ public sealed class RunSummary
 		if (a_j.UsedOld.Any(u => u.Done) && !a_j.Undone) {
 			s.Rows.Add(new Row("Not built again", string.Join(", ", a_j.UsedOld.Where(u => u.Done).Select(u => $"{u.Name} ({u.Mod})")) + " - the old output is used, as this setup says"));
 		}
-		if (a_j.OrderChanged && !a_j.Undone) {
-			s.Rows.Add(new Row("Plugin order", "sorted by LOOT - the new order stays (History > Undo this run takes it back)"));
-		}
 		if (a_j.Retire.Count > 0 && !a_j.Undone) {
 			s.Rows.Add(new Row("Kept off", string.Join(", ", a_j.Retire) + " - replaced by what this run made"));
 		}

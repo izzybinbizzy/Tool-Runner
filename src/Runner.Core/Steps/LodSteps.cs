@@ -137,7 +137,7 @@ public sealed class XLodGenStep : IStep
 				a_ctx.Log.Detail($"the worldspace list: {names[i].Count} worldspace(s) offered ({lists.Count} list(s) in xLODGen's options)");
 				return lists[i];
 			}
-			Thread.Sleep(1000);
+			a_ctx.Pause(TimeSpan.FromSeconds(1));
 		}
 		throw new StepFailedException($"xLODGen's options show no worldspace list within {a_timeout.TotalSeconds:0} s");
 	}
@@ -213,7 +213,14 @@ public sealed class AcmosStep : IStep
 		if (a_s.Str("reads") is not { Length: > 0 }) yield return new Issue(Key, true, "the terrain LOD folder it reads is not set");
 		// a mod there would be moved into itself (its LOD parked in the backup), and its painted copy made beside it in MO2's folders
 		foreach (var i in StepKit.CheckOutputDir(a_c, Key, a_s.Str("reads"), "the terrain LOD folder it reads")) yield return i;
+		if (QuoteIn(a_s.Str("roads"), a_s.Str("reads")) is { } quoted) yield return new Issue(Key, true, quoted);
 	}
+
+	// The road set and the LOD folder stand between quote marks on ACMOS's command line: a quote mark inside one would end it
+	// early, and what follows would reach ACMOS as arguments of its own (another folder to write into). No road set and no
+	// folder has one
+	public static string? QuoteIn(params string?[] a_values) =>
+		a_values.FirstOrDefault(v => v?.Contains('"') == true) is { } bad ? $"a quote mark (\") stands in {bad} - no road set and no folder has one" : null;
 
 	public void Run(RunContext a_ctx, StepSettings a_s)
 	{
@@ -237,6 +244,9 @@ public sealed class AcmosStep : IStep
 		var roadsOut = reads + " roads";
 		StepKit.ParkDir(a_ctx, roadsOut, "ACMOS roads");
 		var roads = a_s.Str("roads") ?? AcmosRoads(toolDir) ?? "Paths Only";
+		if (QuoteIn(roads, lod, roadsOut) is { } quoted) {
+			throw new StepFailedException("ACMOS: " + quoted);
+		}
 		var args = $"-autorun -t:\"{roads}\" -l:\"{lod}\" -o:\"{roadsOut}\"";
 		var cmd = $"{Mo2Control.Quote(exe)} {args}";
 		a_ctx.Activity(Key, "painting roads into the terrain LOD");
@@ -387,7 +397,13 @@ public static class Cli
 		// load every core
 		a_ctx.Control.Ours(p.Id);
 		p.StandardInput.Close();
-		var sb = new System.Text.StringBuilder();
+		// Its output goes into its file as it comes, every line; only its last lines are held here (a tool that prints a line per
+		// file it makes printed hundreds of megabytes, all of it held in memory for the step's life). The file stays readable
+		// while the tool runs. A file that cannot be written must not hide why the step ended: said, and the step goes on
+		var tail = new Queue<string>();
+		StreamWriter? kept = null;
+		// set once the step is done with the file: a line that comes after (a child that kept the pipe) is held, never written
+		var closed = false;
 		string? latest = null;
 		// each stream's end (its last line has arrived)
 		var outEnd = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -399,53 +415,96 @@ public static class Cli
 				a_end.TrySetResult();
 				return;
 			}
-			lock (sb) {
-				sb.AppendLine(a_line);
+			lock (tail) {
+				tail.Enqueue(a_line);
+				if (tail.Count > TailLines) {
+					tail.Dequeue();
+				}
 				latest = a_line;
-			}
-		}
-		p.OutputDataReceived += (_, e) => Add(e.Data, outEnd);
-		p.ErrorDataReceived += (_, e) => Add(e.Data, errEnd);
-		p.BeginOutputReadLine();
-		p.BeginErrorReadLine();
-		try {
-			Waits.Tool(a_ctx, a_step, p, a_deadline, () => {
-				string? line;
-				lock (sb) {
-					line = latest;
-					latest = null;
-				}
-				if (line != null) {
-					a_ctx.Activity(a_step, line.Length > 160 ? line[..160] : line);
-				}
 				try {
-					return p.HasExited ? Waits.Poll.Done : Waits.Poll.Wait;
-				} catch (InvalidOperationException) {
-					return Waits.Poll.Done;
+					if (!closed) {
+						kept?.WriteLine(a_line);
+					}
+				} catch (Exception e) when (e is IOException or ObjectDisposedException) {
+					// a disk that stopped taking it: the lines held here are what is left
 				}
-			});
-		} catch {
-			Procs.KillTree(p.Id);
-			throw;
-		} finally {
-			string text;
-			lock (sb) {
-				text = sb.ToString();
 			}
-			Files.WriteAtomic(a_outFile, text);
 		}
-		// The last output lines: both streams read to their end (a wait on the process alone returns the moment it has ended,
-		// before its last lines have arrived - a finished tool's "Done" line was then missed). Never for long: a child process
-		// that kept the output pipe open would hold it
-		Task.WaitAll([outEnd.Task, errEnd.Task], TimeSpan.FromSeconds(30));
-		string all;
-		lock (sb) {
-			all = sb.ToString();
+		string Tail()
+		{
+			lock (tail) {
+				return string.Join(Environment.NewLine, tail) + (tail.Count > 0 ? Environment.NewLine : "");
+			}
 		}
+		// (held to the method's end; the guarded close below is the one that counts, and a second close does nothing)
+		using var file = OpenOutput(a_outFile, out var notKept);
+		kept = file;
+		try {
+			if (notKept != null) {
+				a_ctx.Log.Warn($"{Path.GetFileName(a_exe)}'s output could not be kept in {a_outFile} ({notKept})");
+			}
+			p.OutputDataReceived += (_, e) => Add(e.Data, outEnd);
+			p.ErrorDataReceived += (_, e) => Add(e.Data, errEnd);
+			p.BeginOutputReadLine();
+			p.BeginErrorReadLine();
+			try {
+				Waits.Tool(a_ctx, a_step, p, a_deadline, () => {
+					string? line;
+					lock (tail) {
+						line = latest;
+						latest = null;
+					}
+					if (line != null) {
+						a_ctx.Activity(a_step, line.Length > 160 ? line[..160] : line);
+					}
+					try {
+						return p.HasExited ? Waits.Poll.Done : Waits.Poll.Wait;
+					} catch (InvalidOperationException) {
+						return Waits.Poll.Done;
+					}
+				});
+			} catch {
+				Procs.End(p);
+				throw;
+			}
+			// The last output lines: both streams read to their end (a wait on the process alone returns the moment it has ended,
+			// before its last lines have arrived - a finished tool's "Done" line was then missed). Never for long: a child process
+			// that kept the output pipe open would hold it - and a Stop ends the wait at once
+			Task.WaitAll([outEnd.Task, errEnd.Task], 30000, a_ctx.Cancel);
+		} finally {
+			// the file is closed here, inside the guard: its last write can fail on a full disk, and that must never stand in
+			// for how the tool ended (or for a Stop or a time limit on its way out)
+			lock (tail) {
+				closed = true;
+				try {
+					kept?.Dispose();
+				} catch (IOException e) {
+					a_ctx.Log.Warn($"{Path.GetFileName(a_exe)}'s output in {a_outFile} is incomplete ({e.Message})");
+				}
+			}
+		}
+		var all = Tail();
 		foreach (var ln in all.TrimEnd().Split('\n').TakeLast(10)) {
 			a_ctx.Log.Detail("| " + ln.TrimEnd());
 		}
 		return (p.ExitCode, all);
+	}
+
+	// how many of a tool's last lines are held to judge its end (its "Done" line is among its last)
+	const int TailLines = 500;
+
+	// the file a tool's output goes into as it comes, readable while the tool runs (null, and why, when it cannot be written)
+	static StreamWriter? OpenOutput(string a_path, out string? a_why)
+	{
+		a_why = null;
+		try {
+			Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(a_path))!);
+			return new StreamWriter(a_path, new System.Text.UTF8Encoding(false),
+				new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write, Share = FileShare.ReadWrite | FileShare.Delete });
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			a_why = e.Message;
+			return null;
+		}
 	}
 }
 

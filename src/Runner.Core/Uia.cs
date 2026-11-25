@@ -325,7 +325,7 @@ public static class Uia
 					return e;
 				}
 			}
-			Thread.Sleep(1000);
+			a_ct.WaitHandle.WaitOne(1000);
 		}
 		return null;
 	}
