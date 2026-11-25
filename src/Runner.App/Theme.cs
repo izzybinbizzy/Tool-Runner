@@ -574,14 +574,13 @@ public static class Theme
 				a_problems.Add($"icon: \"{icon}\" must be a file beside the theme");
 			} else {
 				try {
-					var img = BitmapFrame.Create(new Uri(path), BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
-					img.Freeze();
+					var img = IconFrom(path);
 					res["Logo"] = img;
 					Icon = img;
 					if (Application.Current.MainWindow != null) {
 						Application.Current.MainWindow.Icon = img;
 					}
-				} catch (Exception e) when (e is IOException or FormatException or NotSupportedException or ArgumentException or
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or FormatException or NotSupportedException or ArgumentException or
 				                            InvalidOperationException or System.Runtime.InteropServices.ExternalException) {
 					// a damaged picture throws FileFormatException (a FormatException) or a COM error from Windows' decoder - it is only
 					// an icon, so it never stops the theme
@@ -589,6 +588,37 @@ public static class Theme
 				}
 			}
 		}
+	}
+
+	// how large a theme's picture is kept at the most, in pixels a side: the window shows it at 30, Windows' icons go to 256
+	const int IconMost = 256;
+
+	// A theme's picture, kept no larger than it is ever shown: a larger one is made small as it is decoded. Whole, a picture of
+	// 4,000 pixels a side stays 64 MB in memory for as long as its theme is in use. The file is let go once it is read
+	public static BitmapSource IconFrom(string a_path)
+	{
+		int wide, high;
+		using (var file = File.OpenRead(a_path)) {
+			var first = BitmapDecoder.Create(file, BitmapCreateOptions.DelayCreation, BitmapCacheOption.None).Frames[0];
+			(wide, high) = (first.PixelWidth, first.PixelHeight);
+		}
+		if (Math.Max(wide, high) <= IconMost) {
+			var whole = BitmapFrame.Create(new Uri(a_path), BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+			whole.Freeze();
+			return whole;
+		}
+		var small = new BitmapImage();
+		small.BeginInit();
+		small.CacheOption = BitmapCacheOption.OnLoad;
+		small.UriSource = new Uri(a_path);
+		if (wide >= high) {
+			small.DecodePixelWidth = IconMost;
+		} else {
+			small.DecodePixelHeight = IconMost;
+		}
+		small.EndInit();
+		small.Freeze();
+		return small;
 	}
 
 	// Dark or Light: the base Windows draws its own controls with under the theme in use

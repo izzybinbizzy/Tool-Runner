@@ -5229,6 +5229,39 @@ public static class Program
 		}
 	}
 
+	// A theme's picture is kept no larger than it is ever shown: a large one is made small as it is read, a small one is taken
+	// as it is, and its file is let go either way (a theme's folder must stay free to move or remove)
+	static void T_AThemesPictureIsKeptSmall()
+	{
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "icon " + Guid.NewGuid().ToString("N")[..8]);
+		Directory.CreateDirectory(dir);
+		try {
+			string Picture(string a_name, int a_wide, int a_high)
+			{
+				var file = Path.Combine(dir, a_name);
+				var made = System.Windows.Media.Imaging.BitmapSource.Create(a_wide, a_high, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null, new byte[a_wide * a_high * 4], a_wide * 4);
+				var png = new System.Windows.Media.Imaging.PngBitmapEncoder();
+				png.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(made));
+				using var to = File.Create(file);
+				png.Save(to);
+				return file;
+			}
+			var wide = ToolRunner.App.Theme.IconFrom(Picture("wide.png", 1200, 600));
+			Equal((256, 128), (wide.PixelWidth, wide.PixelHeight), "a wide picture is read at 256 across, its shape kept");
+			var tall = ToolRunner.App.Theme.IconFrom(Picture("tall.png", 300, 900));
+			Check(tall.PixelHeight == 256 && tall.PixelWidth is >= 85 and <= 86, $"a tall one at 256 high: {tall.PixelWidth} x {tall.PixelHeight}");
+			var small = ToolRunner.App.Theme.IconFrom(Picture("small.png", 64, 64));
+			Equal((64, 64), (small.PixelWidth, small.PixelHeight), "a small one is taken as it is");
+			Check(wide.IsFrozen && tall.IsFrozen && small.IsFrozen, "each can be used from any thread");
+			foreach (var f in Directory.GetFiles(dir)) {
+				File.Delete(f);
+			}
+			Check(Directory.GetFiles(dir).Length == 0, "no picture file is held open after it was read");
+		} finally {
+			Directory.Delete(dir, true);
+		}
+	}
+
 	static void T_SmallTextRulesOfTheWindow()
 	{
 		Check(ToolRunner.App.PanelWindow.Plain("HISTORY") == "History" && ToolRunner.App.PanelWindow.Plain("MO2 CHANGELOG") == "MO2 Changelog", "a heading as a window title");
