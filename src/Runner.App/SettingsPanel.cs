@@ -304,6 +304,10 @@ public static class SettingsPanel
 		}
 	}
 
+	// one line of a Windows file picker's filter: its name in the window's language (a "|" in a translation would end the name
+	// there and read as the pattern), then the pattern
+	static string FilterOf(string a_name, string a_pattern) => WindowWords.Word(a_name).Replace("|", "", StringComparison.Ordinal) + "|" + a_pattern;
+
 	// (a setting saved under an empty key still gets a name: its editor is announced by it)
 	// AnvilLOD's "preset" is a word (its own low / medium / high), DynDOLOD's a file
 	const string AnvilPresetLabel = "AnvilLOD preset";
@@ -1701,7 +1705,7 @@ public static class SettingsPanel
 			var d = new Microsoft.Win32.OpenFolderDialog { Title = a_label, InitialDirectory = start ?? "" };
 			return (a_owner == null ? d.ShowDialog() : d.ShowDialog(a_owner)) == true ? d.FolderName : null;
 		}
-		var f = new Microsoft.Win32.OpenFileDialog { Title = a_label, Filter = a_pick == PathPick.Program ? "Programs (*.exe)|*.exe|All files|*.*" : "All files|*.*", InitialDirectory = start ?? "" };
+		var f = new Microsoft.Win32.OpenFileDialog { Title = a_label, Filter = a_pick == PathPick.Program ? FilterOf("Programs (*.exe)", "*.exe") + "|" + FilterOf("All files", "*.*") : FilterOf("All files", "*.*"), InitialDirectory = start ?? "" };
 		return (a_owner == null ? f.ShowDialog() : f.ShowDialog(a_owner)) == true ? f.FileName : null;
 	}
 
