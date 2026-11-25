@@ -9830,6 +9830,8 @@ public static class Program
 		var bottled = "[2026-11-10 12:04:00.425] [info] Loaded CommunityShaders 1-9-0-0\n" + slow + string.Concat(Enumerable.Repeat("[2026-11-10 12:13:38.804] [info] [ReverseZ.cpp:683] ReverseZ: camera\n", 400));
 		Equal<int?>(549, InGame.RemainingIn(bottled), "its last count is read however many lines follow it");
 		Equal<int?>(null, InGame.RemainingIn("Open Shaders 2.20.0\n"), "a log without such lines");
+		Equal<int?>(7, InGame.RemainingIn("[12:00:00] [ShaderTiming] remaining=7\n[12:00:01] [ShaderTiming] remaining=99999999999\n"),
+			"a count past what a number holds is no count: the one before it is the newest");
 		ShaderStep.Look At(string a_log, int a_files, double a_sinceFile, double? a_cores, double a_peak, double a_low, bool a_sane = true, double a_sinceLog = 400, int? a_new = null) =>
 			new(a_log, a_files, a_new ?? a_files, TimeSpan.FromSeconds(a_sinceFile), TimeSpan.FromSeconds(a_sinceLog), a_cores, a_peak, TimeSpan.FromSeconds(a_low), a_sane);
 
