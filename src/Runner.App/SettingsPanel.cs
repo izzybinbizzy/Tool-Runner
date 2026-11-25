@@ -1564,7 +1564,8 @@ public static class SettingsPanel
 			});
 			edit = box;
 		} else if (kind == JsonValueKind.Number) {
-			var t = new TextBox { Text = cur?.ToString() ?? "" };
+			// (one line high whatever the label's height: a label of three lines drew its box three lines high)
+			var t = new TextBox { Text = cur?.ToString() ?? "", VerticalAlignment = VerticalAlignment.Center };
 			a_apply.Add(() => {
 				if (t.Text.Trim() == "") {
 					a_obj.Remove(a_key);
@@ -1615,7 +1616,7 @@ public static class SettingsPanel
 			t.TextChanged += (_, _) => Changed();
 			edit = t;
 		} else {
-			var t = new TextBox { Text = cur?.ToString() ?? "" };
+			var t = new TextBox { Text = cur?.ToString() ?? "", VerticalAlignment = VerticalAlignment.Center };
 			a_apply.Add(() => {
 				if (a_key is "output_mod" or "then_move_to_mod" or "executable" && t.Text.Trim() == "") {
 					return WindowWords.Format("{0}: cannot be empty", WindowWords.Word(a_label));

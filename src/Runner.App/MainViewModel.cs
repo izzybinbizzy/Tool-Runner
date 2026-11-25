@@ -163,6 +163,9 @@ public sealed partial class MainViewModel : Observable
 		OnPropertyChanged(nameof(VerdictKind));
 		OnPropertyChanged(nameof(Mo2Open));
 		OnPropertyChanged(nameof(GameRunning));
+		// (their words too: the off-screen pictures draw the window again in another language without a restart)
+		OnPropertyChanged(nameof(Mo2Text));
+		OnPropertyChanged(nameof(GameText));
 		foreach (var s in Steps) {
 			s.Repaint();
 		}
@@ -1839,7 +1842,8 @@ public sealed partial class MainViewModel : Observable
 		ProgressKnown = !a_waiting && cur >= 0;
 		Progress = current == "xlodgen" ? Math.Min(0.97, now / 17.5) : Math.Min(0.95, now / 1.5);
 		Clock = Long(TimeSpan.FromMinutes(spent));
-		Left = $"about {Long(TimeSpan.FromMinutes(left))} left";
+		// (in the window's words, as a real run says them: the pictures in another language show what a player sees)
+		Left = WindowWords.Format("about {0} left", Long(TimeSpan.FromMinutes(left)));
 		FinishAt = DoneAbout(new DateTime(2026, 10, 27, 20, 0, 0, DateTimeKind.Local).AddMinutes(spent + left));
 		Verdict = "";
 		Mo2Open = a_waiting || current == "xlodgen";
@@ -1847,7 +1851,7 @@ public sealed partial class MainViewModel : Observable
 		Summary = null;
 		RetryFrom = "";
 		WaitingInGame = true;
-		StepOf = cur >= 0 ? $"step {cur + 1} of {Steps.Count}" : "";
+		StepOf = cur >= 0 ? WindowWords.F($"step {cur + 1} of {Steps.Count}") : "";
 		Guide = [];
 		ShowClose();
 		LogChanged?.Invoke(string.Join("\n", log) + "\n", true);

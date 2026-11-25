@@ -550,6 +550,8 @@ public partial class App : Application
 			w.DemoUsesOld("dyndolod", false);
 			w.Demo(false);
 			w.SayFooter();
+			// (the status lights' words are asked for again: a light whose state did not change kept its English words)
+			(w.DataContext as MainViewModel)?.Repaint();
 			WindowWords.Tree(w);
 			Pump(w, 600);
 			// (pictures only: what a German drawing shows never goes into the window words, which list the English)
