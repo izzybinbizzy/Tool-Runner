@@ -5906,6 +5906,21 @@ public static class Program
 			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from5 + " again", link), "a link is refused as the new place");
 			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from5 + " again", Path.Combine(link, "deeper")), "a folder reached through a link into the data is refused");
 			Directory.Delete(link);
+			// a SUBST drive letter that stands for a folder inside the data is that folder too
+			var letter = Enumerable.Range('G', 19).Select(c => (char)c).FirstOrDefault(c => !Directory.Exists(c + @":\"));
+			Check(letter != default, "a free drive letter for the test");
+			void Subst(string a_args)
+			{
+				using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("subst.exe", a_args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true })!;
+				p.WaitForExit();
+			}
+			Subst($"{letter}: \"{Path.Combine(from5 + " again", "inside")}\"");
+			try {
+				Check(Directory.Exists(letter + @":\"), "the test's drive letter stands");
+				Throws<InvalidOperationException>(() => DataFolder.MoveTo(from5 + " again", $@"{letter}:\deeper"), "a folder on a drive letter that stands for one inside the data is refused");
+			} finally {
+				Subst($"{letter}: /d");
+			}
 		} finally {
 			if (Directory.Exists(root)) {
 				Directory.Delete(root, true);

@@ -328,6 +328,31 @@ public static partial class Files
 	[return: MarshalAs(UnmanagedType.Bool)]
 	private static partial bool CloseHandle(nint a_handle);
 
+	[DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
+	static extern uint GetFinalPathNameByHandle(nint a_handle, [Out] char[] a_path, uint a_length, uint a_flags);
+
+	// Where a folder that is there really is, as Windows itself names it: a junction, a link, a SUBST drive letter or a mapped
+	// network drive followed to the folder behind it (a network folder as \\server\share\...). Null when Windows will not say
+	public static string? FinalPath(string a_dir)
+	{
+		const uint ReadAttributes = 0x80, ShareAll = 7, OpenExisting = 3, BackupSemantics = 0x02000000;
+		var h = CreateFile(Path.GetFullPath(a_dir), ReadAttributes, ShareAll, 0, OpenExisting, BackupSemantics, 0);
+		if (h == -1) {
+			return null;
+		}
+		try {
+			var name = new char[1024];
+			var n = GetFinalPathNameByHandle(h, name, (uint)name.Length, 0);
+			if (n == 0 || n >= name.Length) {
+				return null;
+			}
+			var s = new string(name, 0, (int)n);
+			return s.StartsWith(@"\\?\UNC\", StringComparison.Ordinal) ? @"\\" + s[8..] : s.StartsWith(@"\\?\", StringComparison.Ordinal) ? s[4..] : s;
+		} finally {
+			CloseHandle(h);
+		}
+	}
+
 	// the volume a folder is really on (a junction is followed to where it leads); null when Windows will not say
 	static uint? VolumeOf(string a_dir)
 	{
