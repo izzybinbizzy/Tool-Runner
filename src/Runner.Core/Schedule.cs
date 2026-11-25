@@ -132,7 +132,10 @@ public static class Schedule
 		}
 	}
 
-	// Windows' own schtasks, no window, answered within 30 s
+	// how long schtasks is given to answer (the offline tests give it longer: on a PC busy with other work it can take that)
+	public static TimeSpan Limit { get; set; } = TimeSpan.FromSeconds(30);
+
+	// Windows' own schtasks, no window, answered within Limit
 	static (int Code, string Text) Schtasks(params string[] a_args)
 	{
 		var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "schtasks.exe")) {
@@ -145,12 +148,12 @@ public static class Schedule
 		using var p = Process.Start(psi) ?? throw new InvalidOperationException("schtasks did not start");
 		var output = p.StandardOutput.ReadToEndAsync();
 		var err = p.StandardError.ReadToEndAsync();
-		if (!p.WaitForExit(30_000)) {
+		if (!p.WaitForExit(Limit)) {
 			try {
 				p.Kill();
 			} catch (InvalidOperationException) {
 			}
-			throw new InvalidOperationException("schtasks did not answer within 30 seconds");
+			throw new InvalidOperationException($"schtasks did not answer within {Limit.TotalSeconds:0} seconds");
 		}
 		p.WaitForExit();
 		return (p.ExitCode, output.Result + err.Result);

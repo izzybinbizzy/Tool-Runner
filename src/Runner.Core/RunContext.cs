@@ -194,7 +194,7 @@ public sealed class FileGuide(Journal a_journal, Func<bool> a_continued, Action 
 		}
 		while (!a_continued()) {
 			a_ct.ThrowIfCancellationRequested();
-			Thread.Sleep(500);
+			a_ct.WaitHandle.WaitOne(500);
 		}
 		a_clear();
 		if (s != null) {

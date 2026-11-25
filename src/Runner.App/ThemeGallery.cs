@@ -178,7 +178,7 @@ public static class ThemeGallery
 				var current = Theme.Current;
 				var file = await Task.Run(() => Theme.CopyAs(current, Theme.List().FirstOrDefault(t => t.Name == current).File));
 				a_vm.Say($"Made: {System.IO.Path.GetFileName(file)}. Change its values in any text editor, then press Look again here.", "good");
-				System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{file}\"") { UseShellExecute = true });
+				System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{file}\"") { UseShellExecute = true })?.Dispose();
 				Fill2();
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException or System.ComponentModel.Win32Exception) {
 				a_vm.Say("The new theme could not be made: " + e.Message, "bad");
@@ -191,7 +191,7 @@ public static class ThemeGallery
 		open.Click += (_, _) => {
 			try {
 				Theme.EnsureFolder();
-				System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Theme.Folder) { UseShellExecute = true });
+				System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Theme.Folder) { UseShellExecute = true })?.Dispose();
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or System.ComponentModel.Win32Exception) {
 				a_vm.Say("The Themes folder could not be opened: " + e.Message, "bad");
 			}

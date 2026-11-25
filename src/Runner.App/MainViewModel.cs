@@ -1772,7 +1772,7 @@ public sealed partial class MainViewModel : Observable
 	public static void OpenFolder(string a_dir)
 	{
 		if (Directory.Exists(a_dir)) {
-			Process.Start(new ProcessStartInfo("explorer.exe", "\"" + a_dir + "\"") { UseShellExecute = true });
+			Process.Start(new ProcessStartInfo("explorer.exe", "\"" + a_dir + "\"") { UseShellExecute = true })?.Dispose();
 		}
 	}
 }

@@ -25,6 +25,7 @@ public static class QueueDialog
 			Height = UiState.Fit(UiState.Number("queue.height"), 560, 380, room.Height), MinWidth = UiState.Least(420, room.Width), MinHeight = UiState.Least(380, room.Height),
 			WindowStartupLocation = WindowStartupLocation.CenterOwner,
 			Background = Brushes2.Get("Panel"), Foreground = Brushes2.Get("Text"), ResizeMode = ResizeMode.CanResize, ShowInTaskbar = false,
+			FontFamily = (System.Windows.Media.FontFamily)a_owner.FindResource("UiFont"), FontSize = (double)a_owner.FindResource("SizeBody"),
 		};
 		w.Closed += (_, _) => {
 			UiState.Set("queue.width", w.ActualWidth);
@@ -35,7 +36,7 @@ public static class QueueDialog
 		var stack = new StackPanel();
 		DockPanel.SetDock(stack, Dock.Top);
 		dock.Children.Add(stack);
-		stack.Children.Add(new TextBlock { Text = "QUEUE OF SETUPS", Style = (Style)a_owner.FindResource("H1"), Margin = new Thickness(0, 0, 0, 6), FontSize = 18 });
+		stack.Children.Add(new TextBlock { Text = "QUEUE OF SETUPS", Style = (Style)a_owner.FindResource("H1"), Margin = new Thickness(0, 0, 0, 6), FontSize = (double)a_owner.FindResource("SizeHeading1") });
 		stack.Children.Add(new TextBlock { Text = "Tick the setups to run and put them in order. Each one runs whole - its check, its tools, your profile put back - before the next starts.",
 			Style = (Style)a_owner.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 14) });
 

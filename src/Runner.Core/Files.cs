@@ -32,11 +32,15 @@ public static partial class Files
 		}
 	}
 
+	static int s_writes;
+
 	public static void WriteAtomic(string a_path, ReadOnlySpan<byte> a_bytes)
 	{
 		var dir = Path.GetDirectoryName(Path.GetFullPath(a_path)) ?? throw new ArgumentException("no folder: " + a_path);
 		Directory.CreateDirectory(dir);
-		var tmp = Path.Combine(dir, "." + Path.GetFileName(a_path) + "." + Environment.ProcessId + ".tmp");
+		// its own temp file for every write: two threads writing the same file at once would otherwise share one, and the bytes
+		// of one be swapped in under the other's name
+		var tmp = Path.Combine(dir, $".{Path.GetFileName(a_path)}.{Environment.ProcessId}.{Interlocked.Increment(ref s_writes)}.tmp");
 		// a failed write (a full disk) leaves no temp file behind in the player's folder either
 		try {
 			using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough)) {
@@ -153,6 +157,18 @@ public static partial class Files
 		}
 	}
 
+	// the first a_count bytes as text when they are valid UTF-8 (a_text is "" when they are not)
+	public static bool TryStrictUtf8(byte[] a_bytes, int a_count, out string a_text)
+	{
+		try {
+			a_text = StrictUtf8.GetString(a_bytes, 0, a_count);
+			return true;
+		} catch (DecoderFallbackException) {
+			a_text = "";
+			return false;
+		}
+	}
+
 	// a text's bytes for a file, with the mark its encoding writes (UTF-16 and UTF-8-with-mark files keep theirs)
 	public static byte[] EncodeText(string a_text, Encoding a_encoding) => [.. a_encoding.GetPreamble(), .. a_encoding.GetBytes(a_text)];
 
@@ -236,7 +252,9 @@ public static partial class Files
 			}
 			var target = Path.Combine(a_dst, name);
 			if (Directory.Exists(entry)) {
-				if (Directory.Exists(target)) {
+				if (IsLink(entry)) {
+					MoveLink(entry, target);
+				} else if (Directory.Exists(target)) {
 					MoveContents(entry, target);
 					DeleteDir(entry);
 				} else {
@@ -245,6 +263,24 @@ public static partial class Files
 			} else {
 				Move(entry, target, true);
 			}
+		}
+	}
+
+	// a folder that is a link to another folder (a junction, a symbolic link)
+	public static bool IsLink(string a_dir) => new DirectoryInfo(a_dir).Attributes.HasFlag(FileAttributes.ReparsePoint);
+
+	// A link found inside what is moved goes as the link it is - never by emptying the folder it points at, which is somewhere
+	// else and not part of the move. A rename moves a link; where a rename cannot (another disk, a folder already there) the move
+	// stops and says so
+	static void MoveLink(string a_link, string a_target)
+	{
+		if (Directory.Exists(a_target) || File.Exists(a_target)) {
+			throw new IOException($"{a_link} is a link to another folder and {a_target} is there already - not moved; move or remove the link yourself");
+		}
+		try {
+			Retry(() => Directory.Move(a_link, a_target), true);
+		} catch (IOException e) when ((e.HResult & 0xFFFF) == NotSameDevice) {
+			throw new IOException($"{a_link} is a link to another folder and cannot go to another disk - move or remove the link yourself", e);
 		}
 	}
 
@@ -313,6 +349,10 @@ public static partial class Files
 	// the nearest folder at or above a_path that is there (a backup folder a run has yet to make is asked about through its parent)
 	static string? Standing(string a_path)
 	{
+		// (a setting left empty names no place at all)
+		if (string.IsNullOrWhiteSpace(a_path)) {
+			return null;
+		}
 		for (var d = Path.GetFullPath(a_path); !string.IsNullOrEmpty(d); d = Path.GetDirectoryName(d)) {
 			if (Directory.Exists(d)) {
 				return d;
@@ -359,13 +399,89 @@ public static partial class Files
 		File.AppendAllText(a_path, a_text);
 	}
 
+	// (an empty text names no place: it is under nothing and the same as nothing - a setting left empty reaches both)
 	public static bool IsUnder(string a_path, string a_root)
 	{
+		if (string.IsNullOrWhiteSpace(a_path) || string.IsNullOrWhiteSpace(a_root)) {
+			return false;
+		}
 		var p = Path.GetFullPath(a_path).TrimEnd('\\') + "\\";
 		var r = Path.GetFullPath(a_root).TrimEnd('\\') + "\\";
 		return p.StartsWith(r, StringComparison.OrdinalIgnoreCase);
 	}
 
 	public static bool SamePath(string a_a, string a_b) =>
+		!string.IsNullOrWhiteSpace(a_a) && !string.IsNullOrWhiteSpace(a_b) &&
 		string.Equals(Path.GetFullPath(a_a).TrimEnd('\\'), Path.GetFullPath(a_b).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
+}
+
+// A text file another program keeps adding to (a log), read whole as it grows: the first look reads all of it, each later one
+// only what was added since - a log of megabytes is not read and decoded again every few seconds for the lines at its start.
+// Whole lines are kept; a line still being written is given with the rest and read again at the next look, so a letter cut in
+// two by the look is never kept. A file that was replaced (another path, shorter, other first bytes) is read from its start again.
+// How the file is written (UTF-8, or the PC's own code page) is told by its whole lines alone, and told again when a later
+// line does not fit: a look that ends inside a letter settles nothing.
+public sealed class GrowingText
+{
+	const int HeadSize = 64;
+	const int Utf8 = 65001;
+
+	string? _path;
+	// the whole lines read so far, and where the next one starts in the file
+	string _lines = "";
+	long _pos;
+	byte[] _head = [];
+	Encoding _how = new UTF8Encoding(false);
+
+	public string Read(string a_path)
+	{
+		using var fs = new FileStream(a_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+		// its length read once: the file may shrink while it is looked at, and a second reading must never undercut the first
+		var length = fs.Length;
+		var head = new byte[(int)Math.Min(HeadSize, length)];
+		var headGot = fs.ReadAtLeast(head, head.Length, false);
+		var same = Math.Min(headGot, _head.Length);
+		// (two bytes a letter: a line's end found byte by byte would cut a letter in two - such a file is read whole each time)
+		var whole = Wide(_how) || _pos == 0 || !string.Equals(a_path, _path, StringComparison.OrdinalIgnoreCase) || length < _pos || same < _head.Length ||
+			!head.AsSpan(0, same).SequenceEqual(_head.AsSpan(0, same));
+		if (!whole) {
+			fs.Position = _pos;
+			var added = new byte[length - _pos];
+			var read = fs.ReadAtLeast(added, added.Length, false);
+			var end = LineEnd(added, read);
+			// New lines that are no UTF-8, in a file whose lines so far (plain letters only) had passed for it: the file is in
+			// the PC's own code page, and is read from its start again as that
+			string? lines = null;
+			if (_how.CodePage != Utf8 || Files.TryStrictUtf8(added, end, out lines)) {
+				_lines += lines ?? _how.GetString(added, 0, end);
+				_pos += end;
+				// (a file that was shorter than the head kept of it has grown past it: the head is filled up, so a replaced file is told)
+				if (_head.Length < HeadSize) {
+					_head = head[..headGot];
+				}
+				return end == read ? _lines : _lines + _how.GetString(added, end, read - end);
+			}
+		}
+		fs.Position = 0;
+		var all = new byte[fs.Length];
+		var got = fs.ReadAtLeast(all, all.Length, false);
+		// (two bytes a letter, told by its mark: a line's end found byte by byte would cut a letter in two)
+		var cut = Files.HasMark(all) && all[0] != 0xEF ? 0 : LineEnd(all, got);
+		_path = a_path;
+		_head = all[..Math.Min(HeadSize, got)];
+		_pos = cut;
+		if (cut == 0) {
+			// no whole line yet, or two bytes a letter: nothing is kept, and the next look reads all of it again
+			_lines = "";
+			return Files.DecodeText(all[..got], out _how);
+		}
+		// each part decoded once: the whole lines, which alone tell how the file is written, then what follows them
+		_lines = Files.DecodeText(all[..cut], out _how);
+		return cut == got ? _lines : _lines + _how.GetString(all, cut, got - cut);
+	}
+
+	static bool Wide(Encoding a_how) => a_how.CodePage is 1200 or 1201;
+
+	// where the last whole line ends (0: there is none)
+	static int LineEnd(byte[] a_bytes, int a_count) => a_count == 0 ? 0 : Array.LastIndexOf(a_bytes, (byte)'\n', a_count - 1) + 1;
 }

@@ -32,6 +32,14 @@ public static class Preflight
 		if (OtherGame(a_mo2) is { } other) {
 			outList.Add(new Issue("", true, $"this Mod Organizer manages another game ({other}) - Tool Runner works with Skyrim Special Edition and its Anniversary Edition only"));
 		}
+		// the game folder comes from Mod Organizer's own settings, and the checks and steps after this look into it (the game's
+		// plugins, its version): with none named, they would look into a folder "Data" wherever the program happens to stand
+		if (a_mo2.GameDir == "" || !Directory.Exists(a_mo2.GameDir)) {
+			outList.Add(new Issue("", true, a_mo2.GameDir == ""
+				? "Mod Organizer names no game folder (gamePath in its ModOrganizer.ini is empty) - open Mod Organizer once and pick the game"
+				: $"the game folder Mod Organizer names is not there: {a_mo2.GameDir}"));
+			return outList;
+		}
 		if (GameCheck() is { Count: > 0 } game) {
 			outList.Add(new Issue("", true, "the game is running (" + string.Join(", ", game) + ") - close it first"));
 		}
@@ -108,9 +116,14 @@ public static class Preflight
 			rivalsOff ??= Duplicates.Off(a_setup, c.States, selected);
 			outList.AddRange(Duplicates.Check(a_setup, a_mo2, c.States, key, rivalsOff));
 			// the settings learned from the tool's own window: a tool updated since may have changed what they mean
-			if (ToolSettings.CanLearn(s) && ToolSettings.Load(a_setup, key) is { } l && ToolUpdates.Yours(a_mo2, s).Exe is { } exe &&
-			    File.GetLastWriteTimeUtc(exe) > l.At) {
-				outList.Add(new Issue(key, false, "the tool was updated after its settings were learned - open its window once (Learn its settings) to check them"));
+			if (ToolSettings.CanLearn(s) && ToolSettings.Load(a_setup, key) is { } l) {
+				// learned for a tool that has moved since (or a record edited by hand): said here, before the run, not at its step
+				if (ToolSettings.Outside(l, a_mo2, s) is { } outside) {
+					outList.Add(new Issue(key, true, $"its learned settings name a file outside their folder: {outside} is in none of the folders this tool's settings are " +
+						"learned from (has the tool moved?) - learn its settings again"));
+				} else if (ToolUpdates.Yours(a_mo2, s).Exe is { } exe && File.GetLastWriteTimeUtc(exe) > l.At) {
+					outList.Add(new Issue(key, false, "the tool was updated after its settings were learned - open its window once (Learn its settings) to check them"));
+				}
 			}
 		}
 		return outList;
