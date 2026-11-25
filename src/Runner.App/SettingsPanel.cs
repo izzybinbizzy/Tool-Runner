@@ -228,7 +228,8 @@ public static class SettingsPanel
 		}
 	}
 
-	static string Label(string a_key) => Labels.TryGetValue(a_key, out var l) ? l : a_key.Length == 0 ? "" : char.ToUpperInvariant(a_key[0]) + a_key[1..].Replace('_', ' ');
+	// (a setting saved under an empty key still gets a name: its editor is announced by it)
+	static string Label(string a_key) => Labels.TryGetValue(a_key, out var l) ? l : a_key.Length == 0 ? "Unnamed setting" : char.ToUpperInvariant(a_key[0]) + a_key[1..].Replace('_', ' ');
 
 	// the program's own new versions - kept for the whole program, saved the moment it is ticked
 	static void NewVersions(MainWindow a_w, StackPanel a_stack)
@@ -703,39 +704,55 @@ public static class SettingsPanel
 		// what a tool's update may have moved, looked for before a run needs it
 		var testTools = new Button { Content = "Test my tools ...", Style = (Style)a_w.FindResource("Ghost"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 8),
 			ToolTip = "Opens each tool that is driven through its window, up to the window a run presses, and looks for what it would press" };
+		// While the tools are tested a button of its own stops the test: a LOD tool takes minutes to reach its window, and the
+		// main window does not close until the test is over. The two buttons take turns, so each keeps its own words
+		var testStop = new Button { Content = "Stop the test", Style = (Style)a_w.FindResource("Ghost"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 8) };
 		var testRows = new StackPanel();
-		// While the tools are tested the same button stops the test: a LOD tool takes minutes to reach its window, and the main
-		// window does not close until the test is over
-		CancellationTokenSource? testing = null;
-		var testText = testTools.Content;
+		void ShowTest()
+		{
+			var going = s_testing != null;
+			var (shown, hidden) = going ? (testStop, testTools) : (testTools, testStop);
+			var hadFocus = hidden.IsKeyboardFocused;
+			hidden.Visibility = Visibility.Collapsed;
+			shown.Visibility = Visibility.Visible;
+			testStop.IsEnabled = s_testing is { IsCancellationRequested: false };
+			if (hadFocus) {
+				shown.Focus();
+			}
+		}
+		s_showTest = ShowTest;
+		s_testRows = testRows;
+		ShowTest();
+		testStop.Click += (_, _) => {
+			s_testing?.Cancel();
+			testStop.IsEnabled = false;
+		};
 		testTools.Click += async (_, _) => {
-			if (testing is { } going) {
-				going.Cancel();
-				testTools.IsEnabled = false;
+			if (s_testing != null) {
 				return;
 			}
 			if (a_vm.Setup is not { } testSetup || !Ask.Show(a_w, "Test my tools", "Each tool this program drives through its window opens through Mod Organizer, up to the window a run presses, and closes again. " +
 				"Nothing is pressed and nothing is built. Mod Organizer closes for it, and the LOD tools read your whole load order first, so it can take a while.", "Test them", "Not now")) {
 				return;
 			}
-			testRows.Children.Clear();
+			s_testRows?.Children.Clear();
 			using var stop = new CancellationTokenSource();
-			testing = stop;
-			testTools.Content = WindowWords.Word("Stop the test");
+			s_testing = stop;
+			s_showTest?.Invoke();
 			using var hand = a_w.Working("your tools are being tested");
 			try {
 				var results = await Task.Run(() => ToolProof.TestAll(testSetup, RunLog.Null, stop.Token));
+				// (into the drawing on screen now: Settings may have been drawn again since the test began)
 				foreach (var r in results) {
-					testRows.Children.Add(new TextBlock { Text = r.Text, TextWrapping = TextWrapping.Wrap, Foreground = Brushes2.Get(r.Good ? "Text" : "Bad"), Margin = new Thickness(0, 2, 0, 2) });
+					s_testRows?.Children.Add(new TextBlock { Text = r.Text, TextWrapping = TextWrapping.Wrap, Foreground = Brushes2.Get(r.Good ? "Text" : "Bad"), Margin = new Thickness(0, 2, 0, 2) });
 				}
 			} catch (OperationCanceledException) {
 				a_vm.Say("The test of your tools was stopped; the tool it had opened is closed again.", "warn");
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or StepFailedException) {
 				a_vm.Say("The tools could not be tested: " + e.Message, "bad");
 			} finally {
-				testing = null;
-				testTools.Content = testText;
-				testTools.IsEnabled = true;
+				s_testing = null;
+				s_showTest?.Invoke();
 			}
 		};
 		// the look for updates first, its note right under its own button (the note turns into that look's answer) - standing
@@ -744,6 +761,7 @@ public static class SettingsPanel
 		stack.Children.Add(updNote);
 		stack.Children.Add(updRows);
 		stack.Children.Add(testTools);
+		stack.Children.Add(testStop);
 		stack.Children.Add(testRows);
 
 		stack = stepPage;
@@ -1118,6 +1136,13 @@ public static class SettingsPanel
 		return true;
 	}
 
+	// The test of the tools belongs to the window, not to one drawing of Settings: Undo changes draws Settings again while a
+	// test may still run, and the new drawing must stop that test, never start a second one beside it. s_showTest and
+	// s_testRows are the test buttons and the result rows of the drawing on screen; a test that ends writes there.
+	static CancellationTokenSource? s_testing;
+	static Action? s_showTest;
+	static StackPanel? s_testRows;
+
 	// the settings window closed: nothing typed is left to ask about
 	public static void Closed()
 	{
@@ -1131,6 +1156,8 @@ public static class SettingsPanel
 		s_errors = null;
 		s_pick = null;
 		s_steps = null;
+		s_showTest = null;
+		s_testRows = null;
 	}
 
 	// the drawing's step picker on the Steps page and the steps it lists

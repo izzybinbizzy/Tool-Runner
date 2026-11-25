@@ -389,7 +389,11 @@ public static partial class Procs
 			}
 			var after = Snapshot().ToDictionary(e => e.Pid, e => e.Parent);
 			var kept = new List<(int, DateTime, IDisposable)>();
+			// the root ended between its listing and its hold: nothing is kept, and no child's hold is left open
 			if (!held.TryGetValue(a_root, out var root)) {
+				foreach (var (_, hold) in held.Values) {
+					hold.Dispose();
+				}
 				return kept;
 			}
 			kept.Add((a_root, root.Started, root.Hold));

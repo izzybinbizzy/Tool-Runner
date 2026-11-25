@@ -408,6 +408,42 @@ public static class Program
 		Equal("OutA.esp", Plugins.Masters(Path.Combine(f.Mods, "Output B", "OutB.esp")).Single(), "MAST read");
 		Check(Plugins.IsMaster(Path.Combine(f.Mods, "Master Mod", "MasterMod.esm")), "ESM flag");
 		Check(!Plugins.IsMaster(Path.Combine(f.Mods, "Base Mod", "BaseMod.esp")), "not a master");
+
+		// a field longer than 65,535 bytes carries its length in a field before it: the masters after it are still found
+		using var body = new MemoryStream();
+		void Field(string a_type, byte[] a_data, bool a_long = false)
+		{
+			if (a_long) {
+				body.Write("XXXX"u8);
+				body.Write(BitConverter.GetBytes((ushort)4));
+				body.Write(BitConverter.GetBytes((uint)a_data.Length));
+			}
+			body.Write(Encoding.ASCII.GetBytes(a_type));
+			body.Write(BitConverter.GetBytes((ushort)(a_long ? 0 : a_data.Length)));
+			body.Write(a_data);
+		}
+		Field("MAST", "First.esm\0"u8.ToArray());
+		Field("ONAM", new byte[70000], true);
+		Field("MAST", "Second.esm\0"u8.ToArray());
+		var head = new byte[24];
+		"TES4"u8.CopyTo(head);
+		BitConverter.GetBytes((uint)body.Length).CopyTo(head, 4);
+		var odd = Path.Combine(f.Root, "Odd.esp");
+		File.WriteAllBytes(odd, [.. head, .. body.ToArray()]);
+		Equal("First.esm, Second.esm", string.Join(", ", Plugins.Masters(odd)), "a long field is stepped over by its real length");
+
+		// a plugin that ends inside its header is one whose masters are not known - never one that needs none
+		var whole = File.ReadAllBytes(Path.Combine(f.Mods, "Output B", "OutB.esp"));
+		File.WriteAllBytes(odd, whole[..30]);
+		Throws<IOException>(() => Plugins.Masters(odd), "a plugin that ends inside its list of masters");
+		File.WriteAllBytes(odd, whole[..10]);
+		Throws<IOException>(() => Plugins.Masters(odd), "a plugin that ends inside its first bytes");
+		File.WriteAllBytes(odd, [.. whole[..28], 0xFF, 0xFF, .. whole[30..]]);
+		Throws<IOException>(() => Plugins.Masters(odd), "a field that runs past the header's end");
+		File.WriteAllText(odd, "x");
+		Equal(0, Plugins.Masters(odd).Count, "a file that is no plugin needs none");
+		File.WriteAllBytes(Path.Combine(f.Mods, "Needs B", "NeedsB.esp"), whole[..30]);
+		Throws<IOException>(() => ProfileOf(f).Dependents(["Output A"]), "what goes off with a mod is not worked out past a plugin cut short");
 	}
 
 	// ------------------------------------------------------------------ setups and order
@@ -4316,7 +4352,8 @@ public static class Program
 			Directory.CreateDirectory(Path.Combine(setup.BackupDir, w + " " + setup.Name));
 		}
 		Check(Journal.NewestUnreadable(runs) == null, "the newest record reads: a start is not stopped by an older one");
-		Check(Journal.AnyUnreadable(runs) is { } bad && Files.SamePath(bad.Folder, damaged), "the older one that does not read is named");
+		var (read, unread) = Journal.AllOrUnreadable(runs);
+		Check(read.Count == 1 && Files.SamePath(read[0].Folder, good) && unread is { } bad && Files.SamePath(bad.Folder, damaged), "one read gives the records that read and names the older one that does not");
 		Equal(0, Runner.PruneBackupsOf(setup, runs, null, 1, RunLog.Null).Count, "no old backup is removed while a record does not read");
 		Equal(3, Runner.BackupsOf(setup).Count, "all three are still there");
 		Check(DataRemoval.Make(f.Data, false).Refused?.Contains("could not be read", StringComparison.Ordinal) == true, "and the program's data is not removed");
@@ -4468,8 +4505,14 @@ public static class Program
 		File.WriteAllText(elsewhere, "theirs");
 		ToolSettings.Keep(setup, "landscapefixer", "SomeTool", [elsewhere]);
 		File.WriteAllText(elsewhere, "theirs, changed since");
+		var found = Preflight.Run(setup, Mo2Instance.Load(f.Exe, f.Instance), ["landscapefixer"]);
+		Check(found.Any(i => i.Blocking && i.Text.Contains("outside their folder", StringComparison.Ordinal) && RunnerErrors.Find(i.Text)?.Code == "TR-413"),
+			"the check before a run says it first: " + string.Join(" | ", found.Select(i => i.Text)));
 		var refused = Runner.Run(new RunRequest(f.SetupFile, f.Data));
-		Check(refused.State != RunState.Finished && refused.Verdict.Contains("outside their folder", StringComparison.Ordinal), "the step stops, saying so: " + refused.Verdict);
+		Check(refused.State != RunState.Finished && refused.Verdict.Contains("outside their folder", StringComparison.Ordinal), "and a run does not start, saying so: " + refused.Verdict);
+		// (the step itself holds the same line, for a record changed after the check)
+		var late = StepContext(f, "landscapefixer");
+		Throws<StepFailedException>(() => ToolSettings.Apply(late, "landscapefixer"), "the step refuses it too");
 		Equal("theirs, changed since", File.ReadAllText(elsewhere), "and the file elsewhere is as it was");
 	}
 
@@ -10587,6 +10630,11 @@ public static class Program
 		var problems = Setup.FromJson(new JsonObject { ["name"] = @"..\..\Elsewhere" }).Problems();
 		Check(problems.FirstOrDefault(p => p.Contains("not a plain name", StringComparison.Ordinal)) is { } said && RunnerErrors.Find(said)?.Code == "TR-120", "refused by the setup's own check: " + string.Join(" | ", problems));
 		Check(!Setup.FromJson(new JsonObject { ["name"] = "My Profile - LOD" }).Problems().Any(p => p.Contains("not a plain name", StringComparison.Ordinal)), "a plain name passes");
+		// a setup brought in is kept under a name that passes the same test
+		Equal("Example", ToolRunner.App.Cli.ImportName("Example. "), "a dot or a space at a brought-in name's end is dropped");
+		Equal("My-Profile", ToolRunner.App.Cli.ImportName(@"C:\Elsewhere\My:Profile"), "folder parts go, and what Windows refuses becomes a dash");
+		Equal<string?>(null, ToolRunner.App.Cli.ImportName(".."), "and a name with nothing plain in it is none");
+		Check(new[] { "Example", "My-Profile" }.All(Setup.PlainName), "what it gives is a plain name");
 		using var f = new FakeMo2();
 		var setup = f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
 		setup.Root["name"] = @"..\..\Elsewhere";
@@ -10668,6 +10716,23 @@ public static class Program
 		Equal(File.ReadAllText(grownLog), grown.Read(grownLog), "the letter whole at the next look");
 		File.WriteAllText(grownLog, "[11:00] another start's log, longer than the first one was, so its length alone would not tell that it is new\n[11:01] Shader compilation completed\n" + new string('x', 200) + "\n");
 		Equal(File.ReadAllText(grownLog), grown.Read(grownLog), "a file that was replaced is read from its start");
+		// the very first look ends inside a letter: that half settles nothing about how the file is written
+		var cutLog = Path.Combine(f.Root, "cut at first.log");
+		var cutLook = new GrowingText();
+		File.WriteAllBytes(cutLog, [.. Encoding.UTF8.GetBytes("ready\ncaf"), letter[0]]);
+		Check(cutLook.Read(cutLog).StartsWith("ready\ncaf", StringComparison.Ordinal), "the first look ends in half a letter");
+		File.AppendAllBytes(cutLog, [letter[1], (byte)'\n']);
+		Equal("ready\ncafé\n", cutLook.Read(cutLog), "the letter reads right once it is whole");
+		File.AppendAllText(cutLog, "naïve\n");
+		Equal("ready\ncafé\nnaïve\n", cutLook.Read(cutLog), "and so do the lines after it");
+		// plain letters first, then a line in the PC's own code page: the whole file is read as that
+		var ownLog = Path.Combine(f.Root, "own code page.log");
+		var ownLook = new GrowingText();
+		byte[] ownLine = [.. "caf"u8, 0xE9, (byte)'\n'];
+		File.WriteAllText(ownLog, "plain\n");
+		Equal("plain\n", ownLook.Read(ownLog), "plain letters read either way");
+		File.AppendAllBytes(ownLog, ownLine);
+		Equal(Files.DecodeText([.. "plain\n"u8, .. ownLine]), ownLook.Read(ownLog), "a later line that is no UTF-8 is read in the PC's own code page");
 
 		// no place is under nothing and the same as nothing
 		Check(!Files.SamePath("", f.Root) && !Files.SamePath(f.Root, " ") && !Files.IsUnder("", f.Root) && !Files.IsUnder(f.Root, ""), "an empty text names no folder");

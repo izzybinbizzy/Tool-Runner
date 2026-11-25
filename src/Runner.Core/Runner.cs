@@ -1032,17 +1032,19 @@ public static class Runner
 		if (a_keep <= 0) {
 			return removed;
 		}
-		// a record passed over as unreadable may be the run whose backup an undo or a put-back still needs: nothing is removed
-		if (Journal.AnyUnreadable(a_runsDir) is { } bad) {
+		// a record that does not read may be the run whose backup an undo or a put-back still needs: nothing is removed. The
+		// records are read once, and what stays is judged by that same read
+		var (runs, unread) = Journal.AllOrUnreadable(a_runsDir);
+		if (unread is { } bad) {
 			a_log.Warn($"old run backups were not removed: the run record in \"{Path.GetFileName(bad.Folder)}\" could not be read ({bad.Why.Message})");
 			return removed;
 		}
-		var needed = Journal.All(a_runsDir).Where(j => j.Unfinished && !string.IsNullOrWhiteSpace(j.BackupDir)).Select(j => Path.GetFullPath(j.BackupDir)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+		var needed = runs.Where(j => j.Unfinished && !string.IsNullOrWhiteSpace(j.BackupDir)).Select(j => Path.GetFullPath(j.BackupDir)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 		if (a_current != null) {
 			needed.Add(Path.GetFullPath(a_current));
 		}
 		// the run an undo would take back: later runs that left nothing never push its backup out
-		if (Journal.All(a_runsDir).Where(j => !j.Undone && RunUndo.LeftSomething(j) && !string.IsNullOrWhiteSpace(j.BackupDir) && string.Equals(j.SetupFile, a_setup.File, StringComparison.OrdinalIgnoreCase))
+		if (runs.Where(j => !j.Undone && RunUndo.LeftSomething(j) && !string.IsNullOrWhiteSpace(j.BackupDir) && string.Equals(j.SetupFile, a_setup.File, StringComparison.OrdinalIgnoreCase))
 			    .OrderByDescending(j => j.Started).FirstOrDefault() is { } last) {
 			needed.Add(Path.GetFullPath(last.BackupDir));
 		}

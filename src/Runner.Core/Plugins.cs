@@ -19,31 +19,50 @@ public static class Plugins
 		}
 	}
 
+	// The plugins a plugin needs. A file that is no plugin (it does not begin as one) needs none. One that begins as a plugin
+	// and ends before its header is whole, or whose header does not add up, throws an IOException: its masters are not known,
+	// and it is never taken for a plugin that needs none
 	public static List<string> Masters(string a_path)
 	{
 		var outList = new List<string>();
 		using var fs = new FileStream(a_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
 		var head = new byte[24];
-		if (fs.ReadAtLeast(head, 24, false) < 24 || Encoding.ASCII.GetString(head, 0, 4) != "TES4") {
+		// one Read may stop short of what was asked (a network drive): read until the header is whole or the file ends
+		var got = fs.ReadAtLeast(head, 24, false);
+		if (got < 4 || Encoding.ASCII.GetString(head, 0, 4) != "TES4") {
 			return outList;
+		}
+		var name = Path.GetFileName(a_path);
+		if (got < 24) {
+			throw new EndOfStreamException($"{name} ends inside its header");
 		}
 		var size = BitConverter.ToUInt32(head, 4);
 		if (size > 16 * 1024 * 1024) {
-			return outList;
+			throw new IOException($"{name}'s header says it is {size:#,0} bytes long, more than a plugin's header can be");
 		}
 		var data = new byte[size];
-		// one Read may stop short of what was asked (a network drive): read until the header is whole or the file ends
-		var read = fs.ReadAtLeast(data, data.Length, false);
-		int i = 0;
-		while (i + 6 <= read) {
+		try {
+			fs.ReadExactly(data);
+		} catch (EndOfStreamException e) {
+			throw new EndOfStreamException($"{name} ends inside its header", e);
+		}
+		// a field over 65,535 bytes long (the list of overridden records in a big master) has its length in an XXXX field before it
+		uint big = 0;
+		for (var i = 0; i + 6 <= data.Length;) {
 			var type = Encoding.ASCII.GetString(data, i, 4);
-			int len = BitConverter.ToUInt16(data, i + 4);
-			if (type == "MAST" && i + 6 + len <= read) {
-				var body = data.AsSpan(i + 6, len);
+			long len = big != 0 ? big : BitConverter.ToUInt16(data, i + 4);
+			big = 0;
+			if (i + 6 + len > data.Length) {
+				throw new IOException($"{name}'s header does not add up (a field of it runs past its end)");
+			}
+			if (type == "XXXX" && len == 4) {
+				big = BitConverter.ToUInt32(data, i + 6);
+			} else if (type == "MAST") {
+				var body = data.AsSpan(i + 6, (int)len);
 				var z = body.IndexOf((byte)0);
 				outList.Add(Encoding.Latin1.GetString(z >= 0 ? body[..z] : body));
 			}
-			i += 6 + len;
+			i += 6 + (int)len;
 		}
 		return outList;
 	}
