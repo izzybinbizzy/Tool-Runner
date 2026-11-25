@@ -5181,17 +5181,25 @@ public static class Program
 		var t = new Thread(() => {
 			try {
 				ToolRunner.App.WindowWords.Use(new Dictionary<string, string> {
-					["Restore"] = "Wiederherstellen", ["Puts it back"] = "Stellt es wieder her", ["Restore the run"] = "Den Lauf wiederherstellen",
+					["Restore"] = "Wiederherstellen", ["Puts it back"] = "Stellt es wieder her", ["Restore the run"] = "Den Lauf wiederherstellen", ["Double-click"] = "Doppelklick",
 				});
 				var button = new System.Windows.Controls.Button { Content = "Restore" };
 				System.Windows.Automation.AutomationProperties.SetName(button, "Restore the run");
 				System.Windows.Automation.AutomationProperties.SetHelpText(button, "Puts it back");
 				var bound = new System.Windows.Controls.Button { Content = "Restore", DataContext = new { Help = "Puts it back" } };
 				System.Windows.Data.BindingOperations.SetBinding(bound, System.Windows.Automation.AutomationProperties.HelpTextProperty, new System.Windows.Data.Binding("Help"));
+				var menu = new System.Windows.Controls.ContextMenu();
+				var entry = new System.Windows.Controls.MenuItem { Header = "Restore", InputGestureText = "Double-click" };
+				var key = new System.Windows.Controls.MenuItem { Header = "Restore", InputGestureText = "Ctrl+N" };
+				menu.Items.Add(entry);
+				menu.Items.Add(key);
+				button.ContextMenu = menu;
 				var panel = new System.Windows.Controls.StackPanel();
 				panel.Children.Add(button);
 				panel.Children.Add(bound);
 				ToolRunner.App.WindowWords.Tree(panel);
+				Check(entry.Header as string == "Wiederherstellen" && entry.InputGestureText == "Doppelklick", "a menu entry's words, and the words at its right");
+				Equal("Ctrl+N", key.InputGestureText, "a key's name stays as Windows writes it");
 				Equal("Wiederherstellen", button.Content as string, "its words");
 				Equal("Den Lauf wiederherstellen", System.Windows.Automation.AutomationProperties.GetName(button), "its name for a screen reader");
 				Equal("Stellt es wieder her", System.Windows.Automation.AutomationProperties.GetHelpText(button), "and the help text after it");

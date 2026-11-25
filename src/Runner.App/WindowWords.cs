@@ -200,6 +200,11 @@ public static class WindowWords
 				Do(hs, w => h.Header = w);
 				break;
 		}
+		// the words a menu entry shows at its right instead of a key ("Double-click"): a key's name ("Ctrl+N") stays as Windows
+		// writes it, and is in no language file
+		if (a_root is MenuItem item && Free(MenuItem.InputGestureTextProperty) && !string.IsNullOrWhiteSpace(item.InputGestureText)) {
+			Do(item.InputGestureText, w => item.InputGestureText = w);
+		}
 		// a window's own title (its title bar and the taskbar's list of windows)
 		if (a_root is Window win && Free(Window.TitleProperty) && !string.IsNullOrWhiteSpace(win.Title)) {
 			Do(win.Title, w => win.Title = w);
