@@ -231,6 +231,10 @@ public static partial class SetupShare
 		if ((PlainNameOf(a_name ?? s.Name) ?? (a_name == null ? PlainNameOf(Path.GetFileNameWithoutExtension(a_file)) : null)) is not { } given) {
 			return new(null, ["the setup's name is not a plain name"], true);
 		}
+		// the name's check and the write as one: the data's write lock, which every setup save holds (in every copy of the
+		// program, the command line's included), is held from here until the setup is written - two imports of one name never
+		// both find it free
+		using var writes = DataFolder.HoldWrites();
 		var name = given;
 		var dst = Path.Combine(a_setups, name + ".json");
 		for (var n = 2; a_freeName && (File.Exists(dst) || Setup.IsStore(dst)); ++n) {

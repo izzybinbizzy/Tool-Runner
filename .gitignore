@@ -5,3 +5,5 @@ obj/
 publish/
 Tool Runner Data/
 MO2 Tool Runner Data/
+__pycache__/
+*.pyc

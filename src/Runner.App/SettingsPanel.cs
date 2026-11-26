@@ -1657,7 +1657,10 @@ public static class SettingsPanel
 				if (a_key is "output_mod" or "then_move_to_mod" or "executable" && t.Text.Trim() == "") {
 					return WindowWords.Format("{0}: cannot be empty", WindowWords.Word(a_label));
 				}
+				// (a setting the setup did not hold, left empty, stays out of it - and one an earlier press of Save had put in, from
+				// what was typed then, comes out again)
 				if (t.Text == "" && cur == null) {
+					a_obj.Remove(a_key);
 					return null;
 				}
 				a_obj[a_key] = PathKind(a_key, a_step) == null ? t.Text : TypedPath(t.Text);
@@ -1797,9 +1800,10 @@ public static class SettingsPanel
 		Grid.SetColumn(box, 1);
 		row.Children.Add(box);
 		a_host.Children.Add(row);
-		// the Mod Organizer values as typed now (the setup's own where its box is not there)
+		// the Mod Organizer values as typed now (the setup's own where its box is not there) - the two paths as they are saved
+		// (Explorer's quotes taken off), so the same path pasted with them is the same profile
 		(string Exe, string? Instance, string Profile) Typed() => a_mo2.Length == 3 ?
-			(a_mo2[0].Text.Trim(), a_mo2[1].Text.Trim() is { Length: > 0 } i ? i : null, a_mo2[2].Text.Trim()) :
+			(TypedPath(a_mo2[0].Text), TypedPath(a_mo2[1].Text) is { Length: > 0 } i ? i : null, a_mo2[2].Text.Trim()) :
 			(a_setup.Mo2Exe, a_setup.Mo2Instance, a_setup.Profile);
 		var asked = 0;
 		var first = Typed();

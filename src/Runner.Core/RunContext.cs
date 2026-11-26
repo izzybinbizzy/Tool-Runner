@@ -298,7 +298,7 @@ public sealed class Toggle : IDisposable
 		// files go back, laid back over them after, and still counted as the player's (the expectation goes back to before the
 		// step), so the run's final put-back sees and keeps it too
 		var theirs = _ctx.Profile.ChangedByOthers();
-		var marks = theirs.Count > 0 ? _ctx.Profile.PluginMarks() : [];
+		var marks = theirs.Count > 0 ? Runner.KeepTheirMarks(_ctx) : [];
 		try {
 			_ctx.Profile.Restore(_snap);
 		} catch (Mo2OpenException) {
@@ -309,7 +309,7 @@ public sealed class Toggle : IDisposable
 			// looked at again: nothing was put back yet (the refusal comes before the first file is written), and the Mod
 			// Organizer that came up may have saved a change of the player's since the look above
 			theirs = _ctx.Profile.ChangedByOthers();
-			marks = theirs.Count > 0 ? _ctx.Profile.PluginMarks() : [];
+			marks = theirs.Count > 0 ? Runner.KeepTheirMarks(_ctx) : [];
 			_ctx.Profile.Restore(_snap);
 		}
 		_ctx.Profile.OursBack(_oursBefore);

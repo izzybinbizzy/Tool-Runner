@@ -1449,6 +1449,25 @@ public static class Runner
 		a_ctx.Profile.DeactivatePlugins(off, true);
 	}
 
+	// The player's plugin ticks as they are now, kept in the run's record before a put-back's order files go back (the run's own
+	// or a step's): a put-back that cannot set them all - a mod's folder did not read - is tried again with them, after the
+	// order files lost their lines. The ticks read now win; one kept from an earlier put-back fills only a plugin whose line the
+	// lists no longer hold, so a tick the player changed since is never undone by an older one. A record the disk refuses is
+	// asked twice and then said: the order files go back all the same (the run's changes are never left in the profile), and the
+	// ticks are set from memory - only a stop before that loses them
+	public static Dictionary<string, bool> KeepTheirMarks(RunContext a_ctx)
+	{
+		var marks = new Dictionary<string, bool>(a_ctx.Journal.TheirMarks ?? [], StringComparer.OrdinalIgnoreCase);
+		foreach (var (plugin, on) in a_ctx.Profile.PluginMarks()) {
+			marks[plugin] = on;
+		}
+		a_ctx.Journal.TheirMarks = marks;
+		if (!a_ctx.Journal.TrySave() && !a_ctx.Journal.TrySave()) {
+			a_ctx.Log.Warn("the run's record could not be written just now (is the disk full?) - your plugin ticks are set again from memory; if Tool Runner is stopped before that, check them in Mod Organizer");
+		}
+		return marks;
+	}
+
 	public static void PutBack(RunContext a_ctx, Dictionary<string, byte[]>? a_snap)
 	{
 		// the run is over: Mod Organizer closes as after any run
@@ -1480,14 +1499,9 @@ public static class Runner
 			foreach (var m in theirs.Keys.Where(m => !before.ContainsKey(m))) {
 				a_ctx.Profile.Added.Add(m);
 			}
-			// the player's plugin ticks as they left them, read before the order files go back - or, when an earlier put-back
-			// could not set them all, as that one read them (the order files have gone back since, and lost them)
+			// the player's plugin ticks as they left them, kept in the run's record before the order files go back
 			a_ctx.MarksLeft.Clear();
-			var marks = theirs.Count == 0 ? [] : a_ctx.Journal.TheirMarks ?? a_ctx.Profile.PluginMarks();
-			if (theirs.Count > 0 && a_ctx.Journal.TheirMarks == null) {
-				a_ctx.Journal.TheirMarks = marks;
-				a_ctx.Journal.TrySave();
-			}
+			var marks = theirs.Count == 0 ? [] : KeepTheirMarks(a_ctx);
 			a_ctx.Profile.Restore(a_snap);
 			if (theirs.Count > 0) {
 				a_ctx.Log.Warn($"you changed {theirs.Count} mod(s) in Mod Organizer during the run - kept as you left them: " +
@@ -1672,11 +1686,21 @@ public static class Runner
 
 	// The Mod Organizer a run worked in, for putting that run back or undoing it: the one its own record names. The setup may
 	// name another by now (its Mod Organizer changed in Settings, or a new setup made under the same name), and a run's lists
-	// must never be written into another Mod Organizer's profile of the same name. Where the record names none, or its
-	// Mod Organizer or its instance folder is no longer there (moved since), the setup's is the one
-	static Mo2Instance Mo2Of(Journal a_j, Setup a_setup) =>
-		a_j.Mo2Exe != "" && File.Exists(a_j.Mo2Exe) && (string.IsNullOrWhiteSpace(a_j.Mo2Instance) || File.Exists(Path.Combine(a_j.Mo2Instance, "ModOrganizer.ini")))
-			? Mo2Instance.Load(a_j.Mo2Exe, a_j.Mo2Instance) : Mo2Instance.Load(a_setup.Mo2Exe, a_setup.Mo2Instance);
+	// must never be written into another Mod Organizer's profile of the same name. Where the record names none (a record of an
+	// older version) the setup's is the one. Where the record's Mod Organizer or its instance folder is no longer there, nothing
+	// takes its place: the put-back is refused, saying where it worked - another one's profile of that name is not the run's
+	static Mo2Instance Mo2Of(Journal a_j, Setup a_setup)
+	{
+		if (a_j.Mo2Exe == "") {
+			return Mo2Instance.Load(a_setup.Mo2Exe, a_setup.Mo2Instance);
+		}
+		var instance = string.IsNullOrWhiteSpace(a_j.Mo2Instance) ? null : a_j.Mo2Instance;
+		if (!File.Exists(a_j.Mo2Exe) || instance != null && !File.Exists(Path.Combine(instance, "ModOrganizer.ini"))) {
+			throw new IOException($"the Mod Organizer this run worked in is no longer where its record says ({a_j.Mo2Exe}{(instance != null ? ", instance " + instance : "")}) - " +
+				"put it back there to put the run's profile back; another Mod Organizer's profile is never written in its place");
+		}
+		return Mo2Instance.Load(a_j.Mo2Exe, a_j.Mo2Instance);
+	}
 
 	static RunOutcome RestoreLocked(Journal a_j)
 	{
@@ -1877,6 +1901,11 @@ public static class Runner
 			// (one that cannot be taken out stops the undo here, as any file it cannot put back does: undone again, it is tried again)
 			if (UnlistWhatTheRunOnlyListed(ctx.Profile, a_j, log, true) is { Count: > 0 } linesLeft) {
 				throw new IOException(string.Join(", ", LinesLeftWords(linesLeft)) + " could not be taken out again");
+			}
+			// (nor is an undo whole while a mod's folder did not read and the player's plugin ticks in it were not all set again:
+			// the record keeps their ticks, and undone again, it sets them)
+			if (ctx.MarksLeft.Count > 0) {
+				throw new IOException(string.Join(", ", MarksLeftWords(ctx.MarksLeft)) + " could not be set again");
 			}
 		} catch (Exception e) {
 			log.Error("undo failed: " + Plain(e));

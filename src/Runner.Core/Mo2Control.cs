@@ -411,11 +411,24 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 			a_ct.ThrowIfCancellationRequested();
 			_log.Detail($"starting Mod Organizer (profile {ProfileName})");
 			_mo2LaunchedAt = Environment.TickCount64;
-			_lastStarted = Launch($"{Quote(Mo2.Exe)}{Instance} -p {Quote(ProfileName)}", Path.GetDirectoryName(Mo2.Exe)!);
+			var askedAt = DateTime.UtcNow;
+			var openBefore = Pids().ToHashSet();
+			try {
+				_lastStarted = Launch($"{Quote(Mo2.Exe)}{Instance} -p {Quote(ProfileName)}", Path.GetDirectoryName(Mo2.Exe)!);
+			} catch (StartUnansweredException) {
+				// the service answered too late, and Mod Organizer may come up all the same: one that was not open before the ask
+				// and started after it is this run's from here on (known by its start time, never by a number alone), so the
+				// put-back closes it as the run's own instead of waiting for the player to
+				_lateStart = (askedAt, openBefore);
+				throw;
+			}
 			_ownMo2.Add(_lastStarted.Value);
 		}
 		WaitReady(a_ct);
 	}
+
+	// a start of Mod Organizer the service did not answer in time: when it was asked, and the ones open before it
+	(DateTime At, HashSet<int> OpenBefore)? _lateStart;
 
 	// the Mod Organizer this run started last: for its first seconds Windows may not list it by name yet, or not let its path be
 	// read - it still counts as running (a put-back that read "closed" in that moment wrote the order files under it)
@@ -467,8 +480,9 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		}
 		var theirs = new List<int>();
 		foreach (var p in others) {
-			var ours = false;
-			for (int at = p, hops = 0; hops < 8 && parent.TryGetValue(at, out var up) && up != 0 && up != at; at = up, ++hops) {
+			// (one that came up after a start the service answered too late, and was not open before that ask: that start's)
+			var ours = _lateStart is { } late && !late.OpenBefore.Contains(p) && Procs.StartTime(p) is { } began && began >= late.At;
+			for (int at = p, hops = 0; !ours && hops < 8 && parent.TryGetValue(at, out var up) && up != 0 && up != at; at = up, ++hops) {
 				// a real parent of ours: the very process we started, and started before this one
 				if (_ownMo2.SameProcess(up) && Procs.StartTime(up) is { } ut && Procs.StartTime(p) is { } pt && ut <= pt) {
 					ours = true;

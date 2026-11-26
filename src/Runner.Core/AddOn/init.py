@@ -36,6 +36,8 @@ class RootBuilderProfiles(mobase.IPluginTool):
         # looks after a program closed that are on their way (MO2's own callback, or a retry) and not begun yet
         self._looks_waiting = 0
         self._held = False
+        # the run's profile and ticked mods are on record (_ran_on) for the look under way, put off or retried
+        self._captured = False
 
     # ---- MO2 plugin identity ----------------------------------------------------------------
     def name(self):
@@ -133,9 +135,12 @@ class RootBuilderProfiles(mobase.IPluginTool):
                     # turned off: the look is dropped, and the next one reads the profile and its ticked mods anew
                     self._retries = 0
                     self._held = False
+                    self._captured = False
                 elif self._looks_waiting == 0:
-                    # still working on something else (a box of its own is open): this look comes again shortly, and a
-                    # retry under way keeps the profile and mods of the run it is for - this run's changes stay this run's
+                    # still working on something else (a box of its own is open): this look comes again shortly. The run's
+                    # profile and ticked mods are put on record now, before the player can switch profiles meanwhile, and
+                    # every later look of it uses them - this run's changes stay this run's
+                    self._capture()
                     self._held = True
                     self._later(self._after_run, 3000)
             return
@@ -151,6 +156,10 @@ class RootBuilderProfiles(mobase.IPluginTool):
             fn()
         except Exception:
             self._say("ERROR\n" + traceback.format_exc())
+            if fn == self._after_run:
+                # the look ended on an error: the next one reads the profile and its ticked mods anew
+                self._retries = 0
+                self._captured = False
             # a run of Tool Runner may go on with nobody at the PC, and it leaves this add-on's boxes to the player: said in the log only
             if not runner_running():
                 QMessageBox.warning(None, TITLE, self.tr("Something went wrong - nothing more was changed. The log is in MO2's plugins\\data\\RootBuilderProfiles folder."))
@@ -163,13 +172,19 @@ class RootBuilderProfiles(mobase.IPluginTool):
         self._check_game(startup=True)
 
     # ---- 1: after a program closes ---------------------------------------------------------
+    def _capture(self):
+        """The run's profile and ticked mods, put on record once per look: a retry or a look put off keeps them."""
+        if not self._captured:
+            self._ran_on = (self._org.profileName(), self._ticked_mods())
+            self._captured = True
+
     def _after_run(self):
         moving = self._setting("movechanges")
         if not moving and not self._setting("checkgame"):
+            self._captured = False
             return
         # a retry below can outlast a profile switch: this run's changes stay this run's
-        if self._retries == 0:
-            self._ran_on = (self._org.profileName(), self._ticked_mods())
+        self._capture()
         if self._core.build_deployed():
             # Root Builder has not cleared yet (or autobuild is off) - look again a few times, then leave it.
             if self._retries < 10:
@@ -178,8 +193,10 @@ class RootBuilderProfiles(mobase.IPluginTool):
             else:
                 self._say("Root Builder still has files deployed after 30 s - nothing moved this time")
                 self._retries = 0
+                self._captured = False
             return
         self._retries = 0
+        self._captured = False
         if moving and self._ran_on[1] is None:
             self._say("the mod list could not be read: overwrite\\Root is left as it is until the next look")
         elif moving:

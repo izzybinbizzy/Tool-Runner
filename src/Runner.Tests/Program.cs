@@ -12823,6 +12823,8 @@ public static class Program
 		File.AppendAllText(Path.Combine(f.ProfileDir, "plugins.txt"), "*Locked.esp\r\n");
 		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
 		var ctx = StepContext(f, "landscapefixer");
+		// (closed on every way out, so the scratch folder goes; closed again early below to read it, which does no harm)
+		using var ctxLog = ctx.Log;
 		var locked = new DirectoryInfo(Path.Combine(f.Mods, "Locked Mod"));
 		var me = System.Security.Principal.WindowsIdentity.GetCurrent().User!;
 		var deny = new System.Security.AccessControl.FileSystemAccessRule(me, System.Security.AccessControl.FileSystemRights.ListDirectory, System.Security.AccessControl.AccessControlType.Deny);
@@ -12904,6 +12906,26 @@ public static class Program
 	}
 
 	// a bug report is made when a file it would hold cannot be read: that file's place says why
+	// a put-back whose run's Mod Organizer is no longer where its record says is refused - the setup's Mod Organizer of today,
+	// with a profile of the same name, is never written in its place
+	static void T_APutBackNeverWritesIntoAnotherModOrganizer()
+	{
+		using var f = new FakeMo2();
+		using var other = new FakeMo2();
+		other.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		var j = new Journal { Id = "gone", Folder = Path.Combine(Runner.RunsDir(other.Data), "gone"), SetupFile = Path.GetFullPath(other.SetupFile), SetupName = "Test", Profile = "Test",
+			Mo2Exe = f.Exe, Mo2Instance = f.Instance, Started = DateTime.Now.AddHours(-1), State = RunState.Failed, NeedsRestore = true };
+		Directory.CreateDirectory(j.Folder);
+		j.Save();
+		// the run's Mod Organizer moved away since
+		File.Delete(Path.Combine(f.Instance, "ModOrganizer.ini"));
+		var list = Path.Combine(other.ProfileDir, "modlist.txt");
+		var before = File.ReadAllBytes(list);
+		var r = Runner.Restore(Journal.Load(j.Folder));
+		Check(r.State == RunState.Failed && r.Verdict.Contains("no longer where its record says", StringComparison.Ordinal), "refused, and said: " + r.Verdict);
+		Check(before.AsSpan().SequenceEqual(File.ReadAllBytes(list)), "the other Mod Organizer's profile is as it was");
+	}
+
 	static void T_ABugReportIsMadeWithAFileItCannotRead()
 	{
 		using var f = new FakeMo2();
