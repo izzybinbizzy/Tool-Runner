@@ -175,8 +175,9 @@ public static class DataFolder
 	// to do by hand (null: nothing) - the old folder that could not all be removed is then removed by the next start.
 	public static string? MoveTo(string a_from, string a_to)
 	{
-		var from = Path.GetFullPath(a_from);
-		var to = Path.GetFullPath(a_to);
+		var from = Path.TrimEndingDirectorySeparator(Path.GetFullPath(a_from));
+		// (a final "\" taken off: the copy is staged BESIDE the new place, under its name with " (being copied)" added)
+		var to = Path.TrimEndingDirectorySeparator(Path.GetFullPath(a_to));
 		// (by where each one really is: a link, a junction or another name for the same disk can make a folder that looks apart
 		// from the data folder one inside it, which the copy would fill and the removal of the old folder empty again)
 		if (Directory.Exists(to) && Files.IsLink(to)) {
@@ -306,6 +307,30 @@ public static class DataFolder
 			return null;
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			return $"The old folder could not all be removed ({e.Message}); the next start removes what is left of {from}.";
+		}
+	}
+
+	// One writer of the program's data at a time, across every copy of the program on this PC: a setup's save and the data's
+	// move both hold it, so no save lands in a folder that is being copied away (the run lock keeps runs out the same way)
+	public static IDisposable HoldWrites() => new WriteHold();
+
+	sealed class WriteHold : IDisposable
+	{
+		readonly Mutex _gate = new(false, @"Local\" + Brand.Name + " data writes");
+
+		public WriteHold()
+		{
+			try {
+				_gate.WaitOne();
+			} catch (AbandonedMutexException) {
+				// a copy that was stopped while it held it: the turn is this one's
+			}
+		}
+
+		public void Dispose()
+		{
+			_gate.ReleaseMutex();
+			_gate.Dispose();
 		}
 	}
 

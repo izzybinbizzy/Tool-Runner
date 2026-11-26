@@ -6012,6 +6012,15 @@ public static class Program
 			Check(Thrown<InvalidOperationException>(() => DataFolder.MoveTo(from10, Path.Combine(root, "appdata 10", Brand.Name)), "a link inside the data").Message.Contains("is a link to another folder", StringComparison.Ordinal),
 				"a link inside the data stops the move, named");
 			Directory.Delete(Path.Combine(from10, "Backups"));
+			// one writer of the data at a time, across copies of the program: a second hold waits for the first, then goes on
+			Task second;
+			using (DataFolder.HoldWrites()) {
+				second = Task.Run(() => {
+					using var h = DataFolder.HoldWrites();
+				});
+				Check(!second.Wait(300), "a second writer waits while the first holds the data");
+			}
+			Check(second.Wait(5000), "and goes on once the first lets go");
 			// a setup written by hand (a comment, a comma after its last value, a path with forward slashes) is repointed too
 			var from5 = Path.Combine(root, "beside 5", Brand.Name + " Data");
 			var to5 = Path.Combine(root, "appdata 5", Brand.Name);

@@ -1676,7 +1676,15 @@ public sealed partial class MainViewModel : Observable
 		Saving = true;
 		string? why;
 		try {
-			var write = Task.Run(() => Setup.WriteKeepingACopy(file, text, copies));
+			// (with the data's write lock: a move of the data folder by this or another copy of the program finishes first, and a
+			// save after it would land in a folder that is no longer the data's)
+			var data = AppPaths.Data;
+			var write = Task.Run(() => {
+				using var writes = DataFolder.HoldWrites();
+				return DataFolder.MovedTo(data) is { } moved
+					? $"the program's data has moved to {moved} - start Tool Runner again, then save there"
+					: Setup.WriteKeepingACopy(file, text, copies);
+			});
 			PendingSetupSave = write;
 			why = await write;
 		} finally {
