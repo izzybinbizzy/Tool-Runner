@@ -5,10 +5,9 @@ using System.Windows.Shapes;
 
 namespace ToolRunner.App;
 
-// The theme gallery: every theme as a card that shows
-// its own colors, one click to use it - at once, no restart - and a way to start a new theme from the one in use. A card is drawn
-// from the theme's file without applying it; everything around the cards takes the window's colors by reference, so the gallery
-// itself follows the theme it just applied.
+// The theme gallery: every theme as a card that shows its own colors, one click to use it - at once, no restart - and a way
+// to start a new theme from the one in use. A card is drawn from the theme's file without applying it; everything around the
+// cards takes the window's colors by reference, so the gallery itself follows the theme it just applied.
 public static class ThemeGallery
 {
 	// three cards side by side in the drawer

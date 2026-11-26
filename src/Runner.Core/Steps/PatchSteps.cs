@@ -245,7 +245,7 @@ public abstract class LauncherStep : IStep
 	}
 }
 
-// Landscape Fixer (Cl3mus, GPL-3.0) replaced his SnowFixer and AutoBlend: one run, one output, one plugin
+// Landscape Fixer (Cl3mus, GPL-3.0) replaced their SnowFixer and AutoBlend: one run, one output, one plugin
 public sealed class LandscapeFixerStep : LauncherStep
 {
 	public override string Key => "landscapefixer";

@@ -597,9 +597,9 @@ public partial class MainWindow : Window
 
 	bool LogHere => LogBox.Visibility == Visibility.Visible;
 
-	// The log shown in the main window, or hidden there. Hidden, its row gives its room to the cards above: the run's card
-	// grows into
-	// what the other cards leave, and its lists lose the heights they were held to so the log kept its room.
+	// The log shown in the main window, or hidden there. Hidden, its row gives its room to the cards above: the run's
+	// card grows into what the other cards leave, and its lists lose the heights they were held to so the log kept its
+	// room.
 	void ShowLogHere(bool a_show)
 	{
 		LogBox.Visibility = a_show ? Visibility.Visible : Visibility.Collapsed;
@@ -676,9 +676,8 @@ public partial class MainWindow : Window
 		}
 	}
 
-	// The log in a window of its own, where it can be read and scrolled in full: sized and moved as the player likes, on another
-	// screen too. The log hides in the main window while it is
-	// out and comes back as it was when that window closes.
+	// The log in a window of its own, where it can be read and scrolled in full: sized and moved as the player likes, on
+	// another screen too. The log hides in the main window while it is out and comes back as it was when that window closes.
 	public PanelWindow PopLog()
 	{
 		if (_logWindow is { } open) {

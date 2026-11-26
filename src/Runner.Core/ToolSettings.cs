@@ -4,10 +4,10 @@ using ToolRunner.Steps;
 
 namespace ToolRunner;
 
-// The tools' own settings, never their windows. "Learn": the tool's OWN window opens through Mod Organizer, the player sets it
-// up and
-// closes it, and every settings file it wrote is kept with the setup. Every run puts those files in place before the tool
-// starts (each live file kept in the run record first) and the player's own back after. Nothing of a tool's window is copied.
+// The tools' own settings, never their windows. "Learn": the tool's OWN window opens through Mod Organizer, the player sets
+// it up and closes it, and every settings file it wrote is kept with the setup. Every run puts those files in place before
+// the tool starts (each live file kept in the run record first) and the player's own back after. Nothing of a tool's window
+// is copied.
 public static partial class ToolSettings
 {
 	public sealed class LearnedFile

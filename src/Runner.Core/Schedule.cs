@@ -4,8 +4,7 @@ using System.Text;
 namespace ToolRunner;
 
 // Runs at a set time are gone. What is left only clears away a Windows task an older version made, under its old or new
-// name, so
-// nothing starts a run by itself any more.
+// name, so nothing starts a run by itself any more.
 public static class Schedule
 {
 	// a task name an older version gave a setup's timed run

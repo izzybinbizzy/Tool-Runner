@@ -565,14 +565,14 @@ public static partial class InGame
 	// how often the same box is answered before it is taken for one that does not close
 	const int GameBoxTries = 5;
 
-	// One look at the game's own message box. One the run knows is answered by its text and labels (DecideBox). One it does
-	// not know is closed all the same, by the button that takes nothing on (DevBench.CloseIndex) - whatever the box is, it is
-	// found and closed at once - and named in the
-	// log and the run's notes; a setup may say such a box is the player's (ClosesUnknown), and then a_left gets it,
-	// unanswered - as it gets a box that still stands after its answer was given GameBoxTries times.
-	// Returns the text of a box that was answered or closed, else null. The run's watch makes this look every few seconds
-	// for as long as the run's game is up, whatever the step in hand does, and a step makes it where it waits on the game:
-	// one look at a time. a_fromWatch: what was answered is left for the step in hand to take (AnswerGameBox).
+	// One look at the game's own message box. One the run knows is answered by its text and labels (DecideBox). One it
+	// does not know is closed all the same, by the button that takes nothing on (DevBench.CloseIndex) - whatever the box
+	// is, it is found and closed at once - and named in the log and the run's notes; a setup may say such a box is the
+	// player's (ClosesUnknown), and then a_left gets it, unanswered - as it gets a box that still stands after its answer
+	// was given GameBoxTries times. Returns the text of a box that was answered or closed, else null. The run's watch
+	// makes this look every few seconds for as long as the run's game is up, whatever the step in hand does, and a step
+	// makes it where it waits on the game: one look at a time. a_fromWatch: what was answered is left for the step in hand
+	// to take (AnswerGameBox).
 	public static string? LookAtGameBox(RunContext a_ctx, out GameBox? a_left, bool a_fromWatch, int a_timeoutSeconds = 10)
 	{
 		a_left = null;
