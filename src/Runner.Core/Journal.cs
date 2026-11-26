@@ -418,6 +418,9 @@ public sealed class JournalCache(string a_runsDir)
 	// goes), this process's count of record writes, the clock
 	List<Journal>? _whole;
 	DateTime _folderStamp;
+	// how many run folders stood then: a run folder made and removed within one tick of the clock Windows stamps a folder's
+	// time with can leave that time as it was; the count does not
+	int _folderCount = -1;
 	long _writesThen, _wholeAt;
 	int _touched = 1;
 
@@ -452,7 +455,7 @@ public sealed class JournalCache(string a_runsDir)
 			return null;
 		}
 		try {
-			if (Directory.GetLastWriteTimeUtc(a_runsDir) != _folderStamp) {
+			if (Directory.GetLastWriteTimeUtc(a_runsDir) != _folderStamp || Directory.EnumerateDirectories(a_runsDir).Count() != _folderCount) {
 				return null;
 			}
 			foreach (var j in _whole) {
@@ -486,7 +489,8 @@ public sealed class JournalCache(string a_runsDir)
 			at = long.MinValue / 2;
 		}
 		var live = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		foreach (var d in Directory.GetDirectories(a_runsDir).OrderDescending(StringComparer.Ordinal)) {
+		var dirs = Directory.GetDirectories(a_runsDir);
+		foreach (var d in dirs.OrderDescending(StringComparer.Ordinal)) {
 			var f = new FileInfo(Path.Combine(d, "journal.json"));
 			if (!f.Exists) {
 				continue;
@@ -507,7 +511,7 @@ public sealed class JournalCache(string a_runsDir)
 		foreach (var gone in _seen.Keys.Where(k => !live.Contains(k)).ToList()) {
 			_seen.Remove(gone);
 		}
-		(_whole, _folderStamp, _writesThen, _wholeAt) = ([.. list], folder, writes, at);
+		(_whole, _folderStamp, _folderCount, _writesThen, _wholeAt) = ([.. list], folder, dirs.Length, writes, at);
 		return list;
 	}
 }

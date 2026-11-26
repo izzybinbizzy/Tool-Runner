@@ -101,6 +101,8 @@ public static class RunnerErrors
 			"Free some room on the disk Tool Runner keeps its data on, then start the run again (or press \"Put my profile back\" if it offers to)."),
 		E("TR-218", "has Mod Organizer come up since", "A run asked Windows to start Mod Organizer and Windows never answered. Nothing on the PC can tell whether that start will still come, so the profile is put back only once you say it has settled.",
 			"Look whether Mod Organizer came up. Then press \"Put my profile back\" and answer its question (on the command line: restore --late-start-settled); a Mod Organizer that is open is closed before anything is written."),
+		E("TR-219", "the file that keeps what you changed in Mod Organizer during the run", "What you changed in Mod Organizer during a run was kept in a file in the run's backup folder, and that file does not read now (it is in use, locked by another program, or damaged). It may hold your newest changes, so the profile is left as it is, with your changes in it.",
+			"Close any program that has the file open (an editor, a backup or sync tool), then press \"Put my profile back\" again. If the file stays unreadable, make a bug report (Help) and keep the run's backup folder as it is."),
 
 		// ---- the check before a run: a step's own settings and its tool
 		E("TR-301", "no output mod is set|no output folder is set|the terrain LOD folder it reads is not set|no shader cache is set", "A step has no place to put what it makes.",

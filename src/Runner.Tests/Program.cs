@@ -13004,6 +13004,19 @@ public static class Program
 		Runner.PutBack(ctx, before);
 		Check(ctx.Profile.IsOn("Base Mod") && f.Text("plugins.txt").Contains("*BaseMod.esp", StringComparison.Ordinal),
 			"the player's mod and their tick are back, never the lists' untick in their place: " + f.Text("plugins.txt"));
+		// the backup folder's file of what the player changed is there but does not read: it may hold the newer changes, so the
+		// put-back stops before anything is written, and the file and the record stay as they are
+		Directory.CreateDirectory(ctx.BackupFolder);
+		File.WriteAllText(file, "{ not whole");
+		var keptRecord = ctx.Journal.Theirs;
+		var listsBefore = File.ReadAllBytes(mods);
+		var ticksBefore = File.ReadAllBytes(plugins);
+		var unread = Thrown<IOException>(() => Runner.PutBack(ctx, before), "a put-back whose kept changes do not read stops");
+		Check(RunnerErrors.Find(unread.Message)?.Code == "TR-219", "and says why: " + unread.Message);
+		Check(File.ReadAllText(file) == "{ not whole" && ctx.Journal.Theirs == keptRecord, "the file and the record are kept as they were");
+		Check(File.ReadAllBytes(mods).AsSpan().SequenceEqual(listsBefore) && File.ReadAllBytes(plugins).AsSpan().SequenceEqual(ticksBefore), "nothing of the profile was written");
+		Thrown<IOException>(() => Runner.KeepTheirs(ctx, new Dictionary<string, char> { ["Base Mod"] = '-' }, before), "a step's put-back stops on it too");
+		File.Delete(file);
 		// neither the run's record nor its backup folder takes a write: the put-back stops before its lists go back - the
 		// player's changes stay in the profile, never held in memory alone - and says so
 		var listsNow = File.ReadAllBytes(mods);

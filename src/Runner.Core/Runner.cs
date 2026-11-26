@@ -1509,14 +1509,20 @@ public static class Runner
 	// the file in a run's backup folder that holds what the player changed when its record would not take it
 	const string TheirsFile = "your changes during the run.json";
 
-	// what an earlier put-back kept of the player's changes: the newer of the record's and the backup folder's
+	// What an earlier put-back kept of the player's changes: the newer of the record's and the backup folder's. A file that is
+	// there but does not read may hold the newer of the two: the put-back stops before anything is written (the file and the
+	// record kept as they are, the put-back on offer) - never read as none, which would let it go with what it held
 	static TheirsKept? KeptTheirs(RunContext a_ctx)
 	{
 		TheirsKept? inFile = null;
 		var file = Path.Combine(a_ctx.BackupFolder, TheirsFile);
-		try {
-			inFile = File.Exists(file) ? System.Text.Json.JsonSerializer.Deserialize<TheirsKept>(Files.ReadSharedText(file)) : null;
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) {
+		if (File.Exists(file)) {
+			try {
+				inFile = System.Text.Json.JsonSerializer.Deserialize<TheirsKept>(Files.ReadSharedText(file)) ?? throw new System.Text.Json.JsonException("it holds nothing");
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) {
+				throw new IOException($"the file that keeps what you changed in Mod Organizer during the run ({file}) could not be read ({e.Message}) - " +
+					"the profile is not put back now and keeps your changes; put it back once that file can be read", e);
+			}
 		}
 		var inRecord = a_ctx.Journal.Theirs;
 		return inRecord == null ? inFile : inFile == null || inRecord.At >= inFile.At ? inRecord : inFile;
