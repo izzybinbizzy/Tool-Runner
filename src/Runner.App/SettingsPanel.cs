@@ -1339,6 +1339,11 @@ public static class SettingsPanel
 	// the program closes after, and starts again on the new folder
 	static async Task MoveDataToAppData(MainWindow a_w, MainViewModel a_vm, TextBlock a_errors)
 	{
+		// (a Settings drawn again while the data moves has a button of its own: one move at a time, refused before anything changes)
+		if (a_vm.MovingData) {
+			a_errors.Text = "Not moved: the program's data is already being moved.";
+			return;
+		}
 		if (HasChanges && !Ask.Show(a_w, "Settings not saved", "You changed settings and did not press Save. Go on without saving them?", "Go on", "Keep editing")) {
 			return;
 		}
@@ -1367,6 +1372,8 @@ public static class SettingsPanel
 			a_w.WatchRuns(false);
 			leftOver = await Task.Run(() => {
 				using var hold = Runner.HoldIfFree() ?? throw new InvalidOperationException("a run is going - move the data when it has ended");
+				// (a setup save of any copy of the program waits for the move, and finds the data moved when it goes on)
+				using var writes = DataFolder.HoldWrites();
 				string? left = null;
 				// what the window keeps goes along (its sizes and flags), and what it writes from here on goes to the new place
 				UiState.MoveWith(() => left = DataFolder.MoveTo(AppPaths.Data, to), to);

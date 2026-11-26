@@ -175,8 +175,9 @@ public static class DataFolder
 	// to do by hand (null: nothing) - the old folder that could not all be removed is then removed by the next start.
 	public static string? MoveTo(string a_from, string a_to)
 	{
-		var from = Path.GetFullPath(a_from);
-		var to = Path.GetFullPath(a_to);
+		var from = Path.TrimEndingDirectorySeparator(Path.GetFullPath(a_from));
+		// (a final "\" taken off: the copy is staged BESIDE the new place, under its name with " (being copied)" added)
+		var to = Path.TrimEndingDirectorySeparator(Path.GetFullPath(a_to));
 		// (by where each one really is: a link, a junction or another name for the same disk can make a folder that looks apart
 		// from the data folder one inside it, which the copy would fill and the removal of the old folder empty again)
 		if (Directory.Exists(to) && Files.IsLink(to)) {
@@ -204,7 +205,8 @@ public static class DataFolder
 		}
 		// a copy of this very move that was cut off before it counted holds nothing of the player's: it is made again
 		if (HasData(to) && !Chosen(to) && File.Exists(Path.Combine(to, Pending)) && Files.SamePath(File.ReadAllText(Path.Combine(to, Pending)).Trim(), from)) {
-			Files.DeleteDir(to);
+			// (only the copy: a file another program put there since stays, and then the folder holds files and is refused below)
+			RemoveLeftCopy(to, from);
 		}
 		if (HasData(to)) {
 			throw new InvalidOperationException($"{to} holds files already - move them away, then try again");
@@ -228,7 +230,9 @@ public static class DataFolder
 			if (Files.IsLink(staging) || !LeftByThisMove(staging, from)) {
 				throw new InvalidOperationException($"{staging} is in the way - move it away, then try again");
 			}
-			Files.DeleteDir(staging);
+			if (!RemoveLeftCopy(staging, from)) {
+				throw new InvalidOperationException($"{staging} holds files that are not part of the data - move them away, then try again");
+			}
 		}
 		[System.Diagnostics.CodeAnalysis.DoesNotReturn]
 		void TakeBack(string a_copy, Exception a_why, string a_what)
@@ -306,6 +310,30 @@ public static class DataFolder
 		}
 	}
 
+	// One writer of the program's data at a time, across every copy of the program on this PC: a setup's save and the data's
+	// move both hold it, so no save lands in a folder that is being copied away (the run lock keeps runs out the same way)
+	public static IDisposable HoldWrites() => new WriteHold();
+
+	sealed class WriteHold : IDisposable
+	{
+		readonly Mutex _gate = new(false, @"Local\" + Brand.Name + " data writes");
+
+		public WriteHold()
+		{
+			try {
+				_gate.WaitOne();
+			} catch (AbandonedMutexException) {
+				// a copy that was stopped while it held it: the turn is this one's
+			}
+		}
+
+		public void Dispose()
+		{
+			_gate.ReleaseMutex();
+			_gate.Dispose();
+		}
+	}
+
 	// the offline tests only: called the moment the copy has taken its place
 	public static Action<string>? AfterPublish { get; set; }
 
@@ -319,6 +347,33 @@ public static class DataFolder
 		var half = "." + Pending + ".";
 		return !Directory.EnumerateDirectories(a_staging).Any() &&
 			Directory.EnumerateFiles(a_staging).All(f => Path.GetFileName(f).StartsWith(half, StringComparison.Ordinal) && f.EndsWith(".tmp", StringComparison.Ordinal));
+	}
+
+	// A copy a cut-off move of a_from left, taken away: only what is the data's own - a file whose place in the data folder holds
+	// a file, the copy's mark and the half-written files of either - and the folders left empty. Anything else stays where it is.
+	// True when nothing of the folder is left
+	static bool RemoveLeftCopy(string a_copy, string a_from)
+	{
+		var (dirs, files, links) = Tree(a_copy);
+		if (links.Count > 0) {
+			return false;
+		}
+		foreach (var f in files) {
+			var rel = Path.GetRelativePath(a_copy, f);
+			var name = Path.GetFileName(f);
+			// (a half-written file is named ".<its name>.<process>.<count>.tmp" beside where it was going)
+			var halfOf = name.StartsWith('.') && name.EndsWith(".tmp", StringComparison.Ordinal) && name.Split('.') is { Length: >= 5 } parts
+				? Path.Combine(Path.GetDirectoryName(rel) ?? "", string.Join('.', parts[1..^3])) : null;
+			if (File.Exists(Path.Combine(a_from, rel)) || rel == Pending || (halfOf != null && (halfOf == Pending || File.Exists(Path.Combine(a_from, halfOf))))) {
+				Files.Delete(f);
+			}
+		}
+		foreach (var d in dirs.OrderByDescending(d => d.Length).Append(a_copy)) {
+			if (Directory.Exists(d) && !Directory.EnumerateFileSystemEntries(d).Any()) {
+				Directory.Delete(d);
+			}
+		}
+		return !Directory.Exists(a_copy);
 	}
 
 	// a copy that took its place taken away again: only the files and folders this move put there (and its mark); a folder that
