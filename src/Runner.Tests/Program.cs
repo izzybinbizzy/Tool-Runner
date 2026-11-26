@@ -6035,6 +6035,11 @@ public static class Program
 			var viaNetwork = @"\\localhost\" + local[0] + "$" + local[2..];
 			Throws<InvalidOperationException>(() => DataFolder.MoveTo(viaNetwork, Path.Combine(local, "inside", "deeper")), "data reached by a network path is not moved");
 			Check(Directory.Exists(Path.Combine(local, "inside")) && !Directory.Exists(Path.Combine(local, "inside", "deeper")), "and nothing was copied");
+			// Windows' own names, as GetFinalPathNameByHandle gives them, read as plain paths: a share's is a network path, which the
+			// move refuses (no share opens for a test here - this PC's only shares are Windows' admin ones, refused without rights)
+			Equal(@"\\server\share\Tool Runner Data", Files.PlainFinalName(@"\\?\UNC\server\share\Tool Runner Data"), "a share's final name is its network path");
+			Equal(@"C:\Users\x\Tool Runner", Files.PlainFinalName(@"\\?\C:\Users\x\Tool Runner"), "a local folder's final name is its plain path");
+			Equal(@"D:\plain", Files.PlainFinalName(@"D:\plain"), "a name without the prefix stays as it is");
 			// the same with Windows answering for the share (no share of this PC opens for certain): the refusal is the network one
 			var realName = DataFolder.FinalPathOf;
 			var elsewhere = Path.Combine(root, "appdata net", Brand.Name);
