@@ -367,13 +367,38 @@ public static class Theme
 		return path;
 	}
 
-	// a theme file read and parsed (no window work - Settings does this off the window's thread)
-	sealed record Read(JsonObject? Json, string? Dir, string? Problem);
+	// a theme file read and parsed, its picture read and decoded (no window work - Settings does this off the window's thread)
+	sealed record Read(JsonObject? Json, string? Dir, string? Problem, ThemeIcon Icon = default);
+
+	// a theme's picture, decoded and frozen (any thread may hand it on), or why it did not open; both null: the theme names none
+	readonly record struct ThemeIcon(BitmapSource? Image, string? Problem);
+
+	static ThemeIcon LoadIcon(JsonObject a_t, string a_dir)
+	{
+		if (Value(a_t["icon"]) is not { Length: > 0 } icon) {
+			return default;
+		}
+		// only a file beside the theme: a full path, a share or ".." would read (or reach) outside its folder
+		var dir = Path.GetFullPath(a_dir).TrimEnd('\\') + "\\";
+		var path = Path.GetFullPath(Path.Combine(dir, icon));
+		if (Path.IsPathRooted(icon) || !path.StartsWith(dir, StringComparison.OrdinalIgnoreCase)) {
+			return new(null, $"icon: \"{icon}\" must be a file beside the theme");
+		}
+		try {
+			return new(IconFrom(path), null);
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or FormatException or NotSupportedException or ArgumentException or
+		                            InvalidOperationException or System.Runtime.InteropServices.ExternalException) {
+			// a damaged picture throws FileFormatException (a FormatException) or a COM error from Windows' decoder - it is only
+			// an icon, so it never stops the theme
+			return new(null, $"icon: \"{icon}\" does not open ({e.Message})");
+		}
+	}
 
 	static Read ReadTheme(string a_name)
 	{
 		if (BuiltIns.Contains(a_name)) {
-			return new(BuiltIn(a_name), Folder, null);
+			var builtIn = BuiltIn(a_name);
+			return new(builtIn, Folder, null, LoadIcon(builtIn, Folder));
 		}
 		string? file;
 		try {
@@ -385,7 +410,9 @@ public static class Theme
 			return new(null, null, $"no theme called \"{a_name}\" in the Themes folder - the built-in one is used");
 		}
 		try {
-			return new(JsonNode.Parse(Files.ReadSharedText(file), documentOptions: JsonRead.Plain) as JsonObject ?? [], Path.GetDirectoryName(file)!, null);
+			var json = JsonNode.Parse(Files.ReadSharedText(file), documentOptions: JsonRead.Plain) as JsonObject ?? [];
+			var dir = Path.GetDirectoryName(file)!;
+			return new(json, dir, null, LoadIcon(json, dir));
 		} catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException) {
 			return new(null, null, $"{Path.GetFileName(file)} does not read ({e.Message}) - the built-in theme is used");
 		}
@@ -436,7 +463,7 @@ public static class Theme
 				a_name = Default;
 			} else {
 				try {
-					ApplyFile(a_read.Json, a_read.Dir!, problems);
+					ApplyFile(a_read.Json, a_read.Icon, problems);
 				} catch (InvalidOperationException e) {
 					Reset();
 					problems.Add($"\"{a_name}\" does not read ({e.Message}) - the built-in theme is used");
@@ -463,7 +490,7 @@ public static class Theme
 
 	static string? Value(JsonNode? a_n) => a_n is JsonObject o ? o["value"]?.ToString() : a_n is JsonValue ? a_n.ToString() : null;
 
-	static void ApplyFile(JsonObject a_t, string a_dir, List<string> a_problems)
+	static void ApplyFile(JsonObject a_t, ThemeIcon a_icon, List<string> a_problems)
 	{
 		var res = Application.Current.Resources;
 		Color? ReadColor(string a_where, string? a_text)
@@ -566,26 +593,15 @@ public static class Theme
 				}
 			}
 		}
-		if (Value(a_t["icon"]) is { Length: > 0 } icon) {
-			// only a file beside the theme: a full path, a share or ".." would read (or reach) outside its folder
-			var dir = Path.GetFullPath(a_dir).TrimEnd('\\') + "\\";
-			var path = Path.GetFullPath(Path.Combine(dir, icon));
-			if (Path.IsPathRooted(icon) || !path.StartsWith(dir, StringComparison.OrdinalIgnoreCase)) {
-				a_problems.Add($"icon: \"{icon}\" must be a file beside the theme");
-			} else {
-				try {
-					var img = IconFrom(path);
-					res["Logo"] = img;
-					Icon = img;
-					if (Application.Current.MainWindow != null) {
-						Application.Current.MainWindow.Icon = img;
-					}
-				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or FormatException or NotSupportedException or ArgumentException or
-				                            InvalidOperationException or System.Runtime.InteropServices.ExternalException) {
-					// a damaged picture throws FileFormatException (a FormatException) or a COM error from Windows' decoder - it is only
-					// an icon, so it never stops the theme
-					a_problems.Add($"icon: \"{icon}\" does not open ({e.Message})");
-				}
+		// (the picture was read and decoded with the theme's file: here it is only put in place)
+		if (a_icon.Problem != null) {
+			a_problems.Add(a_icon.Problem);
+		}
+		if (a_icon.Image is { } img) {
+			res["Logo"] = img;
+			Icon = img;
+			if (Application.Current.MainWindow != null) {
+				Application.Current.MainWindow.Icon = img;
 			}
 		}
 	}

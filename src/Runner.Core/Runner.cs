@@ -1421,7 +1421,27 @@ public static class Runner
 		var off = a_theirs.Where(p => p.Value == '-' && listed.ContainsKey(p.Key)).Select(p => p.Key).ToList();
 		a_ctx.Profile.SetMods(on, off, a_ctx.Log);
 		a_ctx.Profile.ActivatePlugins(on);
-		var theirPlugins = on.SelectMany(m => Plugins.InMod(a_ctx.Mo2.ModDir(m))).ToHashSet(StringComparer.OrdinalIgnoreCase);
+		var theirPlugins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var unread = new List<string>();
+		foreach (var m in on) {
+			if (Plugins.TryInMod(a_ctx.Mo2.ModDir(m), out var names)) {
+				theirPlugins.UnionWith(names);
+			} else {
+				unread.Add(m);
+			}
+		}
+		if (unread.Count > 0) {
+			// A ticked mod whose folder would not be read: its plugins are not known, and their marks are never dropped for it.
+			// Every mark of the player's that no other ticked mod's plugin explains is set as they had it, and the log says so
+			var others = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			foreach (var m in a_ctx.Profile.States().Where(p => p.Value == '+' && !unread.Contains(p.Key, StringComparer.OrdinalIgnoreCase)).Select(p => p.Key)) {
+				if (Plugins.TryInMod(a_ctx.Mo2.ModDir(m), out var names)) {
+					others.UnionWith(names);
+				}
+			}
+			theirPlugins.UnionWith(a_marks.Keys.Where(k => !others.Contains(k)));
+			a_ctx.Log.Warn($"the folder of {string.Join(", ", unread)} could not be read: the plugins you had ticked or unticked that no other mod holds are set as you had them - check them in Mod Organizer");
+		}
 		a_ctx.Profile.SetPluginMarks(a_marks.Where(p => theirPlugins.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase));
 		a_ctx.Profile.DeactivatePlugins(off, true);
 	}

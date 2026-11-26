@@ -3378,8 +3378,13 @@ public static class Program
 		using var f = new FakeMo2();
 		using var other = new FakeMo2();
 		File.WriteAllText(Path.Combine(f.Mods, "Output A", "old.txt"), "old A");
+		// (the two profiles' lists differ, so the run's lists written into the wrong one would show)
+		var otherList = Path.Combine(other.ProfileDir, "modlist.txt");
+		File.WriteAllText(otherList, "+Only In The Other\r\n" + File.ReadAllText(otherList));
 		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp")));
 		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		string States(FakeMo2 a_m) => string.Join(", ", ProfileOf(a_m).States().OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase).Select(p => p.Value + p.Key));
+		var statesBefore = States(f);
 		Equal(RunState.Finished, Runner.Run(new RunRequest(f.SetupFile, f.Data)).State, "the run finished");
 		var j = Journal.All(Runner.RunsDir(f.Data)).First();
 		Check(Files.SamePath(j.Mo2Exe, f.Exe), "the run's record names the Mod Organizer it worked in");
@@ -3390,6 +3395,7 @@ public static class Program
 		var r = Runner.Undo(Journal.Load(j.Folder));
 		Equal(RunState.Restored, r.State, "undone: " + r.Verdict);
 		Check(theirs.AsSpan().SequenceEqual(File.ReadAllBytes(Path.Combine(other.ProfileDir, "modlist.txt"))), "the other Mod Organizer's profile is as it was");
+		Equal(statesBefore, States(f), "the run's own profile is as it was before the run");
 		Equal("old A", File.ReadAllText(Path.Combine(f.Mods, "Output A", "old.txt")), "the old output is back where the run took it from");
 	}
 
@@ -5072,31 +5078,15 @@ public static class Program
 			Console.WriteLine($"  (skipped: the source is not at {app})");
 			return;
 		}
+		// (the scan itself, on a made-up file: a call inside a comment is no text the window shows, and an escape is read as
+		// the compiler reads it)
+		var fixture = SourceWindowWords("// WindowWords.Word(\"Draft label\")\n/* WindowWords.Word(\"Also a draft\") */\nvar a = WindowWords.Word(\"\\x0041\");\n" +
+			"var b = WindowWords.Word(\"\\x41g\\U0001F600\\a\");\n", "Fixture.cs");
+		Equal("A | Ag\U0001F600\a", string.Join(" | ", fixture.Keys), "only the real calls, their escapes read as the compiler reads them");
 		var keys = new SortedDictionary<string, string>(StringComparer.Ordinal);
 		foreach (var file in Directory.GetFiles(app, "*.cs")) {
-			var name = Path.GetFileName(file);
-			var code = File.ReadAllText(file);
-			// (in its own file the calls stand without the class's name: the ones its properties make, never a method's own first line)
-			var own = name == "WindowWords.cs";
-			foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(code, own ? @"(?<![A-Za-z_.])(Word|Format)\(" : @"WindowWords\.(Word|Format|F)\(")) {
-				if (own && code[Math.Max(0, m.Index - 30)..m.Index].TrimEnd().EndsWith("string", StringComparison.Ordinal)) {
-					continue;
-				}
-				var start = m.Index + m.Length;
-				var where = $"{name}:{code.AsSpan(0, start).Count('\n') + 1}";
-				if (m.Groups[1].Value == "F") {
-					var at = start;
-					while (char.IsWhiteSpace(code[at])) {
-						++at;
-					}
-					Check(code[at] == '$' && code[at + 1] == '"', $"{where}: F( takes one $\"...\" text");
-					keys.TryAdd(SourceInterpolated(code, at).Format, where);
-				} else {
-					var end = SourceSkip(code, start, m.Groups[1].Value == "Format" ? ")," : ")");
-					foreach (var text in SourceLiterals(code, start, end).Where(x => x.Trim() != "")) {
-						keys.TryAdd(text, where);
-					}
-				}
+			foreach (var (key, where) in SourceWindowWords(File.ReadAllText(file), Path.GetFileName(file))) {
+				keys.TryAdd(key, where);
 			}
 		}
 		Check(keys.Count > 250, "the texts were found in the source: " + keys.Count);
@@ -5104,6 +5094,105 @@ public static class Program
 			var words = ToolRunner.App.WindowWords.Read(ToolRunner.App.WindowWords.ShippedText(language)!, out _)!;
 			var missing = keys.Where(k => !words.ContainsKey(k.Key)).Select(k => $"\"{k.Key}\" ({k.Value})").ToList();
 			Check(missing.Count == 0, $"{language} lacks {missing.Count} text(s) the code shows: {string.Join(" | ", missing.Take(4))}");
+		}
+	}
+
+	// The texts one C# file hands to WindowWords - Word("..."), Format("...", values), F($"...") - each with where it stands.
+	// A call inside a comment hands nothing over, and is left out
+	static SortedDictionary<string, string> SourceWindowWords(string a_code, string a_name)
+	{
+		var keys = new SortedDictionary<string, string>(StringComparer.Ordinal);
+		var comment = SourceCommentMask(a_code);
+		// (in its own file the calls stand without the class's name: the ones its properties make, never a method's own first line)
+		var own = a_name == "WindowWords.cs";
+		foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(a_code, own ? @"(?<![A-Za-z_.])(Word|Format)\(" : @"WindowWords\.(Word|Format|F)\(")) {
+			if (comment[m.Index] || own && a_code[Math.Max(0, m.Index - 30)..m.Index].TrimEnd().EndsWith("string", StringComparison.Ordinal)) {
+				continue;
+			}
+			var start = m.Index + m.Length;
+			var where = $"{a_name}:{a_code.AsSpan(0, start).Count('\n') + 1}";
+			if (m.Groups[1].Value == "F") {
+				var at = start;
+				while (char.IsWhiteSpace(a_code[at])) {
+					++at;
+				}
+				Check(a_code[at] == '$' && a_code[at + 1] == '"', $"{where}: F( takes one $\"...\" text");
+				keys.TryAdd(SourceInterpolated(a_code, at).Format, where);
+			} else {
+				var end = SourceSkip(a_code, start, m.Groups[1].Value == "Format" ? ")," : ")");
+				foreach (var text in SourceLiterals(a_code, start, end).Where(x => x.Trim() != "")) {
+					keys.TryAdd(text, where);
+				}
+			}
+		}
+		return keys;
+	}
+
+	// Which characters of a C# file stand inside a comment (// to the line's end, /* to */). Strings and characters are
+	// stepped over - a // inside a text is no comment - regular, verbatim (@"", with "" for a quote) and interpolated alike
+	static bool[] SourceCommentMask(string a_s)
+	{
+		var mask = new bool[a_s.Length + 1];
+		for (var i = 0; i < a_s.Length; ++i) {
+			var c = a_s[i];
+			var next = i + 1 < a_s.Length ? a_s[i + 1] : '\0';
+			if (c == '/' && next == '/') {
+				var end = a_s.IndexOf('\n', i);
+				end = end < 0 ? a_s.Length : end;
+				Array.Fill(mask, true, i, end - i);
+				i = end;
+			} else if (c == '/' && next == '*') {
+				var end = a_s.IndexOf("*/", i + 2, StringComparison.Ordinal);
+				end = end < 0 ? a_s.Length : end + 2;
+				Array.Fill(mask, true, i, end - i);
+				i = end - 1;
+			} else if (c == '@' && next == '"' || c is '$' or '@' && next is '$' or '@' && i + 2 < a_s.Length && a_s[i + 2] == '"') {
+				// a verbatim text: it ends at a lone quote
+				var j = a_s.IndexOf('"', i) + 1;
+				while (j < a_s.Length && !(a_s[j] == '"' && (j + 1 >= a_s.Length || a_s[j + 1] != '"'))) {
+					j += a_s[j] == '"' ? 2 : 1;
+				}
+				i = j;
+			} else if (c == '"') {
+				i = SourceString(a_s, i).After - 1;
+			} else if (c == '$' && next == '"') {
+				i = SourceInterpolated(a_s, i).After - 1;
+			} else if (c == '\'') {
+				// (an escaped quote or a \u escape closes after its escape: the quote looked for begins past the backslash's own character)
+				i += next == '\\' ? (a_s.IndexOf('\'', i + 3) - i) : 2;
+			}
+		}
+		return mask;
+	}
+
+	// One escape of a C# text at a_s[a_i] (a backslash), read as the compiler reads it: what it stands for, and how many
+	// characters it takes. \x takes one to four hex digits, as many as follow; \U eight, one character past the first plane
+	static (string Value, int Length) SourceEscape(string a_s, int a_i)
+	{
+		static bool Hex(char a_c) => char.IsAsciiHexDigit(a_c);
+		int Digits(int a_most) {
+			var n = 0;
+			while (n < a_most && a_i + 2 + n < a_s.Length && Hex(a_s[a_i + 2 + n])) {
+				++n;
+			}
+			return n;
+		}
+		int Value(int a_n) => int.Parse(a_s.AsSpan(a_i + 2, a_n), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture);
+		var n = a_s[a_i + 1];
+		switch (n) {
+			case 'u':
+				return (((char)Value(4)).ToString(), 6);
+			case 'x': {
+				var d = Digits(4);
+				return (((char)Value(d)).ToString(), 2 + d);
+			}
+			case 'U':
+				return (char.ConvertFromUtf32(Value(8)), 10);
+			default:
+				return ((n switch {
+					'n' => '\n', 't' => '\t', 'r' => '\r', '0' => '\0', 'a' => '\a', 'b' => '\b', 'f' => '\f', 'v' => '\v', 'e' => '\u001b',
+					_ => n,
+				}).ToString(), 2);
 		}
 	}
 
@@ -5118,14 +5207,9 @@ public static class Program
 				sb.Append(a_s[i++]);
 				continue;
 			}
-			var n = a_s[i + 1];
-			if (n == 'u') {
-				sb.Append((char)int.Parse(a_s.AsSpan(i + 2, 4), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture));
-				i += 6;
-			} else {
-				sb.Append(n switch { 'n' => '\n', 't' => '\t', 'r' => '\r', '0' => '\0', _ => n });
-				i += 2;
-			}
+			var (value, length) = SourceEscape(a_s, i);
+			sb.Append(value);
+			i += length;
 		}
 		return (sb.ToString(), i + 1);
 	}
@@ -5166,9 +5250,9 @@ public static class Program
 		while (a_s[i] != '"') {
 			var c = a_s[i];
 			if (c == '\\') {
-				var n = a_s[i + 1];
-				sb.Append(n switch { 'n' => '\n', 't' => '\t', 'r' => '\r', _ => n });
-				i += 2;
+				var (value, length) = SourceEscape(a_s, i);
+				sb.Append(value);
+				i += length;
 			} else if ((c == '{' || c == '}') && a_s[i + 1] == c) {
 				sb.Append(c).Append(c);
 				i += 2;
@@ -5313,10 +5397,15 @@ public static class Program
 	static void T_AShaderLogLineWithACountAndAMarkIsKeptAsBoth()
 	{
 		var d = new ShaderStep.LogDigest();
-		d.Take("[12:00:00.000] [info] [ShaderTiming] Shader compilation completed, remaining=0\n[12:00:01.000] [info] [ShaderTiming] slow shader: 10 ms, remaining=0\n");
+		// the line alone first: its count is kept with it, not only its mark
+		d.Take("[12:00:00.000] [info] [ShaderTiming] Shader compilation completed, remaining=7\n");
+		Check(d.Text.Contains("Shader compilation completed", StringComparison.Ordinal), "the line that says the compile ended is kept: " + d.Text);
+		Equal<int?>(7, InGame.RemainingIn(d.Text), "and so is its count");
+		// a later count takes the count's place, never the mark's
+		d.Take("[12:00:01.000] [info] [ShaderTiming] slow shader: 10 ms, remaining=3\n");
 		Check(d.Text.Contains("Shader compilation completed", StringComparison.Ordinal), "the line that says the compile ended stays: " + d.Text);
-		Equal<int?>(0, InGame.RemainingIn(d.Text), "the newest count is the one asked");
-		Check(d.Text.EndsWith("slow shader: 10 ms, remaining=0", StringComparison.Ordinal), "and stands last");
+		Equal<int?>(3, InGame.RemainingIn(d.Text), "the newest count is the one asked");
+		Check(d.Text.EndsWith("slow shader: 10 ms, remaining=3", StringComparison.Ordinal), "and stands last");
 	}
 
 	// what a screen reader says of a control - its name, and the help text after it - goes into the window's language with
@@ -9730,12 +9819,14 @@ public static class Program
 		}
 		var found = ToolFinder.Find(Mo2Instance.Load(f.Exe, f.Instance), [f.Mods]);
 		Equal(ToolFinder.Found.NotListed, found.Single(r => r.Tool.Step == "anvillod").State, "AnvilLOD is one of the tools looked for");
-		// with AnvilLOD alone in the list its step is the one switched on
+		// with AnvilLOD alone in the list its step is there, with its program and its output - and off: it reads DynDOLOD's rule
+		// files, whose folder is not known without DynDOLOD on the list (switched on, every start of the setup stopped on it)
 		ToolFinder.AddFound(Mo2Instance.Load(f.Exe, f.Instance), found.Where(r => r.Tool.Step == "anvillod"));
 		var alone = SetupMaker.Make(f.Exe, f.Instance, "Test", "Anvil only", f.Data);
 		var only = alone.Steps.Single(s => s.Key == "anvillod");
-		Check(only.On && Files.SamePath(Setup.Str(only.Settings, "exe")!, Path.Combine(f.Mods, "Anvil Tool", "AnvilLOD.exe")) && Setup.Str(only.Settings, "output_mod") == "AnvilLOD Output - Test",
-			"its step, on, with its program and its output: " + only.Settings.ToJsonString());
+		Check(!only.On && Files.SamePath(Setup.Str(only.Settings, "exe")!, Path.Combine(f.Mods, "Anvil Tool", "AnvilLOD.exe")) && Setup.Str(only.Settings, "output_mod") == "AnvilLOD Output - Test",
+			"its step, off, with its program and its output: " + only.Settings.ToJsonString());
+		Check(only.Settings["dyndolod"] == null, "DynDOLOD's folder is left for the player to set, never written as nothing");
 		Check(alone.Steps.All(s => s.Key != "dyndolod") && Setup.List(only.Settings, "replaces").Count == 0, "no DynDOLOD: nothing for it to keep off");
 		// with both, DynDOLOD's step is on and AnvilLOD's is there, off; each names the other's output
 		ToolFinder.AddFound(Mo2Instance.Load(f.Exe, f.Instance), ToolFinder.Find(Mo2Instance.Load(f.Exe, f.Instance), [f.Mods]));
@@ -10720,9 +10811,10 @@ public static class Program
 			// (ping under a name of this test's own, so the copy left behind is ended by that name once the test is over)
 			var leftDir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "left behind " + Guid.NewGuid().ToString("N")[..8]);
 			var leftName = "left behind " + Guid.NewGuid().ToString("N")[..8] + ".exe";
-			Directory.CreateDirectory(leftDir);
-			File.Copy(ping, Path.Combine(leftDir, leftName));
+			// (inside the try: a copy that fails half way still has its folder taken away)
 			try {
+				Directory.CreateDirectory(leftDir);
+				File.Copy(ping, Path.Combine(leftDir, leftName));
 				var sw = Stopwatch.StartNew();
 				var stepAt = TimeSpan.Zero;
 				StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => stepAt = sw.Elapsed));
@@ -10737,7 +10829,9 @@ public static class Program
 					Procs.KillTree(pid);
 				}
 				try {
-					Directory.Delete(leftDir, true);
+					if (Directory.Exists(leftDir)) {
+						Directory.Delete(leftDir, true);
+					}
 				} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 				}
 			}
@@ -10945,10 +11039,12 @@ public static class Program
 	{
 		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "detached " + Guid.NewGuid().ToString("N")[..8]);
 		Directory.CreateDirectory(dir);
+		var pid = 0;
 		try {
 			var file = Path.Combine(dir, "ran in.txt");
 			var cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
-			var pid = Mo2Control.StartDetached($"\"{cmd}\" /c cd > \"{file}\" & ping -n 3 127.0.0.1 > nul", Environment.SystemDirectory, 0);
+			// (it waits a minute: alive for as long as it is looked at, whatever this test's thread is given, and ended below)
+			pid = Mo2Control.StartDetached($"\"{cmd}\" /c cd > \"{file}\" & ping -n 60 127.0.0.1 > nul", Environment.SystemDirectory, 0);
 			Check(pid > 0 && pid != Environment.ProcessId, $"Windows gave the process's number: {pid}");
 			var parent = Procs.Snapshot().FirstOrDefault(r => r.Pid == pid).Parent;
 			Check(parent != 0 && parent != Environment.ProcessId, $"it is no child of this process (its parent: {parent})");
@@ -10969,13 +11065,11 @@ public static class Program
 				Check(e.Message.StartsWith("Windows could not start \"" + gone, StringComparison.Ordinal) && e.Message.Contains("(code ", StringComparison.Ordinal),
 					"a program that is not there is said, with Windows' own code: " + e.Message);
 			}
-			// (the command's own two seconds: its folder is free once it has ended)
-			try {
-				using var left = Process.GetProcessById(pid);
-				left.WaitForExit(10_000);
-			} catch (ArgumentException) {
-			}
 		} finally {
+			// the command this test started, ended by its number and start time (and its ping with it), then its folder
+			if (pid > 0 && Procs.StartTime(pid) is { } at) {
+				Procs.KillTree(pid, at);
+			}
 			Directory.Delete(dir, true);
 		}
 	}
@@ -11829,10 +11923,10 @@ public static class Program
 	static void T_ALinkToAnotherFolderIsLeftAsItIs()
 	{
 		using var f = new FakeMo2();
+		// (made by Windows' own call, never a command processor: a "%" in the temp folder's name stays a "%")
 		static bool Junction(string a_link, string a_to)
 		{
-			using var mk = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), $"/d /c mklink /J \"{a_link}\" \"{a_to}\"") { CreateNoWindow = true, UseShellExecute = false })!;
-			mk.WaitForExit();
+			Program.Junction(a_link, a_to);
 			return Directory.Exists(a_link);
 		}
 		var kept = Path.Combine(f.Root, "Kept elsewhere");
@@ -12099,12 +12193,52 @@ public static class Program
 			var hidden = read.Where(k => !offered.Contains(k) && !basics.Contains(k)).Order(StringComparer.Ordinal).ToList();
 			Check(hidden.Count == 0, $"{step} reads {hidden.Count} setting(s) its page never offers: {string.Join(", ", hidden)}");
 		}
-		// what the game steps share: a game start that loads a save (InGame), Faster Archives' offer at any game start (GameMods)
-		var save = ToolRunner.App.SettingsPanel.OfferedKeys("cleansave").Concat(ToolRunner.App.SettingsPanel.OfferedKeys("playsave")).ToHashSet(StringComparer.Ordinal);
-		var inGame = KeysIn(File.ReadAllText(Path.Combine(SourceDir(), "InGame.cs")));
-		Check(inGame.Count >= 6, $"the save steps' settings were found in the source ({inGame.Count})");
-		var lost = inGame.Where(k => !save.Contains(k) && !basics.Contains(k)).ToList();
-		Check(lost.Count == 0, "the save steps read settings their pages never offer: " + string.Join(", ", lost));
+		// What the game steps share: a game start that loads a save (InGame). Each save step is held to what IT reads - the
+		// InGame functions its own class calls, and the ones those call - on its own page: a setting both read is on both pages
+		var inGameText = File.ReadAllText(Path.Combine(SourceDir(), "InGame.cs"));
+		var methodAt = new System.Text.RegularExpressions.Regex(@"(?m)^\t(?:public |internal |private )*static [^\n=;]*?\b(\w+)(?:<[^>\n]*>)?\(");
+		var methods = methodAt.Matches(inGameText);
+		var bodyOf = new Dictionary<string, string>(StringComparer.Ordinal);
+		for (var i = 0; i < methods.Count; i++) {
+			var body = inGameText[methods[i].Index..(i + 1 < methods.Count ? methods[i + 1].Index : inGameText.Length)];
+			bodyOf[methods[i].Groups[1].Value] = bodyOf.GetValueOrDefault(methods[i].Groups[1].Value, "") + body;
+		}
+		var callAt = new System.Text.RegularExpressions.Regex(@"\b(\w+)\(");
+		HashSet<string> ReadThrough(IEnumerable<string> a_calls)
+		{
+			var seen = new HashSet<string>(StringComparer.Ordinal);
+			var todo = new Stack<string>(a_calls.Where(bodyOf.ContainsKey));
+			var keys = new HashSet<string>(StringComparer.Ordinal);
+			while (todo.Count > 0) {
+				var m = todo.Pop();
+				if (!seen.Add(m)) {
+					continue;
+				}
+				keys.UnionWith(KeysIn(bodyOf[m]));
+				foreach (var c in callAt.Matches(bodyOf[m]).Select(x => x.Groups[1].Value).Where(bodyOf.ContainsKey)) {
+					todo.Push(c);
+				}
+			}
+			return keys;
+		}
+		var gameSteps = File.ReadAllText(Path.Combine(steps, "GameSteps.cs"));
+		var stepClasses = classAt.Matches(gameSteps);
+		var inGameAll = new HashSet<string>(StringComparer.Ordinal);
+		foreach (var (cls, step) in new[] { ("CleanSaveStep", "cleansave"), ("PlaySaveStep", "playsave") }) {
+			var at = stepClasses.FirstOrDefault(m => m.Groups[1].Value == cls);
+			Check(at != null, $"{cls} was found in the source");
+			if (at == null) {
+				continue;
+			}
+			var next = stepClasses.FirstOrDefault(m => m.Index > at.Index)?.Index ?? gameSteps.Length;
+			var calls = new System.Text.RegularExpressions.Regex(@"\bInGame\.(\w+)\(").Matches(gameSteps[at.Index..next]).Select(x => x.Groups[1].Value);
+			var reads = ReadThrough(calls);
+			inGameAll.UnionWith(reads);
+			var offered = ToolRunner.App.SettingsPanel.OfferedKeys(step);
+			var lost = reads.Where(k => !offered.Contains(k) && !basics.Contains(k)).Order(StringComparer.Ordinal).ToList();
+			Check(lost.Count == 0, $"{step} reads, through the game's own steps, settings its page never offers: {string.Join(", ", lost)}");
+		}
+		Check(inGameAll.Count >= 6, $"the save steps' settings were found in the source ({inGameAll.Count})");
 		var offer = KeysIn(File.ReadAllText(Path.Combine(SourceDir(), "GameMods.cs")));
 		Check(offer.Contains("max_offers") && offer.Contains("offer_wait_min"), "Faster Archives' two settings were found in the source");
 		foreach (var step in (string[])["cleansave", "playsave", "shaders", "grass"]) {
@@ -12595,8 +12729,14 @@ public static class Program
 		Equal("--json is no option of lod (it takes: --setup, --step)", Not("lod", "--setup", "x.json", "--step", "grass", "--json"), "--json where a command prints no JSON");
 		Equal<string?>(null, Not("frobnicate", "--anything"), "a word that is no command is said to be none elsewhere");
 		Equal<string?>(null, Not(), "nothing typed");
-		// every command the help line names takes its options from the table (one left out would take anything again)
-		var cli = File.ReadAllText(Path.Combine(Path.GetDirectoryName(SourceDir())!, "Runner.App", "Cli.cs"));
+		// every command the help line names takes its options from the table (one left out would take anything again) - read off
+		// the source, when it is there (the checks above run without it)
+		var cliFile = Path.Combine(Path.GetDirectoryName(SourceDir())!, "Runner.App", "Cli.cs");
+		if (!File.Exists(cliFile)) {
+			Console.WriteLine($"  (the help line's scan skipped: the source is not at {cliFile})");
+			return;
+		}
+		var cli = File.ReadAllText(cliFile);
 		var help = System.Text.RegularExpressions.Regex.Match(cli, "Console\\.WriteLine\\(\"Tool Runner - ([^\"]+)\"\\)").Groups[1].Value.Split('|').Select(c => c.Trim()).Where(c => c != "").ToList();
 		Check(help.Count >= 20, "the help line's commands were read: " + help.Count);
 		foreach (var command in help) {
@@ -12617,6 +12757,173 @@ public static class Program
 			"a tool's settings file with one stops its step before anything is changed");
 	}
 
+	// A start Windows' management service answered too late may have reached the open Mod Organizer all the same: the tool it
+	// starts is waited for and comes back to the run, which puts it on its record (left off it, it held Mod Organizer open)
+	static void T_AToolStartedAfterALateAnswerIsTheRuns() => FastReady(() => {
+		using var f = new FakeMo2();
+		var c = new Mo2Control(Mo2Instance.Load(f.Exe, f.Instance), "Test", RunLog.Null) {
+			ReadyProbe = () => new(true, true, TimeSpan.FromSeconds(9), null),
+			Launch = (_, _) => throw new Mo2Control.StartUnansweredException("Windows could not start x (its management service did not answer within 2 minutes)"),
+		};
+		var looks = 0;
+		Equal<int?>(4242, c.LaunchTool("x", () => ++looks >= 3 ? 4242 : 0, TimeSpan.FromSeconds(10), default), "the tool that came is handed back");
+		var none = new Mo2Control(Mo2Instance.Load(f.Exe, f.Instance), "Test", RunLog.Null) {
+			ReadyProbe = () => new(true, true, TimeSpan.FromSeconds(9), null),
+			Launch = (_, _) => throw new Mo2Control.StartUnansweredException("late"),
+		};
+		Equal<int?>(null, none.LaunchTool("x", () => 0, TimeSpan.FromSeconds(2), default), "and none that never came is made up");
+	});
+
+	// a ticked mod whose folder would not be read: the player's marks of its plugins are never dropped for it - every mark no
+	// other ticked mod's plugin explains is set as they had it - and the log says so
+	static void T_APlayersPluginMarksStayWhenAModDoesNotRead()
+	{
+		using var f = new FakeMo2();
+		f.Mod("Locked Mod", ("Locked.esp", false, []));
+		File.AppendAllText(Path.Combine(f.ProfileDir, "modlist.txt"), "+Locked Mod\r\n");
+		File.AppendAllText(Path.Combine(f.ProfileDir, "plugins.txt"), "*Locked.esp\r\n");
+		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		var ctx = StepContext(f, "landscapefixer");
+		var locked = new DirectoryInfo(Path.Combine(f.Mods, "Locked Mod"));
+		var me = System.Security.Principal.WindowsIdentity.GetCurrent().User!;
+		var deny = new System.Security.AccessControl.FileSystemAccessRule(me, System.Security.AccessControl.FileSystemRights.ListDirectory, System.Security.AccessControl.AccessControlType.Deny);
+		var acl = System.IO.FileSystemAclExtensions.GetAccessControl(locked);
+		acl.AddAccessRule(deny);
+		System.IO.FileSystemAclExtensions.SetAccessControl(locked, acl);
+		try {
+			if (Plugins.TryInMod(locked.FullName, out _)) {
+				Console.WriteLine("      (the folder still reads here: skipped)");
+				return;
+			}
+			Runner.ReapplyTheirs(ctx, new Dictionary<string, char>(StringComparer.OrdinalIgnoreCase) { ["Locked Mod"] = '+' },
+				new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase) { ["Locked.esp"] = false, ["BaseMod.esp"] = false });
+			var plugins = f.Text("plugins.txt");
+			Check(plugins.Contains("\nLocked.esp", StringComparison.Ordinal) && !plugins.Contains("*Locked.esp", StringComparison.Ordinal), "its plugin is as the player had it: " + plugins);
+			Check(plugins.Contains("*BaseMod.esp", StringComparison.Ordinal), "a plugin a ticked mod that reads holds is left to that mod");
+			ctx.Log.Dispose();
+			Check(File.ReadAllText(Path.Combine(ctx.Journal.Folder, "log.txt")).Contains("Locked Mod could not be read", StringComparison.Ordinal), "and the log names the mod");
+		} finally {
+			acl.RemoveAccessRule(deny);
+			System.IO.FileSystemAclExtensions.SetAccessControl(locked, acl);
+		}
+	}
+
+	// More of a setup file that comes from anywhere, read as meant: the entry of Mod Organizer's list a step starts is among what
+	// the setup starts; a negative fraction is no number; a shader step's cache named both ways is one output; lodOutputs as one
+	// name is named after the profile too; a file that is no setup is said so, apart from a name that is taken
+	static void T_MoreOfASetupFromAnywhereIsReadAsMeant()
+	{
+		var withEntry = Setup.FromJson(new JsonObject { ["mo2"] = new JsonObject(), ["steps"] = new JsonArray(new JsonObject { ["step"] = "pgpatcher", ["on"] = true, ["settings"] = new JsonObject { ["executable"] = "PGPatcher" } }) });
+		Check(withEntry.Starts().Any(l => l.Contains("PGPatcher", StringComparison.Ordinal) && l.Contains("Mod Organizer's entry", StringComparison.Ordinal)), "a step's entry is among what it starts: " + string.Join(" | ", withEntry.Starts()));
+		var changed = Setup.FromJson(new JsonObject { ["mo2"] = new JsonObject(), ["steps"] = new JsonArray(new JsonObject { ["step"] = "pgpatcher", ["on"] = true, ["settings"] = new JsonObject { ["executable"] = "Something Else" } }) });
+		Check(withEntry.StartsMark() != changed.StartsMark(), "another entry asks again");
+		Equal(60, new StepSettings(new JsonObject { ["deadline_min"] = -0.5 }).Int("deadline_min", 60), "a negative fraction is no number: the default stands");
+		Equal(1, new StepSettings(new JsonObject { ["deadline_min"] = 0 }).Int("deadline_min", 60), "a zero of minutes is one");
+		Equal(2, new StepSettings(new JsonObject { ["deadline_min"] = 2.7 }).Int("deadline_min", 60), "a positive fraction is made whole");
+		var shaders = Setup.FromJson(new JsonObject { ["mo2"] = new JsonObject(), ["steps"] = new JsonArray(new JsonObject { ["step"] = "shaders", ["on"] = true,
+			["settings"] = new JsonObject { ["output_mod"] = "Cache", ["shader_mod"] = "Shader Mod", ["caches"] = new JsonArray(new JsonObject { ["shader_mod"] = "Shader Mod", ["output_mod"] = "Cache" }) } }) });
+		Equal(0, Preflight.SharedOutputs(shaders, ["shaders"]).Count(), "one cache named both ways is one output, never shared with itself");
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "lod outputs " + Guid.NewGuid().ToString("N")[..8]);
+		Directory.CreateDirectory(dir);
+		try {
+			var from = Path.Combine(dir, "shared.json");
+			File.WriteAllText(from, """{ "name": "Shared", "mo2": { "profile": "Old" }, "lodOutputs": "DynDOLOD Output - Old", "steps": [ { "step": "dyndolod", "on": true, "settings": { "output_mod": "DynDOLOD Output - Old" } } ] }""");
+			var setups = Path.Combine(dir, "Setups");
+			var got = SetupShare.BringIn(from, null, setups, true, dir, new SetupShare.ForProfile(@"D:\MO2\ModOrganizer.exe", @"D:\MO2", "New"));
+			Check(got.File != null, "brought in: " + string.Join(" | ", got.Lines));
+			var root = Setup.Load(got.File!).Root;
+			Equal("DynDOLOD Output - New", root["lodOutputs"]?.ToString(), "lodOutputs given as one name follows the step's output");
+			var notOne = Path.Combine(dir, "not one.json");
+			File.WriteAllText(notOne, """{ "steps": "none" }""");
+			var refused = SetupShare.BringIn(notOne, "Not One", setups, false, dir);
+			Check(refused.File == null && refused.NotASetup && !refused.NoName, "a file that is no setup is said to be none: " + string.Join(" | ", refused.Lines));
+			var taken = SetupShare.BringIn(from, Path.GetFileNameWithoutExtension(got.File!), setups, false, dir);
+			Check(taken.File == null && !taken.NotASetup, "a name that is taken is no fault of the file");
+		} finally {
+			Directory.Delete(dir, true);
+		}
+	}
+
+	// A growing log read by what each look added gives only that: a line still being written comes once, with the look that
+	// ends it - never also from the look that found it unfinished
+	static void T_AGrowingLogGivesAnUnfinishedLineOnce()
+	{
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "growing " + Guid.NewGuid().ToString("N")[..8]);
+		Directory.CreateDirectory(dir);
+		try {
+			var file = Path.Combine(dir, "tool.log");
+			File.WriteAllText(file, "progress");
+			var g = new GrowingText { KeepAll = false };
+			Equal("", g.Read(file), "an unfinished first line is not given yet");
+			Equal("progress", g.Unfinished, "it is the unfinished one");
+			File.AppendAllText(file, "\nnext");
+			Equal("progress\n", g.Read(file), "it comes once, with the look that ends it");
+		} finally {
+			Directory.Delete(dir, true);
+		}
+	}
+
+	// a bug report is made when a file it would hold cannot be read: that file's place says why
+	static void T_ABugReportIsMadeWithAFileItCannotRead()
+	{
+		using var f = new FakeMo2();
+		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		var j = new Journal { Id = "r1", Folder = Path.Combine(Runner.RunsDir(f.Data), "r1"), SetupFile = Path.GetFullPath(f.SetupFile), SetupName = "Test", Profile = "Test",
+			Started = DateTime.Now, State = RunState.Finished };
+		Directory.CreateDirectory(j.Folder);
+		j.Save();
+		var outDir = Path.Combine(f.Root, "Reports");
+		string zip;
+		// (held open by nobody else's leave: no read of it goes through while this handle stands)
+		using (new FileStream(f.SetupFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) {
+			zip = BugReport.Make(f.Data, j, outDir, "1.0");
+		}
+		using var z = System.IO.Compression.ZipFile.OpenRead(zip);
+		using var setupEntry = new StreamReader(z.GetEntry("setup.json")!.Open());
+		Check(setupEntry.ReadToEnd().StartsWith("(this file could not be read", StringComparison.Ordinal), "the setup's place says it could not be read");
+	}
+
+	// The words of every StepFailedException one C# file makes, in the order they stand: "new StepFailedException(...)", and a
+	// target-typed "new(...)" where the type it makes is a StepFailedException - a helper declared to return one (by => or by
+	// return), or a local or field of that type. A call in a comment, and one that only hands on a text made elsewhere, has none
+	static List<string> StepFailureTexts(string a_src)
+	{
+		var at = new SortedDictionary<int, int>();
+		foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(a_src, @"\bnew StepFailedException\(")) {
+			at[m.Index] = m.Index + m.Length;
+		}
+		// a local or field of the type, or a helper that gives one with =>
+		foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(a_src, @"\bStepFailedException\??\s+\w+\s*(?:=|\([^()]*\)\s*=>)\s*(new)\(")) {
+			at[m.Groups[1].Index] = m.Index + m.Length;
+		}
+		// a helper with a body: each "return new(" up to its closing bracket
+		foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(a_src, @"\bStepFailedException\??\s+\w+\s*\([^()]*\)\s*\{")) {
+			var depth = 1;
+			var end = m.Index + m.Length;
+			while (end < a_src.Length && depth > 0) {
+				depth += a_src[end] == '{' ? 1 : a_src[end] == '}' ? -1 : 0;
+				++end;
+			}
+			foreach (System.Text.RegularExpressions.Match r in System.Text.RegularExpressions.Regex.Matches(a_src[(m.Index + m.Length)..end], @"\breturn\s+(new)\(")) {
+				var from = m.Index + m.Length;
+				at[from + r.Groups[1].Index] = from + r.Index + r.Length;
+			}
+		}
+		var texts = new List<string>();
+		foreach (var (start, open) in at) {
+			var line = a_src.LastIndexOf('\n', start) + 1;
+			if (a_src.AsSpan(line, start - line).Contains("//", StringComparison.Ordinal)) {
+				continue;
+			}
+			// (a failure that only hands on a text made elsewhere - a tool's own box, a check's finding - has no words of its own here)
+			var text = string.Join(" ", ReadCall(a_src, open).Strings);
+			if (text.Trim().Length >= 8) {
+				texts.Add(text);
+			}
+		}
+		return texts;
+	}
+
 	// ... and every text a step fails with: its own words, or the tool's, come with a code and what to do
 	static void T_EveryFailureOfAStepIsInTheCatalog()
 	{
@@ -12627,18 +12934,18 @@ public static class Program
 		}
 		var missing = new List<string>();
 		var seen = 0;
+		// (the scan itself, on a made-up file: each way a failure is made is found, a target-typed new() in a helper included)
+		var fixture = StepFailureTexts("""
+			static StepFailedException Lost() => new("the fixture's helper found no usable input");
+			static StepFailedException Gone() { return new("the fixture's other helper found nothing"); }
+			void A() { StepFailedException e = new("the fixture's local found nothing either"); throw e; }
+			void B() => throw new StepFailedException("the fixture's plain one");
+			// new StepFailedException("a comment is no failure")
+			""");
+		Equal("the fixture's helper found no usable input | the fixture's other helper found nothing | the fixture's local found nothing either | the fixture's plain one",
+			string.Join(" | ", fixture), "every form of a step's failure is found, a comment's is not");
 		foreach (var file in Directory.EnumerateFiles(core, "*.cs", SearchOption.AllDirectories).Where(p => !p.Contains(@"\obj\", StringComparison.Ordinal) && !p.Contains(@"\bin\", StringComparison.Ordinal))) {
-			var src = File.ReadAllText(file);
-			foreach (System.Text.RegularExpressions.Match call in System.Text.RegularExpressions.Regex.Matches(src, @"\bnew StepFailedException\(")) {
-				var line = src.LastIndexOf('\n', call.Index) + 1;
-				if (src.AsSpan(line, call.Index - line).Contains("//", StringComparison.Ordinal)) {
-					continue;
-				}
-				// (a failure that only hands on a text made elsewhere - a tool's own box, a check's finding - has no words of its own here)
-				var text = string.Join(" ", ReadCall(src, call.Index + call.Length).Strings);
-				if (text.Trim().Length < 8) {
-					continue;
-				}
+			foreach (var text in StepFailureTexts(File.ReadAllText(file))) {
 				++seen;
 				if (RunnerErrors.Find(text + " ") == null) {
 					missing.Add($"{Path.GetFileName(file)}: {text.Trim()}");

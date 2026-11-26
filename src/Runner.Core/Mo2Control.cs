@@ -27,6 +27,10 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	// how long Windows' management service is given to answer one start
 	static readonly TimeSpan StartAnswer = TimeSpan.FromMinutes(2);
 
+	// the service did not answer in time: the start may still have happened (its program is then ended, if it is the very one
+	// this asked for), and what that program would have handed on - a request to a Mod Organizer already open - may be under way
+	public sealed class StartUnansweredException(string a_message) : InvalidOperationException(a_message);
+
 	// The start is asked of Windows' management service (Win32_Process.Create): what is started is that service's child
 	// and none of this process's. It is asked through Windows' own scripting objects for the service (wbemdisp.dll), each
 	// member by its name. The System.Management package made this same one call, and put itself and System.CodeDom - half
@@ -69,6 +73,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 				Put(Property(asked, "CommandLine"), "Value", a_commandLine);
 				Put(Property(asked, "CurrentDirectory"), "Value", a_cwd);
 				Put(Property(asked, "ProcessStartupInformation"), "Value", startup);
+				var askedAt = DateTime.UtcNow;
 				var answer = Keep(Ask(process, "ExecMethod_", "Create", asked));
 				var rc = Convert.ToUInt32(Ask(Property(answer, "ReturnValue"), "Value"), InvariantCulture);
 				if (rc != 0) {
@@ -80,7 +85,11 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 				}
 				lock (gate) {
 					if (abandoned) {
-						Procs.KillTree(started);
+						// only the very process this start made: one that began before the ask holds a number that changed
+						// hands after the started one ended, and is left alone (as is one whose start cannot be read)
+						if (Procs.StartTime(started) is { } at && at >= askedAt.AddSeconds(-1)) {
+							Procs.KillTree(started, at);
+						}
 					} else {
 						pid = started;
 					}
@@ -111,7 +120,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 				abandoned = !finished && pid == 0;
 			}
 			if (abandoned) {
-				throw new InvalidOperationException($"Windows could not start {a_commandLine} (its management service did not answer within {StartAnswer.TotalMinutes:0} minutes)");
+				throw new StartUnansweredException($"Windows could not start {a_commandLine} (its management service did not answer within {StartAnswer.TotalMinutes:0} minutes)");
 			}
 		}
 		if (pid != 0) {
@@ -1180,7 +1189,13 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 			WaitReady(a_ct);
 			_mo2LaunchedAt = Environment.TickCount64;
 			// the second Mod Organizer that hands the request on is the run's own, never taken for the player's while it lives
-			_ownMo2.Add(Launch(a_cmd, Path.GetDirectoryName(Mo2.Exe)!));
+			try {
+				_ownMo2.Add(Launch(a_cmd, Path.GetDirectoryName(Mo2.Exe)!));
+			} catch (StartUnansweredException e) {
+				// the request may have reached the open Mod Organizer all the same: the tool is waited for as always, so one it
+				// starts is on the run's record (a tool left open off the record would hold Mod Organizer, and the put-back, open)
+				_log.Warn(e.Message + " - waiting for the tool all the same");
+			}
 			var waited = Stopwatch.StartNew();
 			var lost = false;
 			while (waited.Elapsed < a_limit && !lost) {

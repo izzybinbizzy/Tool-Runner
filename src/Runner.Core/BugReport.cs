@@ -70,6 +70,17 @@ public static class BugReport
 		return "(only the last part of this file is here)\n" + tail[(tail.IndexOf('\n') + 1)..];
 	}
 
+	// A file of the report that is there but will not be read (Windows denied it, another program holds it whole): the report is
+	// made without it, and says why in its place - a report about a setup Windows will not let be read is still made
+	static string TailOrWhy(string a_path)
+	{
+		try {
+			return ReadTail(a_path);
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			return "(this file could not be read: " + e.Message + ")";
+		}
+	}
+
 	static string FileVersion(string? a_exe)
 	{
 		try {
@@ -125,16 +136,16 @@ public static class BugReport
 			foreach (var f in new[] { "journal.json", "log.txt", RunLog.SimpleName }) {
 				var p = Path.Combine(a_run.Folder, f);
 				if (File.Exists(p)) {
-					entries.Add(("run\\" + f, ReadTail(p)));
+					entries.Add(("run\\" + f, TailOrWhy(p)));
 				}
 			}
 		}
 		if (setupFile != null && File.Exists(setupFile)) {
-			entries.Add(("setup.json", ReadTail(setupFile)));
+			entries.Add(("setup.json", TailOrWhy(setupFile)));
 		}
 		var crash = Path.Combine(a_dataDir, "crash.txt");
 		if (File.Exists(crash)) {
-			entries.Add(("crash.txt", ReadTail(crash)));
+			entries.Add(("crash.txt", TailOrWhy(crash)));
 		}
 		Directory.CreateDirectory(a_outDir);
 		var zip = Path.Combine(a_outDir, $"{Brand.Name} bug report {DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss", InvariantCulture)}.zip");

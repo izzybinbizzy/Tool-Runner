@@ -190,12 +190,21 @@ public static partial class SetupShare
 			}
 			return n;
 		}
-		return a_setup.Steps.Sum(s => Under(s.Settings)) + (a_setup.Root["lodOutputs"] is JsonArray lod ? In(lod) : 0);
+		// (lodOutputs is read as a list or as one name, as Setup.List reads it: either form is named after the profile)
+		var lodOutputs = 0;
+		if (a_setup.Root["lodOutputs"] is JsonArray lod) {
+			lodOutputs = In(lod);
+		} else if (a_setup.Root["lodOutputs"] is JsonValue one && one.TryGetValue<string>(out var single) && Named(single) is { } renamed) {
+			a_setup.Root["lodOutputs"] = renamed;
+			lodOutputs = 1;
+		}
+		return a_setup.Steps.Sum(s => Under(s.Settings)) + lodOutputs;
 	}
 
 	// What bringing a setup in came to. File: where it was written (null: it was not brought in); Lines: what to tell the
-	// player; NoName: the name it was to take is no setup's name
-	public sealed record Brought(string? File, List<string> Lines, bool NoName = false);
+	// player; NoName: the name it was to take is no setup's name; NotASetup: the file itself is no setup that can be brought in
+	// (what was named is wrong, not something found on this PC - the command line tells the two apart by its exit code)
+	public sealed record Brought(string? File, List<string> Lines, bool NoName = false, bool NotASetup = false);
 
 	// The name a setup from elsewhere is kept under. It becomes a file name in the Setups folder and the name of its run
 	// folders: no folder parts, no characters Windows refuses, no dot or space at its end (Windows drops those from a folder's
@@ -217,7 +226,7 @@ public static partial class SetupShare
 	{
 		var s = Setup.Load(Path.GetFullPath(a_file));
 		if (s.Root["steps"] is not JsonArray || s.Root["mo2"] is not JsonObject) {
-			return new(null, ["not a setup file (no steps list, no Mod Organizer): " + a_file]);
+			return new(null, ["not a setup file (no steps list, no Mod Organizer): " + a_file], NotASetup: true);
 		}
 		if ((PlainNameOf(a_name ?? s.Name) ?? (a_name == null ? PlainNameOf(Path.GetFileNameWithoutExtension(a_file)) : null)) is not { } given) {
 			return new(null, ["the setup's name is not a plain name"], true);
@@ -240,7 +249,7 @@ public static partial class SetupShare
 		// a file from elsewhere: what it gives as a mod's name must be one, and it brings no command of its own to run here
 		var wrong = s.ModNames().Where(m => !Setup.PlainName(m.Name)).Select(m => $"{m.Where}: {m.Name}").Distinct().ToList();
 		if (wrong.Count > 0) {
-			return new(null, ["not brought in - these are not mod names (a plain folder name each): " + string.Join("; ", wrong.Take(8))]);
+			return new(null, ["not brought in - these are not mod names (a plain folder name each): " + string.Join("; ", wrong.Take(8))], NotASetup: true);
 		}
 		var commands = s.TakeOutCommands();
 		var programs = s.TakeOutWhatStartsPrograms();

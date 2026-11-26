@@ -116,9 +116,15 @@ public static class SetupMaker
 			Add("dyndolod", true, o);
 		}
 		if (anvil != null) {
-			var o = new JsonObject { ["exe"] = anvil.Binary, ["dyndolod"] = dyn != null ? Path.GetDirectoryName(dyn.Binary) : null, ["output_mod"] = Out("AnvilLOD Output"), ["deadline_min"] = 60 };
-			if (dyn != null) o["replaces"] = new JsonArray(Out("DynDOLOD Output"));
-			Add("anvillod", dyn == null, o);
+			var o = new JsonObject { ["exe"] = anvil.Binary, ["output_mod"] = Out("AnvilLOD Output"), ["deadline_min"] = 60 };
+			if (dyn != null) {
+				o["dyndolod"] = Path.GetDirectoryName(dyn.Binary);
+				o["replaces"] = new JsonArray(Out("DynDOLOD Output"));
+			}
+			// AnvilLOD reads DynDOLOD's rule files: without a DynDOLOD on Mod Organizer's list its folder is not known, and the
+			// step stays off until it is set in Settings (switched on, every start of the setup stopped on it); with DynDOLOD
+			// there, DynDOLOD's step is the one switched on
+			Add("anvillod", false, o);
 		}
 		if (ByBinary(mo2, "Pandora Behaviour Engine+.exe", "Pandora Behaviour Engine.exe") is { } pan) {
 			Add("pandora", true, new JsonObject { ["executable"] = pan.Title, ["args"] = "--auto_run --auto_close", ["output_dir"] = Path.Combine(scratch, "Pandora"),

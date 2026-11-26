@@ -594,7 +594,8 @@ public sealed class GrowingText
 			_lines = "";
 			var text = Files.DecodeText(all[..got], out _how);
 			(Added, Unfinished) = Wide(_how) ? (text, "") : ("", text);
-			return text;
+			// (a reader that takes only what each look added gets only that: the unfinished line comes with the look that ends it)
+			return KeepAll ? text : Added;
 		}
 		// each part decoded once: the whole lines, which alone tell how the file is written, then what follows them
 		var wholeLines = Files.DecodeText(all[..cut], out _how);

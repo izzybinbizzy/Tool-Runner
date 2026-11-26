@@ -1623,8 +1623,10 @@ public static class SettingsPanel
 		} else if (kind == JsonValueKind.Array && (cur == null || (cur as JsonArray)!.All(n => n is JsonValue))) {
 			var t = new TextBox { Text = string.Join("\n", (cur as JsonArray ?? []).Select(n => n?.ToString())), AcceptsReturn = true, MinHeight = 54, TextWrapping = TextWrapping.NoWrap };
 			a_apply.Add(() => {
-				// (a list the setup does not hold and nobody typed into is not written into it as an empty one)
+				// (a list the setup did not hold, left empty, is not written into it as an empty one - and one an earlier press
+				// of Save had put in, from what was typed then, comes out again)
 				if (cur == null && t.Text.Trim() == "") {
+					a_obj.Remove(a_key);
 					return null;
 				}
 				a_obj[a_key] = new JsonArray(t.Text.Replace("\r", "").Split('\n').Select(s => s.Trim()).Where(s => s != "").Select(s => (JsonNode)JsonValue.Create(s)).ToArray());

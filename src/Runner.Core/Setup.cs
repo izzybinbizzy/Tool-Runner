@@ -328,6 +328,10 @@ public sealed class Setup
 				// ("image" is the name the tool's process runs under, which the step waits for: it starts nothing)
 				if (key != "image" && value is JsonValue v && v.TryGetValue<string>(out var text) && text.Trim() != "" && NamesProgram(key, text)) {
 					lines.Add($"{StepCatalog.Name(s.Key)} ({key}): {text}");
+				} else if (key == "executable" && value is JsonValue e && e.TryGetValue<string>(out var entry) && entry.Trim() != "") {
+					// (the entry of Mod Organizer's own list the step starts: only a program the player put on that list, but a
+					// started one all the same - a changed entry asks again)
+					lines.Add($"{StepCatalog.Name(s.Key)} (Mod Organizer's entry): {entry}");
 				}
 			}
 		}

@@ -33,6 +33,9 @@ class RootBuilderProfiles(mobase.IPluginTool):
         self._retries = 0
         self._ran_on = (None, None)
         self._busy = False
+        # looks after a program closed that are on their way (MO2's own callback, or a retry) and not begun yet
+        self._looks_waiting = 0
+        self._held = False
 
     # ---- MO2 plugin identity ----------------------------------------------------------------
     def name(self):
@@ -115,15 +118,29 @@ class RootBuilderProfiles(mobase.IPluginTool):
 
     def _later(self, fn, ms=0):
         """Run after the current MO2 callbacks have all returned - so Root Builder's own Clear is finished first."""
+        if fn == self._after_run:
+            self._looks_waiting += 1
         QTimer.singleShot(ms, lambda: self._guard(fn))
 
     def _guard(self, fn):
+        if fn == self._after_run:
+            self._looks_waiting -= 1
         if not self.isActive() or self._busy:
-            self._say(f"{fn.__name__}: skipped ({'turned off in MO2' if not self.isActive() else 'already working'})")
+            if not self._held:
+                self._say(f"{fn.__name__}: skipped ({'turned off in MO2' if not self.isActive() else 'already working'})")
             if fn == self._after_run:
-                # the look after a program closed did not happen: the next one reads the profile and its ticked mods anew
-                self._retries = 0
+                if not self.isActive():
+                    # turned off: the look is dropped, and the next one reads the profile and its ticked mods anew
+                    self._retries = 0
+                    self._held = False
+                elif self._looks_waiting == 0:
+                    # still working on something else (a box of its own is open): this look comes again shortly, and a
+                    # retry under way keeps the profile and mods of the run it is for - this run's changes stay this run's
+                    self._held = True
+                    self._later(self._after_run, 3000)
             return
+        if fn == self._after_run:
+            self._held = False
         self._say(f"{fn.__name__}: running")
         self._busy = True
         try:

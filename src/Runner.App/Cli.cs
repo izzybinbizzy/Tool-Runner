@@ -571,6 +571,9 @@ public static class Cli
 		if (got.NoName) {
 			throw new ArgumentException(got.Lines[0] + ": give it a name with --name <setup name>");
 		}
+		if (got.NotASetup) {
+			throw new ArgumentException(got.Lines[0]);
+		}
 		foreach (var line in got.Lines) {
 			Console.WriteLine(line);
 		}

@@ -213,8 +213,9 @@ public sealed class StepSettings(JsonObject a_o)
 	// A number of a setup file that can come from anywhere (shared, brought in, written by hand): one below zero is no
 	// number - the step's own default stands - and a time in whole minutes is one minute at least. The Settings window
 	// holds a typed number to the same two rules; a number read past them made a step fail at once on "its -5 minute limit"
+	// (the sign is read before the number is made whole: -0.5 would be 0, and as minutes taken for one)
 	public int Int(string a_key, int a_default) =>
-		Setup.Int(Raw, a_key) is { } n && n >= 0 ? (a_key.EndsWith("_min", StringComparison.Ordinal) ? Math.Max(1, n) : n) : a_default;
+		Setup.Num(Raw, a_key) is { } d && d >= 0 && Setup.Int(Raw, a_key) is { } n ? (a_key.EndsWith("_min", StringComparison.Ordinal) ? Math.Max(1, n) : n) : a_default;
 	// (nor is one past what a whole number holds: as minutes it was more time than there is, and the step ended on that)
 	public double Num(string a_key, double a_default) => Setup.Num(Raw, a_key) is { } d && d >= 0 && d <= int.MaxValue ? d : a_default;
 	public bool Bool(string a_key, bool a_default) => Setup.Bool(Raw, a_key) ?? a_default;

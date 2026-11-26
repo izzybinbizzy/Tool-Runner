@@ -274,7 +274,15 @@ public static class NewSetupDialog
 				var s = await Task.Run(() => SetupMaker.Make(exeText, inst, p, setupName, AppPaths.Data, pat));
 				// the setup it replaces goes to the setups' earlier copies first, as with every save
 				var text = s.Text();
-				if (await Task.Run(() => Setup.WriteKeepingACopy(file, text, Path.Combine(AppPaths.Data, "Setup backups"))) is { } notWritten) {
+				var replacing = File.Exists(file);
+				if (await Task.Run(() => {
+					// a setup that is replaced is written with the run lock held: a run begun since the check above, here or in
+					// another copy of the program, never has its setup changed under it
+					using var hold = replacing ? Runner.HoldIfFree() : null;
+					return replacing && hold == null
+						? "a run has started - the setup was not replaced; do it again once the run has ended"
+						: Setup.WriteKeepingACopy(file, text, Path.Combine(AppPaths.Data, "Setup backups"));
+				}) is { } notWritten) {
 					throw new IOException(notWritten);
 				}
 				made = file;
