@@ -10971,7 +10971,7 @@ public static class Program
 		File.SetLastWriteTime(j.File, died);
 		File.Move(f.Exe, f.Exe + ".gone");
 		var missing = Runner.Restore(Journal.Load(j.Folder));
-		Check(missing.State == RunState.Failed && missing.Verdict.Contains("was not found", StringComparison.Ordinal), "a Mod Organizer that is gone is said: " + missing.Verdict);
+		Check(missing.State == RunState.Failed && missing.Verdict.Contains("no longer where its record says", StringComparison.Ordinal), "a Mod Organizer that is gone is said: " + missing.Verdict);
 		File.Move(f.Exe + ".gone", f.Exe);
 		File.SetLastWriteTime(j.File, died);
 		Equal(RunState.Restored, Runner.Restore(Journal.Load(j.Folder)).State, "restored once it is back");
@@ -10985,7 +10985,7 @@ public static class Program
 		File.Move(f.Exe, f.Exe + ".gone");
 		try {
 			var undo = Runner.Undo(Journal.Load(done.Folder!));
-			Check(undo.Verdict.Contains("nothing was undone", StringComparison.Ordinal) && undo.Verdict.Contains("was not found", StringComparison.Ordinal), "Undo says it too: " + undo.Verdict);
+			Check(undo.Verdict.Contains("nothing was undone", StringComparison.Ordinal) && undo.Verdict.Contains("no longer where its record says", StringComparison.Ordinal), "Undo says it too: " + undo.Verdict);
 		} finally {
 			File.Move(f.Exe + ".gone", f.Exe);
 		}
