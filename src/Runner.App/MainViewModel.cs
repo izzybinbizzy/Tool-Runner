@@ -1487,12 +1487,25 @@ public sealed partial class MainViewModel : Observable
 		if (j == null || Restoring) {
 			return;
 		}
+		// a start of Mod Organizer Windows never answered: nothing on the PC can tell whether it will still come, so the player
+		// says whether it has settled before anything is written
+		var settled = false;
+		if (Runner.AsksAboutALateStart(j) && j.UnansweredStartAt is { } late) {
+			var when = late.ToLocalTime().ToString("HH:mm", System.Globalization.CultureInfo.CurrentCulture);
+			if (ConfirmRun == null || !ConfirmRun("Has Mod Organizer come up?",
+				WindowWords.F($"Windows did not answer a start of Mod Organizer that the interrupted run asked for at {when}, so Mod Organizer could still come up. If it is open, it is closed before anything is written. Put your profile back now?"),
+				"Put it back now")) {
+				Say("Not put back - nothing was changed.", "");
+				return;
+			}
+			settled = true;
+		}
 		Restoring = true;
 		Say("Putting your profile back ...", "warn");
 		using var hand = Working(WindowWords.Word("your profile is being put back"));
 		// its own copy: the records the window reads are shared with the next look
 		try {
-			var r = await Task.Run(() => Runner.Restore(Journal.Load(j.Folder)));
+			var r = await Task.Run(() => Runner.Restore(Journal.Load(j.Folder), settled));
 			Say(r.Verdict, r.State == RunState.Restored ? "good" : "bad");
 		} catch (Exception e) {
 			Say("Could not finish putting it back: " + e.Message + " - press the button again once the file is free.", "bad");

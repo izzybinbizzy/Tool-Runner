@@ -12934,7 +12934,8 @@ public static class Program
 	});
 
 	// a put-back that stopped on a start Windows had not answered keeps that start's time in the run's record: pressed again
-	// soon, it is refused and says until when; once that start can no longer come, it goes ahead
+	// soon, it is refused and says until when; after that it asks the player whether that start has settled, and goes ahead
+	// only on their word (the window's box, the command line's --late-start-settled)
 	static void T_APutBackWaitsForAStartWindowsHadNotAnswered()
 	{
 		using var f = new FakeMo2();
@@ -12943,14 +12944,19 @@ public static class Program
 			Mo2Exe = f.Exe, Mo2Instance = f.Instance, Started = DateTime.Now.AddHours(-1), State = RunState.Failed, NeedsRestore = true, UnansweredStartAt = DateTime.UtcNow };
 		Directory.CreateDirectory(j.Folder);
 		j.Save();
-		var held = Runner.Restore(Journal.Load(j.Folder));
+		var held = Runner.Restore(Journal.Load(j.Folder), true);
 		Check(held.State == RunState.Failed && held.Verdict.Contains("has not answered a start", StringComparison.Ordinal) && RunnerErrors.Find(held.Verdict)?.Code == "TR-215",
-			"refused while that start could still come, and said: " + held.Verdict);
+			"refused while that start could still come, even with the player's word, and said: " + held.Verdict);
+		Check(!Runner.AsksAboutALateStart(Journal.Load(j.Folder)), "(nothing is asked of the player while it is held)");
 		var old = Journal.Load(j.Folder);
 		old.UnansweredStartAt = DateTime.UtcNow - Runner.UnansweredStartHold - TimeSpan.FromMinutes(1);
 		old.Save();
-		var after = Runner.Restore(Journal.Load(j.Folder));
-		Check(!after.Verdict.Contains("has not answered a start", StringComparison.Ordinal), "once it can no longer come, the put-back is not held for it: " + after.Verdict);
+		Check(Runner.AsksAboutALateStart(Journal.Load(j.Folder)), "after the hold the player is asked");
+		var asked = Runner.Restore(Journal.Load(j.Folder));
+		Check(asked.State == RunState.Failed && RunnerErrors.Find(asked.Verdict)?.Code == "TR-218" && Journal.Load(j.Folder).NeedsRestore,
+			"without the player's word nothing is written and the put-back stays on offer: " + asked.Verdict);
+		var after = Runner.Restore(Journal.Load(j.Folder), true);
+		Check(after.State == RunState.Restored && Journal.Load(j.Folder).UnansweredStartAt == null, "with it, the profile is put back and the start is let go of: " + after.Verdict);
 	}
 
 	// What the player changed during the run, kept before a put-back's lists go back: the newer of the run's record and the

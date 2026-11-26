@@ -1721,7 +1721,9 @@ public static class Runner
 
 	// an interrupted run (a crash, Stop now, a power cut): every unfinished output back, the profile as before + the finished
 	// outputs on - the window's Restore button and the command line's --restore
-	public static RunOutcome Restore(Journal a_j)
+	// a_lateStartSettled: the player said a start Windows never answered has settled (the window's box, the command line's
+	// --late-start-settled); asked once that start is older than UnansweredStartHold
+	public static RunOutcome Restore(Journal a_j, bool a_lateStartSettled = false)
 	{
 		if (a_j.OwnerAlive) {
 			return new RunOutcome(a_j.State, "that run is still going", a_j.Folder);
@@ -1732,8 +1734,12 @@ public static class Runner
 		}
 		// one put-back at a time, never beside a run
 		using var hold = HoldIfFree();
-		return hold == null ? new RunOutcome(a_j.State, "a run or another put-back is going - try again when it is done", a_j.Folder) : RestoreLocked(a_j);
+		return hold == null ? new RunOutcome(a_j.State, "a run or another put-back is going - try again when it is done", a_j.Folder) : RestoreLocked(a_j, a_lateStartSettled);
 	}
+
+	// Whether a put-back of this run must first ask the player about a start of Mod Organizer Windows never answered: past
+	// UnansweredStartHold nothing on the PC can tell whether it will still come, so only the player can say it has settled
+	public static bool AsksAboutALateStart(Journal a_j) => a_j.UnansweredStartAt is { } asked && DateTime.UtcNow - asked >= UnansweredStartHold;
 
 	// The setup a put-back or an undo works with. One that is gone or does not read must not leave a profile that can never be
 	// put back (and every later start refused for it): the run's record names its Mod Organizer and its profile, and the
@@ -1773,12 +1779,17 @@ public static class Runner
 	// how long after a start Windows had not answered a put-back still waits: by then that start has come or never will
 	public static TimeSpan UnansweredStartHold { get; set; } = TimeSpan.FromMinutes(15);
 
-	static RunOutcome RestoreLocked(Journal a_j)
+	static RunOutcome RestoreLocked(Journal a_j, bool a_lateStartSettled)
 	{
-		// a start Windows had not answered when the run's own put-back stopped could still bring Mod Organizer up over this one
+		// a start Windows had not answered when the run's own put-back stopped could still bring Mod Organizer up over this one:
+		// held for UnansweredStartHold, then put back only once the player says it has settled
 		if (a_j.UnansweredStartAt is { } asked && DateTime.UtcNow - asked < UnansweredStartHold) {
 			return new RunOutcome(RunState.Failed, $"Windows has not answered a start of Mod Organizer that run asked it for at {asked.ToLocalTime():HH:mm} - " +
 				$"it could still come up, so the profile is not written now; put it back after {(asked + UnansweredStartHold).ToLocalTime():HH:mm}", a_j.Folder);
+		}
+		if (a_j.UnansweredStartAt is { } never && !a_lateStartSettled) {
+			return new RunOutcome(RunState.Failed, $"Windows never answered a start of Mod Organizer that run asked it for at {never.ToLocalTime():HH:mm}, so it could still come up - " +
+				"has Mod Organizer come up since? The profile is put back only once you say so (the window asks; on the command line: restore --late-start-settled)", a_j.Folder);
 		}
 		// when the cut-off run last wrote its record, read before this put-back writes it again: the time that run died
 		var lastWritten = File.GetLastWriteTime(a_j.File);

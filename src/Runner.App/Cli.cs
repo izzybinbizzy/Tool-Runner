@@ -10,7 +10,7 @@ namespace ToolRunner.App;
 //   "Tool Runner.exe" status [--setup <file>]                                               what is going right now
 //   "Tool Runner.exe" catalog                                                               every refusal and failure of its own: its code, what it means, what to do
 //   "Tool Runner.exe" lod --setup <file> --step <step>                                      the mods a LOD step builds from, with their pages
-//   "Tool Runner.exe" restore [--setup <file>]                                              put back an interrupted run
+//   "Tool Runner.exe" restore [--setup <file>] [--late-start-settled]                       put back an interrupted run
 //   "Tool Runner.exe" undo --setup <file>                                                   the setup's last run undone: its outputs and lists as before it
 //   "Tool Runner.exe" import --file <setup file> [--name <setup name>]                      a setup from elsewhere brought into the Setups folder
 //   "Tool Runner.exe" stop | stop-after                                                     ask the running run to stop
@@ -60,7 +60,7 @@ public static class Cli
 		["status"] = (["--setup"], ["--json"], 0),
 		["catalog"] = ([], ["--json"], 0),
 		["lod"] = (["--setup", "--step"], [], 0),
-		["restore"] = (["--setup"], [], 0),
+		["restore"] = (["--setup"], ["--late-start-settled"], 0),
 		["undo"] = (["--setup"], [], 0),
 		["stop"] = ([], [], 0),
 		["stop-after"] = ([], [], 0),
@@ -554,7 +554,8 @@ public static class Cli
 			Console.WriteLine("nothing to put back: no run was interrupted");
 			return 0;
 		}
-		var r = Runner.Restore(j);
+		// a start Windows never answered: put back only when the command says it has settled (the window asks instead)
+		var r = Runner.Restore(j, a_args.Contains("--late-start-settled", StringComparer.Ordinal));
 		Console.WriteLine(r.Verdict);
 		return r.State == RunState.Restored ? 0 : 1;
 	}

@@ -99,6 +99,8 @@ public static class RunnerErrors
 			"Free some room on the disk Tool Runner keeps its data on (and the one the backups go to), then press \"Put my profile back\"."),
 		E("TR-217", "could not be put on record - it is not started", "The disk took no write to the run's record, so a start of Mod Organizer could not be noted there first. Tool Runner does not start Mod Organizer without that note: after a crash, the put-back would not know a Mod Organizer could still come up.",
 			"Free some room on the disk Tool Runner keeps its data on, then start the run again (or press \"Put my profile back\" if it offers to)."),
+		E("TR-218", "has Mod Organizer come up since", "A run asked Windows to start Mod Organizer and Windows never answered. Nothing on the PC can tell whether that start will still come, so the profile is put back only once you say it has settled.",
+			"Look whether Mod Organizer came up. Then press \"Put my profile back\" and answer its question (on the command line: restore --late-start-settled); a Mod Organizer that is open is closed before anything is written."),
 
 		// ---- the check before a run: a step's own settings and its tool
 		E("TR-301", "no output mod is set|no output folder is set|the terrain LOD folder it reads is not set|no shader cache is set", "A step has no place to put what it makes.",

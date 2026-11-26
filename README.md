@@ -77,12 +77,12 @@ Shader caches, DynDOLOD's clean save, Synthesis, Landscape Fixer, PGPatcher, xLO
 "Tool Runner.exe" preview --setup <file> [--only <step> | --from <step> | --until <step>]
 "Tool Runner.exe" dryrun --setup <file> [--only <step> | --from <step> | --until <step>]
 "Tool Runner.exe" status [--setup <file>]
-"Tool Runner.exe" restore [--setup <file>]
+"Tool Runner.exe" restore [--setup <file>] [--late-start-settled]
 "Tool Runner.exe" undo --setup <file>
 "Tool Runner.exe" stop | stop-after
 ```
 
-`--json` after `run`, `retry`, `check`, `preview`, `dryrun`, `status`, `catalog`, `updates`, `changes` or `tools` prints one JSON object for a script to read. The wiki lists every command.
+`--json` after `run`, `retry`, `check`, `preview`, `dryrun`, `status`, `catalog`, `updates`, `changes` or `tools` prints one JSON object for a script to read. `--late-start-settled` after `restore` says that a start of Mod Organizer Windows never answered has settled (the window asks this itself). The wiki lists every command.
 
 | exit code | meaning |
 |---|---|
