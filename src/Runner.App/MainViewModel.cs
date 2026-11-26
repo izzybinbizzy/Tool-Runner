@@ -1642,6 +1642,9 @@ public sealed partial class MainViewModel : Observable
 	// a setup is being copied: the data move waits for it, as for a setup's own save
 	public bool CopyingSetup { get; set; }
 
+	// a shared copy of a setup is being written into the data folder: the data move waits for it too
+	public bool SharingSetup { get; set; }
+
 	// why a setup may not be written or started at this moment (null: it may)
 	public string? WhyNotWriting(string a_done) => NotYetSaved(a_done);
 
