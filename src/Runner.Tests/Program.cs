@@ -12836,20 +12836,24 @@ public static class Program
 		// (a stand-in program of the test's own plays the Mod Organizer that came up late)
 		using var late = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "PING.EXE"), "-n 30 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false })!;
 		try {
+			var told = new List<DateTime?>();
 			var c = new Mo2Control(Mo2Instance.Load(f.Exe, f.Instance), "Test", RunLog.Null) {
 				RunningProbe = () => false,
 				ReadyProbe = () => new(true, true, TimeSpan.FromSeconds(9), null),
 				Launch = (_, _) => throw new Mo2Control.StartUnansweredException("late", answer.Task),
+				UnansweredChanged = told.Add,
 			};
 			Thrown<Mo2Control.StartUnansweredException>(() => c.Start(default), "the start says it was not answered");
+			Check(told.Count == 1 && told[0] != null, "the unanswered start's time is told at once, for the run's record");
 			Check(c.UnansweredSince is { } since && DateTime.UtcNow - since < TimeSpan.FromMinutes(1), "when it was asked is there to be kept in the run's record");
 			Thrown<Mo2BusyException>(() => c.Close(), "nothing counts as closed while its answer is still to come");
 			Check(!c.RunProcesses().Contains(late.Id), "(nothing is taken for the run's before the answer names it)");
 			// (the stand-in's parent is this test, not Windows' management host: the test's own rule proves it)
-			Mo2Control.MadeByTheStart = (a_pid, _) => a_pid == late.Id;
+			Mo2Control.MadeByTheStart = (a_pid, _, a_image) => a_pid == late.Id && a_image == "ModOrganizer.exe";
 			answer.SetResult(late.Id);
 			c.Close();
 			Check(c.RunProcesses().Contains(late.Id) && c.UnansweredSince == null, "the process the late answer names is the run's own");
+			Check(told.Count == 2 && told[1] == null, "and once it is answered, none is left to keep");
 			// a number whose process ended before the answer came, and went to another program: never taken for the run's
 			var reused = new TaskCompletionSource<int>();
 			var other = new Mo2Control(Mo2Instance.Load(f.Exe, f.Instance), "Test", RunLog.Null) {
@@ -12857,13 +12861,14 @@ public static class Program
 				ReadyProbe = () => new(true, true, TimeSpan.FromSeconds(9), null),
 				Launch = (_, _) => throw new Mo2Control.StartUnansweredException("late", reused.Task),
 			};
-			Mo2Control.MadeByTheStart = (_, _) => false;
+			Mo2Control.MadeByTheStart = (_, _, _) => false;
 			Thrown<Mo2Control.StartUnansweredException>(() => other.Start(default), "(a second late start)");
 			reused.SetResult(late.Id);
 			other.Close();
 			Check(!other.RunProcesses().Contains(late.Id), "a number the start did not make is not the run's");
 			// and the real rule refuses a process this test started itself (its parent is no management host)
-			Check(!proven(late.Id, DateTime.UtcNow.AddMinutes(-1)), "a process started by another program is not one the service made");
+			Check(!proven(late.Id, DateTime.UtcNow.AddMinutes(-1), "PING.EXE"), "a process started by another program is not one the service made");
+			Check(!proven(late.Id, DateTime.UtcNow.AddMinutes(-1), "ModOrganizer.exe"), "nor one that runs another program than the start ran");
 		} finally {
 			Mo2Control.LateStartWait = keep;
 			Mo2Control.MadeByTheStart = proven;
@@ -12924,6 +12929,19 @@ public static class Program
 		Runner.PutBack(ctx, snap);
 		Check(!ctx.Profile.IsOn("Base Mod"), "the put-back brings the player's switch back from what it had kept");
 		Check(ctx.Journal.Theirs == null && !File.Exists(file), "and lets go of what it kept once all of it is set again");
+		// a tick the player set on a plugin the lists had unticked: after the lists went back, the tick read now is the lists'
+		// (unticked), and the tick the player had set (kept) stands - one the player changes again since would win
+		var mods = Path.Combine(f.ProfileDir, "modlist.txt");
+		var plugins = Path.Combine(f.ProfileDir, "plugins.txt");
+		File.WriteAllText(mods, File.ReadAllText(mods).Replace("+Base Mod", "-Base Mod", StringComparison.Ordinal));
+		File.WriteAllText(plugins, File.ReadAllText(plugins).Replace("*BaseMod.esp", "BaseMod.esp", StringComparison.Ordinal));
+		var before = ctx.Profile.Snapshot();
+		ctx.Journal.Theirs = new TheirsKept { At = DateTime.UtcNow, Mods = new(StringComparer.OrdinalIgnoreCase) { ["Base Mod"] = '+' },
+			Marks = new(StringComparer.OrdinalIgnoreCase) { ["BaseMod.esp"] = true } };
+		ctx.Journal.Save();
+		Runner.PutBack(ctx, before);
+		Check(ctx.Profile.IsOn("Base Mod") && f.Text("plugins.txt").Contains("*BaseMod.esp", StringComparison.Ordinal),
+			"the player's mod and their tick are back, never the lists' untick in their place: " + f.Text("plugins.txt"));
 	}
 
 	// a ticked mod whose folder would not be read: the player's marks of its plugins are never dropped for it - every mark no

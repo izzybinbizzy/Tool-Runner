@@ -272,6 +272,11 @@ public static class Runner
 		};
 		forThisRun = control;
 		control.StopAsked = cts.Token;
+		// a start Windows has not answered is in the run's record from the moment it is so - a put-back after a crash waits for it
+		control.UnansweredChanged = a_at => {
+			journal.UnansweredStartAt = a_at;
+			journal.TrySave();
+		};
 		journal.Mo2KeptOpen = control.CompanionOn;
 		control.CompanionGaveUp = () => {
 			journal.Mo2KeptOpen = false;
@@ -1458,10 +1463,15 @@ public static class Runner
 	// refuses it twice, in a file of its own in the run's backup folder (often another disk). Each keeping carries its time, and
 	// the newer of the two places is the one read. The order files go back all the same (the run's changes are never left in
 	// the profile); only when neither place takes it is it set from memory alone, and said
-	public static TheirsKept KeepTheirs(RunContext a_ctx, IReadOnlyDictionary<string, char> a_theirs)
+	//
+	// a_snap: the lists this put-back puts back. After one that was cut off between its lists going back and the player's
+	// changes being set again, a tick read now that equals the tick those lists hold is theirs (the restore's), not the
+	// player's: the tick kept before it stands. One that differs is a change the player made since, and wins
+	public static TheirsKept KeepTheirs(RunContext a_ctx, IReadOnlyDictionary<string, char> a_theirs, IReadOnlyDictionary<string, byte[]>? a_snap = null)
 	{
 		var keptFile = Path.Combine(a_ctx.BackupFolder, TheirsFile);
 		var older = KeptTheirs(a_ctx);
+		var restored = older != null && a_snap != null ? Profile.MarksOf(a_snap) : null;
 		var kept = new TheirsKept { At = DateTime.UtcNow };
 		foreach (var (mod, state) in older?.Mods ?? []) {
 			kept.Mods[mod] = state;
@@ -1473,6 +1483,9 @@ public static class Runner
 			kept.Marks[plugin] = on;
 		}
 		foreach (var (plugin, on) in a_ctx.Profile.PluginMarks()) {
+			if (restored != null && restored.TryGetValue(plugin, out var back) && back == on && older!.Marks.ContainsKey(plugin)) {
+				continue;
+			}
 			kept.Marks[plugin] = on;
 		}
 		a_ctx.Journal.Theirs = kept;
@@ -1552,7 +1565,7 @@ public static class Runner
 			}
 			// what the player changed, kept in the run's record before the order files go back
 			a_ctx.MarksLeft.Clear();
-			var marks = theirs.Count == 0 ? [] : KeepTheirs(a_ctx, theirs).Marks;
+			var marks = theirs.Count == 0 ? [] : KeepTheirs(a_ctx, theirs, a_snap).Marks;
 			a_ctx.Profile.Restore(a_snap);
 			if (theirs.Count > 0) {
 				a_ctx.Log.Warn($"you changed {theirs.Count} mod(s) in Mod Organizer during the run - kept as you left them: " +

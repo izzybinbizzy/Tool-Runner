@@ -64,6 +64,18 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 	public bool IsOn(string a_mod) => States().TryGetValue(a_mod, out var c) && c == '+';
 
 	// the mod states in a snapshot's modlist.txt (empty when it holds none)
+	// the plugin ticks a snapshot's plugins.txt holds
+	public static Dictionary<string, bool> MarksOf(IReadOnlyDictionary<string, byte[]> a_snap)
+	{
+		var marks = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+		if (a_snap.TryGetValue("plugins.txt", out var b)) {
+			foreach (var ln in Files.DecodeText(b).Replace("\r\n", "\n").Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith('#'))) {
+				marks[ln.TrimStart('*')] = ln.StartsWith('*');
+			}
+		}
+		return marks;
+	}
+
 	public static Dictionary<string, char> StatesOf(IReadOnlyDictionary<string, byte[]> a_snap)
 	{
 		var st = new Dictionary<string, char>(StringComparer.OrdinalIgnoreCase);
