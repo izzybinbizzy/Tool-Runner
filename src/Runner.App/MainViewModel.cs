@@ -192,7 +192,7 @@ public sealed partial class MainViewModel : Observable
 	public string EstimateText { get; set => Set(ref field, value); } = "";
 	public bool StopAfterAsked { get; set => Set(ref field, value); }
 	// the LOG box shows the detailed log (every line) when ticked, else the simple step-by-step one
-	public bool DetailedLog { get; set { if (Set(ref field, value)) { _logTail.Restart(); TailLog(); } } }
+	public bool DetailedLog { get; set { if (Set(ref field, value)) { TailLog(true); } } }
 	// the step the setup's last run stopped at ("" = nothing to run again): the "Run again from ..." button
 	public string RetryFrom { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(RetryText)); } } = "";
 	public string RetryText => RetryFrom == "" ? "" : WindowWords.Format("Run _again from {0}", StepCatalog.Name(RetryFrom));
@@ -937,9 +937,30 @@ public sealed partial class MainViewModel : Observable
 		return !a_detailed && File.Exists(simple) && new FileInfo(simple).Length > 0 ? simple : Path.Combine(a_folder, "log.txt");
 	}
 
-	void TailLog()
+	// The log is read on a worker - a slow disk never holds the window - one read at a time, its text handed over on the window's
+	// thread. A look while a read is still going is left to the next one; a switch between the simple and the detailed log
+	// (a_restart) waits for that read and then reads the other log from its start. LogRead: the newest read, so what needs its
+	// text (First problem) can wait for it
+	Task _tailing = Task.CompletedTask;
+	public Task LogRead => _tailing;
+
+	void TailLog(bool a_restart = false)
 	{
-		var (text, reset) = _logTail.Read(_run == null ? null : LogFile(_run.Folder, DetailedLog));
+		if (!a_restart && !_tailing.IsCompleted) {
+			return;
+		}
+		_tailing = TailLogAfter(_tailing, _run == null ? null : LogFile(_run.Folder, DetailedLog), a_restart);
+	}
+
+	async Task TailLogAfter(Task a_before, string? a_file, bool a_restart)
+	{
+		await a_before;
+		var (text, reset) = await Task.Run(() => {
+			if (a_restart) {
+				_logTail.Restart();
+			}
+			return _logTail.Read(a_file);
+		});
 		if (reset) {
 			LogChanged?.Invoke("", true);
 		}
@@ -1724,12 +1745,27 @@ public sealed partial class MainViewModel : Observable
 	// so nothing lands in the folder being copied
 	public bool MovingData { get; set; }
 
+	// a setup is being copied: the data move waits for it, as for a setup's own save
+	public bool CopyingSetup { get; set; }
+
+	// a shared copy of a setup is being written into the data folder: the data move waits for it too
+	public bool SharingSetup { get; set; }
+
 	// why a setup may not be written or started at this moment (null: it may)
 	public string? WhyNotWriting(string a_done) => NotYetSaved(a_done);
 
 	// The write of a setup that is under way (finished when none is). A window that closes waits for it, and so does the
 	// program's end: a change the window took is in the file before the program is gone
 	public static Task PendingSetupSave { get; private set; } = Task.CompletedTask;
+
+	// A setup's text written to its file, with the data's write lock held: a move of the data folder by this or another copy
+	// of the program finishes first, and a write after it - into a folder that moved, or is gone - is refused, never made in
+	// the old place. Null when written; else why not
+	public static string? WriteSetup(string a_data, string a_file, string a_text, string a_copies)
+	{
+		using var writes = DataFolder.HoldWrites();
+		return DataFolder.WhyNotWritable(a_data) ?? Setup.WriteKeepingACopy(a_file, a_text, a_copies);
+	}
 
 	// The setup shown, written to its file - away from the window's own thread, where the copy into "Setup backups", the
 	// tidying of older copies and the write itself held up every click on a slow disk. Its text is made here (memory
@@ -1755,7 +1791,10 @@ public sealed partial class MainViewModel : Observable
 		Saving = true;
 		string? why;
 		try {
-			var write = Task.Run(() => Setup.WriteKeepingACopy(file, text, copies));
+			// (with the data's write lock: a move of the data folder by this or another copy of the program finishes first, and a
+			// save after it would land in a folder that is no longer the data's)
+			var data = AppPaths.Data;
+			var write = Task.Run(() => WriteSetup(data, file, text, copies));
 			PendingSetupSave = write;
 			why = await write;
 		} finally {

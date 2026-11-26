@@ -164,6 +164,18 @@ public static partial class Files
 		}
 	}
 
+	// the first a_count bytes as text when they are valid UTF-8 (a_text is "" when they are not)
+	public static bool TryStrictUtf8(byte[] a_bytes, int a_count, out string a_text)
+	{
+		try {
+			a_text = StrictUtf8.GetString(a_bytes, 0, a_count);
+			return true;
+		} catch (DecoderFallbackException) {
+			a_text = "";
+			return false;
+		}
+	}
+
 	// a text's bytes for a file, with the mark its encoding writes (UTF-16 and UTF-8-with-mark files keep theirs)
 	public static byte[] EncodeText(string a_text, Encoding a_encoding) => [.. a_encoding.GetPreamble(), .. a_encoding.GetBytes(a_text)];
 
@@ -370,6 +382,40 @@ public static partial class Files
 	[return: MarshalAs(UnmanagedType.Bool)]
 	private static partial bool CloseHandle(nint a_handle);
 
+	[DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
+	static extern uint GetFinalPathNameByHandle(nint a_handle, [Out] char[] a_path, uint a_length, uint a_flags);
+
+	// Where a folder that is there really is, as Windows itself names it: a junction, a link, a SUBST drive letter or a mapped
+	// network drive followed to the folder behind it (a network folder as \\server\share\...). Null when Windows will not say
+	public static string? FinalPath(string a_dir)
+	{
+		const uint ReadAttributes = 0x80, ShareAll = 7, OpenExisting = 3, BackupSemantics = 0x02000000;
+		var h = CreateFile(Path.GetFullPath(a_dir), ReadAttributes, ShareAll, 0, OpenExisting, BackupSemantics, 0);
+		if (h == -1) {
+			return null;
+		}
+		try {
+			var name = new char[1024];
+			var n = GetFinalPathNameByHandle(h, name, (uint)name.Length, 0);
+			// (too small: Windows says how much it needs, and it is asked once more with that)
+			if (n >= name.Length) {
+				name = new char[n + 1];
+				n = GetFinalPathNameByHandle(h, name, (uint)name.Length, 0);
+			}
+			if (n == 0 || n >= name.Length) {
+				return null;
+			}
+			return PlainFinalName(new string(name, 0, (int)n));
+		} finally {
+			CloseHandle(h);
+		}
+	}
+
+	// Windows' final name of a folder as a plain path: "\\?\C:\x" is C:\x, a share's "\\?\UNC\server\share\x" is
+	// \\server\share\x
+	public static string PlainFinalName(string a_name) =>
+		a_name.StartsWith(@"\\?\UNC\", StringComparison.Ordinal) ? @"\\" + a_name[8..] : a_name.StartsWith(@"\\?\", StringComparison.Ordinal) ? a_name[4..] : a_name;
+
 	// the volume a folder is really on (a junction is followed to where it leads); null when Windows will not say
 	static uint? VolumeOf(string a_dir)
 	{
@@ -494,21 +540,24 @@ public sealed class GrowingText
 	public string Read(string a_path)
 	{
 		using var fs = new FileStream(a_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-		var head = new byte[(int)Math.Min(HeadSize, fs.Length)];
+		// its length read once: the file may shrink while it is looked at, and a second reading must never undercut the first
+		var length = fs.Length;
+		var head = new byte[(int)Math.Min(HeadSize, length)];
 		var headGot = fs.ReadAtLeast(head, head.Length, false);
 		var same = Math.Min(headGot, _head.Length);
 		// (two bytes a letter: a line's end found byte by byte would cut a letter in two - such a file is read whole each time)
-		var whole = Wide(_how) || _pos == 0 || !string.Equals(a_path, _path, StringComparison.OrdinalIgnoreCase) || fs.Length < _pos || same < _head.Length ||
+		var whole = Wide(_how) || _pos == 0 || !string.Equals(a_path, _path, StringComparison.OrdinalIgnoreCase) || length < _pos || same < _head.Length ||
 			!head.AsSpan(0, same).SequenceEqual(_head.AsSpan(0, same));
 		if (!whole) {
 			fs.Position = _pos;
-			var added = new byte[fs.Length - _pos];
+			var added = new byte[length - _pos];
 			var read = fs.ReadAtLeast(added, added.Length, false);
 			var end = LineEnd(added, read);
 			// New lines that are no UTF-8, in a file whose lines so far (plain letters only) had passed for it: the file is in
 			// the PC's own code page, and is read from its start again as that
-			if (_how.CodePage != Utf8 || IsUtf8(added[..end])) {
-				(Added, Unfinished, Restarted) = (_how.GetString(added, 0, end), end == read ? "" : _how.GetString(added, end, read - end), false);
+			string? lines = null;
+			if (_how.CodePage != Utf8 || Files.TryStrictUtf8(added, end, out lines)) {
+				(Added, Unfinished, Restarted) = (lines ?? _how.GetString(added, 0, end), end == read ? "" : _how.GetString(added, end, read - end), false);
 				_pos += end;
 				// (a file that was shorter than the head kept of it has grown past it: the head is filled up, so a replaced file is told)
 				if (_head.Length < HeadSize) {
@@ -524,19 +573,20 @@ public sealed class GrowingText
 		fs.Position = 0;
 		var all = new byte[fs.Length];
 		var got = fs.ReadAtLeast(all, all.Length, false);
-		var text = Files.DecodeText(all[..got], out var how);
-		var cut = Wide(how) ? 0 : LineEnd(all, got);
+		// (two bytes a letter, told by its mark: a line's end found byte by byte would cut a letter in two)
+		var cut = Files.HasMark(all) && all[0] != 0xEF ? 0 : LineEnd(all, got);
 		_path = a_path;
 		_head = all[..Math.Min(HeadSize, got)];
 		_pos = cut;
 		Restarted = true;
 		if (cut == 0) {
 			// no whole line yet, or two bytes a letter: nothing is kept, and the next look reads all of it again
-			_how = how;
 			_lines = "";
-			(Added, Unfinished) = Wide(how) ? (text, "") : ("", text);
+			var text = Files.DecodeText(all[..got], out _how);
+			(Added, Unfinished) = Wide(_how) ? (text, "") : ("", text);
 			return text;
 		}
+		// each part decoded once: the whole lines, which alone tell how the file is written, then what follows them
 		var lines = Files.DecodeText(all[..cut], out _how);
 		(Added, Unfinished) = (lines, cut == got ? "" : _how.GetString(all, cut, got - cut));
 		if (!KeepAll) {
@@ -551,10 +601,4 @@ public sealed class GrowingText
 
 	// where the last whole line ends (0: there is none)
 	static int LineEnd(byte[] a_bytes, int a_count) => a_count == 0 ? 0 : Array.LastIndexOf(a_bytes, (byte)'\n', a_count - 1) + 1;
-
-	static bool IsUtf8(byte[] a_bytes)
-	{
-		Files.DecodeText(a_bytes, out var how);
-		return how.CodePage == Utf8;
-	}
 }

@@ -29,10 +29,14 @@ public static class Plugins
 		var head = new byte[24];
 		// one Read may stop short of what was asked (a network drive): read until the header is whole or the file ends
 		var got = fs.ReadAtLeast(head, 24, false);
+		var name = Path.GetFileName(a_path);
 		if (got < 4 || Encoding.ASCII.GetString(head, 0, 4) != "TES4") {
+			// (one to three bytes that are how a plugin begins: a plugin cut short, not a file that is none)
+			if (got is > 0 and < 4 && "TES4"u8[..got].SequenceEqual(head.AsSpan(0, got))) {
+				throw new EndOfStreamException($"{name} ends inside its header");
+			}
 			return outList;
 		}
-		var name = Path.GetFileName(a_path);
 		if (got < 24) {
 			throw new EndOfStreamException($"{name} ends inside its header");
 		}
@@ -48,7 +52,8 @@ public static class Plugins
 		}
 		// a field over 65,535 bytes long (the list of overridden records in a big master) has its length in an XXXX field before it
 		uint big = 0;
-		for (var i = 0; i + 6 <= data.Length;) {
+		var i = 0;
+		while (i + 6 <= data.Length) {
 			var type = Encoding.ASCII.GetString(data, i, 4);
 			long len = big != 0 ? big : BitConverter.ToUInt16(data, i + 4);
 			big = 0;
@@ -63,6 +68,9 @@ public static class Plugins
 				outList.Add(Encoding.Latin1.GetString(z >= 0 ? body[..z] : body));
 			}
 			i += 6 + (int)len;
+		}
+		if (i != data.Length || big != 0) {
+			throw new IOException($"{name}'s header does not add up (bytes left after its last field)");
 		}
 		return outList;
 	}

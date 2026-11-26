@@ -100,12 +100,26 @@ public partial class MainWindow
 			_vm.Say(_vm.WhyNotWriting("copied")!, "bad");
 			return;
 		}
+		// the name offered first is looked for on the disk too (a free "(copy n)"): on a worker, as every check of the name is
+		_copying = true;
+		string offered;
+		try {
+			offered = await Task.Run(() => SetupFiles.FreeCopyName(item.File));
+		} finally {
+			_copying = false;
+		}
 		var name = Ask.Input(this, "Copy this setup", WindowWords.F($"A new setup with the steps and settings of \"{item.Name}\", and the settings its tools learned. Nothing of \"{item.Name}\" changes. The copy's name:"),
-			SetupFiles.FreeCopyName(item.File), "Make the copy", n => SetupFiles.BadName(AppPaths.Setups, n));
+			offered, "Make the copy", n => SetupFiles.BadName(AppPaths.Setups, n));
 		if (name == null) {
 			return;
 		}
+		// (a data move may have begun while the name was typed: the copy never runs beside it)
+		if (_vm.MovingData) {
+			_vm.Say(_vm.WhyNotWriting("copied")!, "bad");
+			return;
+		}
 		_copying = true;
+		_vm.CopyingSetup = true;
 		// the window's own work: closing waits for it, so a copy is never cut off half made
 		using var hold = _vm.Working(WindowWords.Word("a setup is being copied"));
 		try {
@@ -121,6 +135,7 @@ public partial class MainWindow
 			_vm.Say("The copy could not be made: " + e.Message, "bad");
 		} finally {
 			_copying = false;
+			_vm.CopyingSetup = false;
 		}
 	}
 

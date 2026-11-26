@@ -61,6 +61,11 @@ public static class QueueDialog
 
 		var rows = a_setups.Select(MakeRow).ToList();
 		var list = new ListBox { MinHeight = 120, AllowDrop = true };
+		// each row's container carries the setup's name: a screen reader reads the container, not the panel inside it
+		var rowName = new Style(typeof(ListBoxItem), Application.Current?.TryFindResource(typeof(ListBoxItem)) as Style);
+		rowName.Setters.Add(new Setter(System.Windows.Automation.AutomationProperties.NameProperty, new System.Windows.Data.Binding {
+			RelativeSource = System.Windows.Data.RelativeSource.Self, Path = new PropertyPath("Content.(0)", System.Windows.Automation.AutomationProperties.NameProperty) }));
+		list.ItemContainerStyle = rowName;
 		// a click on a tick box is the box's own, so its row would stay unselected: the row follows the box's focus
 		foreach (var r in rows) {
 			r.Box.GotKeyboardFocus += (_, _) => list.SelectedItem = r.Item;

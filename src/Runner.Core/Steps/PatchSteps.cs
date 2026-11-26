@@ -36,6 +36,9 @@ public abstract class LauncherStep : IStep
 	// (the game's folder too: renamed, the tool would read its own new key and build for a game folder it was given before)
 	static readonly string[] Pointing = ["Mo2InstancePath", "Mo2ProfileName", "GameLocation", "OutputLocation"];
 
+	// and the field that tells it which mod manager the mods are in (PointedAt writes it as Mod Organizer's every run)
+	const string Manager = "ModManager";
+
 	// the first of those fields a settings file the tool already wrote does not hold (null: all there, or no file yet - a new
 	// one gets them all). A file that holds no object, or an empty one, holds none of them
 	public static string? MissingField(string? a_settings)
@@ -47,7 +50,7 @@ public abstract class LauncherStep : IStep
 			return Pointing[0];
 		}
 		var held = JsonNode.Parse(a_settings, documentOptions: JsonRead.Plain) as JsonObject;
-		return held == null ? Pointing[0] : Pointing.FirstOrDefault(k => !held.ContainsKey(k));
+		return held == null ? Pointing[0] : Pointing.Append(Manager).FirstOrDefault(k => !held.ContainsKey(k));
 	}
 
 	// What stops the step in the tool's settings file before anything of it changes (null: nothing - no file yet is fine, a new
@@ -64,7 +67,8 @@ public abstract class LauncherStep : IStep
 		} catch (JsonException) {
 			return $"{a_name}'s settings file does not read as settings - nothing was changed and {a_name} was not started." + OursToFix(a_name);
 		}
-		return gone == null ? null : $"{a_name}'s settings file no longer holds \"{gone}\", which Tool Runner sets to point it at this profile and this output - nothing was changed and {a_name} was not started." + OursToFix(a_name);
+		var why = gone == Manager ? "tell it the mods are in Mod Organizer" : "point it at this profile and this output";
+		return gone == null ? null : $"{a_name}'s settings file no longer holds \"{gone}\", which Tool Runner sets to {why} - nothing was changed and {a_name} was not started." + OursToFix(a_name);
 	}
 
 	// the tool's settings file still holds every field this program points: looked at before anything of the step is changed

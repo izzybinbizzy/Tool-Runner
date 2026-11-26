@@ -226,10 +226,12 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 		try {
 			ListMod(a_mod, a_log);
 		} catch (Exception e) when (made && e is IOException or UnauthorizedAccessException or InvalidOperationException) {
-			// its line could not be written (Mod Organizer open, a name the list cannot hold): the folder made a moment ago goes
-			// again - left there, it was an empty mod nothing had on record
+			// its line could not be written (Mod Organizer open, a name the list cannot hold): what this call made a moment ago goes
+			// again - left there, it was an empty mod nothing had on record. Only its own meta.ini, then the folder only while it is
+			// empty: whatever another program put there meanwhile stays
 			try {
-				Files.DeleteDir(d);
+				File.Delete(Path.Combine(d, "meta.ini"));
+				Directory.Delete(d, false);
 			} catch (Exception again) when (again is IOException or UnauthorizedAccessException) {
 			}
 			throw;

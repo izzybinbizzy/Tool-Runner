@@ -440,8 +440,19 @@ public static class SettingsPanel
 				a_vm.Say($"Not shared: these are the settings of \"{openedName}\", and \"{current.Name}\" is picked in the main window now. Pick \"{openedName}\" again to share it.", "bad");
 				return;
 			}
+			// (it writes into the data folder: never while that folder is being moved, and one at a time - a Settings drawn
+			// again while one writes has a Share button of its own)
+			if (a_vm.MovingData) {
+				a_vm.Say(a_vm.WhyNotWriting("shared")!, "bad");
+				return;
+			}
+			if (a_vm.SharingSetup) {
+				a_vm.Say("A shared copy is still being written - share again when it is done.", "bad");
+				return;
+			}
 			// the setup as it is this moment, written off the window's thread; one share at a time
 			share.IsEnabled = false;
+			a_vm.SharingSetup = true;
 			var text = System.Text.Encoding.UTF8.GetBytes(current.Root.ToJsonString());
 			var source = current.File;
 			try {
@@ -456,19 +467,22 @@ public static class SettingsPanel
 				a_vm.Say("The shared copy could not be made: " + e.Message, "bad");
 			} finally {
 				share.IsEnabled = true;
+				a_vm.SharingSetup = false;
 			}
 		};
 		stack.Children.Add(share);
 		var mo2 = work["mo2"] as JsonObject ?? (JsonObject)(work["mo2"] = new JsonObject());
-		Field(stack, apply, "MO2 program (ModOrganizer.exe)", mo2, "exe");
-		Field(stack, apply, "MO2 instance folder", mo2, "instance");
-		Field(stack, apply, "MO2 profile", mo2, "profile");
+		var mo2Boxes = new[] {
+			Field(stack, apply, "MO2 program (ModOrganizer.exe)", mo2, "exe"),
+			Field(stack, apply, "MO2 instance folder", mo2, "instance"),
+			Field(stack, apply, "MO2 profile", mo2, "profile"),
+		}.OfType<TextBox>().ToArray();
 		Field(stack, apply, "Backups folder", work, "backups");
 		Field(stack, apply, "Scratch folder (emptied after a run)", work, "scratch");
 		Field(stack, apply, "SKSE log folder (empty = My Games)", work, "skseLogs");
 		stack = gamePage;
 		// the character whose saves the game steps load, picked from the characters of the profile's saves (read off the window's thread)
-		CharacterChoice(stack, apply, work, a_vm.Setup!);
+		CharacterChoice(stack, apply, work, a_vm.Setup!, mo2Boxes);
 		// ---- Game steps (the rest of that page)
 		work["quietGame"] ??= false;
 		Field(gamePage, apply, "Run game steps in a small, muted window (your game settings are put back after)", work, "quietGame", JsonValueKind.True);
@@ -859,10 +873,15 @@ public static class SettingsPanel
 			using var hand = a_w.Working(WindowWords.Word("your tools are being tested"));
 			try {
 				var results = await Task.Run(() => ToolProof.TestAll(testSetup, RunLog.Null, stop.Token));
-				// (into the drawing on screen now: Settings may have been drawn again since the test began)
-				foreach (var r in results) {
-					s_testRows?.Children.Add(new TextBlock { Text = r.Text, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 2) }
-						.Live(TextBlock.ForegroundProperty, r.Good ? "Text" : "Bad"));
+				// (into the drawing on screen now: Settings may have been drawn again since the test began, or closed - then the
+				// results are said where the window says its messages)
+				if (s_testRows is { } rows) {
+					foreach (var r in results) {
+						rows.Children.Add(new TextBlock { Text = r.Text, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 2) }
+							.Live(TextBlock.ForegroundProperty, r.Good ? "Text" : "Bad"));
+					}
+				} else {
+					a_vm.Say("The test of your tools: " + string.Join(" | ", results.Select(r => r.Text)), results.All(r => r.Good) ? "good" : "bad");
 				}
 			} catch (OperationCanceledException) {
 				a_vm.Say("The test of your tools was stopped; the tool it had opened is closed again.", "warn");
@@ -1285,6 +1304,8 @@ public static class SettingsPanel
 		s_find = null;
 		s_cats = null;
 		s_errors = null;
+		s_showTest = null;
+		s_testRows = null;
 		s_pick = null;
 		s_steps = null;
 		s_showTest = null;
@@ -1351,7 +1372,8 @@ public static class SettingsPanel
 			(others.Count == 0 ? "" : " " + WindowWords.Format("Also in the settings of: {0} (pick it on the Steps page).", string.Join(", ", others)));
 	}
 
-	// the steps (all but a_skip) whose settings hold a_q - in a setting's name, its label or its value
+	// the steps (all but a_skip) whose settings hold a_q - in a setting's name, its label (in English and as the step editor
+	// shows it, in the window's language) or its value
 	public static List<string> StepsWith(IReadOnlyList<JsonObject> a_steps, string a_q, int a_skip)
 	{
 		bool Has(string? a_t) => (a_t ?? "").Contains(a_q, StringComparison.OrdinalIgnoreCase);
@@ -1452,12 +1474,17 @@ public static class SettingsPanel
 	// the program closes after, and starts again on the new folder
 	static async Task MoveDataToAppData(MainWindow a_w, MainViewModel a_vm, TextBlock a_errors)
 	{
+		// (a Settings drawn again while the data moves has a button of its own: one move at a time, refused before anything changes)
+		if (a_vm.MovingData) {
+			a_errors.Text = "Not moved: the program's data is already being moved.";
+			return;
+		}
 		if (HasChanges && !Ask.Show(a_w, "Settings not saved", "You changed settings and did not press Save. Go on without saving them?", "Go on", "Keep editing")) {
 			return;
 		}
 		var to = AppPaths.AppDataFolder;
 		if (!Ask.Show(a_w, "Keep data through updates", WindowWords.F($"Tool Runner's data (your setups, the run history, the settings learned from your tools) moves from\n{AppPaths.Data}\nto\n{to}") + "\n\n" +
-			    WindowWords.Word("Every copy of Tool Runner on this PC then uses it, also a new version unzipped into another folder. Run backups stay where your setups put them.") + "\n\n" +
+			    WindowWords.Word("Every copy of Tool Runner on this PC then uses it, also a new version unzipped into another folder. Run backups kept outside that folder stay where they are; backups kept inside it move with the data.") + "\n\n" +
 			    WindowWords.Word("Tool Runner closes when the move is done; start it again."), "Move my data", "Not now")) {
 			return;
 		}
@@ -1466,15 +1493,21 @@ public static class SettingsPanel
 		a_vm.MovingData = true;
 		string? leftOver;
 		try {
-			while (!MainViewModel.PendingSetupSave.IsCompleted || a_vm.Saving) {
+			// (a setup copy or rename under way finishes first: it reads and writes in the folder being moved)
+			while (!MainViewModel.PendingSetupSave.IsCompleted || a_vm.Saving || a_vm.CopyingSetup || a_vm.Renaming || a_vm.SharingSetup) {
 				try {
 					await MainViewModel.PendingSetupSave.ConfigureAwait(true);
 				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) {
 				}
-				await Task.Yield();
+				await Task.Delay(50).ConfigureAwait(true);
 			}
+			// (Windows refuses to move or remove a folder while a folder inside it is watched: the window's watch of the runs
+			// folder lets go first, and comes back if the move is refused)
+			a_w.WatchRuns(false);
 			leftOver = await Task.Run(() => {
 				using var hold = Runner.HoldIfFree() ?? throw new InvalidOperationException("a run is going - move the data when it has ended");
+				// (a setup save of any copy of the program waits for the move, and finds the data moved when it goes on)
+				using var writes = DataFolder.HoldWrites();
 				string? left = null;
 				// what the window keeps goes along (its sizes and flags), and what it writes from here on goes to the new place
 				UiState.MoveWith(() => left = DataFolder.MoveTo(AppPaths.Data, to), to);
@@ -1482,6 +1515,7 @@ public static class SettingsPanel
 			});
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) {
 			a_vm.MovingData = false;
+			a_w.WatchRuns(true);
 			a_errors.Text = "Not moved: " + e.Message;
 			return;
 		}
@@ -1543,7 +1577,7 @@ public static class SettingsPanel
 
 	// one setting: its editor by its kind; the returned function writes it back (or says what is wrong)
 	// a_onUnlessSet: a switch the setup does not hold yet shows on (its default), so saving the page keeps it what it was
-	static void Field(Panel a_host, List<Func<string?>> a_apply, string a_label, JsonObject a_obj, string a_key, JsonValueKind a_kind = JsonValueKind.String, bool a_onUnlessSet = false,
+	static FrameworkElement Field(Panel a_host, List<Func<string?>> a_apply, string a_label, JsonObject a_obj, string a_key, JsonValueKind a_kind = JsonValueKind.String, bool a_onUnlessSet = false,
 		string? a_step = null)
 	{
 		var row = new Grid { Margin = new Thickness(0, 0, 0, 10) };
@@ -1646,7 +1680,11 @@ public static class SettingsPanel
 					var now = pathBox.Text.Trim();
 					// (a folder on a network share that is gone can take a while to answer: never on the window's thread)
 					var start = await Task.Run(() => StartFolder(pick, now));
-					if (Browse(Window.GetWindow(browse), pick, start, WindowWords.Word(a_label)) is { } chosen) {
+					// (Settings may have closed while a slow folder answered: no picker opens over a window that is gone)
+					if (!browse.IsLoaded || !browse.IsVisible || Window.GetWindow(browse) is not { IsVisible: true } owner) {
+						return;
+					}
+					if (Browse(owner, pick, start, WindowWords.Word(a_label)) is { } chosen) {
 						pathBox.Text = chosen;
 					}
 				} finally {
@@ -1662,6 +1700,7 @@ public static class SettingsPanel
 		Grid.SetColumn(shown, 1);
 		row.Children.Add(shown);
 		a_host.Children.Add(row);
+		return edit;
 	}
 
 	// A path as it was typed or pasted: the blanks round it taken off, and the quotes Explorer's "Copy as path" puts round it
@@ -1718,7 +1757,9 @@ public static class SettingsPanel
 	// found in the profile's saves, most recently played first; a name the setup holds that no save carries stays in it, marked
 	const string AnyCharacter = "Most recent save (any character)";
 
-	static void CharacterChoice(Panel a_host, List<Func<string?>> a_apply, JsonObject a_obj, Setup a_setup)
+	// a_mo2: the Setup page's Mod Organizer program, instance and profile boxes - the list is of the profile typed there, read
+	// again a moment after any of them changes
+	static void CharacterChoice(Panel a_host, List<Func<string?>> a_apply, JsonObject a_obj, Setup a_setup, TextBox[] a_mo2)
 	{
 		const string label = "Character to load";
 		var row = new Grid { Margin = new Thickness(0, 0, 0, 10) };
@@ -1754,32 +1795,84 @@ public static class SettingsPanel
 		Grid.SetColumn(box, 1);
 		row.Children.Add(box);
 		a_host.Children.Add(row);
-		_ = Task.Run(() => {
-			try {
-				var mo2 = Mo2Instance.Load(a_setup.Mo2Exe, a_setup.Mo2Instance);
-				return SaveHeader.Characters(InGame.SavesDir(new Profile(mo2, a_setup.Profile, () => false)));
-			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) {
-				return new List<string>();
-			}
-		}).ContinueWith(t => box.Dispatcher.BeginInvoke(() => {
-			if (!t.IsCompletedSuccessfully) {
-				return;
-			}
-			// the player may have picked meanwhile: that pick stays picked
-			var picked = box.SelectedIndex > 0 ? box.SelectedItem as string : null;
-			var found = t.Result;
-			var list = new List<string> { WindowWords.Word(AnyCharacter) };
-			list.AddRange(found);
-			if (current != null && !found.Contains(current, StringComparer.OrdinalIgnoreCase)) {
-				list.Add(current + NoSaves);
-			}
-			filling = true;
-			box.ItemsSource = list;
-			var at = picked == null ? 0 : list.FindIndex(n => string.Equals(Bare(n), Bare(picked), StringComparison.OrdinalIgnoreCase));
-			static string Bare(string a_entry) => a_entry.EndsWith(NoSaves, StringComparison.Ordinal) ? a_entry[..^NoSaves.Length] : a_entry;
-			box.SelectedIndex = Math.Max(0, at);
-			filling = false;
-		}), TaskScheduler.Default);
+		// the Mod Organizer values as typed now (the setup's own where its box is not there)
+		(string Exe, string? Instance, string Profile) Typed() => a_mo2.Length == 3 ?
+			(a_mo2[0].Text.Trim(), a_mo2[1].Text.Trim() is { Length: > 0 } i ? i : null, a_mo2[2].Text.Trim()) :
+			(a_setup.Mo2Exe, a_setup.Mo2Instance, a_setup.Profile);
+		var asked = 0;
+		var first = Typed();
+		void Read()
+		{
+			var look = ++asked;
+			var values = Typed();
+			_ = Task.Run(() => {
+				try {
+					var mo2 = Mo2Instance.Load(values.Exe, values.Instance);
+					return SaveHeader.Characters(InGame.SavesDir(new Profile(mo2, values.Profile, () => false)));
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) {
+					return new List<string>();
+				}
+			}).ContinueWith(t => box.Dispatcher.BeginInvoke(() => {
+				// a later look, or values typed since, make this answer out of date
+				if (!t.IsCompletedSuccessfully || look != asked || Typed() != values) {
+					return;
+				}
+				// the player may have picked meanwhile: that pick stays picked while this profile has it
+				var picked = box.SelectedIndex > 0 ? box.SelectedItem as string : null;
+				var found = t.Result;
+				var list = new List<string> { WindowWords.Word(AnyCharacter) };
+				list.AddRange(found);
+				// the setup's own character, not found in its own profile's saves, is shown as such; under another profile only
+				// the characters of that profile are offered
+				var sameProfile = values == first;
+				if (sameProfile && current != null && !found.Contains(current, StringComparer.OrdinalIgnoreCase)) {
+					list.Add(current + NoSaves);
+				}
+				var wasFilling = filling;
+				filling = true;
+				box.ItemsSource = list;
+				var at = picked == null ? 0 : list.FindIndex(n => string.Equals(Bare(n), Bare(picked), StringComparison.OrdinalIgnoreCase));
+				static string Bare(string a_entry) => a_entry.EndsWith(NoSaves, StringComparison.Ordinal) ? a_entry[..^NoSaves.Length] : a_entry;
+				box.SelectedIndex = Math.Max(0, at);
+				filling = wasFilling;
+				// a pick that this profile does not have went back to any character: that is a change to save
+				if (picked != null && at < 0) {
+					Changed();
+				}
+			}), TaskScheduler.Default);
+		}
+		Read();
+		// a change of Mod Organizer, its instance or its profile reads the saves again, once the typing has paused
+		var pause = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
+		pause.Tick += (_, _) => {
+			pause.Stop();
+			Read();
+		};
+		// the values the list stands for: an edit that leaves them as they were (a space typed at an end) changes nothing
+		var shownFor = first;
+		foreach (var b in a_mo2) {
+			b.TextChanged += (_, _) => {
+				if (Typed() == shownFor) {
+					return;
+				}
+				shownFor = Typed();
+				// a character picked from the saves of the values before is no pick for these: back to any character at once,
+				// so a Save pressed before the new list is read never writes one profile's character for another
+				// and the list holds only that until the new one is read: no character of the old profile can be picked again
+				var wasPicked = box.SelectedIndex > 0;
+				var wasFilling = filling;
+				filling = true;
+				box.ItemsSource = new List<string> { WindowWords.Word(AnyCharacter) };
+				box.SelectedIndex = 0;
+				filling = wasFilling;
+				if (wasPicked) {
+					Changed();
+				}
+				pause.Stop();
+				pause.Start();
+			};
+		}
+		box.Unloaded += (_, _) => pause.Stop();
 	}
 
 	static string NoSaves => " (" + WindowWords.Word("no saves in this profile") + ")";

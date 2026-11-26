@@ -350,13 +350,13 @@ public sealed class Journal
 	// Every run record, each read once, and the first that cannot be read with why (null: every one reads). What deletes on the
 	// strength of the records - removing the program's data, pruning old backups - judges by this one read alone: a record
 	// passed over by All may be a run that still needs its profile put back or its backup for an undo, and a second read of
-	// the same record need not come out as the first did.
+	// the same record need not come out as the first did. The first record that does not read ends the look: whatever deletes
+	// refuses on it, and each record after it would cost its own second of tries.
 	public static (List<Journal> Runs, (string Folder, Exception Why)? Bad) AllOrUnreadable(string a_runsDir)
 	{
 		var runs = new List<Journal>();
-		(string Folder, Exception Why)? bad = null;
 		if (!Directory.Exists(a_runsDir)) {
-			return (runs, bad);
+			return (runs, null);
 		}
 		foreach (var d in Directory.GetDirectories(a_runsDir).OrderDescending(StringComparer.Ordinal)) {
 			try {
@@ -364,10 +364,10 @@ public sealed class Journal
 					runs.Add(LoadPatiently(d));
 				}
 			} catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException or InvalidDataException) {
-				bad ??= (d, e);
+				return (runs, (d, e));
 			}
 		}
-		return (runs, bad);
+		return (runs, null);
 	}
 
 	// by its name in the folder's own list: a record this user may not read is still there (File.Exists says "no" for that

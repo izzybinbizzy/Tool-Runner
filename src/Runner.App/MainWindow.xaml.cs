@@ -778,12 +778,13 @@ public partial class MainWindow : Window
 			var end = at < 0 ? -1 : box.Text.IndexOf('\n', at);
 			Reveal(at, at < 0 ? 0 : (end < 0 ? box.Text.Length : end) - at, WindowWords.Word("No line of this log is marked as a problem."));
 		}
-		problem.Click += (_, _) => {
+		problem.Click += async (_, _) => {
 			// the simple log marks no line (only the detailed one says "!" and "!!!"): the detailed log is shown first, and the
-			// search runs once its text is in
+			// search runs once its text is in the box (it is read on a worker)
 			if (!_vm.DetailedLog) {
 				_vm.DetailedLog = true;
-				Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, ShowFirstProblem);
+				await _vm.LogRead;
+				await Dispatcher.InvokeAsync(ShowFirstProblem, System.Windows.Threading.DispatcherPriority.Background);
 				return;
 			}
 			ShowFirstProblem();
@@ -1667,13 +1668,30 @@ public static class Ask
 		var why = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0), Foreground = Brushes2.Get("Bad") };
 		var yes = new Button { Content = a_yes, Style = (Style)a_owner.FindResource("Primary"), Margin = new Thickness(0, 0, 10, 0), IsDefault = true };
 		var no = new Button { Content = "Cancel", Style = (Style)a_owner.FindResource("Ghost"), IsCancel = true };
-		void Judge() => why.Text = a_bad(box.Text) ?? "";
-		box.TextChanged += (_, _) => Judge();
-		yes.Click += (_, _) => {
-			Judge();
-			if (why.Text == "") {
-				result = box.Text.Trim();
-				w.Close();
+		// The check looks at the disk (a setup of that name there already): never on the window's thread, where a slow folder
+		// would hold the box at every letter typed. Only the newest look's answer is shown; the button looks once more itself
+		var looks = 0;
+		async Task<string> Judge()
+		{
+			var look = ++looks;
+			var text = box.Text;
+			var said = await Task.Run(() => a_bad(text)) ?? "";
+			if (look == looks) {
+				why.Text = said;
+			}
+			return said;
+		}
+		box.TextChanged += async (_, _) => await Judge();
+		yes.Click += async (_, _) => {
+			yes.IsEnabled = false;
+			try {
+				var text = box.Text;
+				if (await Judge() == "" && box.Text == text && w.IsVisible) {
+					result = text.Trim();
+					w.Close();
+				}
+			} finally {
+				yes.IsEnabled = true;
 			}
 		};
 		var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 18, 0, 0) };
