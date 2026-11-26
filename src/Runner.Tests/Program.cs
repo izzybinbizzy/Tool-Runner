@@ -5985,6 +5985,40 @@ public static class Program
 			}
 			Check(File.Exists(Path.Combine(to15 + " (being copied)", "theirs.txt")) && !File.Exists(Path.Combine(to15 + " (being copied)", "Setups", "A.json")) &&
 				File.Exists(Path.Combine(from15, "Setups", "A.json")), "takes back only what it copied; another's file stays, and the data is where it was");
+			// another program's file at a data file's name, made the moment before that file is copied: the copy fails, and the
+			// file - never on the copy's list - stays
+			var from17 = Path.Combine(root, "beside 17", Brand.Name + " Data");
+			var to17 = Path.Combine(root, "appdata 17", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from17, "Setups"));
+			File.WriteAllText(Path.Combine(from17, "Setups", "B.json"), "{}");
+			DataFolder.BeforeCopy = a_target => File.WriteAllText(a_target, "theirs");
+			try {
+				Throws<IOException>(() => DataFolder.MoveTo(from17, to17), "a file put where a copy goes, the moment before");
+			} finally {
+				DataFolder.BeforeCopy = null;
+			}
+			Check(File.ReadAllText(Path.Combine(to17 + " (being copied)", "Setups", "B.json")) == "theirs", "that file stays as it was");
+			// a cut-off move whose last copy is not on its list yet (stopped between the copy and the list): that file stays, and
+			// the move waits for it - no file the list does not name is taken away
+			var from18 = Path.Combine(root, "beside 18", Brand.Name + " Data");
+			var to18 = Path.Combine(root, "appdata 18", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from18, "Setups"));
+			File.WriteAllText(Path.Combine(from18, "Setups", "C.json"), "{}");
+			Directory.CreateDirectory(Path.Combine(to18 + " (being copied)", "Setups"));
+			File.WriteAllText(Path.Combine(to18 + " (being copied)", ".renamed from.txt"), from18);
+			File.WriteAllText(Path.Combine(to18 + " (being copied)", ".copied.txt"), "");
+			File.WriteAllText(Path.Combine(to18 + " (being copied)", "Setups", "C.json"), "{}");
+			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from18, to18), "a cut-off copy holding a file its list does not name");
+			Check(File.Exists(Path.Combine(to18 + " (being copied)", "Setups", "C.json")), "that file stays");
+			// the save itself, after a move removed the old folder: refused, and the folder is not made again
+			var saveData = Path.Combine(root, "beside 19", Brand.Name + " Data");
+			var saveFile = Path.Combine(saveData, "Setups", "Saved.json");
+			Directory.CreateDirectory(Path.GetDirectoryName(saveFile)!);
+			Equal<string?>(null, ToolRunner.App.MainViewModel.WriteSetup(saveData, saveFile, "{ \"name\": \"Saved\" }", Path.Combine(saveData, "Setup backups")), "a save where the data is writes");
+			Check(File.ReadAllText(saveFile).Contains("Saved", StringComparison.Ordinal), "and the file holds it");
+			Directory.Delete(saveData, true);
+			Check(ToolRunner.App.MainViewModel.WriteSetup(saveData, saveFile, "{ \"name\": \"Saved\" }", Path.Combine(saveData, "Setup backups"))?.Contains("no longer in", StringComparison.Ordinal) == true &&
+				!Directory.Exists(saveData), "a save after the old folder is gone is refused and makes nothing again");
 			// ... and one cut off after its copy took its place: the copy goes, another's file in the new place stays
 			var from14 = Path.Combine(root, "beside 14", Brand.Name + " Data");
 			var to14 = Path.Combine(root, "appdata 14", Brand.Name);
