@@ -5950,6 +5950,7 @@ public static class Program
 			// (half of the data's own file, as a copy cut off in the middle of it leaves it)
 			Directory.CreateDirectory(Path.Combine(to2, "Setups"));
 			File.WriteAllText(Path.Combine(to2, "Setups", "Two.json"), "{ \"na");
+			File.WriteAllText(Path.Combine(to2, ".copied.txt"), "Setups\\Two.json\n");
 			Check(DataFolder.MoveTo(from2, to2) == null && File.ReadAllText(Path.Combine(to2, "Setups", "Two.json")).Contains("\"Two\"", StringComparison.Ordinal),
 				"a half copy of the same move is replaced by the whole one");
 			// a move that counted (the old folder's mark) is finished by the next start, whatever was left of it
@@ -5989,6 +5990,8 @@ public static class Program
 			File.WriteAllText(Path.Combine(to7 + " (being copied)", ".renamed from.txt"), from7);
 			Directory.CreateDirectory(Path.Combine(to7 + " (being copied)", "Setups"));
 			File.WriteAllText(Path.Combine(to7 + " (being copied)", "Setups", "Up.json"), "{ \"mo");
+			// (and its own list, which names each file before it is copied)
+			File.WriteAllText(Path.Combine(to7 + " (being copied)", ".copied.txt"), "Setups\\Up.json\n");
 			Check(DataFolder.MoveTo(from7, to7) == null && File.Exists(Path.Combine(to7, "Setups", "Up.json")) && !Directory.Exists(to7 + " (being copied)"),
 				"a copy left by a cut-off move is replaced, and the whole copy takes the new place's name");
 			Equal((from7 + "/../MO2").Replace("\\", "/", StringComparison.Ordinal),
@@ -6006,13 +6009,33 @@ public static class Program
 			var to13 = Path.Combine(root, "appdata 13", Brand.Name);
 			Directory.CreateDirectory(Path.Combine(from13, "Setups"));
 			File.WriteAllText(Path.Combine(from13, "Setups", "S.json"), "{}");
+			File.WriteAllText(Path.Combine(from13, "Setups", "T.json"), "{}");
 			Directory.CreateDirectory(Path.Combine(to13 + " (being copied)", "Setups"));
 			File.WriteAllText(Path.Combine(to13 + " (being copied)", ".renamed from.txt"), from13);
+			File.WriteAllText(Path.Combine(to13 + " (being copied)", ".copied.txt"), "Setups\\S.json\n");
 			File.WriteAllText(Path.Combine(to13 + " (being copied)", "Setups", "S.json"), "{}");
-			File.WriteAllText(Path.Combine(to13 + " (being copied)", "theirs.txt"), "x");
+			// (another program's file, where a data file not copied yet would have gone)
+			File.WriteAllText(Path.Combine(to13 + " (being copied)", "Setups", "T.json"), "theirs");
 			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from13, to13), "a staged copy that also holds another's file");
-			Check(File.Exists(Path.Combine(to13 + " (being copied)", "theirs.txt")) && !File.Exists(Path.Combine(to13 + " (being copied)", "Setups", "S.json")),
-				"its own copy is gone, the other file stays");
+			Check(File.ReadAllText(Path.Combine(to13 + " (being copied)", "Setups", "T.json")) == "theirs" && !File.Exists(Path.Combine(to13 + " (being copied)", "Setups", "S.json")),
+				"its own copy is gone; the other file stays, though a data file of that name was still to come");
+			// a move that fails while it copies: what it copied by its own list goes, a file another program put there stays
+			var from15 = Path.Combine(root, "beside 15", Brand.Name + " Data");
+			var to15 = Path.Combine(root, "appdata 15", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from15, "Setups"));
+			File.WriteAllText(Path.Combine(from15, "Setups", "A.json"), "{ \"a\": 1 }");
+			DataFolder.AfterCopy = a_staging => {
+				File.WriteAllText(Path.Combine(a_staging, "theirs.txt"), "x");
+				// (and a copy that will not read back whole: the move fails)
+				File.WriteAllText(Path.Combine(a_staging, "Setups", "A.json"), "{ \"a\": 2 }");
+			};
+			try {
+				Throws<IOException>(() => DataFolder.MoveTo(from15, to15), "a copy that does not read back whole");
+			} finally {
+				DataFolder.AfterCopy = null;
+			}
+			Check(File.Exists(Path.Combine(to15 + " (being copied)", "theirs.txt")) && !File.Exists(Path.Combine(to15 + " (being copied)", "Setups", "A.json")) &&
+				File.Exists(Path.Combine(from15, "Setups", "A.json")), "takes back only what it copied; another's file stays, and the data is where it was");
 			// ... and one cut off after its copy took its place: the copy goes, another's file in the new place stays
 			var from14 = Path.Combine(root, "beside 14", Brand.Name + " Data");
 			var to14 = Path.Combine(root, "appdata 14", Brand.Name);
@@ -6021,6 +6044,7 @@ public static class Program
 			Directory.CreateDirectory(Path.Combine(to14, "Setups"));
 			File.WriteAllText(Path.Combine(to14, ".renamed from.txt"), from14);
 			File.WriteAllText(Path.Combine(to14, "Setups", "S.json"), "{}");
+			File.WriteAllText(Path.Combine(to14, ".copied.txt"), "Setups\\S.json\n");
 			File.WriteAllText(Path.Combine(to14, "theirs.txt"), "x");
 			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from14, to14), "a published copy that also holds another's file");
 			Check(File.Exists(Path.Combine(to14, "theirs.txt")) && !File.Exists(Path.Combine(to14, "Setups", "S.json")) && File.Exists(Path.Combine(from14, "Setups", "S.json")),
@@ -6072,6 +6096,25 @@ public static class Program
 				Check(!second.Wait(300), "a second writer waits while the first holds the data");
 			}
 			Check(second.Wait(5000), "and goes on once the first lets go");
+			// a save that waited for a move finds where the data stands once it may write: a move that removed the old folder whole
+			// (its mark with it) leaves nothing to write into, and the save is refused rather than making the old folder again
+			var waitedData = Path.Combine(root, "beside 16", Brand.Name + " Data");
+			Directory.CreateDirectory(Path.Combine(waitedData, "Setups"));
+			Equal<string?>(null, DataFolder.WhyNotWritable(waitedData), "the data where it is may be written");
+			Task<string?> waitingSave;
+			using (DataFolder.HoldWrites()) {
+				waitingSave = Task.Run(() => {
+					using var h = DataFolder.HoldWrites();
+					return DataFolder.WhyNotWritable(waitedData);
+				});
+				Check(!waitingSave.Wait(300), "the save waits for the move");
+				Directory.Delete(waitedData, true);
+			}
+			Check(waitingSave.Wait(5000) && waitingSave.Result?.Contains("no longer in", StringComparison.Ordinal) == true && !Directory.Exists(waitedData),
+				"and, the old folder gone, is refused without making it again: " + waitingSave.Result);
+			Directory.CreateDirectory(waitedData);
+			File.WriteAllText(Path.Combine(waitedData, DataFolder.MovedMark), to);
+			Check(DataFolder.WhyNotWritable(waitedData)?.Contains("has moved to", StringComparison.Ordinal) == true, "a folder that still holds the move mark is refused too, naming where the data went");
 			// a setup written by hand (a comment, a comma after its last value, a path with forward slashes) is repointed too
 			var from5 = Path.Combine(root, "beside 5", Brand.Name + " Data");
 			var to5 = Path.Combine(root, "appdata 5", Brand.Name);

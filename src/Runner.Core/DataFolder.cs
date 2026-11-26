@@ -206,7 +206,7 @@ public static class DataFolder
 		// a copy of this very move that was cut off before it counted holds nothing of the player's: it is made again
 		if (HasData(to) && !Chosen(to) && File.Exists(Path.Combine(to, Pending)) && Files.SamePath(File.ReadAllText(Path.Combine(to, Pending)).Trim(), from)) {
 			// (only the copy: a file another program put there since stays, and then the folder holds files and is refused below)
-			RemoveLeftCopy(to, from);
+			RemoveLeftCopy(to);
 		}
 		if (HasData(to)) {
 			throw new InvalidOperationException($"{to} holds files already - move them away, then try again");
@@ -230,19 +230,22 @@ public static class DataFolder
 			if (Files.IsLink(staging) || !LeftByThisMove(staging, from)) {
 				throw new InvalidOperationException($"{staging} is in the way - move it away, then try again");
 			}
-			if (!RemoveLeftCopy(staging, from)) {
+			if (!RemoveLeftCopy(staging)) {
 				throw new InvalidOperationException($"{staging} holds files that are not part of the data - move them away, then try again");
 			}
 		}
 		[System.Diagnostics.CodeAnalysis.DoesNotReturn]
 		void TakeBack(string a_copy, Exception a_why, string a_what)
 		{
+			// (only what this move copied, by its own list: a file another program put there meanwhile stays)
+			bool whole;
 			try {
-				Files.DeleteDir(a_copy);
+				whole = RemoveLeftCopy(a_copy);
 			} catch (Exception e2) when (e2 is IOException or UnauthorizedAccessException) {
 				throw new IOException($"{a_what} ({a_why.Message}), and the part already copied could not be removed again ({a_copy}) - delete that folder yourself; your data is still where it was", a_why);
 			}
-			throw new IOException($"{a_what} ({a_why.Message}) - it is still where it was", a_why);
+			throw new IOException(whole ? $"{a_what} ({a_why.Message}) - it is still where it was" :
+				$"{a_what} ({a_why.Message}) - it is still where it was; the part copied was taken away, and what another program put in {a_copy} stays there", a_why);
 		}
 		try {
 			Directory.CreateDirectory(staging);
@@ -251,9 +254,18 @@ public static class DataFolder
 			foreach (var d in dirs) {
 				Directory.CreateDirectory(Path.Combine(staging, Path.GetRelativePath(from, d)));
 			}
+			// Each file is put on the copy's own list before it is copied: what a failed or cut-off move takes away is what that
+			// list names, never a file another program put in the folder (one already standing where a file goes stops the move)
+			var copied = Path.Combine(staging, CopiedList);
 			foreach (var rel in want.Keys) {
-				Files.Copy(Path.Combine(from, rel), Path.Combine(staging, rel), false);
+				var target = Path.Combine(staging, rel);
+				if (File.Exists(target)) {
+					throw new IOException($"{target} was put there by another program while the data was copied");
+				}
+				File.AppendAllText(copied, rel + "\n");
+				Files.Copy(Path.Combine(from, rel), target, false);
 			}
+			AfterCopy?.Invoke(staging);
 			// each copy read back against its file, byte for byte, before anything of the old folder goes (its size alone says
 			// nothing of what was written)
 			foreach (var (rel, size) in want) {
@@ -285,7 +297,7 @@ public static class DataFolder
 			// (the copy has its place by now, where another program may have put something since: only what this move put
 			// there goes)
 			try {
-				RemoveCopy(to, from, dirs, want.Keys);
+				RemoveLeftCopy(to);
 			} catch (Exception e2) when (e2 is IOException or UnauthorizedAccessException) {
 				throw new IOException($"the old folder could not be marked as moved ({e.Message}), and the copy could not all be removed again ({to}) - delete what is left of it yourself; your data is still where it was", e);
 			}
@@ -293,6 +305,7 @@ public static class DataFolder
 		}
 		// what is left after the mark never takes the move back: a start that finds the mark finishes both
 		try {
+			Files.Delete(Path.Combine(to, CopiedList));
 			Files.Delete(Path.Combine(to, Pending));
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			// (the move counts already: a mark left there only makes the next start repoint once more - harmless)
@@ -313,6 +326,12 @@ public static class DataFolder
 	// One writer of the program's data at a time, across every copy of the program on this PC: a setup's save and the data's
 	// move both hold it, so no save lands in a folder that is being copied away (the run lock keeps runs out the same way)
 	public static IDisposable HoldWrites() => new WriteHold();
+
+	// Why the data may not be written in a_data now (null: it may) - asked with HoldWrites held: a move that finished meanwhile
+	// left the move mark there, or removed the folder whole, mark and all. A write then would make the old folder again
+	public static string? WhyNotWritable(string a_data) =>
+		MovedTo(a_data) is { } moved ? $"the program's data has moved to {moved} - start Tool Runner again, then save there" :
+		!Directory.Exists(a_data) ? $"the program's data is no longer in {a_data} - start Tool Runner again" : null;
 
 	sealed class WriteHold : IDisposable
 	{
@@ -349,22 +368,33 @@ public static class DataFolder
 			Directory.EnumerateFiles(a_staging).All(f => Path.GetFileName(f).StartsWith(half, StringComparison.Ordinal) && f.EndsWith(".tmp", StringComparison.Ordinal));
 	}
 
-	// A copy a cut-off move of a_from left, taken away: only what is the data's own - a file whose place in the data folder holds
-	// a file, the copy's mark and the half-written files of either - and the folders left empty. Anything else stays where it is.
-	// True when nothing of the folder is left
-	static bool RemoveLeftCopy(string a_copy, string a_from)
+	// the list a copy keeps of every file it copies, each named before it is copied
+	const string CopiedList = ".copied.txt";
+
+	// the offline tests only: called once every file is copied, before they are read back
+	public static Action<string>? AfterCopy { get; set; }
+
+	// A copy a move made, taken away: only what is its own - the files its list names, its mark and its list, and the
+	// half-written files of any of them - and the folders left empty. Anything else stays where it is. True when nothing of
+	// the folder is left
+	static bool RemoveLeftCopy(string a_copy)
 	{
 		var (dirs, files, links) = Tree(a_copy);
 		if (links.Count > 0) {
 			return false;
 		}
+		var listed = File.Exists(Path.Combine(a_copy, CopiedList))
+			? File.ReadAllLines(Path.Combine(a_copy, CopiedList)).Where(l => l.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase)
+			: new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		listed.Add(Pending);
+		listed.Add(CopiedList);
 		foreach (var f in files) {
 			var rel = Path.GetRelativePath(a_copy, f);
 			var name = Path.GetFileName(f);
 			// (a half-written file is named ".<its name>.<process>.<count>.tmp" beside where it was going)
 			var halfOf = name.StartsWith('.') && name.EndsWith(".tmp", StringComparison.Ordinal) && name.Split('.') is { Length: >= 5 } parts
 				? Path.Combine(Path.GetDirectoryName(rel) ?? "", string.Join('.', parts[1..^3])) : null;
-			if (File.Exists(Path.Combine(a_from, rel)) || rel == Pending || (halfOf != null && (halfOf == Pending || File.Exists(Path.Combine(a_from, halfOf))))) {
+			if (listed.Contains(rel) || (halfOf != null && listed.Contains(halfOf))) {
 				Files.Delete(f);
 			}
 		}
@@ -374,21 +404,6 @@ public static class DataFolder
 			}
 		}
 		return !Directory.Exists(a_copy);
-	}
-
-	// a copy that took its place taken away again: only the files and folders this move put there (and its mark); a folder that
-	// holds anything else stays with it
-	static void RemoveCopy(string a_to, string a_from, List<string> a_dirs, IEnumerable<string> a_files)
-	{
-		foreach (var rel in a_files) {
-			Files.Delete(Path.Combine(a_to, rel));
-		}
-		Files.Delete(Path.Combine(a_to, Pending));
-		foreach (var d in a_dirs.Select(d => Path.Combine(a_to, Path.GetRelativePath(a_from, d))).OrderByDescending(d => d.Length).Append(a_to)) {
-			if (Directory.Exists(d) && !Directory.EnumerateFileSystemEntries(d).Any()) {
-				Directory.Delete(d);
-			}
-		}
 	}
 
 	// every folder and file under a_dir, a folder that is a link (a junction, a symbolic link) named and never walked into

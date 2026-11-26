@@ -1681,9 +1681,7 @@ public sealed partial class MainViewModel : Observable
 			var data = AppPaths.Data;
 			var write = Task.Run(() => {
 				using var writes = DataFolder.HoldWrites();
-				return DataFolder.MovedTo(data) is { } moved
-					? $"the program's data has moved to {moved} - start Tool Runner again, then save there"
-					: Setup.WriteKeepingACopy(file, text, copies);
+				return DataFolder.WhyNotWritable(data) ?? Setup.WriteKeepingACopy(file, text, copies);
 			});
 			PendingSetupSave = write;
 			why = await write;
