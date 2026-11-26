@@ -26,8 +26,8 @@ public static class Preflight
 		// (the shader step builds the caches it reads: a list of caches makes an older single output_mod beside it no output
 		// of its own, and one cache named both ways is one output, never two that share a mod)
 		if (a_s.Key == "shaders") {
-			foreach (var mod in ShaderStep.Caches(new StepSettings(a_s.Settings)).Select(c => c.OutputMod).Distinct(StringComparer.OrdinalIgnoreCase)) {
-				yield return (a_s.Key, mod);
+			foreach (var cacheMod in ShaderStep.Caches(new StepSettings(a_s.Settings)).Select(c => c.OutputMod).Distinct(StringComparer.OrdinalIgnoreCase)) {
+				yield return (a_s.Key, cacheMod);
 			}
 			yield break;
 		}
