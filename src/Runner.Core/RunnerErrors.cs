@@ -93,6 +93,8 @@ public static class RunnerErrors
 			"Tool Runner works with Skyrim Special Edition and its Anniversary Edition (Steam and GOG). Point the setup at the Mod Organizer instance of that game: Settings > Setup."),
 		E("TR-214", "Mod Organizer names no game folder|the game folder Mod Organizer names is not there", "Mod Organizer's settings name no game folder, or one that is gone (the game moved, a drive not plugged in).",
 			"Open Mod Organizer and let it find the game again (it asks at its start when the folder is gone), close it, then press Check (F5)."),
+		E("TR-215", "has not answered a start|is no longer where its record says", "Windows has not yet answered a start of Mod Organizer the run asked it for, or the Mod Organizer the run worked in has moved - so your profile is not written now.",
+			"Wait the few minutes the message names, then press \"Put my profile back\" again. If Mod Organizer moved, put it back where it was (or start it once from there), then press it again."),
 
 		// ---- the check before a run: a step's own settings and its tool
 		E("TR-301", "no output mod is set|no output folder is set|the terrain LOD folder it reads is not set|no shader cache is set", "A step has no place to put what it makes.",

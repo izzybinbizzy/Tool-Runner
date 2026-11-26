@@ -97,6 +97,14 @@ public sealed class KeptFile
 // The run record on disk: everything needed to put the profile back after a crash, a Stop now or a power cut, and what
 // the window shows. Written atomically after every change. The order files as they were before the run sit beside it in
 // "profile before\", byte for byte.
+// What the player changed in Mod Organizer while a run went on - their mods switched, their plugins ticked - as read at At
+public sealed class TheirsKept
+{
+	public DateTime At { get; set; }
+	public Dictionary<string, char> Mods { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+	public Dictionary<string, bool> Marks { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
 public sealed class Journal
 {
 	public string Id { get; set; } = "";
@@ -230,9 +238,13 @@ public sealed class Journal
 	// set when putting the profile back failed (e.g. a file locked): the window keeps offering Restore until it worked
 	public bool NeedsRestore { get; set; }
 
-	// the player's plugin ticks as they left them, read before a put-back's order files went back: kept until a put-back has set
-	// them all again, so a put-back that could not (a mod's folder did not read) is tried again with what the player had
-	public Dictionary<string, bool>? TheirMarks { get; set; }
+	// what the player changed during the run, read before a put-back's order files went back: kept until a put-back has set it
+	// all again, so one that was cut off, or could not (a mod's folder did not read), is tried again with what the player had
+	public TheirsKept? Theirs { get; set; }
+
+	// a start Windows had not answered when the put-back stopped on it (UTC): it could still bring Mod Organizer up, so a
+	// put-back pressed later waits until that can no longer happen
+	public DateTime? UnansweredStartAt { get; set; }
 	// the player undid this run: its outputs are no longer in the profile
 	public bool Undone { get; set; }
 	// an undo began and has not ended: outputs and lists may be half way, so nothing new starts until it is pressed again (or the

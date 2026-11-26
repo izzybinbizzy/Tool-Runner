@@ -298,7 +298,7 @@ public sealed class Toggle : IDisposable
 		// files go back, laid back over them after, and still counted as the player's (the expectation goes back to before the
 		// step), so the run's final put-back sees and keeps it too
 		var theirs = _ctx.Profile.ChangedByOthers();
-		var marks = theirs.Count > 0 ? Runner.KeepTheirMarks(_ctx) : [];
+		var marks = theirs.Count > 0 ? Runner.KeepTheirs(_ctx, theirs).Marks : [];
 		try {
 			_ctx.Profile.Restore(_snap);
 		} catch (Mo2OpenException) {
@@ -309,7 +309,7 @@ public sealed class Toggle : IDisposable
 			// looked at again: nothing was put back yet (the refusal comes before the first file is written), and the Mod
 			// Organizer that came up may have saved a change of the player's since the look above
 			theirs = _ctx.Profile.ChangedByOthers();
-			marks = theirs.Count > 0 ? Runner.KeepTheirMarks(_ctx) : [];
+			marks = theirs.Count > 0 ? Runner.KeepTheirs(_ctx, theirs).Marks : [];
 			_ctx.Profile.Restore(_snap);
 		}
 		_ctx.Profile.OursBack(_oursBefore);
@@ -328,8 +328,13 @@ public sealed class Toggle : IDisposable
 		if (theirs.Count > 0) {
 			var expected = _ctx.Profile.OursNow();
 			_ctx.Log.Detail($"kept what you changed in Mod Organizer during {_label}: " + string.Join(", ", theirs.Select(p => (p.Value == '+' ? "on " : "off ") + p.Key)));
+			_ctx.MarksLeft.Clear();
 			Runner.ReapplyTheirs(_ctx, theirs, marks);
 			_ctx.Profile.OursBack(expected);
+			// all set again: what was kept of it goes (kept on, a switch the player undid later would come back from it)
+			if (_ctx.MarksLeft.Count == 0) {
+				Runner.LetGoOfTheirs(_ctx);
+			}
 		}
 		// What the player switched in Mod Organizer changes the files the game finds, whatever was counted or taken back
 		// above for the step's own switches. Each such switch counts once, when it is first met here: by what the run has

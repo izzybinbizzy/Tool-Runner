@@ -1359,6 +1359,7 @@ public static class Runner
 		} catch (Exception e) {
 			j.State = RunState.Failed;
 			j.NeedsRestore = true;
+			j.UnansweredStartAt = a_ctx.Control.UnansweredSince;
 			j.Verdict = $"the profile could NOT be put back ({Plain(e)}) - press \"Put my profile back\" once Mod Organizer can close";
 			Keep();
 			a_ctx.Log.Error(j.Verdict);
@@ -1449,51 +1450,66 @@ public static class Runner
 		a_ctx.Profile.DeactivatePlugins(off, true);
 	}
 
-	// The player's plugin ticks as they are now, kept in the run's record before a put-back's order files go back (the run's own
-	// or a step's): a put-back that cannot set them all - a mod's folder did not read - is tried again with them, after the
-	// order files lost their lines. The ticks read now win; one kept from an earlier put-back fills only a plugin whose line the
-	// lists no longer hold, so a tick the player changed since is never undone by an older one. A record the disk refuses is
-	// asked twice, and then the ticks go into a file of their own in the run's backup folder (often another disk), which a later
-	// put-back reads. The order files go back all the same (the run's changes are never left in the profile); only when neither
-	// place takes them are they set from memory alone, and said
-	public static Dictionary<string, bool> KeepTheirMarks(RunContext a_ctx)
+	// What the player changed during the run - a_theirs, their mods switched, and their plugin ticks as they are now - kept
+	// before a put-back's order files go back (the run's own or a step's), so a put-back that is cut off after its lists went
+	// back, or cannot set every tick (a mod's folder did not read), is tried again with what the player had. What is read now
+	// wins; what was kept before fills only what is no longer there to read (a switch or a plugin line the lists lost when they
+	// went back), so a change the player made since is never undone by an older one. Kept in the run's record; when the disk
+	// refuses it twice, in a file of its own in the run's backup folder (often another disk). Each keeping carries its time, and
+	// the newer of the two places is the one read. The order files go back all the same (the run's changes are never left in
+	// the profile); only when neither place takes it is it set from memory alone, and said
+	public static TheirsKept KeepTheirs(RunContext a_ctx, IReadOnlyDictionary<string, char> a_theirs)
 	{
-		var keptFile = Path.Combine(a_ctx.BackupFolder, TheirMarksFile);
-		var marks = new Dictionary<string, bool>(a_ctx.Journal.TheirMarks ?? ReadTheirMarks(keptFile) ?? [], StringComparer.OrdinalIgnoreCase);
-		foreach (var (plugin, on) in a_ctx.Profile.PluginMarks()) {
-			marks[plugin] = on;
+		var keptFile = Path.Combine(a_ctx.BackupFolder, TheirsFile);
+		var older = KeptTheirs(a_ctx);
+		var kept = new TheirsKept { At = DateTime.UtcNow };
+		foreach (var (mod, state) in older?.Mods ?? []) {
+			kept.Mods[mod] = state;
 		}
-		a_ctx.Journal.TheirMarks = marks;
+		foreach (var (mod, state) in a_theirs) {
+			kept.Mods[mod] = state;
+		}
+		foreach (var (plugin, on) in older?.Marks ?? []) {
+			kept.Marks[plugin] = on;
+		}
+		foreach (var (plugin, on) in a_ctx.Profile.PluginMarks()) {
+			kept.Marks[plugin] = on;
+		}
+		a_ctx.Journal.Theirs = kept;
 		if (a_ctx.Journal.TrySave() || a_ctx.Journal.TrySave()) {
-			return marks;
+			return kept;
 		}
 		try {
 			Directory.CreateDirectory(a_ctx.BackupFolder);
-			Files.WriteAtomic(keptFile, System.Text.Json.JsonSerializer.Serialize(marks));
-			a_ctx.Log.Warn($"the run's record could not be written just now (is the disk full?) - your plugin ticks are kept in {keptFile} instead");
+			Files.WriteAtomic(keptFile, System.Text.Json.JsonSerializer.Serialize(kept));
+			a_ctx.Log.Warn($"the run's record could not be written just now (is the disk full?) - what you changed in Mod Organizer is kept in {keptFile} instead");
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
-			a_ctx.Log.Warn("the run's record could not be written just now, nor the run's backup folder (is the disk full?) - your plugin ticks are set again from memory; if Tool Runner is stopped before that, check them in Mod Organizer");
+			a_ctx.Log.Warn("the run's record could not be written just now, nor the run's backup folder (is the disk full?) - what you changed in Mod Organizer is set again from memory; if Tool Runner is stopped before that, check your mods and plugins in Mod Organizer");
 		}
-		return marks;
+		return kept;
 	}
 
-	// the file in a run's backup folder that holds the player's plugin ticks when its record would not take them
-	const string TheirMarksFile = "your plugin ticks.json";
+	// the file in a run's backup folder that holds what the player changed when its record would not take it
+	const string TheirsFile = "your changes during the run.json";
 
-	static Dictionary<string, bool>? ReadTheirMarks(string a_file)
+	// what an earlier put-back kept of the player's changes: the newer of the record's and the backup folder's
+	static TheirsKept? KeptTheirs(RunContext a_ctx)
 	{
+		TheirsKept? inFile = null;
+		var file = Path.Combine(a_ctx.BackupFolder, TheirsFile);
 		try {
-			return File.Exists(a_file) ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, bool>>(Files.ReadSharedText(a_file)) : null;
+			inFile = File.Exists(file) ? System.Text.Json.JsonSerializer.Deserialize<TheirsKept>(Files.ReadSharedText(file)) : null;
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) {
-			return null;
 		}
+		var inRecord = a_ctx.Journal.Theirs;
+		return inRecord == null ? inFile : inFile == null || inRecord.At >= inFile.At ? inRecord : inFile;
 	}
 
-	// the ticks are all set again: the record lets go of them, and so does the backup folder's file
-	static void LetGoOfTheirMarks(RunContext a_ctx)
+	// what the player changed is all set again: the record lets go of it, and so does the backup folder's file
+	internal static void LetGoOfTheirs(RunContext a_ctx)
 	{
-		a_ctx.Journal.TheirMarks = null;
-		Files.TryDelete(Path.Combine(a_ctx.BackupFolder, TheirMarksFile));
+		a_ctx.Journal.Theirs = null;
+		Files.TryDelete(Path.Combine(a_ctx.BackupFolder, TheirsFile));
 	}
 
 	public static void PutBack(RunContext a_ctx, Dictionary<string, byte[]>? a_snap)
@@ -1506,6 +1522,13 @@ public static class Runner
 		var own = a_ctx.Journal.Added.Concat(a_ctx.Journal.Built).Concat(a_ctx.Journal.Retire).Concat(a_ctx.Journal.ParkedMods)
 			.Concat(a_ctx.Journal.UsedOld.Select(u => u.Mod)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 		var theirs = a_ctx.Profile.ChangedByOthers().Where(p => !own.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase);
+		// a put-back cut off after its lists went back (the program stopped) left the player's switches out of them: what it had
+		// kept comes back with them - what the player has changed since wins
+		if (KeptTheirs(a_ctx) is { } cutOff) {
+			foreach (var (mod, state) in cutOff.Mods.Where(p => !own.Contains(p.Key))) {
+				theirs.TryAdd(mod, state);
+			}
+		}
 		if (a_snap != null && a_snap.Count > 0) {
 			a_ctx.Log.Say("the profile as it was before the run, with this run's finished outputs on:");
 			// The mods the run had switched off come back on, and what it built with them: the game now finds other files than
@@ -1527,9 +1550,9 @@ public static class Runner
 			foreach (var m in theirs.Keys.Where(m => !before.ContainsKey(m))) {
 				a_ctx.Profile.Added.Add(m);
 			}
-			// the player's plugin ticks as they left them, kept in the run's record before the order files go back
+			// what the player changed, kept in the run's record before the order files go back
 			a_ctx.MarksLeft.Clear();
-			var marks = theirs.Count == 0 ? [] : KeepTheirMarks(a_ctx);
+			var marks = theirs.Count == 0 ? [] : KeepTheirs(a_ctx, theirs).Marks;
 			a_ctx.Profile.Restore(a_snap);
 			if (theirs.Count > 0) {
 				a_ctx.Log.Warn($"you changed {theirs.Count} mod(s) in Mod Organizer during the run - kept as you left them: " +
@@ -1537,7 +1560,7 @@ public static class Runner
 				ReapplyTheirs(a_ctx, theirs, marks);
 			}
 			if (a_ctx.MarksLeft.Count == 0) {
-				LetGoOfTheirMarks(a_ctx);
+				LetGoOfTheirs(a_ctx);
 			}
 		}
 		// an output left empty (its step failed, was stopped, or never ran) never stays in the mod list - one the run made:
@@ -1730,8 +1753,16 @@ public static class Runner
 		return Mo2Instance.Load(a_j.Mo2Exe, a_j.Mo2Instance);
 	}
 
+	// how long after a start Windows had not answered a put-back still waits: by then that start has come or never will
+	public static TimeSpan UnansweredStartHold { get; set; } = TimeSpan.FromMinutes(15);
+
 	static RunOutcome RestoreLocked(Journal a_j)
 	{
+		// a start Windows had not answered when the run's own put-back stopped could still bring Mod Organizer up over this one
+		if (a_j.UnansweredStartAt is { } asked && DateTime.UtcNow - asked < UnansweredStartHold) {
+			return new RunOutcome(RunState.Failed, $"Windows has not answered a start of Mod Organizer that run asked it for at {asked.ToLocalTime():HH:mm} - " +
+				$"it could still come up, so the profile is not written now; put it back after {(asked + UnansweredStartHold).ToLocalTime():HH:mm}", a_j.Folder);
+		}
 		// when the cut-off run last wrote its record, read before this put-back writes it again: the time that run died
 		var lastWritten = File.GetLastWriteTime(a_j.File);
 		if (SetupOf(a_j, out var noSetup) is not { } setup) {
@@ -1807,6 +1838,7 @@ public static class Runner
 		}
 		a_j.State = RunState.Restored;
 		a_j.NeedsRestore = false;
+		a_j.UnansweredStartAt = null;
 		a_j.Ended ??= DateTime.Now;
 		a_j.Verdict = "put back after an interrupted run - the profile is as it was, with the outputs that finished on" + LostNote(a_j);
 		if (!a_j.TrySave()) {

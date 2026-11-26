@@ -10831,8 +10831,19 @@ public static class Program
 				Equal(RunState.Finished, r.State, r.Verdict);
 				Check(stepAt > TimeSpan.Zero && stepAt < TimeSpan.FromSeconds(15), $"the first step began after {stepAt.TotalSeconds:0.0} s, not once the program left behind had ended (29 s)");
 			} finally {
+				// each one held open first, then known by the name read through that very handle (this test's own, unique): a number
+				// that went to another program after it was listed is never ended
 				foreach (var pid in Procs.Pids(leftName)) {
-					Procs.KillTree(pid);
+					try {
+						using var p = Process.GetProcessById(pid);
+						_ = p.SafeHandle;
+						if (!p.HasExited && p.ProcessName.Equals(Path.GetFileNameWithoutExtension(leftName), StringComparison.OrdinalIgnoreCase)) {
+							p.Kill(true);
+							p.WaitForExit(10_000);
+						}
+					} catch (Exception e) when (e is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException) {
+						// (gone already, or a child of it would not go)
+					}
 				}
 				try {
 					if (Directory.Exists(leftDir)) {
@@ -12820,6 +12831,7 @@ public static class Program
 		using var f = new FakeMo2();
 		var answer = new TaskCompletionSource<int>();
 		var keep = Mo2Control.LateStartWait;
+		var proven = Mo2Control.MadeByTheStart;
 		Mo2Control.LateStartWait = TimeSpan.FromSeconds(1);
 		// (a stand-in program of the test's own plays the Mod Organizer that came up late)
 		using var late = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "PING.EXE"), "-n 30 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false })!;
@@ -12830,17 +12842,89 @@ public static class Program
 				Launch = (_, _) => throw new Mo2Control.StartUnansweredException("late", answer.Task),
 			};
 			Thrown<Mo2Control.StartUnansweredException>(() => c.Start(default), "the start says it was not answered");
+			Check(c.UnansweredSince is { } since && DateTime.UtcNow - since < TimeSpan.FromMinutes(1), "when it was asked is there to be kept in the run's record");
 			Thrown<Mo2BusyException>(() => c.Close(), "nothing counts as closed while its answer is still to come");
 			Check(!c.RunProcesses().Contains(late.Id), "(nothing is taken for the run's before the answer names it)");
+			// (the stand-in's parent is this test, not Windows' management host: the test's own rule proves it)
+			Mo2Control.MadeByTheStart = (a_pid, _) => a_pid == late.Id;
 			answer.SetResult(late.Id);
 			c.Close();
-			Check(c.RunProcesses().Contains(late.Id), "the process the late answer names is the run's own");
+			Check(c.RunProcesses().Contains(late.Id) && c.UnansweredSince == null, "the process the late answer names is the run's own");
+			// a number whose process ended before the answer came, and went to another program: never taken for the run's
+			var reused = new TaskCompletionSource<int>();
+			var other = new Mo2Control(Mo2Instance.Load(f.Exe, f.Instance), "Test", RunLog.Null) {
+				RunningProbe = () => false,
+				ReadyProbe = () => new(true, true, TimeSpan.FromSeconds(9), null),
+				Launch = (_, _) => throw new Mo2Control.StartUnansweredException("late", reused.Task),
+			};
+			Mo2Control.MadeByTheStart = (_, _) => false;
+			Thrown<Mo2Control.StartUnansweredException>(() => other.Start(default), "(a second late start)");
+			reused.SetResult(late.Id);
+			other.Close();
+			Check(!other.RunProcesses().Contains(late.Id), "a number the start did not make is not the run's");
+			// and the real rule refuses a process this test started itself (its parent is no management host)
+			Check(!proven(late.Id, DateTime.UtcNow.AddMinutes(-1)), "a process started by another program is not one the service made");
 		} finally {
 			Mo2Control.LateStartWait = keep;
+			Mo2Control.MadeByTheStart = proven;
 			late.Kill();
 			late.WaitForExit(10_000);
 		}
 	});
+
+	// a put-back that stopped on a start Windows had not answered keeps that start's time in the run's record: pressed again
+	// soon, it is refused and says until when; once that start can no longer come, it goes ahead
+	static void T_APutBackWaitsForAStartWindowsHadNotAnswered()
+	{
+		using var f = new FakeMo2();
+		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		var j = new Journal { Id = "late", Folder = Path.Combine(Runner.RunsDir(f.Data), "late"), SetupFile = Path.GetFullPath(f.SetupFile), SetupName = "Test", Profile = "Test",
+			Mo2Exe = f.Exe, Mo2Instance = f.Instance, Started = DateTime.Now.AddHours(-1), State = RunState.Failed, NeedsRestore = true, UnansweredStartAt = DateTime.UtcNow };
+		Directory.CreateDirectory(j.Folder);
+		j.Save();
+		var held = Runner.Restore(Journal.Load(j.Folder));
+		Check(held.State == RunState.Failed && held.Verdict.Contains("has not answered a start", StringComparison.Ordinal) && RunnerErrors.Find(held.Verdict)?.Code == "TR-215",
+			"refused while that start could still come, and said: " + held.Verdict);
+		var old = Journal.Load(j.Folder);
+		old.UnansweredStartAt = DateTime.UtcNow - Runner.UnansweredStartHold - TimeSpan.FromMinutes(1);
+		old.Save();
+		var after = Runner.Restore(Journal.Load(j.Folder));
+		Check(!after.Verdict.Contains("has not answered a start", StringComparison.Ordinal), "once it can no longer come, the put-back is not held for it: " + after.Verdict);
+	}
+
+	// What the player changed during the run, kept before a put-back's lists go back: the newer of the run's record and the
+	// backup folder's file is the one read; and a put-back cut off after its lists went back (the program stopped) brings the
+	// player's switches back from it
+	static void T_ThePlayersChangesAreKeptAcrossACutOffPutBack()
+	{
+		using var f = new FakeMo2();
+		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		var ctx = StepContext(f, "landscapefixer");
+		using var ctxLog = ctx.Log;
+		Directory.CreateDirectory(ctx.BackupFolder);
+		var file = Path.Combine(ctx.BackupFolder, "your changes during the run.json");
+		var t0 = DateTime.UtcNow.AddMinutes(-10);
+		TheirsKept Kept(DateTime a_at, char a_base) => new() { At = a_at, Mods = new(StringComparer.OrdinalIgnoreCase) { ["Base Mod"] = a_base } };
+		// the file newer than the record: the file's is read
+		ctx.Journal.Theirs = Kept(t0, '+');
+		File.WriteAllText(file, System.Text.Json.JsonSerializer.Serialize(Kept(t0.AddMinutes(1), '-')));
+		Equal('-', Runner.KeepTheirs(ctx, new Dictionary<string, char>()).Mods["Base Mod"], "the newer keeping (the file's) is the one read");
+		// the record newer than the file: the record's
+		ctx.Journal.Theirs = Kept(t0.AddMinutes(2), '+');
+		File.WriteAllText(file, System.Text.Json.JsonSerializer.Serialize(Kept(t0.AddMinutes(1), '-')));
+		Equal('+', Runner.KeepTheirs(ctx, new Dictionary<string, char>()).Mods["Base Mod"], "the newer keeping (the record's) is the one read");
+		// and what the player changes now wins over both
+		Equal('-', Runner.KeepTheirs(ctx, new Dictionary<string, char> { ["Base Mod"] = '-' }).Mods["Base Mod"], "what is read now wins");
+		// a put-back cut off after its lists went back: the profile is as before the run, the player's switch only in the record
+		Runner.LetGoOfTheirs(ctx);
+		var snap = ctx.Profile.Snapshot();
+		ctx.Journal.Theirs = Kept(DateTime.UtcNow, '-');
+		ctx.Journal.Save();
+		Check(ctx.Profile.IsOn("Base Mod"), "(the lists went back: the player's switch is not in them)");
+		Runner.PutBack(ctx, snap);
+		Check(!ctx.Profile.IsOn("Base Mod"), "the put-back brings the player's switch back from what it had kept");
+		Check(ctx.Journal.Theirs == null && !File.Exists(file), "and lets go of what it kept once all of it is set again");
+	}
 
 	// a ticked mod whose folder would not be read: the player's marks of its plugins are never dropped for it - every mark no
 	// other ticked mod's plugin explains is set as they had it - and the log says so
