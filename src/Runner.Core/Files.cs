@@ -587,13 +587,13 @@ public sealed class GrowingText
 			return text;
 		}
 		// each part decoded once: the whole lines, which alone tell how the file is written, then what follows them
-		var lines = Files.DecodeText(all[..cut], out _how);
-		(Added, Unfinished) = (lines, cut == got ? "" : _how.GetString(all, cut, got - cut));
+		var wholeLines = Files.DecodeText(all[..cut], out _how);
+		(Added, Unfinished) = (wholeLines, cut == got ? "" : _how.GetString(all, cut, got - cut));
 		if (!KeepAll) {
 			_lines = "";
 			return Added;
 		}
-		_lines = lines;
+		_lines = wholeLines;
 		return Unfinished == "" ? _lines : _lines + Unfinished;
 	}
 
