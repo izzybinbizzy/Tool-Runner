@@ -5932,6 +5932,8 @@ public static class Program
 			Directory.CreateDirectory(Path.Combine(from7, "Setups"));
 			File.WriteAllText(Path.Combine(from7, "Setups", "Up.json"), "{ \"mo2\": \"" + (from7 + "/../MO2").Replace("\\", "\\\\", StringComparison.Ordinal) + "\" }");
 			Directory.CreateDirectory(to7 + " (being copied)");
+			// (as a cut-off move leaves it: its mark names the data folder it came from first, then part of the copy)
+			File.WriteAllText(Path.Combine(to7 + " (being copied)", ".renamed from.txt"), from7);
 			File.WriteAllText(Path.Combine(to7 + " (being copied)", "half.json"), "{}");
 			Check(DataFolder.MoveTo(from7, to7) == null && File.Exists(Path.Combine(to7, "Setups", "Up.json")) && !Directory.Exists(to7 + " (being copied)"),
 				"a copy left by a cut-off move is replaced, and the whole copy takes the new place's name");
