@@ -1462,8 +1462,9 @@ public partial class MainWindow : Window
 		var made = NewSetupDialog.Run(this, out var imported);
 		if (made != null) {
 			_vm.LoadSetups(made);
-			// made or brought in here, by the player: what it starts is theirs, and is not asked about at its first START
-			if (_vm.Setup is { } own && Files.SamePath(own.File, made)) {
+			// made here by the player: what it starts is theirs, and is not asked about at its first START. One brought in from
+			// elsewhere is: what it kept (each step's entry of Mod Organizer's list) is shown before it first starts anything
+			if (imported == null && _vm.Setup is { } own && Files.SamePath(own.File, made)) {
 				MainViewModel.AllowStarts(own);
 			}
 			if (imported == null) {

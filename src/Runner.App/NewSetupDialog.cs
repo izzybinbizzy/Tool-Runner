@@ -276,12 +276,18 @@ public static class NewSetupDialog
 				var text = s.Text();
 				var replacing = File.Exists(file);
 				if (await Task.Run(() => {
-					// a setup that is replaced is written with the run lock held: a run begun since the check above, here or in
-					// another copy of the program, never has its setup changed under it
+					// The data's write lock, which every save of a setup holds (here and in another copy of the program): a setup of
+					// this name made meanwhile is seen, and never replaced without the question above. A setup that is replaced is
+					// written with the run lock held too: a run begun since the checks above never has its setup changed under it
+					using var writes = DataFolder.HoldWrites();
 					using var hold = replacing ? Runner.HoldIfFree() : null;
-					return replacing && hold == null
-						? "a run has started - the setup was not replaced; do it again once the run has ended"
-						: Setup.WriteKeepingACopy(file, text, Path.Combine(AppPaths.Data, "Setup backups"));
+					if (replacing && hold == null) {
+						return "a run has started - the setup was not replaced; do it again once the run has ended";
+					}
+					if (!replacing && File.Exists(file)) {
+						return "a setup of that name was made meanwhile - nothing was replaced; make it again to be asked first";
+					}
+					return Setup.WriteKeepingACopy(file, text, Path.Combine(AppPaths.Data, "Setup backups"));
 				}) is { } notWritten) {
 					throw new IOException(notWritten);
 				}

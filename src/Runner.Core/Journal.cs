@@ -229,6 +229,10 @@ public sealed class Journal
 
 	// set when putting the profile back failed (e.g. a file locked): the window keeps offering Restore until it worked
 	public bool NeedsRestore { get; set; }
+
+	// the player's plugin ticks as they left them, read before a put-back's order files went back: kept until a put-back has set
+	// them all again, so a put-back that could not (a mod's folder did not read) is tried again with what the player had
+	public Dictionary<string, bool>? TheirMarks { get; set; }
 	// the player undid this run: its outputs are no longer in the profile
 	public bool Undone { get; set; }
 	// an undo began and has not ended: outputs and lists may be half way, so nothing new starts until it is pressed again (or the

@@ -126,6 +126,10 @@ public sealed class RunContext
 	// (the list was held by another program). The profile is not whole back while one is left: the put-back stays on offer
 	public List<string> LinesLeft { get; } = [];
 
+	// After a put-back: the ticked mods whose folder would not be read, so the player's plugin ticks of them could not all be
+	// set again. The put-back stays on offer while one is left (the marks it needs are kept in the run's record)
+	public List<string> MarksLeft { get; } = [];
+
 	public void SetAfter(params string[] a_mods) => PendingEnable.AddRange(a_mods);
 
 	// one output of a step that makes several is complete: on record as built at once, so it stays - and is switched on at the

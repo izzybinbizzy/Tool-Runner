@@ -1365,13 +1365,13 @@ public static class Runner
 			a_ctx.Log.Simple("Stopped: " + j.Verdict, Level.Error);
 			return new RunOutcome(j.State, j.Verdict, j.Folder);
 		}
-		if (notBack.Count > 0 || filesNotBack.Count > 0 || a_ctx.LinesLeft.Count > 0) {
+		if (notBack.Count > 0 || filesNotBack.Count > 0 || a_ctx.LinesLeft.Count > 0 || a_ctx.MarksLeft.Count > 0) {
 			// the run did not end cleanly, whatever its steps did: said so, never "finished" or "back as it was" - also when
 			// only a line the run wrote into the mod list could not be taken out again (the put-back tries that again)
 			j.State = RunState.Failed;
 			j.NeedsRestore = true;
 			j.Ended = DateTime.Now;
-			j.Verdict = "the profile is back except " + string.Join(", ", notBack.Concat(filesNotBack.Select(Path.GetFileName)).OfType<string>().Concat(LinesLeftWords(a_ctx.LinesLeft))) +
+			j.Verdict = "the profile is back except " + string.Join(", ", notBack.Concat(filesNotBack.Select(Path.GetFileName)).OfType<string>().Concat(LinesLeftWords(a_ctx.LinesLeft)).Concat(MarksLeftWords(a_ctx.MarksLeft))) +
 				(notBack.Count > 0 || filesNotBack.Count > 0 ? " (kept off / in the backup)" : "") + " - press \"Put my profile back\" once the files are free";
 			Keep();
 			a_ctx.Log.Error(j.Verdict);
@@ -1440,7 +1440,10 @@ public static class Runner
 				}
 			}
 			theirPlugins.UnionWith(a_marks.Keys.Where(k => !others.Contains(k)));
-			a_ctx.Log.Warn($"the folder of {string.Join(", ", unread)} could not be read: the plugins you had ticked or unticked that no other mod holds are set as you had them - check them in Mod Organizer");
+			foreach (var m in unread.Where(m => !a_ctx.MarksLeft.Contains(m, StringComparer.OrdinalIgnoreCase))) {
+				a_ctx.MarksLeft.Add(m);
+			}
+			a_ctx.Log.Warn($"the folder of {string.Join(", ", unread)} could not be read: the plugins you had ticked or unticked that no other mod holds are set as you had them - the put-back stays on offer until it can read them");
 		}
 		a_ctx.Profile.SetPluginMarks(a_marks.Where(p => theirPlugins.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase));
 		a_ctx.Profile.DeactivatePlugins(off, true);
@@ -1477,13 +1480,22 @@ public static class Runner
 			foreach (var m in theirs.Keys.Where(m => !before.ContainsKey(m))) {
 				a_ctx.Profile.Added.Add(m);
 			}
-			// the player's plugin ticks as they left them, read before the order files go back
-			var marks = theirs.Count > 0 ? a_ctx.Profile.PluginMarks() : [];
+			// the player's plugin ticks as they left them, read before the order files go back - or, when an earlier put-back
+			// could not set them all, as that one read them (the order files have gone back since, and lost them)
+			a_ctx.MarksLeft.Clear();
+			var marks = theirs.Count == 0 ? [] : a_ctx.Journal.TheirMarks ?? a_ctx.Profile.PluginMarks();
+			if (theirs.Count > 0 && a_ctx.Journal.TheirMarks == null) {
+				a_ctx.Journal.TheirMarks = marks;
+				a_ctx.Journal.TrySave();
+			}
 			a_ctx.Profile.Restore(a_snap);
 			if (theirs.Count > 0) {
 				a_ctx.Log.Warn($"you changed {theirs.Count} mod(s) in Mod Organizer during the run - kept as you left them: " +
 					string.Join(", ", theirs.Select(p => (p.Value == '+' ? "on " : "off ") + p.Key)));
 				ReapplyTheirs(a_ctx, theirs, marks);
+			}
+			if (a_ctx.MarksLeft.Count == 0) {
+				a_ctx.Journal.TheirMarks = null;
 			}
 		}
 		// an output left empty (its step failed, was stopped, or never ran) never stays in the mod list - one the run made:
@@ -1623,6 +1635,8 @@ public static class Runner
 	// those lines, in a verdict's words
 	static IEnumerable<string> LinesLeftWords(IEnumerable<string> a_mods) => a_mods.Select(m => $"the line this run gave \"{m}\" in the mod list");
 
+	static IEnumerable<string> MarksLeftWords(IEnumerable<string> a_mods) => a_mods.Select(m => $"your plugin ticks of \"{m}\" (its folder could not be read)");
+
 	// an interrupted run (a crash, Stop now, a power cut): every unfinished output back, the profile as before + the finished
 	// outputs on - the window's Restore button and the command line's --restore
 	public static RunOutcome Restore(Journal a_j)
@@ -1719,11 +1733,11 @@ public static class Runner
 		if (data != null) {
 			NoteChanges(mo2, data, "putting back " + RunWho(a_j), log);
 		}
-		if (notBack.Count > 0 || filesNotBack.Count > 0 || ctx.LinesLeft.Count > 0) {
+		if (notBack.Count > 0 || filesNotBack.Count > 0 || ctx.LinesLeft.Count > 0 || ctx.MarksLeft.Count > 0) {
 			// something is still out - or a line the run wrote into the mod list could not be taken out again: Restore stays
 			// on offer (the window keeps its button) and says what
 			a_j.NeedsRestore = true;
-			a_j.Verdict = "put back except " + string.Join(", ", notBack.Concat(filesNotBack.Select(Path.GetFileName)).OfType<string>().Concat(LinesLeftWords(ctx.LinesLeft))) +
+			a_j.Verdict = "put back except " + string.Join(", ", notBack.Concat(filesNotBack.Select(Path.GetFileName)).OfType<string>().Concat(LinesLeftWords(ctx.LinesLeft)).Concat(MarksLeftWords(ctx.MarksLeft))) +
 				(notBack.Count > 0 || filesNotBack.Count > 0 ? " (kept off / in the backup)" : "") + " - press \"Put my profile back\" again once the files are free";
 			a_j.TrySave();
 			log.Error(a_j.Verdict);

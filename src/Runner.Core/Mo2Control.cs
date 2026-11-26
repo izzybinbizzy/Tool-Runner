@@ -73,7 +73,6 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 				Put(Property(asked, "CommandLine"), "Value", a_commandLine);
 				Put(Property(asked, "CurrentDirectory"), "Value", a_cwd);
 				Put(Property(asked, "ProcessStartupInformation"), "Value", startup);
-				var askedAt = DateTime.UtcNow;
 				var answer = Keep(Ask(process, "ExecMethod_", "Create", asked));
 				var rc = Convert.ToUInt32(Ask(Property(answer, "ReturnValue"), "Value"), InvariantCulture);
 				if (rc != 0) {
@@ -85,11 +84,9 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 				}
 				lock (gate) {
 					if (abandoned) {
-						// only the very process this start made: one that began before the ask holds a number that changed
-						// hands after the started one ended, and is left alone (as is one whose start cannot be read)
-						if (Procs.StartTime(started) is { } at && at >= askedAt.AddSeconds(-1)) {
-							Procs.KillTree(started, at);
-						}
+						// The caller has given up on this start. Its process is left running: the service's answer is a number
+						// only, and the process may have ended and its number gone to another program before the answer came -
+						// a start time read now would be that other program's. Ending it could end somebody else's program
 					} else {
 						pid = started;
 					}
@@ -1199,7 +1196,14 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 			var waited = Stopwatch.StartNew();
 			var lost = false;
 			while (waited.Elapsed < a_limit && !lost) {
-				a_ct.ThrowIfCancellationRequested();
+				if (a_ct.IsCancellationRequested) {
+					// a Stop while the start was on its way: a tool Mod Organizer has started meanwhile is the run's all the same -
+					// put on its record, so the Stop ends it and nothing of it holds Mod Organizer (and the put-back) open
+					if (a_freshPid() is var came && came != 0) {
+						Ours(came);
+					}
+					a_ct.ThrowIfCancellationRequested();
+				}
 				if (a_freshPid() is var pid && pid != 0) {
 					return pid;
 				}

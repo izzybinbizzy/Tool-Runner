@@ -3383,9 +3383,14 @@ public static class Program
 		File.WriteAllText(otherList, "+Only In The Other\r\n" + File.ReadAllText(otherList));
 		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp")));
 		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		// (the run's output starts off: the run switches it on, and only an undo that works in this profile switches it off again)
+		var ownList = Path.Combine(f.ProfileDir, "modlist.txt");
+		File.WriteAllText(ownList, File.ReadAllText(ownList).Replace("+Output A", "-Output A", StringComparison.Ordinal));
 		string States(FakeMo2 a_m) => string.Join(", ", ProfileOf(a_m).States().OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase).Select(p => p.Value + p.Key));
 		var statesBefore = States(f);
+		Check(!ProfileOf(f).IsOn("Output A"), "(the output starts off)");
 		Equal(RunState.Finished, Runner.Run(new RunRequest(f.SetupFile, f.Data)).State, "the run finished");
+		Check(ProfileOf(f).IsOn("Output A"), "the run switched its output on");
 		var j = Journal.All(Runner.RunsDir(f.Data)).First();
 		Check(Files.SamePath(j.Mo2Exe, f.Exe), "the run's record names the Mod Organizer it worked in");
 		var root = Setup.Load(f.SetupFile).Root;
@@ -3395,6 +3400,7 @@ public static class Program
 		var r = Runner.Undo(Journal.Load(j.Folder));
 		Equal(RunState.Restored, r.State, "undone: " + r.Verdict);
 		Check(theirs.AsSpan().SequenceEqual(File.ReadAllBytes(Path.Combine(other.ProfileDir, "modlist.txt"))), "the other Mod Organizer's profile is as it was");
+		Check(!ProfileOf(f).IsOn("Output A"), "the undo switched it off again, in the run's own profile");
 		Equal(statesBefore, States(f), "the run's own profile is as it was before the run");
 		Equal("old A", File.ReadAllText(Path.Combine(f.Mods, "Output A", "old.txt")), "the old output is back where the run took it from");
 	}
@@ -11040,12 +11046,15 @@ public static class Program
 		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "detached " + Guid.NewGuid().ToString("N")[..8]);
 		Directory.CreateDirectory(dir);
 		var pid = 0;
+		DateTime? startedAt = null;
 		try {
 			var file = Path.Combine(dir, "ran in.txt");
 			var cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
-			// (it waits a minute: alive for as long as it is looked at, whatever this test's thread is given, and ended below)
-			pid = Mo2Control.StartDetached($"\"{cmd}\" /c cd > \"{file}\" & ping -n 60 127.0.0.1 > nul", Environment.SystemDirectory, 0);
-			Check(pid > 0 && pid != Environment.ProcessId, $"Windows gave the process's number: {pid}");
+			// (it waits ten minutes: alive for as long as it is looked at, whatever this test's thread is given, and ended below by
+			// the identity read the moment it started - while it lives its number is nobody else's)
+			pid = Mo2Control.StartDetached($"\"{cmd}\" /c cd > \"{file}\" & ping -n 600 127.0.0.1 > nul", Environment.SystemDirectory, 0);
+			startedAt = Procs.StartTime(pid);
+			Check(pid > 0 && pid != Environment.ProcessId && startedAt != null, $"Windows gave the process's number: {pid}");
 			var parent = Procs.Snapshot().FirstOrDefault(r => r.Pid == pid).Parent;
 			Check(parent != 0 && parent != Environment.ProcessId, $"it is no child of this process (its parent: {parent})");
 			using (var host = Process.GetProcessById(parent)) {
@@ -11066,8 +11075,9 @@ public static class Program
 					"a program that is not there is said, with Windows' own code: " + e.Message);
 			}
 		} finally {
-			// the command this test started, ended by its number and start time (and its ping with it), then its folder
-			if (pid > 0 && Procs.StartTime(pid) is { } at) {
+			// the command this test started, ended by its number and the start time read when it began (and its ping with it) -
+			// never a program that took its number later - and waited for, then its folder
+			if (pid > 0 && startedAt is { } at) {
 				Procs.KillTree(pid, at);
 			}
 			Directory.Delete(dir, true);
@@ -12224,6 +12234,11 @@ public static class Program
 		var gameSteps = File.ReadAllText(Path.Combine(steps, "GameSteps.cs"));
 		var stepClasses = classAt.Matches(gameSteps);
 		var inGameAll = new HashSet<string>(StringComparer.Ordinal);
+		// (a phase the run itself carries out for a step - the clean save's first half, before every output goes off - calls
+		// InGame from the run, not from the step's class: counted for that step too)
+		var phases = new System.Text.RegularExpressions.Regex(@"RunPhase\([^,]+,\s*""(\w+)""[^\n]*?\bInGame\.(\w+)\(")
+			.Matches(File.ReadAllText(Path.Combine(SourceDir(), "Runner.cs"))).Select(m => (Step: m.Groups[1].Value, Call: m.Groups[2].Value)).ToList();
+		Check(phases.Any(p => p is { Step: "cleansave", Call: "Deactivate" }), "the clean save's first half was found in the run: " + string.Join(", ", phases));
 		foreach (var (cls, step) in new[] { ("CleanSaveStep", "cleansave"), ("PlaySaveStep", "playsave") }) {
 			var at = stepClasses.FirstOrDefault(m => m.Groups[1].Value == cls);
 			Check(at != null, $"{cls} was found in the source");
@@ -12231,8 +12246,11 @@ public static class Program
 				continue;
 			}
 			var next = stepClasses.FirstOrDefault(m => m.Index > at.Index)?.Index ?? gameSteps.Length;
-			var calls = new System.Text.RegularExpressions.Regex(@"\bInGame\.(\w+)\(").Matches(gameSteps[at.Index..next]).Select(x => x.Groups[1].Value);
+			var calls = new System.Text.RegularExpressions.Regex(@"\bInGame\.(\w+)\(").Matches(gameSteps[at.Index..next]).Select(x => x.Groups[1].Value)
+				.Concat(phases.Where(p => p.Step == step).Select(p => p.Call));
 			var stepReads = ReadThrough(calls);
+			// (so the page's own wait is held to it: the clean save's first half reads it before its save)
+			Check(stepReads.Contains("settle_s"), $"{step} is found to read its wait before a save (settle_s): taken off its page, that would fail here");
 			inGameAll.UnionWith(stepReads);
 			var offered = ToolRunner.App.SettingsPanel.OfferedKeys(step);
 			var lost = stepReads.Where(k => !offered.Contains(k) && !basics.Contains(k)).Order(StringComparer.Ordinal).ToList();
@@ -12775,6 +12793,24 @@ public static class Program
 			Launch = (_, _) => throw new Mo2Control.StartUnansweredException("late"),
 		};
 		Equal<int?>(null, none.LaunchTool("x", () => 0, TimeSpan.FromSeconds(2), default), "and none that never came is made up");
+		// a Stop pressed while Windows still had not answered: a tool Mod Organizer started meanwhile goes on the run's record,
+		// so the Stop ends it (a stand-in program of the test's own plays the tool)
+		using var cts = new CancellationTokenSource();
+		using var tool = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "PING.EXE"), "-n 30 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false })!;
+		try {
+			var stopped = new Mo2Control(Mo2Instance.Load(f.Exe, f.Instance), "Test", RunLog.Null) {
+				ReadyProbe = () => new(true, true, TimeSpan.FromSeconds(9), null),
+				Launch = (_, _) => {
+					cts.Cancel();
+					throw new Mo2Control.StartUnansweredException("late");
+				},
+			};
+			Thrown<OperationCanceledException>(() => stopped.LaunchTool("x", () => tool.Id, TimeSpan.FromSeconds(10), cts.Token), "the Stop ends the wait");
+			Check(stopped.Started.Contains(tool.Id), "the tool that came meanwhile is on the run's record");
+		} finally {
+			tool.Kill();
+			tool.WaitForExit(10_000);
+		}
 	});
 
 	// a ticked mod whose folder would not be read: the player's marks of its plugins are never dropped for it - every mark no
@@ -12803,6 +12839,7 @@ public static class Program
 			var plugins = f.Text("plugins.txt");
 			Check(plugins.Contains("\nLocked.esp", StringComparison.Ordinal) && !plugins.Contains("*Locked.esp", StringComparison.Ordinal), "its plugin is as the player had it: " + plugins);
 			Check(plugins.Contains("*BaseMod.esp", StringComparison.Ordinal), "a plugin a ticked mod that reads holds is left to that mod");
+			Check(ctx.MarksLeft.Contains("Locked Mod"), "and the put-back stays on offer, naming the mod: " + string.Join(", ", ctx.MarksLeft));
 			ctx.Log.Dispose();
 			Check(File.ReadAllText(Path.Combine(ctx.Journal.Folder, "log.txt")).Contains("Locked Mod could not be read", StringComparison.Ordinal), "and the log names the mod");
 		} finally {
