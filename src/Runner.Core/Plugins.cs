@@ -10,12 +10,18 @@ public static class Plugins
 
 	public static bool IsPlugin(string a_name) => Ext.Any(e => a_name.EndsWith(e, StringComparison.OrdinalIgnoreCase));
 
-	public static List<string> InMod(string a_modDir)
+	public static List<string> InMod(string a_modDir) => TryInMod(a_modDir, out var plugins) ? plugins : [];
+
+	// the plugins of a mod's folder; false when the folder is there and would not be read - its plugins are then not known,
+	// which is not the same as having none
+	public static bool TryInMod(string a_modDir, out List<string> a_plugins)
 	{
 		try {
-			return Directory.Exists(a_modDir) ? Directory.GetFiles(a_modDir).Select(Path.GetFileName).OfType<string>().Where(IsPlugin).ToList() : [];
-		} catch (IOException) {
-			return [];
+			a_plugins = Directory.Exists(a_modDir) ? Directory.GetFiles(a_modDir).Select(Path.GetFileName).OfType<string>().Where(IsPlugin).ToList() : [];
+			return true;
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			a_plugins = [];
+			return false;
 		}
 	}
 

@@ -12,6 +12,19 @@ public static class SaveHeader
 	// the Windows Western code page the game writes names in (Latin-1 only where code page 1252 cannot be had)
 	static readonly Encoding Western = MakeWestern();
 
+	// A game in Russian, Polish, Japanese ... writes the name as UTF-8. A Western name with an accent in the old code page is
+	// never valid UTF-8, so it reads as before
+	static readonly UTF8Encoding StrictUtf8 = new(false, true);
+
+	static string NameOf(byte[] a_bytes)
+	{
+		try {
+			return StrictUtf8.GetString(a_bytes);
+		} catch (DecoderFallbackException) {
+			return Western.GetString(a_bytes);
+		}
+	}
+
 	static Encoding MakeWestern()
 	{
 		try {
@@ -38,7 +51,7 @@ public static class SaveHeader
 			if (len == 0 || len > 256 || fs.Position + len > fs.Length) {
 				return null;
 			}
-			var name = Western.GetString(r.ReadBytes(len)).Trim();
+			var name = NameOf(r.ReadBytes(len)).Trim();
 			return name == "" ? null : name;
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or EndOfStreamException) {
 			return null;

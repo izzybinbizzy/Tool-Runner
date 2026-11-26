@@ -23,11 +23,13 @@ public sealed class CheckContext
 
 public static class StepRegistry
 {
-	static readonly Dictionary<string, IStep> Steps = new IStep[] {
+	static IStep[] Own() => [
 		new ShaderStep(), new CleanSaveStep(), new SynthesisStep(), new LandscapeFixerStep(), new PgPatcherStep(),
 		new XLodGenStep(), new AcmosStep(), new GrassStep(), new TreeLodGenStep(), new TexGenStep(), new DynDolodStep(),
 		new AnvilLodStep(), new PandoraStep(), new PlaySaveStep(),
-	}.ToDictionary(s => s.Key);
+	];
+
+	static readonly Dictionary<string, IStep> Steps = Own().ToDictionary(s => s.Key);
 
 	public static IReadOnlyDictionary<string, IStep> All => Steps;
 
@@ -35,6 +37,15 @@ public static class StepRegistry
 
 	// the offline tests put their own steps in (a step that writes files, fails or waits) to drive the whole run
 	public static void Replace(IStep a_step) => Steps[a_step.Key] = a_step;
+
+	// the program's own steps again, every stand-in gone: the tests call it before each test, so none meets another's
+	public static void PutBackOwn()
+	{
+		Steps.Clear();
+		foreach (var s in Own()) {
+			Steps[s.Key] = s;
+		}
+	}
 }
 
 // what the steps share
@@ -288,7 +299,9 @@ public static class StepKit
 			yield break;
 		}
 		foreach (var (root, what) in new[] { (a_c.Mo2.ModsDir, "Mod Organizer's mods folder"), (a_c.Mo2.OverwriteDir, "Mod Organizer's overwrite folder"),
-			         (a_c.Mo2.ProfilesDir, "Mod Organizer's profiles folder"), (a_c.Mo2.GameDir, "the game's folder") }) {
+			         (a_c.Mo2.ProfilesDir, "Mod Organizer's profiles folder"), (a_c.Mo2.GameDir, "the game's folder"),
+			         // (a run empties this folder into its backup: one that is, holds or lies in that backup would be moved into itself)
+			         (a_c.Setup.BackupDir, "this setup's backup folder") }) {
 			if (!string.IsNullOrEmpty(root) && (Files.IsUnder(a_dir, root) || Files.IsUnder(root, a_dir))) {
 				yield return new Issue(a_step, true, $"{a_label} {a_dir} is in (or holds) {what} - use an empty folder of its own");
 			}
@@ -347,7 +360,13 @@ public static class StepKit
 			a_ctx.Journal.Parked.Add(park);
 			a_ctx.Journal.Save();
 			try {
-				Files.MoveDirectory(a_path, dst);
+				// a folder that is a link to another place (kept on a bigger disk through a junction) keeps its place: only what
+				// it holds goes to the backup, and the tool writes where the player put the folder
+				if (Files.IsLink(a_path)) {
+					Files.MoveContents(a_path, dst);
+				} else {
+					Files.MoveDirectory(a_path, dst);
+				}
 			} catch (Exception e) when ((e is IOException or UnauthorizedAccessException) && !Directory.Exists(dst)) {
 				// nothing moved (a move on one drive is all or nothing): nothing to come back
 				a_ctx.Journal.Parked.Remove(park);

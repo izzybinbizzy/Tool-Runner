@@ -66,11 +66,13 @@ public static class LastRuns
 		string a_profile, DateTime a_since, DateTime? a_watchedSince, Func<string, bool> a_skip)
 	{
 		var rows = a_rows as IReadOnlyList<Mo2Changes.Change> ?? a_rows.ToList();
-		if (a_pending == null || a_watchedSince is not { } watched || watched > a_since ||
-		    (rows.Count >= Mo2Changes.KeepRows && rows[0].When > a_since)) {
+		// (each compared as the instant it was: two local times side by side go wrong in the hour a daylight change repeats)
+		var since = a_since.ToUniversalTime();
+		if (a_pending == null || a_watchedSince is not { } watched || watched.ToUniversalTime() > since ||
+		    (rows.Count >= Mo2Changes.KeepRows && rows[0].When.ToUniversalTime() > since)) {
 			return null;
 		}
-		var all = rows.Where(r => r.Who == Mo2Changes.Outside && r.When > a_since && r.Profiles.Contains(a_profile, StringComparer.OrdinalIgnoreCase) &&
+		var all = rows.Where(r => r.Who == Mo2Changes.Outside && r.When.ToUniversalTime() > since && r.Profiles.Contains(a_profile, StringComparer.OrdinalIgnoreCase) &&
 		                          r.What is not ("profile added" or "profile removed"))
 			.Select(r => (r.Mod, r.What)).Concat(a_pending).Where(c => !a_skip(c.Mod)).ToList();
 		// a mod ticked and unticked again (or installed and removed again) is back as the step found it
@@ -141,9 +143,9 @@ public static class LastRuns
 
 	static string When(DateTime a_t) => a_t.ToString("ddd MMM d HH:mm", InvariantCulture);
 
-	static string Took(Ran a_r) => a_r.Ended is { } e ? Minutes(e - a_r.Started) : "";
+	static string Took(Ran a_r) => a_r.Ended is { } e ? Minutes(Times.Between(a_r.Started, e)) : "";
 
-	static string Minutes(TimeSpan a_t) => a_t.TotalMinutes < 1 ? $"{Math.Max(1, (int)a_t.TotalSeconds)} s" : a_t.TotalMinutes < 60 ? $"{(int)Math.Round(a_t.TotalMinutes)} min" : $"{(int)a_t.TotalHours} h {a_t.Minutes:00} min";
+	static string Minutes(TimeSpan a_t) => a_t.TotalMinutes < 1 ? $"{Math.Max(1, (int)a_t.TotalSeconds)} s" : Times.HoursAndMinutes(a_t);
 
 	// "5 added, 3 ticked, 1 moved" off the change texts
 	public static string Counted(IEnumerable<(string Mod, string What)> a_changes) =>

@@ -59,7 +59,8 @@ public sealed partial class Mo2Instance
 		var exes = new List<Mo2Executable>();
 		if (a_sections.TryGetValue("customExecutables", out var ce)) {
 			_ = int.TryParse(ce.GetValueOrDefault("size"), out var n);
-			for (int i = 1; i <= n; ++i) {
+			// (never more rows than the section has keys: a damaged "size" is not counted to)
+			for (int i = 1; i <= Math.Min(n, ce.Count); ++i) {
 				var title = ce.GetValueOrDefault($"{i}\\title") ?? "";
 				if (title != "") {
 					exes.Add(new Mo2Executable(title, Full(ce.GetValueOrDefault($"{i}\\binary") ?? "", iniDir),
@@ -155,8 +156,8 @@ public sealed partial class Mo2Instance
 		}
 	}
 
-	// The instance of ModOrganizer.exe: the instance folder the setup names (a_instanceDir), else a ModOrganizer.ini beside the
-	// exe (portable)
+	// The instance of ModOrganizer.exe: the instance folder the setup names (a_instanceDir); with none named, a ModOrganizer.ini
+	// beside the exe (portable)
 	public static Mo2Instance Load(string a_mo2Exe, string? a_instanceDir = null)
 	{
 		if (!File.Exists(a_mo2Exe)) {
@@ -164,8 +165,13 @@ public sealed partial class Mo2Instance
 		}
 		var exeDir = Path.GetDirectoryName(Path.GetFullPath(a_mo2Exe))!;
 		string? ini = null;
-		if (!string.IsNullOrWhiteSpace(a_instanceDir) && File.Exists(Path.Combine(a_instanceDir, "ModOrganizer.ini"))) {
+		if (!string.IsNullOrWhiteSpace(a_instanceDir)) {
+			// the instance the setup names, or none: with its file gone (the folder moved or renamed), the instance beside the
+			// program is never read in its place - a profile of the same name there is another player's load order
 			ini = Path.Combine(a_instanceDir, "ModOrganizer.ini");
+			if (!File.Exists(ini)) {
+				throw new FileNotFoundException($"No ModOrganizer.ini in the instance folder {a_instanceDir} - pick the instance folder again in the setup");
+			}
 		} else if (File.Exists(Path.Combine(exeDir, "ModOrganizer.ini"))) {
 			ini = Path.Combine(exeDir, "ModOrganizer.ini");
 		}
@@ -179,7 +185,12 @@ public sealed partial class Mo2Instance
 	public static IEnumerable<string> GlobalInstances()
 	{
 		var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ModOrganizer");
-		return Directory.Exists(root) ? Directory.GetDirectories(root).Where(d => File.Exists(Path.Combine(d, "ModOrganizer.ini"))) : [];
+		try {
+			return Directory.Exists(root) ? Directory.GetDirectories(root).Where(d => File.Exists(Path.Combine(d, "ModOrganizer.ini"))).ToList() : [];
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			// a folder that cannot be listed holds no instance this program could use
+			return [];
+		}
 	}
 
 	// Qt's INI flavour: [section], key=value, values may be @ByteArray(...) with backslashes doubled, keys may hold %20

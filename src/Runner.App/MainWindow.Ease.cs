@@ -60,7 +60,9 @@ public partial class MainWindow
 				_vm.Say($"{row.Name}'s output \"{mod}\" is not there yet - its first run makes it.", "warn");
 				return;
 			}
-			MainViewModel.OpenFolder(dir);
+			if (MainViewModel.OpenFolder(dir) is { } why) {
+				_vm.Say($"{row.Name}'s output folder did not open: {why}", "warn");
+			}
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or InvalidDataException) {
 			_vm.Say("Mod Organizer could not be read: " + e.Message, "bad");
 		}
@@ -86,7 +88,11 @@ public partial class MainWindow
 	// the copy is made on a worker (a slow disk never holds the window), one at a time
 	async void DuplicateSetup_Click(object a_s, RoutedEventArgs a_e)
 	{
-		if (_copying || _vm.IsRunning || _vm.SelectedSetup is not { } item) {
+		if (_copying || _vm.SelectedSetup is not { } item) {
+			return;
+		}
+		if (_vm.IsRunning) {
+			_vm.Say("A run is going - copy the setup when it has ended.", "bad");
 			return;
 		}
 		if (_vm.MovingData) {
@@ -101,7 +107,7 @@ public partial class MainWindow
 		} finally {
 			_copying = false;
 		}
-		var name = Ask.Input(this, "Copy this setup", $"A new setup with the steps and settings of \"{item.Name}\", and the settings its tools learned. Nothing of \"{item.Name}\" changes. The copy's name:",
+		var name = Ask.Input(this, "Copy this setup", WindowWords.F($"A new setup with the steps and settings of \"{item.Name}\", and the settings its tools learned. Nothing of \"{item.Name}\" changes. The copy's name:"),
 			offered, "Make the copy", n => SetupFiles.BadName(AppPaths.Setups, n));
 		if (name == null) {
 			return;
@@ -114,10 +120,14 @@ public partial class MainWindow
 		_copying = true;
 		_vm.CopyingSetup = true;
 		// the window's own work: closing waits for it, so a copy is never cut off half made
-		using var hold = _vm.Working("a setup is being copied");
+		using var hold = _vm.Working(WindowWords.Word("a setup is being copied"));
 		try {
 			var from = item.File;
 			var made = await Task.Run(() => SetupFiles.Duplicate(from, name)).ConfigureAwait(true);
+			// (a copy starts what the setup it was made from starts: allowed there, it is allowed here)
+			if (UiState.Text(MainViewModel.StartsAllowedKey(from)) is { Length: > 0 } allowed) {
+				UiState.Set(MainViewModel.StartsAllowedKey(made), allowed);
+			}
 			_vm.LoadSetups(made);
 			_vm.Say($"\"{name.Trim()}\" made: a copy of \"{item.Name}\". It has no runs of its own yet.", "good");
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or InvalidDataException or System.Text.Json.JsonException) {
@@ -151,14 +161,14 @@ public partial class MainWindow
 		if (_panels.TryGetValue("settings", out var open)) {
 			open.Close();
 		}
-		var name = Ask.Input(this, "Rename this setup", $"The new name of \"{item.Name}\". Its runs and their history, and the settings its tools learned, go with it.",
+		var name = Ask.Input(this, "Rename this setup", WindowWords.F($"The new name of \"{item.Name}\". Its runs and their history, and the settings its tools learned, go with it."),
 			item.Name, "Rename", n => SetupFiles.BadName(AppPaths.Setups, n, item.File));
 		if (name == null || name.Trim() == item.Name) {
 			return;
 		}
 		_renaming = true;
 		// the window's own work: closing waits for it, so a rename is never cut off between its files
-		using var hold = _vm.Working("a setup is being renamed");
+		using var hold = _vm.Working(WindowWords.Word("a setup is being renamed"));
 		// from here no change or save of the setup starts (Renaming), until the renamed one is shown
 		_vm.Renaming = true;
 		try {
@@ -173,6 +183,11 @@ public partial class MainWindow
 			if (UiState.Flag(was)) {
 				UiState.Set(MainViewModel.ToolsOfferedKey(done.File), true);
 				UiState.Set(was, false);
+			}
+			// (what was allowed for it goes along with its name)
+			if (UiState.Text(MainViewModel.StartsAllowedKey(item.File)) is { Length: > 0 } allowed) {
+				UiState.Set(MainViewModel.StartsAllowedKey(done.File), allowed);
+				UiState.Set(MainViewModel.StartsAllowedKey(item.File), "");
 			}
 			_vm.LoadSetups(done.File);
 			_vm.Say(done.NotRepointed.Count == 0 ? $"Renamed to \"{name.Trim()}\"." :
@@ -215,12 +230,15 @@ public partial class MainWindow
 			new(WindowWords.Word(_logWindow == null ? "Log in its own window" : "Log back in the main window"), () => LogPop_Click(this, new RoutedEventArgs())),
 			new(WindowWords.Word("Compact view"), () => ShowCompact()),
 		]);
-		foreach (var s in _vm.Setups.Where(s => !ReferenceEquals(s, _vm.SelectedSetup))) {
-			items.Add(new(WindowWords.Format("Show setup: {0}", s.Name), () => {
-				if (!_vm.IsRunning) {
-					_vm.SelectedSetup = s;
-				}
-			}));
+		// (another setup is shown only while no run goes: the list does not offer what would do nothing)
+		if (!_vm.IsRunning) {
+			foreach (var s in _vm.Setups.Where(s => !ReferenceEquals(s, _vm.SelectedSetup))) {
+				items.Add(new(WindowWords.Format("Show setup: {0}", s.Name), () => {
+					if (!_vm.IsRunning) {
+						_vm.SelectedSetup = s;
+					}
+				}));
+			}
 		}
 		foreach (var r in _vm.Steps) {
 			items.Add(new(WindowWords.Format("Settings of {0}", r.Name), () => OpenStepSettings(r)));

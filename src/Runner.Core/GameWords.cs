@@ -104,7 +104,7 @@ public sealed class GameWords
 		var files = r.ReadInt32();
 		r.ReadUInt32();
 		var namesLength = r.ReadInt32();
-		if (folders is < 0 or > MostEntries || files is < 0 or > MostEntries || namesLength < 0) {
+		if (folders is < 0 or > MostEntries || files is < 0 or > MostEntries || namesLength < 0 || namesLength > f.Length) {
 			throw new InvalidDataException("not a game archive: " + a_archive);
 		}
 		f.Position = foldersAt;

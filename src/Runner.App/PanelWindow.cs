@@ -78,13 +78,18 @@ public sealed class PanelWindow : Window
 		set => _body.Content = value;
 	}
 
+	// Both in the window's language, here: a heading changed after the window opened (another view, the settings drawn again)
+	// is past the walk that translates a window as it loads
 	public void Head(string a_title)
 	{
-		_head.Text = a_title;
-		// the title bar in plain case: "HISTORY" -> "History"
-		Title = a_title.Length > 1 ? a_title[..1] + a_title[1..].ToLowerInvariant().Replace("mo2", "MO2", StringComparison.Ordinal) : a_title;
+		_head.Text = WindowWords.Word(a_title);
+		Title = WindowWords.Word(Plain(a_title));
 		System.Windows.Automation.AutomationProperties.SetName(this, Title);
 	}
+
+	// the title bar in plain case: "HISTORY" -> "History", "MO2 CHANGELOG" -> "MO2 Changelog" (a word with a digit in it stays whole)
+	public static string Plain(string a_heading) =>
+		string.Join(' ', a_heading.Split(' ').Select(w => w.Length < 2 || w.Any(char.IsDigit) ? w : w[..1] + w[1..].ToLowerInvariant()));
 
 	// the keyboard into the panel: what a_first focuses, else the first thing in its own content, else its Close button
 	public void TakeKeyboard(Action? a_first = null)

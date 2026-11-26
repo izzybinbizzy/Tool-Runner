@@ -15,7 +15,7 @@ public sealed class DevBench(string a_baseUrl = "http://127.0.0.1:8920/api/tool/
 		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(a_timeoutSeconds));
 		using var resp = Http.PostAsJsonAsync(a_baseUrl + a_tool, a_args, cts.Token).GetAwaiter().GetResult();
 		resp.EnsureSuccessStatusCode();
-		var node = JsonNode.Parse(resp.Content.ReadAsStringAsync(cts.Token).GetAwaiter().GetResult()) as JsonObject ?? [];
+		var node = JsonNode.Parse(resp.Content.ReadAsStringAsync(cts.Token).GetAwaiter().GetResult(), documentOptions: JsonRead.Plain) as JsonObject ?? [];
 		return node["result"] as JsonObject ?? node;
 	}
 

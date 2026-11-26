@@ -10,8 +10,8 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- WPF0001: the Fluent theme's ThemeMode is marked experimental. The others are naming / style rules the engine project
-         leaves out too (its a_ parameter names, a WPF override's parameter names), never a resource or correctness rule -->
-    <NoWarn>$(NoWarn);WPF0001;CA1707;CA1401;CA1720;CA1861;CA1869;CA1822;CA1725</NoWarn>
+         leaves out too (its a_ parameter names, a WPF override's parameter names), never a resource, speed or correctness rule -->
+    <NoWarn>$(NoWarn);WPF0001;CA1707;CA1401;CA1720;CA1725</NoWarn>
     <AssemblyName>Tool Runner</AssemblyName>
     <RootNamespace>ToolRunner.App</RootNamespace>
     <ApplicationIcon>Icon.ico</ApplicationIcon>
@@ -36,11 +36,27 @@
   <ItemGroup>
     <Resource Include="Logo.png" />
     <EmbeddedResource Include="Theme template.json" LogicalName="ThemeTemplate.json" />
-    <!-- the shipped themes, each the same file a player's own theme is (written by the work folder's "make themes.py") -->
+    <!-- the shipped themes, each the same file a player's own theme is -->
     <EmbeddedResource Include="Themes\*.json" LogicalName="Theme.%(Filename).json" />
-    <!-- the shipped languages: { "the English words": "their translation" } each -->
-    <EmbeddedResource Include="Languages\*.json" LogicalName="Language.%(Filename).json" />
+    <!-- The shipped languages: { "the English words": "their translation" } each. As plain text they were a third of the
+         program file (a one-file program that needs the runtime is not compressed when it is published): they go in as one
+         packed file, made when the program is built (the PackLanguages target), and only the language in use is unpacked -->
+    <LanguageFile Include="Languages\*.json" />
+    <EmbeddedResource Include="$(IntermediateOutputPath)Languages.zip" LogicalName="Languages.zip" Visible="false" />
   </ItemGroup>
+
+  <!-- the list of the language files, written only when it changes: a file taken out or renamed makes the pack again too -->
+  <Target Name="ListLanguages">
+    <MakeDir Directories="$(IntermediateOutputPath)" />
+    <WriteLinesToFile File="$(IntermediateOutputPath)Languages.list" Lines="@(LanguageFile->'%(Filename)%(Extension)')" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
+
+  <!-- only the listed files go into the pack, never anything else left in the folder -->
+  <Target Name="PackLanguages" BeforeTargets="AssignTargetPaths" DependsOnTargets="ListLanguages" Inputs="@(LanguageFile);$(IntermediateOutputPath)Languages.list" Outputs="$(IntermediateOutputPath)Languages.zip">
+    <RemoveDir Directories="$(IntermediateOutputPath)Languages" />
+    <Copy SourceFiles="@(LanguageFile)" DestinationFolder="$(IntermediateOutputPath)Languages" />
+    <ZipDirectory SourceDirectory="$(IntermediateOutputPath)Languages" DestinationFile="$(IntermediateOutputPath)Languages.zip" Overwrite="true" />
+  </Target>
 
   <ItemGroup>
     <ProjectReference Include="..\Runner.Core\Runner.Core.csproj" />

@@ -35,7 +35,16 @@ public sealed class InvertBool : IValueConverter
 
 static class Brushes2
 {
+	// the theme's brush as it is this moment: for a box that is answered before a theme can change under it
 	public static Brush Get(string a_key) => (Brush)Application.Current.Resources[a_key];
+
+	// a theme's value as a live reference: a theme picked while the element shows repaints it (a theme puts new brushes in
+	// place of the old ones, so one taken with Get keeps the look that was in use when it was taken)
+	public static T Live<T>(this T a_element, DependencyProperty a_property, string a_key) where T : FrameworkElement
+	{
+		a_element.SetResourceReference(a_property, a_key);
+		return a_element;
+	}
 }
 
 // "good" / "bad" / "warn" -> its color

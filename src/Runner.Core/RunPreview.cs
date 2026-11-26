@@ -128,5 +128,5 @@ public sealed class RunPreview
 		return l;
 	}
 
-	static string Minutes(TimeSpan a_t) => a_t.TotalMinutes < 1 ? "under a minute" : a_t.TotalMinutes < 60 ? $"{a_t.TotalMinutes:0} min" : $"{(int)a_t.TotalHours} h {a_t.Minutes:00} min";
+	static string Minutes(TimeSpan a_t) => a_t.TotalMinutes < 1 ? "under a minute" : Times.HoursAndMinutes(a_t);
 }

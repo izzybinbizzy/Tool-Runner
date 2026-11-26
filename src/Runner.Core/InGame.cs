@@ -181,11 +181,12 @@ public static partial class InGame
 	public static List<string> CrashReports(IReadOnlyList<string> a_logFolders, string a_overwrite, DateTime a_since)
 	{
 		var found = new List<FileInfo>();
+		var since = a_since.ToUniversalTime();
 		void Look(string a_dir, string a_pattern, SearchOption a_how)
 		{
 			try {
 				if (Directory.Exists(a_dir)) {
-					found.AddRange(new DirectoryInfo(a_dir).EnumerateFiles(a_pattern, a_how).Where(f => f.LastWriteTime >= a_since && IsCrashReport(f.Name)));
+					found.AddRange(new DirectoryInfo(a_dir).EnumerateFiles(a_pattern, a_how).Where(f => f.LastWriteTimeUtc >= since && IsCrashReport(f.Name)));
 				}
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			}
@@ -196,7 +197,7 @@ public static partial class InGame
 		}
 		Look(Path.Combine(a_overwrite, "NetScriptFramework", "Crash"), "Crash*.txt", SearchOption.TopDirectoryOnly);
 		Look(Path.Combine(a_overwrite, "SKSE", "Plugins"), "SkyrimDiag_Crash_*_SkyrimDiagReport.txt", SearchOption.AllDirectories);
-		return found.OrderByDescending(f => f.LastWriteTime).Select(f => f.FullName).Distinct(StringComparer.OrdinalIgnoreCase)
+		return found.OrderByDescending(f => f.LastWriteTimeUtc).Select(f => f.FullName).Distinct(StringComparer.OrdinalIgnoreCase)
 			.GroupBy(f => Path.GetFileName(f).StartsWith("SkyrimDiag", StringComparison.OrdinalIgnoreCase) ? "t" : Path.GetExtension(f).ToLowerInvariant()).Select(g => g.First()).ToList();
 	}
 
@@ -209,7 +210,9 @@ public static partial class InGame
 		return a_folders.SelectMany(d => names.Select(n => Path.Combine(d, n))).Where(File.Exists).OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
 	}
 
-	[GeneratedRegex(@"\[(?:\d{4}-\d\d-\d\d[ T])?\d\d:\d\d:\d\d(?:\.\d+)?\].*\[ShaderTiming\].*\bremaining=(\d+)")]
+	// (nine digits at most: a line written over by another, digits run together, read past what a number holds and threw where
+	// the step reads the count)
+	[GeneratedRegex(@"\[(?:\d{4}-\d\d-\d\d[ T])?\d\d:\d\d:\d\d(?:\.\d+)?\].*\[ShaderTiming\].*\bremaining=(\d{1,9})(?!\d)")]
 	private static partial Regex Remaining();
 
 	// a compile runs: a "remaining=N" line (N > 0) in the last 5 minutes, or Open Shaders' "started" with no "completed" after it,
@@ -336,7 +339,7 @@ public static partial class InGame
 		// the game's INIs: the profile's own when it keeps them (LocalSettings), else My Games'; SkyrimCustom.ini wins
 		var localInis = File.Exists(ini) && Files.ReadSharedText(ini).Split('\n').Any(l => l.Trim().Equals("LocalSettings=true", StringComparison.OrdinalIgnoreCase));
 		var iniDir = localInis ? a_profile.Dir : myGames;
-		var savePath = new[] { "SkyrimCustom.ini", "Skyrim.ini" }.Select(n => Path.Combine(iniDir, n)).Where(File.Exists)
+		var savePath = GameInis.Select(n => Path.Combine(iniDir, n)).Where(File.Exists)
 			.Select(f => Files.ReadSharedText(f).Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.StartsWith("sLocalSavePath=", StringComparison.OrdinalIgnoreCase)))
 			.FirstOrDefault(l => l != null)?["sLocalSavePath=".Length..].Trim();
 		return Path.Combine(myGames, string.IsNullOrEmpty(savePath) ? "Saves" : savePath.TrimEnd('\\'));
@@ -409,7 +412,11 @@ public static partial class InGame
 	// a_openEnd: where a step with no end stops (now for the run going; its record's last write for a run that died)
 	public static IEnumerable<(DateTime From, DateTime To)> GameTimes(IEnumerable<StepRecord> a_steps, DateTime a_openEnd) =>
 		a_steps.Where(s => GameSteps.Contains(s.Key) && s.Started != null)
-			.Select(s => (s.Started!.Value.ToUniversalTime(), (s.Ended ?? (a_openEnd < s.Started.Value ? s.Started.Value : a_openEnd)).ToUniversalTime()));
+			.Select(s => {
+				var from = s.Started!.Value.ToUniversalTime();
+				var open = a_openEnd.ToUniversalTime();
+				return (from, s.Ended?.ToUniversalTime() ?? (open < from ? from : open));
+			});
 
 	// The place the player stood at before the clean save is on record in the run that MADE that save. A run that starts from an
 	// earlier run's clean save - "run again from the failed step" is a new run with a record of its own - takes the marker from
@@ -504,19 +511,23 @@ public static partial class InGame
 	static void Settle(RunContext a_ctx, string a_step, int a_seconds, string a_why)
 	{
 		a_ctx.Activity(a_step, a_why);
-		var plain = DateTime.UtcNow.AddSeconds(a_seconds);
+		// counted on a clock that only runs forward: the PC's clock being set (a time sync) never ends or stretches the wait
+		var began = DateTime.UtcNow;
+		var ran = Stopwatch.StartNew();
+		DateTime Now() => began + ran.Elapsed;
+		var plain = began.AddSeconds(a_seconds);
 		var until = plain;
-		var nextLook = DateTime.UtcNow;
-		while (DateTime.UtcNow < until) {
+		var nextLook = began;
+		while (Now() < until) {
 			a_ctx.Cancel.ThrowIfCancellationRequested();
 			if (!GameUp(a_ctx)) {
 				throw GameClosed(a_ctx, "while the save settled");
 			}
-			if (DateTime.UtcNow >= nextLook) {
-				nextLook = DateTime.UtcNow.AddSeconds(5);
+			if (Now() >= nextLook) {
+				nextLook = Now().AddSeconds(5);
 				try {
 					if (AnswerGameBox(a_ctx) is { } body) {
-						until = SettleUntil(plain, DateTime.UtcNow, body);
+						until = SettleUntil(plain, Now(), body);
 						if (PromisesBox(body)) {
 							a_ctx.Log.Detail("that box says another follows - waiting for it (up to 10 minutes)");
 						}
@@ -556,7 +567,7 @@ public static partial class InGame
 		if (d["messageBoxOpen"]?.GetValue<bool>() == false) {
 			return null;
 		}
-		var body = string.Join(" ", new[] { "bodyText", "text", "message" }.Select(k => d[k]?.ToString() ?? "")).Trim();
+		var body = string.Join(" ", BoxTextKeys.Select(k => d[k]?.ToString() ?? "")).Trim();
 		var labels = (d["buttons"] as JsonArray ?? d["buttonTexts"] as JsonArray ?? [])
 			.Select(b => b is JsonObject bo ? (bo["text"] ?? bo["label"])?.ToString() ?? "" : b?.ToString() ?? "").ToList();
 		return new GameBox(body, labels, d["buttonCount"]?.GetValue<int>(), d["cancelIndex"] is JsonValue c && c.TryGetValue<int>(out var cancel) ? cancel : -1);
@@ -752,7 +763,7 @@ public static partial class InGame
 			}
 			if (IsTrue(list["messageBoxOpen"])) {
 				var d = a_ctx.DevBench.Call("menu", new { action = "describe" }, 10);
-				parts.Add("a game message: " + string.Join(" ", new[] { "bodyText", "text", "message" }.Select(k => d[k]?.ToString() ?? "")).Trim());
+				parts.Add("a game message: " + string.Join(" ", BoxTextKeys.Select(k => d[k]?.ToString() ?? "")).Trim());
 			}
 		} catch (Exception e) when (e is HttpRequestException or TaskCanceledException or InvalidOperationException or FormatException or System.Text.Json.JsonException) {
 		}
@@ -930,6 +941,10 @@ public static partial class InGame
 	}
 
 	static bool IsTrue(JsonNode? a_n) => a_n is JsonValue v && v.TryGetValue<bool>(out var b) && b;
+
+	// (lists asked for at every look into the game: each made once)
+	static readonly string[] GameInis = ["SkyrimCustom.ini", "Skyrim.ini"];
+	static readonly string[] BoxTextKeys = ["bodyText", "text", "message"];
 
 	// the player's followers in a DevBench actor list: every living teammate loaded near them, never the player (followers
 	// come along - the game's follow package can leave one behind after a coc / MoveTo)
@@ -1491,11 +1506,9 @@ public static partial class InGame
 	public const string SavesCopyFolder = "saves before the run";
 
 	// the free bytes on a folder's drive (the offline tests answer for the disk)
-	public static Func<string, long> FreeBytes { get; set; } = a_path => {
-		var root = Path.GetPathRoot(Path.GetFullPath(a_path));
-		// a network folder's room cannot be read this way: not known, so the copy goes ahead (a failure there is said like any other)
-		return string.IsNullOrEmpty(root) || root.StartsWith(@"\\", StringComparison.Ordinal) ? long.MaxValue / 2 : new DriveInfo(root).AvailableFreeSpace;
-	};
+	// (the disk the folder really stands on, a junction followed; where Windows will not say - a share that does not answer - the
+	// room is not known and the copy goes ahead: a failure there is said like any other)
+	public static Func<string, long> FreeBytes { get; set; } = a_path => Files.FreeOn(a_path) ?? long.MaxValue / 2;
 
 	// a_lastStep: the run's work is behind it, so only a small margin is kept
 	public static string? CopySaves(RunContext a_ctx, bool a_lastStep = false)

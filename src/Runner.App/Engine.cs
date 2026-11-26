@@ -23,6 +23,17 @@ public static class AppPaths
 	// the player chose the app-data folder for every copy (Settings > Program)
 	public static bool AppDataChosen => DataFolder.Chosen(AppDataFolder);
 
+	// the folder beside the program is where the player's setups are
+	static bool HoldsSetups(string a_data)
+	{
+		try {
+			var setups = Path.Combine(a_data, "Setups");
+			return Directory.Exists(setups) && Directory.EnumerateFiles(setups, "*.json").Any();
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			return false;
+		}
+	}
+
 	static string Resolve()
 	{
 		try {
@@ -49,8 +60,15 @@ public static class AppPaths
 			var beside = DataFolder.Adopt(AppContext.BaseDirectory, " Data");
 			Directory.CreateDirectory(beside);
 			var probe = Path.Combine(beside, ".write test");
-			File.WriteAllText(probe, "");
-			File.Delete(probe);
+			try {
+				File.WriteAllText(probe, "");
+			} catch (Exception e) when ((e is IOException or UnauthorizedAccessException) && HoldsSetups(beside)) {
+				// the player's setups are in this folder: a file another program holds for a moment (a scanner) must not send
+				// this start to an empty folder elsewhere - tried again before the folder is given up
+				Files.Retry(() => File.WriteAllText(probe, ""));
+			}
+			// (the write proved the folder; its removal never decides where the data is)
+			Files.TryDelete(probe);
 			return beside;
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			var local = DataFolder.Adopt(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "");
@@ -107,7 +125,7 @@ public static class Engine
 	public static string? LastRefusal(DateTime a_since)
 	{
 		try {
-			return File.Exists(RefusalFile) && File.GetLastWriteTime(RefusalFile) >= a_since.AddSeconds(-5) ? Files.ReadSharedText(RefusalFile).Trim() : null;
+			return File.Exists(RefusalFile) && File.GetLastWriteTimeUtc(RefusalFile) >= a_since.ToUniversalTime().AddSeconds(-5) ? Files.ReadSharedText(RefusalFile).Trim() : null;
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			return null;
 		}
@@ -115,6 +133,12 @@ public static class Engine
 
 	// every run record, newest first (read again only where a record changed)
 	public static List<Journal> Runs() => Cache.Read();
+
+	// The window watches the runs folder (RunsWatch) and says so here: what was read stands until the watcher names a
+	// change, this process writes a record, a run folder comes or goes, or a quarter of a minute is over (JournalCache)
+	public static void RunsWatched(bool a_on) => Cache.Watched = a_on;
+
+	public static void RunsChanged() => Cache.Touch();
 
 	// the run that is going: also one that has finished and is at its last chores (its game for the final save, the setup's
 	// after-run commands, packing the old outputs) - Stop and the close guard reach it until its engine has ended
@@ -131,7 +155,7 @@ public static class Engine
 		var all = new Dictionary<string, List<double>>();
 		foreach (var j in (a_runs ?? Runs()).Where(j => string.Equals(j.SetupFile, a_setupFile, StringComparison.OrdinalIgnoreCase)).Take(30)) {
 			foreach (var s in j.Steps.Where(s => s.State == StepState.Done && s.Started != null && s.Ended != null)) {
-				(all.TryGetValue(s.Key, out var l) ? l : all[s.Key] = []).Add((s.Ended!.Value - s.Started!.Value).TotalSeconds);
+				(all.TryGetValue(s.Key, out var l) ? l : all[s.Key] = []).Add(Times.Between(s.Started!.Value, s.Ended!.Value).TotalSeconds);
 			}
 		}
 		return all.ToDictionary(p => p.Key, p => TimeSpan.FromSeconds(p.Value.Order().ElementAt(p.Value.Count / 2)));
@@ -147,13 +171,66 @@ public static partial class ConsoleAttach
 
 	public static void ToParent()
 	{
-		if (AttachConsole(-1)) {
-			// the console owns this writer for the rest of the program's life (a command ends the process right after)
+		// the console owns these writers for the rest of the program's life (a command ends the process right after)
 #pragma warning disable CA2000
-			var o = new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true };
+		if (AttachConsole(-1)) {
+			// A console shows bytes in its own code page, which holds few letters: UTF-8 written there came out as wrong letters,
+			// and the code page itself has no Cyrillic or Chinese. Text for a console goes as UTF-16 - .NET then hands it to
+			// Windows' wide-character console call, every letter the font has shown and the console's code page left as the
+			// player set it. A file or a pipe - a script - gets UTF-8 without a byte-order mark, as before
+			System.Text.Encoding encoding;
+			if (Console.IsOutputRedirected) {
+				encoding = new System.Text.UTF8Encoding(false);
+			} else {
+				Console.OutputEncoding = System.Text.Encoding.Unicode;
+				encoding = new System.Text.UnicodeEncoding(false, false);
+			}
+			Console.SetOut(new ReaderGone(new StreamWriter(Console.OpenStandardOutput(), encoding) { AutoFlush = true }));
+			Console.SetError(Console.Out);
+		} else {
+			// (started with no console to join - a script, a scheduled task: what it reads from the error stream stays apart
+			// from what it reads from the output)
+			Console.SetOut(new ReaderGone(Console.Out));
+			Console.SetError(new ReaderGone(Console.Error));
+		}
 #pragma warning restore CA2000
-			Console.SetOut(o);
-			Console.SetError(o);
+	}
+
+	// What is printed goes to whoever reads it, and a write fails once that reader is gone (a pipe closed early:
+	// "... | select -first 1"). Left to fail, it made a finished run end with exit 1, and from the place that says what went
+	// wrong it ended the program on an error of its own. Nobody is reading any more: what is written from then on is dropped
+	public sealed class ReaderGone(TextWriter a_to) : TextWriter(InvariantCulture)
+	{
+		bool _gone;
+
+		public override System.Text.Encoding Encoding => a_to.Encoding;
+
+		public override void Write(char a_value) => Try(() => a_to.Write(a_value));
+
+		public override void Write(string? a_value) => Try(() => a_to.Write(a_value));
+
+		public override void WriteLine(string? a_value) => Try(() => a_to.WriteLine(a_value));
+
+		public override void Flush() => Try(a_to.Flush);
+
+		void Try(Action a_write)
+		{
+			if (_gone) {
+				return;
+			}
+			try {
+				a_write();
+			} catch (Exception e) when (e is IOException or ObjectDisposedException or UnauthorizedAccessException) {
+				_gone = true;
+			}
+		}
+
+		protected override void Dispose(bool a_disposing)
+		{
+			if (a_disposing) {
+				a_to.Dispose();
+			}
+			base.Dispose(a_disposing);
 		}
 	}
 }

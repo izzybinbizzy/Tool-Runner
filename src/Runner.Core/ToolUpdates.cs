@@ -31,13 +31,25 @@ public static partial class ToolUpdates
 	public sealed record Result(string Step, string Tool, string Yours, string Newest, bool Newer, string Page, string? Problem, int Tools = 1);
 
 	// the line under the rows: every tool a row names is counted, and a row that could not be asked never counts as up to date
-	public static string Summary(IReadOnlyCollection<Result> a_res)
+	const string NewerText = "{0} tool(s) have a newer version - download it from its page (Mod Manager Download), then open the tool once and learn its settings again.";
+	const string NotCheckedText = "{0} tool(s) could not be checked - see their rows; the others are up to date.";
+	const string UpToDateText = "Every tool is up to date.";
+
+	// every text the summary can be (the window says each in its own language)
+	public static IReadOnlyList<string> SummaryTexts => [NewerText, NotCheckedText, UpToDateText];
+
+	// the summary as a text with a place for its number (no number: every tool is up to date)
+	public static (string Text, int? Count) SummaryParts(IReadOnlyCollection<Result> a_res)
 	{
 		var newer = a_res.Where(r => r.Newer).Sum(r => r.Tools);
 		var notChecked = a_res.Where(r => r.Problem != null).Sum(r => r.Tools);
-		return newer > 0 ? $"{newer} tool(s) have a newer version - download it from its page (Mod Manager Download), then open the tool once and learn its settings again." :
-			notChecked > 0 ? $"{notChecked} tool(s) could not be checked - see their rows; the others are up to date." :
-			"Every tool is up to date.";
+		return newer > 0 ? (NewerText, newer) : notChecked > 0 ? (NotCheckedText, notChecked) : (UpToDateText, null);
+	}
+
+	public static string Summary(IReadOnlyCollection<Result> a_res)
+	{
+		var (text, count) = SummaryParts(a_res);
+		return count is { } n ? text.Replace("{0}", n.ToString(InvariantCulture), StringComparison.Ordinal) : text;
 	}
 
 	// the player's copy of a step's tool: its program file and the version read off it (or off its MO2 mod's meta.ini)
@@ -90,8 +102,8 @@ public static partial class ToolUpdates
 	}
 
 	// is "newest" newer than "yours"? Versions are written many ways ("2.3.1.0" / "2.3.1", "3.0.0.217" / "Alpha-217"): equal
-	// numbers, or the page's numbers ending the program's, count as the same; else the numbers compare left to right. Unsure
-	// (no numbers) = not called newer.
+	// numbers count as the same; a page that shows one number alone is held against the program's last number; else the
+	// numbers compare left to right. Unsure (no numbers) = not called newer.
 	public static bool IsNewer(string a_yours, string a_newest)
 	{
 		var y = Parts(a_yours);
@@ -99,13 +111,10 @@ public static partial class ToolUpdates
 		if (y.Count == 0 || n.Count == 0 || y.SequenceEqual(n)) {
 			return false;
 		}
-		// the two short-form rules only for a page version written short ("Alpha-217"), never one shortened by its zeros ("2.0")
-		var shortForm = n.Count == Numbers().Count(a_newest);
-		if (shortForm && n.Count < y.Count && y.Skip(y.Count - n.Count).SequenceEqual(n)) {
-			return false;
-		}
-		if (shortForm && n.Count < y.Count && n.Count == 1) {
-			// one number on the page ("Alpha-218") against a full version: the last part decides
+		// One number on the page ("Alpha-218") against a full version: the last part decides. Only for a page version written
+		// as one number, never one shortened by its zeros ("2.0") - and never for two numbers or more: "1.2" ends "1.1.2"
+		// and is still the newer version
+		if (n.Count == 1 && y.Count > 1 && Numbers().Count(a_newest) == 1) {
 			return n[0] > y[^1];
 		}
 		for (var i = 0; i < Math.Max(y.Count, n.Count); ++i) {
@@ -159,7 +168,8 @@ public static partial class ToolUpdates
 				var newest = src.NexusId != null ? await Nexus(http, src.NexusId, a_ct).ConfigureAwait(false) : await GitHub(http, src.GitHub!, a_ct).ConfigureAwait(false);
 				outList.Add(new Result(step.Key, tool, yours == "" ? "?" : yours, newest, exe != null && yours != "" && IsNewer(yours, newest), src.Page,
 					exe == null ? "its program was not found" : yours == "" ? "its version could not be read" : null));
-			} catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidOperationException) {
+				// (NotSupported: an answer that is no JSON at all - the sign-in page a hotel's or a school's network puts in front of every address)
+			} catch (Exception e) when (e is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or InvalidOperationException or NotSupportedException) {
 				outList.Add(new Result(step.Key, tool, yours, "", false, src.Page, "could not ask its page: " + e.Message));
 			}
 		}

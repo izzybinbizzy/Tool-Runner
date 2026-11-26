@@ -33,6 +33,11 @@ class RootBuilderProfiles(mobase.IPluginTool):
         self._retries = 0
         self._ran_on = (None, None)
         self._busy = False
+        # looks after a program closed that are on their way (MO2's own callback, or a retry) and not begun yet
+        self._looks_waiting = 0
+        self._held = False
+        # the run's profile and ticked mods are on record (_ran_on) for the look under way, put off or retried
+        self._captured = False
 
     # ---- MO2 plugin identity ----------------------------------------------------------------
     def name(self):
@@ -51,7 +56,7 @@ class RootBuilderProfiles(mobase.IPluginTool):
         return self.description()
 
     def version(self):
-        return mobase.VersionInfo(1, 4, 1)
+        return mobase.VersionInfo(1, 4, 2)
 
     def icon(self):
         try:
@@ -93,7 +98,7 @@ class RootBuilderProfiles(mobase.IPluginTool):
         organizer.onFinishedRun(lambda app, code: self._later(self._after_run))
         organizer.onProfileChanged(lambda old, new: self._later(self._check_game))
         organizer.onUserInterfaceInitialized(lambda window: self._later(self._startup))
-        self._say(f"loaded (version 1.4.1), profile '{organizer.profileName()}'")
+        self._say(f"loaded (version 1.4.2), profile '{organizer.profileName()}'")
         return True
 
     def _say(self, line):
@@ -115,12 +120,32 @@ class RootBuilderProfiles(mobase.IPluginTool):
 
     def _later(self, fn, ms=0):
         """Run after the current MO2 callbacks have all returned - so Root Builder's own Clear is finished first."""
+        if fn == self._after_run:
+            self._looks_waiting += 1
         QTimer.singleShot(ms, lambda: self._guard(fn))
 
     def _guard(self, fn):
+        if fn == self._after_run:
+            self._looks_waiting -= 1
         if not self.isActive() or self._busy:
-            self._say(f"{fn.__name__}: skipped ({'turned off in MO2' if not self.isActive() else 'already working'})")
+            if not self._held:
+                self._say(f"{fn.__name__}: skipped ({'turned off in MO2' if not self.isActive() else 'already working'})")
+            if fn == self._after_run:
+                if not self.isActive():
+                    # turned off: the look is dropped, and the next one reads the profile and its ticked mods anew
+                    self._retries = 0
+                    self._held = False
+                    self._captured = False
+                elif self._looks_waiting == 0:
+                    # still working on something else (a box of its own is open): this look comes again shortly. The run's
+                    # profile and ticked mods are put on record now, before the player can switch profiles meanwhile, and
+                    # every later look of it uses them - this run's changes stay this run's
+                    self._capture()
+                    self._held = True
+                    self._later(self._after_run, 3000)
             return
+        if fn == self._after_run:
+            self._held = False
         self._say(f"{fn.__name__}: running")
         self._busy = True
         try:
@@ -131,7 +156,13 @@ class RootBuilderProfiles(mobase.IPluginTool):
             fn()
         except Exception:
             self._say("ERROR\n" + traceback.format_exc())
-            QMessageBox.warning(None, TITLE, self.tr("Something went wrong - nothing more was changed. The log is in MO2's plugins\\data\\RootBuilderProfiles folder."))
+            if fn == self._after_run:
+                # the look ended on an error: the next one reads the profile and its ticked mods anew
+                self._retries = 0
+                self._captured = False
+            # a run of Tool Runner may go on with nobody at the PC, and it leaves this add-on's boxes to the player: said in the log only
+            if not runner_running():
+                QMessageBox.warning(None, TITLE, self.tr("Something went wrong - nothing more was changed. The log is in MO2's plugins\\data\\RootBuilderProfiles folder."))
         finally:
             self._busy = False
 
@@ -141,13 +172,19 @@ class RootBuilderProfiles(mobase.IPluginTool):
         self._check_game(startup=True)
 
     # ---- 1: after a program closes ---------------------------------------------------------
+    def _capture(self):
+        """The run's profile and ticked mods, put on record once per look: a retry or a look put off keeps them."""
+        if not self._captured:
+            self._ran_on = (self._org.profileName(), self._ticked_mods())
+            self._captured = True
+
     def _after_run(self):
         moving = self._setting("movechanges")
         if not moving and not self._setting("checkgame"):
+            self._captured = False
             return
         # a retry below can outlast a profile switch: this run's changes stay this run's
-        if self._retries == 0:
-            self._ran_on = (self._org.profileName(), self._ticked_mods())
+        self._capture()
         if self._core.build_deployed():
             # Root Builder has not cleared yet (or autobuild is off) - look again a few times, then leave it.
             if self._retries < 10:
@@ -156,8 +193,10 @@ class RootBuilderProfiles(mobase.IPluginTool):
             else:
                 self._say("Root Builder still has files deployed after 30 s - nothing moved this time")
                 self._retries = 0
+                self._captured = False
             return
         self._retries = 0
+        self._captured = False
         if moving and self._ran_on[1] is None:
             self._say("the mod list could not be read: overwrite\\Root is left as it is until the next look")
         elif moving:
@@ -229,7 +268,7 @@ class RootBuilderProfiles(mobase.IPluginTool):
                 else:
                     state["declined copies"] = ckey
                     self._core.save_state(state)
-                    self._say(f"{len(copies)} leftover copies of mods' Root files: he said no - not asked again until they change")
+                    self._say(f"{len(copies)} leftover copies of mods' Root files: the answer was no - not asked again until they change")
             for rel in copies:
                 files.pop(rel, None)
                 known.pop(rel, None)
@@ -238,7 +277,7 @@ class RootBuilderProfiles(mobase.IPluginTool):
             state = self._core.load_state() or {}
         key = sorted(k.lower() for k in files)
         if state.get("declined") == key:
-            self._say(f"{len(files)} unowned preset file(s) in the game folder - he said no to this set before, not asked")
+            self._say(f"{len(files)} unowned preset file(s) in the game folder - the answer to this set was no before, not asked")
             return
         names = "\n".join(sorted(files)[:10]) + ("\n..." if len(files) > 10 else "")
         answer = QMessageBox.question(None, TITLE, self.tr(
@@ -248,7 +287,7 @@ class RootBuilderProfiles(mobase.IPluginTool):
         if answer != QMessageBox.StandardButton.Yes:
             state["declined"] = key
             self._core.save_state(state)
-            self._say(f"{len(files)} unowned preset file(s): he said no - not asked again until they change (Tools menu asks again)")
+            self._say(f"{len(files)} unowned preset file(s): the answer was no - not asked again until they change (Tools menu asks again)")
             return
         mod = self._ask_name()
         if not mod:

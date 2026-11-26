@@ -58,7 +58,7 @@ public static class Theme
 	static JsonObject BuiltIn(string a_name)
 	{
 		if (Shipped.Contains(a_name) || a_name == Default) {
-			return JsonNode.Parse(ShippedText(a_name)) as JsonObject ?? [];
+			return JsonNode.Parse(ShippedText(a_name), documentOptions: JsonRead.Plain) as JsonObject ?? [];
 		}
 		if (a_name == ColorBlind) {
 			return new JsonObject { ["colors"] = Tokens(("Good", "#0072B2"), ("Warn", "#7A5C00"), ("Bad", "#B34E00"), ("BannerBad", "#FBE6D4")) };
@@ -208,11 +208,13 @@ public static class Theme
 				continue;
 			}
 			try {
-				var o = JsonNode.Parse(Files.ReadSharedText(f)) as JsonObject;
+				var o = JsonNode.Parse(Files.ReadSharedText(f), documentOptions: JsonRead.Plain) as JsonObject;
 				var name = (o?["name"] as JsonObject)?["value"]?.ToString() ?? o?["name"]?.ToString();
 				// a theme named like a built-in look (by its name or its file name) gets "(file)" added, so both can be picked
 				var shown = string.IsNullOrWhiteSpace(name) || name == Default || BuiltIns.Contains(name) ? Path.GetFileNameWithoutExtension(f) : name;
-				outList.Add((shown == Default || BuiltIns.Contains(shown) ? shown + " (file)" : shown, f));
+				shown = shown == Default || BuiltIns.Contains(shown) ? shown + " (file)" : shown;
+				// two files that carry one name inside: the later one says which file it is, so each can be picked
+				outList.Add((outList.Any(t => t.Item1 == shown) ? $"{shown} ({Path.GetFileName(f)})" : shown, f));
 			} catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException) {
 				outList.Add((Path.GetFileNameWithoutExtension(f) + " (does not read)", f));
 			}
@@ -266,23 +268,39 @@ public static class Theme
 	public sealed record Look(string Name, string? File, string About, bool Dark, Color Bg, Color Panel, Color Panel2, Color Line, Color Accent, Color AccentLight,
 		Color Text, Color Muted, Color Good, Color Warn, Color Bad, Color OnAccent, Color BarFrom, Color BarTo, double Corner, string? Problem);
 
-	static Color ColorOr(JsonObject? a_colors, string a_key, Color a_else)
+	// A color is "#" and 3, 4, 6 or 8 hex digits, or a color's name. Windows Presentation Foundation's own reader takes more -
+	// among it a color profile named by a file, a share or an address, which it then opens: a theme file that comes from
+	// someone else would have the window read from wherever it names. Anything that is not one of the two plain forms is no
+	// color here, and the reader never sees it
+	public static bool PlainColor(string a_text)
 	{
+		var t = a_text.Trim();
+		return t.Length > 0 && (t[0] == '#' ? t.Length is 4 or 5 or 7 or 9 && t.Skip(1).All(Uri.IsHexDigit) : t.All(char.IsAsciiLetter));
+	}
+
+	// null: no color (ReadColor says so where a theme is applied; a card in the gallery shows the default's instead)
+	static Color? ColorOf(string? a_text)
+	{
+		if (a_text == null || !PlainColor(a_text)) {
+			return null;
+		}
 		try {
-			return Value(a_colors?[a_key]) is { Length: > 0 } text ? (Color)ColorConverter.ConvertFromString(text.Trim()) : a_else;
+			return (Color)ColorConverter.ConvertFromString(a_text.Trim());
 		} catch (FormatException) {
-			return a_else;
+			return null;
 		}
 	}
+
+	static Color ColorOr(JsonObject? a_colors, string a_key, Color a_else) => ColorOf(Value(a_colors?[a_key])) ?? a_else;
 
 	// what a theme looks like, for its card in the gallery; a key it leaves out shows the default's value, as applying it would
 	public static Look LookOf(string a_name, string? a_file)
 	{
-		var basis = JsonNode.Parse(ShippedText(Default)) as JsonObject ?? [];
+		var basis = JsonNode.Parse(ShippedText(Default), documentOptions: JsonRead.Plain) as JsonObject ?? [];
 		JsonObject? own = null;
 		string? problem = null;
 		try {
-			own = a_file != null ? JsonNode.Parse(Files.ReadSharedText(a_file)) as JsonObject : a_name == Default ? basis : BuiltIn(a_name);
+			own = a_file != null ? JsonNode.Parse(Files.ReadSharedText(a_file), documentOptions: JsonRead.Plain) as JsonObject : a_name == Default ? basis : BuiltIn(a_name);
 		} catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException or InvalidDataException) {
 			problem = "does not read: " + e.Message;
 		}
@@ -293,12 +311,9 @@ public static class Theme
 		}
 		(Color From, Color To) Bar(JsonObject? a_t)
 		{
-			if (((a_t?["gradients"] as JsonObject)?["PrimaryAndProgress"] as JsonObject)?["stops"] is JsonArray { Count: >= 2 } stops) {
-				try {
-					return ((Color)ColorConverter.ConvertFromString(stops[0]!["color"]!.ToString()), (Color)ColorConverter.ConvertFromString(stops[^1]!["color"]!.ToString()));
-				} catch (Exception e) when (e is FormatException or NullReferenceException or InvalidOperationException) {
-					// (InvalidOperationException: a stop that is plain text, not an object - one such file kept the whole gallery from filling)
-				}
+			if (((a_t?["gradients"] as JsonObject)?["PrimaryAndProgress"] as JsonObject)?["stops"] is JsonArray { Count: >= 2 } stops &&
+			    ColorOf((stops[0] as JsonObject)?["color"]?.ToString()) is { } first && ColorOf((stops[^1] as JsonObject)?["color"]?.ToString()) is { } last) {
+				return (first, last);
 			}
 			return (Pick("Accent"), Pick("Accent"));
 		}
@@ -317,8 +332,8 @@ public static class Theme
 	public static string CopyAs(string a_name, string? a_file)
 	{
 		EnsureFolder();
-		var doc = JsonNode.Parse(TemplateText()) as JsonObject ?? [];
-		var from = a_file != null ? JsonNode.Parse(Files.ReadSharedText(a_file)) as JsonObject ?? [] : a_name == Default ? [] : BuiltIn(a_name);
+		var doc = JsonNode.Parse(TemplateText(), documentOptions: JsonRead.Plain) as JsonObject ?? [];
+		var from = a_file != null ? JsonNode.Parse(Files.ReadSharedText(a_file), documentOptions: JsonRead.Plain) as JsonObject ?? [] : a_name == Default ? [] : BuiltIn(a_name);
 		// every value the source sets goes over the template's, group by group, so the copy keeps each "where" line
 		foreach (var (key, node) in from) {
 			if (node is JsonObject group && doc[key] is JsonObject target && key is "colors" or "fonts" or "sizes" or "shape" or "glyphs" or "windowsAccent") {
@@ -348,24 +363,56 @@ public static class Theme
 		if (doc["author"] is JsonObject author) {
 			author["value"] = "";
 		}
-		Files.WriteAtomic(path, doc.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+		Files.WriteAtomic(path, doc.ToJsonString(JsonWrite.IndentedLetters));
 		return path;
 	}
 
-	// a theme file read and parsed (no window work - Settings does this off the window's thread)
-	sealed record Read(JsonObject? Json, string? Dir, string? Problem);
+	// a theme file read and parsed, its picture read and decoded (no window work - Settings does this off the window's thread)
+	sealed record Read(JsonObject? Json, string? Dir, string? Problem, ThemeIcon Icon = default);
+
+	// a theme's picture, decoded and frozen (any thread may hand it on), or why it did not open; both null: the theme names none
+	readonly record struct ThemeIcon(BitmapSource? Image, string? Problem);
+
+	static ThemeIcon LoadIcon(JsonObject a_t, string a_dir)
+	{
+		if (Value(a_t["icon"]) is not { Length: > 0 } icon) {
+			return default;
+		}
+		// only a file beside the theme: a full path, a share or ".." would read (or reach) outside its folder
+		var dir = Path.GetFullPath(a_dir).TrimEnd('\\') + "\\";
+		var path = Path.GetFullPath(Path.Combine(dir, icon));
+		if (Path.IsPathRooted(icon) || !path.StartsWith(dir, StringComparison.OrdinalIgnoreCase)) {
+			return new(null, $"icon: \"{icon}\" must be a file beside the theme");
+		}
+		try {
+			return new(IconFrom(path), null);
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or FormatException or NotSupportedException or ArgumentException or
+		                            InvalidOperationException or System.Runtime.InteropServices.ExternalException) {
+			// a damaged picture throws FileFormatException (a FormatException) or a COM error from Windows' decoder - it is only
+			// an icon, so it never stops the theme
+			return new(null, $"icon: \"{icon}\" does not open ({e.Message})");
+		}
+	}
 
 	static Read ReadTheme(string a_name)
 	{
 		if (BuiltIns.Contains(a_name)) {
-			return new(BuiltIn(a_name), Folder, null);
+			var builtIn = BuiltIn(a_name);
+			return new(builtIn, Folder, null, LoadIcon(builtIn, Folder));
 		}
-		var file = List().FirstOrDefault(t => t.Name == a_name).File;
+		string? file;
+		try {
+			file = List().FirstOrDefault(t => t.Name == a_name).File;
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			return new(null, null, $"the Themes folder could not be read ({e.Message}) - the built-in theme is used");
+		}
 		if (file == null) {
 			return new(null, null, $"no theme called \"{a_name}\" in the Themes folder - the built-in one is used");
 		}
 		try {
-			return new(JsonNode.Parse(Files.ReadSharedText(file)) as JsonObject ?? [], Path.GetDirectoryName(file)!, null);
+			var json = JsonNode.Parse(Files.ReadSharedText(file), documentOptions: JsonRead.Plain) as JsonObject ?? [];
+			var dir = Path.GetDirectoryName(file)!;
+			return new(json, dir, null, LoadIcon(json, dir));
 		} catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException) {
 			return new(null, null, $"{Path.GetFileName(file)} does not read ({e.Message}) - the built-in theme is used");
 		}
@@ -377,9 +424,6 @@ public static class Theme
 	// a pick that is still being read is not applied when it arrives
 	public static void DropPending() => ++s_asked;
 
-	static readonly string[] DeviceNames = ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"];
-
 	// A theme's name as a file's name: every character Windows refuses in a name taken out (a theme may be called "Ocean: dark",
 	// and a slash in a name would put the copy outside the Themes folder), and a name Windows keeps for a device given a word in
 	// front ("CON.demo copy.json" is still the console, whatever follows the dot)
@@ -389,7 +433,7 @@ public static class Theme
 		if (safe.Length == 0) {
 			return "Theme";
 		}
-		return DeviceNames.Contains(safe.Split('.')[0].Trim(), StringComparer.OrdinalIgnoreCase) ? "Theme " + safe : safe;
+		return Setup.IsDeviceName(safe) ? "Theme " + safe : safe;
 	}
 
 	// A font is named by its family ("Segoe UI", or several with commas between them). Windows Presentation Foundation also takes
@@ -419,7 +463,7 @@ public static class Theme
 				a_name = Default;
 			} else {
 				try {
-					ApplyFile(a_read.Json, a_read.Dir!, problems);
+					ApplyFile(a_read.Json, a_read.Icon, problems);
 				} catch (InvalidOperationException e) {
 					Reset();
 					problems.Add($"\"{a_name}\" does not read ({e.Message}) - the built-in theme is used");
@@ -446,7 +490,7 @@ public static class Theme
 
 	static string? Value(JsonNode? a_n) => a_n is JsonObject o ? o["value"]?.ToString() : a_n is JsonValue ? a_n.ToString() : null;
 
-	static void ApplyFile(JsonObject a_t, string a_dir, List<string> a_problems)
+	static void ApplyFile(JsonObject a_t, ThemeIcon a_icon, List<string> a_problems)
 	{
 		var res = Application.Current.Resources;
 		Color? ReadColor(string a_where, string? a_text)
@@ -454,12 +498,11 @@ public static class Theme
 			if (string.IsNullOrWhiteSpace(a_text)) {
 				return null;
 			}
-			try {
-				return (Color)ColorConverter.ConvertFromString(a_text.Trim());
-			} catch (FormatException) {
-				a_problems.Add($"{a_where}: \"{a_text}\" is not a color (#RRGGBB or #AARRGGBB)");
-				return null;
+			if (ColorOf(a_text) is { } color) {
+				return color;
 			}
+			a_problems.Add($"{a_where}: \"{a_text}\" is not a color (#RRGGBB or #AARRGGBB)");
+			return null;
 		}
 		if (Value(a_t["windowsMode"]) is { } mode) {
 			if (mode is "Dark" or "Light") {
@@ -550,29 +593,48 @@ public static class Theme
 				}
 			}
 		}
-		if (Value(a_t["icon"]) is { Length: > 0 } icon) {
-			// only a file beside the theme: a full path, a share or ".." would read (or reach) outside its folder
-			var dir = Path.GetFullPath(a_dir).TrimEnd('\\') + "\\";
-			var path = Path.GetFullPath(Path.Combine(dir, icon));
-			if (Path.IsPathRooted(icon) || !path.StartsWith(dir, StringComparison.OrdinalIgnoreCase)) {
-				a_problems.Add($"icon: \"{icon}\" must be a file beside the theme");
-			} else {
-				try {
-					var img = BitmapFrame.Create(new Uri(path), BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
-					img.Freeze();
-					res["Logo"] = img;
-					Icon = img;
-					if (Application.Current.MainWindow != null) {
-						Application.Current.MainWindow.Icon = img;
-					}
-				} catch (Exception e) when (e is IOException or FormatException or NotSupportedException or ArgumentException or
-				                            InvalidOperationException or System.Runtime.InteropServices.ExternalException) {
-					// a damaged picture throws FileFormatException (a FormatException) or a COM error from Windows' decoder - it is only
-					// an icon, so it never stops the theme
-					a_problems.Add($"icon: \"{icon}\" does not open ({e.Message})");
-				}
+		// (the picture was read and decoded with the theme's file: here it is only put in place)
+		if (a_icon.Problem != null) {
+			a_problems.Add(a_icon.Problem);
+		}
+		if (a_icon.Image is { } img) {
+			res["Logo"] = img;
+			Icon = img;
+			if (Application.Current.MainWindow != null) {
+				Application.Current.MainWindow.Icon = img;
 			}
 		}
+	}
+
+	// how large a theme's picture is kept at the most, in pixels a side: the window shows it at 30, Windows' icons go to 256
+	const int IconMost = 256;
+
+	// A theme's picture, kept no larger than it is ever shown: a larger one is made small as it is decoded. Whole, a picture of
+	// 4,000 pixels a side stays 64 MB in memory for as long as its theme is in use. The file is let go once it is read
+	public static BitmapSource IconFrom(string a_path)
+	{
+		int wide, high;
+		using (var file = File.OpenRead(a_path)) {
+			var first = BitmapDecoder.Create(file, BitmapCreateOptions.DelayCreation, BitmapCacheOption.None).Frames[0];
+			(wide, high) = (first.PixelWidth, first.PixelHeight);
+		}
+		if (Math.Max(wide, high) <= IconMost) {
+			var whole = BitmapFrame.Create(new Uri(a_path), BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+			whole.Freeze();
+			return whole;
+		}
+		var small = new BitmapImage();
+		small.BeginInit();
+		small.CacheOption = BitmapCacheOption.OnLoad;
+		small.UriSource = new Uri(a_path);
+		if (wide >= high) {
+			small.DecodePixelWidth = IconMost;
+		} else {
+			small.DecodePixelHeight = IconMost;
+		}
+		small.EndInit();
+		small.Freeze();
+		return small;
 	}
 
 	// Dark or Light: the base Windows draws its own controls with under the theme in use

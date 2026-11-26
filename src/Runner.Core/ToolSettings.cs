@@ -98,7 +98,7 @@ public static partial class ToolSettings
 	// what a settings file looks like (a tool's logs, caches and outputs are not)
 	static readonly string[] Kinds = [".ini", ".json", ".xml", ".cfg", ".toml", ".yaml", ".yml", ".conf"];
 	static readonly string[] SkipDirs = ["logs", "log", "cache", "temp", "tmp", "backup", "backups", "shadercache", "meshes", "textures"];
-	static readonly JsonSerializerOptions Pretty = new() { WriteIndented = true };
+	static readonly JsonSerializerOptions Pretty = JsonWrite.Indented;
 
 	public static string Folder(Setup a_setup, string a_step) =>
 		Path.Combine(Path.GetDirectoryName(a_setup.File) ?? "", "learned settings", Path.GetFileNameWithoutExtension(a_setup.File), a_step);

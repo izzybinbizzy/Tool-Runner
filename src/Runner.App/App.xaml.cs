@@ -14,6 +14,9 @@ public partial class App : Application
 
 	static bool s_logging;
 
+	// the box that says an error is on screen: an error that comes again meanwhile is written down, never a second box
+	static bool s_telling;
+
 	// what no window can show is written down: an error on a thread of its own, and a background task that failed with nobody
 	// waiting on it (a start, a check, a look at Mod Organizer) instead of vanishing without a trace
 	public static void LogCrashes()
@@ -68,16 +71,30 @@ public partial class App : Application
 				Shutdown(1);
 				return;
 			}
+			// One box at a time. A box keeps the window alive under it, so an error that comes back with every look the window
+			// takes (once a second during a run) would open box upon box without end
+			if (s_telling) {
+				return;
+			}
+			s_telling = true;
 			var text = "Something went wrong: " + e.Exception.Message + "\n\nIt is written in crash.txt in the data folder. A run that is going is not affected.";
 			// the themed box over the window (every pop-up wears the theme); Windows' own box only when the window cannot carry one
+			var noWindow = MainWindow is not { IsLoaded: true };
 			try {
 				if (MainWindow is { IsLoaded: true } owner && Ask.Show(owner, "Something went wrong", text, "Open the data folder", "Close")) {
 					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(AppPaths.Data) { UseShellExecute = true })?.Dispose();
-				} else if (MainWindow is not { IsLoaded: true }) {
+				} else if (noWindow) {
 					MessageBox.Show(text, Brand.Name, MessageBoxButton.OK, MessageBoxImage.Warning);
 				}
 			} catch (Exception e2) when (e2 is InvalidOperationException or System.ComponentModel.Win32Exception) {
 				MessageBox.Show(text, Brand.Name, MessageBoxButton.OK, MessageBoxImage.Warning);
+			} finally {
+				s_telling = false;
+			}
+			// The error came before the window stood (the start itself failed): no window will ever close, so nothing would end
+			// the program - it would stay in memory unseen. It ends here, as a start that failed
+			if (noWindow) {
+				Shutdown(1);
 			}
 		};
 		LogCrashes();
@@ -154,8 +171,8 @@ public partial class App : Application
 
 	static void Pump(Window a_w, int a_ms)
 	{
-		var until = DateTime.Now.AddMilliseconds(a_ms);
-		while (DateTime.Now < until) {
+		var waited = System.Diagnostics.Stopwatch.StartNew();
+		while (waited.ElapsedMilliseconds < a_ms) {
 			a_w.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
 			Thread.Sleep(30);
 		}
@@ -256,7 +273,7 @@ public partial class App : Application
 		} finally {
 			try {
 				Directory.Delete(runs, true);
-			} catch (IOException) {
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			}
 		}
 		var t = new DateTime(2026, 10, 27, 22, 43, 0);
@@ -500,6 +517,28 @@ public partial class App : Application
 		Pump(dryBox, 600);
 		Save("7b a dry run that would be refused", dryBox);
 		dryBox.Close();
+		// what a setup starts on this PC, asked about once before its first run from the window
+		var startsBox = w.StartsBox("My Profile", [@"Mod Organizer: D:\Games\Mod Organizer 2\ModOrganizer.exe", @"a command before each run: ""D:\Tools\copy my saves.cmd"" --quiet",
+			@"xLODGen (exe): D:\Games\Tools\xLODGen\xLODGenx64.exe", @"TexGen (exe): D:\Games\Tools\DynDOLOD\TexGenx64.exe", @"DynDOLOD (exe): D:\Games\Tools\DynDOLOD\DynDOLODx64.exe",
+			@"Pandora (exe): D:\Games\Tools\Pandora\Pandora Behaviour Engine+.exe", @"a command after each run: ""D:\Tools\tell me.cmd"""], _ => { });
+		startsBox.ShowActivated = false;
+		startsBox.WindowStartupLocation = WindowStartupLocation.Manual;
+		startsBox.Left = -30000;
+		startsBox.Top = -30000;
+		startsBox.Show();
+		Pump(startsBox, 600);
+		Save("7h what a setup starts", startsBox);
+		startsBox.Close();
+		// New setup as it opens, with its Import button
+		var newBox = NewSetupDialog.Build(w, (_, _) => { });
+		newBox.ShowActivated = false;
+		newBox.WindowStartupLocation = WindowStartupLocation.Manual;
+		newBox.Left = -30000;
+		newBox.Top = -30000;
+		newBox.Show();
+		Pump(newBox, 600);
+		Save("9f new setup", newBox);
+		newBox.Close();
 		// the window in a shipped language whose words run long: nothing may be cut off or overlap. Taken last: the labels it
 		// sets stay German, and no English picture or window word may come after it
 		if (WindowWords.ShippedText("Deutsch") is { } de && WindowWords.Read(de, out _) is { } german) {
@@ -511,6 +550,8 @@ public partial class App : Application
 			w.DemoUsesOld("dyndolod", false);
 			w.Demo(false);
 			w.SayFooter();
+			// (the status lights' words are asked for again: a light whose state did not change kept its English words)
+			(w.DataContext as MainViewModel)?.Repaint();
 			WindowWords.Tree(w);
 			Pump(w, 600);
 			// (pictures only: what a German drawing shows never goes into the window words, which list the English)
@@ -529,7 +570,7 @@ public partial class App : Application
 		}
 		w.Close();
 		File.WriteAllText(Path.Combine(a_dir, "window words.json"), System.Text.Json.JsonSerializer.Serialize(words.ToDictionary(k => k, _ => ""),
-			new System.Text.Json.JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+			JsonWrite.IndentedLetters));
 		if (squeezed.Count > 0) {
 			File.WriteAllLines(Path.Combine(a_dir, "layout problems.txt"), squeezed);
 			ConsoleAttach.ToParent();

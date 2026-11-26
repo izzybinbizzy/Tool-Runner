@@ -17,13 +17,13 @@ public abstract class LauncherStep : IStep
 	// builds from that other profile and writes into that other mods folder. The file goes back after the step
 	public static string PointedAt(string? a_settings, string a_instance, string a_profile, string a_game, string a_output)
 	{
-		var json = a_settings is { Length: > 0 } ? JsonNode.Parse(a_settings)?.AsObject() ?? [] : [];
+		var json = a_settings is { Length: > 0 } ? JsonNode.Parse(a_settings, documentOptions: JsonRead.Plain)?.AsObject() ?? [] : [];
 		json["ModManager"] = 1;
 		json["Mo2InstancePath"] = a_instance;
 		json["Mo2ProfileName"] = a_profile;
 		json["GameLocation"] = a_game;
 		json["OutputLocation"] = a_output;
-		return json.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+		return json.ToJsonString(JsonWrite.Indented);
 	}
 
 	// The tool's window and its settings file are its author's and may change in any version, with no word to this program: a
@@ -49,7 +49,7 @@ public abstract class LauncherStep : IStep
 		if (a_settings.Trim().Length == 0) {
 			return Pointing[0];
 		}
-		var held = JsonNode.Parse(a_settings) as JsonObject;
+		var held = JsonNode.Parse(a_settings, documentOptions: JsonRead.Plain) as JsonObject;
 		return held == null ? Pointing[0] : Pointing.Append(Manager).FirstOrDefault(k => !held.ContainsKey(k));
 	}
 
@@ -117,7 +117,7 @@ public abstract class LauncherStep : IStep
 			foreach (var f in Directory.EnumerateFiles(a_translations, "*.json")) {
 				try {
 					// a file of another shape (a list, a plain value) is passed over - indexing it by name would throw and stop the step
-					if (JsonNode.Parse(Files.ReadSharedText(f)) is JsonObject root && root["run"] is JsonObject run &&
+					if (JsonNode.Parse(Files.ReadSharedText(f), documentOptions: JsonRead.Plain) is JsonObject root && root["run"] is JsonObject run &&
 					    run["generate"] is JsonValue v && v.TryGetValue<string>(out var n) && n.Trim() != "") {
 						names.Add(n.Trim());
 					}
@@ -285,7 +285,7 @@ public sealed class PgPatcherStep : IStep
 		if (set != null && !File.Exists(set)) {
 			yield return new Issue(Key, true, "the PGPatcher settings set is missing: " + set);
 		} else if (set != null && a_s.Bool("pglite_check", false)) {
-			var conf = JsonNode.Parse(Files.ReadSharedText(set)) as JsonObject;
+			var conf = JsonNode.Parse(Files.ReadSharedText(set), documentOptions: JsonRead.Plain) as JsonObject;
 			var mode = conf?["params"]?["processing"]?["pglitemode"]?.GetValue<bool>() == true;
 			var ticked = Runner.PgLiteTicked(a_c.Profile);
 			if (mode != ticked) {
@@ -308,7 +308,16 @@ public sealed class PgPatcherStep : IStep
 		try {
 			if (source != null) {
 				StepKit.KeepFile(a_ctx, live);
-				var conf = JsonNode.Parse(Files.ReadSharedText(source)) as JsonObject ?? throw new StepFailedException("PGPatcher's settings do not read");
+				// (a file that is no JSON at all left the step as an error of the reader's, with no word on what to do)
+				JsonObject? conf;
+				try {
+					conf = JsonNode.Parse(Files.ReadSharedText(source), documentOptions: JsonRead.Plain) as JsonObject;
+				} catch (System.Text.Json.JsonException e) {
+					throw new StepFailedException($"PGPatcher's settings do not read ({Path.GetFileName(source)}: {e.Message})");
+				}
+				if (conf == null) {
+					throw new StepFailedException($"PGPatcher's settings do not read ({Path.GetFileName(source)} holds no settings)");
+				}
 				if (conf["params"]?["output"] is not JsonObject output) {
 					throw new StepFailedException("PGPatcher's settings have no output section - run PGPatcher once by hand to make them");
 				}
@@ -319,7 +328,7 @@ public sealed class PgPatcherStep : IStep
 				if (conf["params"]?["modmanager"] is JsonObject manager && manager.ContainsKey("mo2instancedir")) {
 					manager["mo2instancedir"] = Path.GetDirectoryName(a_ctx.Mo2.IniPath)!;
 				}
-				Files.WriteAtomic(live, conf.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+				Files.WriteAtomic(live, conf.ToJsonString(JsonWrite.Indented));
 				a_ctx.Log.Detail($"PGPatcher settings: {a_s.Str("settings") ?? "its own"} (output {mod})");
 			}
 			using (new Toggle(a_ctx, StepKit.ToolMods(a_ctx, a_s), [mod, .. a_s.List("disable_during")], "PGPatcher", a_ctx.Cancel)) {
@@ -414,13 +423,15 @@ public sealed class SynthesisStep : IStep
 				// judged by its window (its timers and patcher states change while it works), never by its CPU alone; a patcher
 				// that failed is read off Synthesis's own log the moment its run ends (one failed, no Synthesis.esp)
 				DateTime? exitedAt = null;
+				var grown = new GrowingText { KeepAll = false };
+				var said = new LogDigest();
 				Waits.Tool(a_ctx, Key, proc, a_s.Deadline(90), () => {
 					var fresh = new[] { espOw, espMod }.FirstOrDefault(p => File.Exists(p) && File.GetLastWriteTimeUtc(p) > t0);
 					if (fresh != null && DateTime.UtcNow - File.GetLastWriteTimeUtc(fresh) > TimeSpan.FromSeconds(20)) {
 						return Waits.Poll.Done;
 					}
 					runLog ??= RunLog(logs, tRun);
-					if (fresh == null && runLog != null && Failure(Files.ReadSharedText(runLog)) is { } why) {
+					if (fresh == null && runLog != null && Judged(runLog, grown, said) is { } why) {
 						throw new StepFailedException($"Synthesis: {why} - it wrote no Synthesis.esp (its log: {runLog})");
 					}
 					// a Synthesis that closed is given a moment for its last write, then the step ends - never the 90-minute deadline
@@ -456,16 +467,67 @@ public sealed class SynthesisStep : IStep
 	// a finished run whose log holds an error: which patcher failed and why; null while it runs or when nothing failed
 	public static string? Failure(string a_log)
 	{
-		if (!a_log.Contains("Finished patcher run", StringComparison.Ordinal)) {
-			return null;
+		var all = new LogDigest();
+		all.Take(a_log);
+		return all.Failure;
+	}
+
+	// The same, of a log taken as it grows: what the verdict needs is kept from each addition. The wait read and searched the
+	// whole log at every look - megabytes of it, every two seconds, in a long run
+	public sealed class LogDigest
+	{
+		bool _finished;
+		// the patcher that last started, the first error, and the patcher that had started when it came
+		string? _patcher, _error, _failed;
+
+		public void Restart() => (_finished, _patcher, _error, _failed) = (false, null, null, null);
+
+		// lines the log gained
+		public void Take(string a_added)
+		{
+			foreach (var line in a_added.Split('\n')) {
+				Line(line);
+			}
 		}
-		var err = Regex.Matches(a_log, @"\[ERR\] \[T\d+\] (?<m>.+)").Select(m => m.Groups["m"].Value.Trim()).FirstOrDefault(m => m.Length > 0 && !m.StartsWith("Error while running", StringComparison.Ordinal));
-		if (err == null) {
-			return null;
+
+		void Line(string a_line)
+		{
+			_finished |= a_line.Contains("Finished patcher run", StringComparison.Ordinal);
+			if (_error != null) {
+				return;
+			}
+			if (a_line.Contains("[ERR] [T", StringComparison.Ordinal) && Regex.Match(a_line, @"\[ERR\] \[T\d+\] (?<m>.+)") is { Success: true } m &&
+			    m.Groups["m"].Value.Trim() is { Length: > 0 } said && !said.StartsWith("Error while running", StringComparison.Ordinal)) {
+				(_error, _failed) = (said, _patcher);
+			} else if (a_line.Contains("Starting Patcher ", StringComparison.Ordinal) && Regex.Matches(a_line, @"Starting Patcher (?<p>.+?) Run").LastOrDefault() is { } start) {
+				_patcher = start.Groups["p"].Value;
+			}
 		}
-		var at = a_log.IndexOf(err, StringComparison.Ordinal);
-		var patcher = Regex.Matches(a_log[..at], @"Starting Patcher (?<p>.+?) Run").LastOrDefault()?.Groups["p"].Value;
-		return (patcher != null ? $"its patcher \"{patcher}\" failed: " : "a patcher failed: ") + (err.Length > 300 ? err[..300] : err);
+
+		public string? Failure => !_finished || _error == null ? null :
+			(_failed != null ? $"its patcher \"{_failed}\" failed: " : "a patcher failed: ") + (_error.Length > 300 ? _error[..300] : _error);
+
+		// the same, with the line the log is still writing counted in
+		public string? FailureWith(string a_unfinished)
+		{
+			if (a_unfinished.Length == 0) {
+				return Failure;
+			}
+			var with = (LogDigest)MemberwiseClone();
+			with.Line(a_unfinished);
+			return with.Failure;
+		}
+	}
+
+	// what the run's log says of a failure, read by what it gained since the last look
+	static string? Judged(string a_file, GrowingText a_log, LogDigest a_said)
+	{
+		a_log.Read(a_file);
+		if (a_log.Restarted) {
+			a_said.Restart();
+		}
+		a_said.Take(a_log.Added);
+		return a_said.FailureWith(a_log.Unfinished);
 	}
 
 	public const string GoRx = @"^GoButton|\bRun\b|RunPatchers";
@@ -483,7 +545,7 @@ public sealed class SynthesisStep : IStep
 		void StillOpen(string a_when)
 		{
 			if (Exited(a_proc)) {
-				throw new StepFailedException($"Synthesis closed {a_when}");
+				throw new StepFailedException($"Synthesis's window closed {a_when}");
 			}
 		}
 		static string Short(string a_t) => a_t.Length > 300 ? a_t[..300] + " ..." : a_t;
@@ -509,8 +571,8 @@ public sealed class SynthesisStep : IStep
 			if (!Uia.Press(b)) {
 				continue;
 			}
-			var until = DateTime.UtcNow.AddSeconds(45);
-			while (DateTime.UtcNow < until) {
+			var sincePress = System.Diagnostics.Stopwatch.StartNew();
+			while (sincePress.Elapsed < TimeSpan.FromSeconds(45)) {
 				a_ctx.Pause(TimeSpan.FromMilliseconds(1500));
 				StillOpen("right after Run was pressed");
 				if (Uia.TextOf(a_w(), int.MaxValue) != before || Buttons().Count == 0) {
@@ -545,7 +607,7 @@ public sealed class SynthesisStep : IStep
 	{
 		JsonNode? root;
 		try {
-			root = JsonNode.Parse(a_settings);
+			root = JsonNode.Parse(a_settings, documentOptions: JsonRead.Plain);
 		} catch (System.Text.Json.JsonException) {
 			return a_settings;
 		}
@@ -560,7 +622,7 @@ public sealed class SynthesisStep : IStep
 				changed = true;
 			}
 		}
-		return changed ? top.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) : a_settings;
+		return changed ? top.ToJsonString(JsonWrite.Indented) : a_settings;
 	}
 
 	// found again each time: the window seen first can be its start-up window, gone a moment later, and a gone window reads as empty
@@ -646,7 +708,7 @@ public sealed class PandoraStep : IStep
 		var before = File.Exists(settings) ? Files.ReadShared(settings) : null;
 		JsonObject conf;
 		try {
-			conf = before == null ? [] : JsonNode.Parse(Files.DecodeText(before)) as JsonObject ?? [];
+			conf = before == null ? [] : JsonNode.Parse(Files.DecodeText(before), documentOptions: JsonRead.Plain) as JsonObject ?? [];
 		} catch (JsonException) {
 			throw new StepFailedException("Pandora's Settings.json in Mod Organizer's overwrite folder does not read - fix or move it first");
 		}
@@ -657,7 +719,7 @@ public sealed class PandoraStep : IStep
 		var stray = Path.Combine(a_ctx.Mo2.OverwriteDir, "Engine.log");
 		StepKit.KeepFile(a_ctx, settings);
 		try {
-			Files.WriteAtomic(settings, conf.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+			Files.WriteAtomic(settings, conf.ToJsonString(JsonWrite.Indented));
 			using (new Toggle(a_ctx, [.. a_s.List("enable_during"), .. StepKit.ToolMods(a_ctx, a_s)], a_s.List("disable_during"), "Pandora", a_ctx.Cancel)) {
 				try {
 					using var proc = a_ctx.Control.RunExecutable(a_s.Req("executable"), image, a_s.Str("args") ?? "--auto_run --auto_close", a_ctx.Cancel);

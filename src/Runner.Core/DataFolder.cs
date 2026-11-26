@@ -489,7 +489,7 @@ public static class DataFolder
 		return Path.TrimEndingDirectorySeparator(real);
 	}
 
-	static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+	static readonly JsonSerializerOptions WriteOptions = JsonWrite.IndentedLetters;
 
 	// every JSON file under the folder: a string value that is the old folder, or a path inside it, is written under the new one
 	// (compared as values, so escaping and letters outside English never matter; a sibling folder sharing the name is left).
@@ -505,8 +505,8 @@ public static class DataFolder
 				var text = Files.ReadSharedText(f);
 				JsonNode? node;
 				try {
-					// (as every setup is read: a comment or a comma after the last value is no reason to skip it)
-					node = JsonNode.Parse(text, documentOptions: Setup.ReadOptions);
+					// (read as a setup is read: one with a comment or a last comma in it holds paths to repoint too)
+					node = JsonNode.Parse(text, documentOptions: JsonRead.ByHand);
 				} catch (JsonException) {
 					// not JSON this can read: fine unless it names the old folder, which it would go on naming after the move
 					if (NamesFolder(text, from)) {

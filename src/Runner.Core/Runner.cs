@@ -31,7 +31,7 @@ public static class Runner
 				throw new ArgumentException($"{StepCatalog.Name(k)} is left out: this setup is set to a new game (untick \"New game\" to run it)");
 			}
 			if (a_setup.KeptSteps.Any(s => s.Key == k)) {
-				throw new ArgumentException($"{StepCatalog.Name(k)} is set to use its old output in this setup, so it does not run (switch \"Use old output\" off for it to run it)");
+				throw new ArgumentException($"{StepCatalog.Name(k)} is set to use its old output in this setup, so it does not run (press \"Build it again\" for it to run it)");
 			}
 			if (order.All(s => s.Key != k)) {
 				throw new ArgumentException($"\"{k}\" is not a step of this setup - its steps: {string.Join(", ", order.Select(s => s.Key))}");
@@ -233,6 +233,10 @@ public static class Runner
 			Thread.Sleep(100);
 			id = Named();
 		}
+		// (a clock set back, the hour a daylight change repeats: an earlier run's folder is never taken)
+		if (Directory.Exists(Path.Combine(runs, id))) {
+			return Refuse($"a run of this setup is already on record under this very time ({id}) - was the PC's clock set back? Start again in a moment");
+		}
 		var journal = new Journal {
 			Id = id, Folder = Path.Combine(runs, id), SetupFile = Path.GetFullPath(a_req.SetupFile), SetupName = setup.Name, Profile = setup.Profile,
 			Mo2Exe = setup.Mo2Exe, Mo2Instance = setup.Mo2Instance, BackupDir = Path.Combine(setup.BackupDir, id), Pid = Environment.ProcessId,
@@ -268,6 +272,12 @@ public static class Runner
 		};
 		forThisRun = control;
 		control.StopAsked = cts.Token;
+		// a start of Mod Organizer is in the run's record from before it is asked until Windows answers it - a put-back after a
+		// crash waits for it; one that cannot be recorded is not asked
+		control.UnansweredChanged = a_at => {
+			journal.UnansweredStartAt = a_at;
+			return journal.TrySave() || journal.TrySave();
+		};
 		journal.Mo2KeptOpen = control.CompanionOn;
 		control.CompanionGaveUp = () => {
 			journal.Mo2KeptOpen = false;
@@ -314,7 +324,7 @@ public static class Runner
 					log.Warn($"ending the game (process {pid}): nobody here can answer its box");
 					EndGameAlone(control, pid, at, log);
 				}
-			}) { Wait = TimeSpan.FromSeconds(Setup.Int(setup.Root, "boxWaitSeconds") ?? 60), CloseUnknown = InGame.ClosesUnknown(setup) };
+			}) { Wait = TimeSpan.FromSeconds(Setup.Int(setup.Root, "boxWaitSeconds") is >= 0 and var wait ? wait : 60), CloseUnknown = InGame.ClosesUnknown(setup) };
 		var ctx = new RunContext {
 			Setup = setup, Mo2 = mo2, Profile = profile, Control = control, Log = log, Journal = journal, Cancel = cts.Token,
 			BackupFolder = journal.BackupDir, Guide = a_guide?.Invoke(journal) ?? new FileGuide(journal, commands.TakeContinue, commands.ClearContinue),
@@ -501,7 +511,13 @@ public static class Runner
 					PruneBackups(ctx);
 					return new RunOutcome(journal.State, journal.Verdict, journal.Folder);
 				}
-				control.Close();
+				// the run is finished and the profile back: a Stop ends this wait (a download can hold Mod Organizer open for
+				// half an hour), and Mod Organizer is then left open
+				try {
+					control.Close(null, cts.Token);
+				} catch (OperationCanceledException) {
+					log.Warn("Stop: Mod Organizer is left open - the run had finished and your profile is back");
+				}
 			}
 			// The run has finished and the profile is back. Each chore from here stands on its own: one that fails is a note on a
 			// finished run - never a second put-back, never the after-run commands twice
@@ -1001,7 +1017,7 @@ public static class Runner
 		foreach (var j in mine.Skip(a_keep).Where(j => !j.Unfinished && (a_current == null || !Files.SamePath(j.Folder, a_current)))) {
 			try {
 				var d = new DirectoryInfo(j.Folder);
-				foreach (var f in d.EnumerateFiles("*", SearchOption.AllDirectories).Where(f => f.IsReadOnly)) {
+				foreach (var f in Files.Under(d.FullName).Where(f => f.IsReadOnly)) {
 					f.IsReadOnly = false;
 				}
 				d.Delete(true);
@@ -1017,17 +1033,27 @@ public static class Runner
 	}
 
 	// this setup's own run backups (by the run-folder name the runner gives them), newest first, with their size in bytes
-	public static List<(DirectoryInfo Dir, long Bytes)> BackupsOf(Setup a_setup) => BackupDirsOf(a_setup).Select(d => (d, Files.SizeOf(d.FullName))).ToList();
+	// (a_runsDir: the program's runs folder - with it, the backups made under an earlier name of the setup count too)
+	public static List<(DirectoryInfo Dir, long Bytes)> BackupsOf(Setup a_setup, string? a_runsDir = null) =>
+		BackupDirsOf(a_setup, a_runsDir == null ? null : Journal.All(a_runsDir)).Select(d => (d, Files.SizeOf(d.FullName))).ToList();
 
 	// the same folders, newest first, without measuring them (pruning needs no sizes - a big LOD backup is never walked for it)
-	public static List<DirectoryInfo> BackupDirsOf(Setup a_setup)
+	// a_runs: the run records. A setup renamed since its last runs has backups under its older name, which no folder name ties to
+	// it any more; each of its run records still names its own, and those in the setup's backup folder count as its own
+	public static List<DirectoryInfo> BackupDirsOf(Setup a_setup, IEnumerable<Journal>? a_runs = null)
 	{
 		var root = a_setup.BackupDir;
 		if (root == "" || !Directory.Exists(root)) {
 			return [];
 		}
 		var own = new System.Text.RegularExpressions.Regex(@"^\d{4}-\d\d-\d\d \d\d-\d\d-\d\d " + System.Text.RegularExpressions.Regex.Escape(a_setup.Name) + "$");
-		return new DirectoryInfo(root).GetDirectories().Where(d => own.IsMatch(d.Name)).OrderByDescending(d => d.Name, StringComparer.Ordinal).ToList();
+		var dirs = new DirectoryInfo(root).GetDirectories().Where(d => own.IsMatch(d.Name)).ToList();
+		foreach (var dir in (a_runs ?? []).Where(j => Files.SamePath(j.SetupFile, a_setup.File)).Select(DataRemoval.RunBackup).OfType<string>()) {
+			if (Files.SamePath(Path.GetDirectoryName(dir) ?? "", root) && !dirs.Any(d => Files.SamePath(d.FullName, dir))) {
+				dirs.Add(new DirectoryInfo(dir));
+			}
+		}
+		return dirs.OrderByDescending(d => d.Name, StringComparer.Ordinal).ToList();
 	}
 
 	// all but the newest a_keep of this setup's run backups removed - never the running one (a_current) or one an unfinished run
@@ -1054,9 +1080,9 @@ public static class Runner
 			    .OrderByDescending(j => j.Started).FirstOrDefault() is { } last) {
 			needed.Add(Path.GetFullPath(last.BackupDir));
 		}
-		foreach (var d in BackupDirsOf(a_setup).Skip(a_keep).Where(b => !needed.Contains(b.FullName))) {
+		foreach (var d in BackupDirsOf(a_setup, runs).Skip(a_keep).Where(b => !needed.Contains(b.FullName))) {
 			try {
-				foreach (var f in d.EnumerateFiles("*", SearchOption.AllDirectories).Where(f => f.IsReadOnly)) {
+				foreach (var f in Files.Under(d.FullName).Where(f => f.IsReadOnly)) {
 					f.IsReadOnly = false;
 				}
 				d.Delete(true);
@@ -1127,6 +1153,11 @@ public static class Runner
 			}
 			foreach (var line in ToolErrors.Simple(StepCatalog.Name(a_s.Key), r.State, r.Note, why)) {
 				a_ctx.Log.Simple(line, r.State == StepState.Stopped ? Level.Warn : Level.Error);
+			}
+			// a failure of the runner's own (no error the tool's help documents): what to do about it, with its code, in both logs
+			if (!stopped && why == null && RunnerErrors.Find(r.Note) is { } own) {
+				a_ctx.Log.Warn($"what to do: {own.Todo} [{own.Code}]");
+				a_ctx.Log.Simple($"What to do: {own.Todo} [{own.Code}]", Level.Warn);
 			}
 			try {
 				StepKit.CloseTool(a_ctx, new StepSettings(a_s.Settings).Str("image"));
@@ -1334,19 +1365,20 @@ public static class Runner
 		} catch (Exception e) {
 			j.State = RunState.Failed;
 			j.NeedsRestore = true;
+			j.UnansweredStartAt = a_ctx.Control.UnansweredSince;
 			j.Verdict = $"the profile could NOT be put back ({Plain(e)}) - press \"Put my profile back\" once Mod Organizer can close";
 			Keep();
 			a_ctx.Log.Error(j.Verdict);
 			a_ctx.Log.Simple("Stopped: " + j.Verdict, Level.Error);
 			return new RunOutcome(j.State, j.Verdict, j.Folder);
 		}
-		if (notBack.Count > 0 || filesNotBack.Count > 0 || a_ctx.LinesLeft.Count > 0) {
+		if (notBack.Count > 0 || filesNotBack.Count > 0 || a_ctx.LinesLeft.Count > 0 || a_ctx.MarksLeft.Count > 0) {
 			// the run did not end cleanly, whatever its steps did: said so, never "finished" or "back as it was" - also when
 			// only a line the run wrote into the mod list could not be taken out again (the put-back tries that again)
 			j.State = RunState.Failed;
 			j.NeedsRestore = true;
 			j.Ended = DateTime.Now;
-			j.Verdict = "the profile is back except " + string.Join(", ", notBack.Concat(filesNotBack.Select(Path.GetFileName)).OfType<string>().Concat(LinesLeftWords(a_ctx.LinesLeft))) +
+			j.Verdict = "the profile is back except " + string.Join(", ", notBack.Concat(filesNotBack.Select(Path.GetFileName)).OfType<string>().Concat(LinesLeftWords(a_ctx.LinesLeft)).Concat(MarksLeftWords(a_ctx.MarksLeft))) +
 				(notBack.Count > 0 || filesNotBack.Count > 0 ? " (kept off / in the backup)" : "") + " - press \"Put my profile back\" once the files are free";
 			Keep();
 			a_ctx.Log.Error(j.Verdict);
@@ -1396,9 +1428,112 @@ public static class Runner
 		var off = a_theirs.Where(p => p.Value == '-' && listed.ContainsKey(p.Key)).Select(p => p.Key).ToList();
 		a_ctx.Profile.SetMods(on, off, a_ctx.Log);
 		a_ctx.Profile.ActivatePlugins(on);
-		var theirPlugins = on.SelectMany(m => Plugins.InMod(a_ctx.Mo2.ModDir(m))).ToHashSet(StringComparer.OrdinalIgnoreCase);
+		var theirPlugins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var unread = new List<string>();
+		foreach (var m in on) {
+			if (Plugins.TryInMod(a_ctx.Mo2.ModDir(m), out var names)) {
+				theirPlugins.UnionWith(names);
+			} else {
+				unread.Add(m);
+			}
+		}
+		if (unread.Count > 0) {
+			// A ticked mod whose folder would not be read: its plugins are not known, and their marks are never dropped for it.
+			// Every mark of the player's that no other ticked mod's plugin explains is set as they had it, and the log says so
+			var others = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			foreach (var m in a_ctx.Profile.States().Where(p => p.Value == '+' && !unread.Contains(p.Key, StringComparer.OrdinalIgnoreCase)).Select(p => p.Key)) {
+				if (Plugins.TryInMod(a_ctx.Mo2.ModDir(m), out var names)) {
+					others.UnionWith(names);
+				}
+			}
+			theirPlugins.UnionWith(a_marks.Keys.Where(k => !others.Contains(k)));
+			foreach (var m in unread.Where(m => !a_ctx.MarksLeft.Contains(m, StringComparer.OrdinalIgnoreCase))) {
+				a_ctx.MarksLeft.Add(m);
+			}
+			a_ctx.Log.Warn($"the folder of {string.Join(", ", unread)} could not be read: the plugins you had ticked or unticked that no other mod holds are set as you had them - the put-back stays on offer until it can read them");
+		}
 		a_ctx.Profile.SetPluginMarks(a_marks.Where(p => theirPlugins.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase));
 		a_ctx.Profile.DeactivatePlugins(off, true);
+	}
+
+	// What the player changed during the run - a_theirs, their mods switched, and their plugin ticks as they are now - kept
+	// before a put-back's order files go back (the run's own or a step's), so a put-back that is cut off after its lists went
+	// back, or cannot set every tick (a mod's folder did not read), is tried again with what the player had. What is read now
+	// wins; what was kept before fills only what is no longer there to read (a switch or a plugin line the lists lost when they
+	// went back), so a change the player made since is never undone by an older one. Kept in the run's record; when the disk
+	// refuses it twice, in a file of its own in the run's backup folder (often another disk). Each keeping carries its time, and
+	// the newer of the two places is the one read. When neither place takes it, the put-back stops before the order files go
+	// back (a refusal, the put-back on offer): the player's changes are never held in memory alone
+	//
+	// a_snap: the lists this put-back puts back. After one that was cut off between its lists going back and the player's
+	// changes being set again, a tick read now that equals the tick those lists hold is theirs (the restore's), not the
+	// player's: the tick kept before it stands. One that differs is a change the player made since, and wins
+	public static TheirsKept KeepTheirs(RunContext a_ctx, IReadOnlyDictionary<string, char> a_theirs, IReadOnlyDictionary<string, byte[]>? a_snap = null)
+	{
+		var keptFile = Path.Combine(a_ctx.BackupFolder, TheirsFile);
+		var older = KeptTheirs(a_ctx);
+		var restored = older != null && a_snap != null ? Profile.MarksOf(a_snap) : null;
+		var kept = new TheirsKept { At = DateTime.UtcNow };
+		foreach (var (mod, state) in older?.Mods ?? []) {
+			kept.Mods[mod] = state;
+		}
+		foreach (var (mod, state) in a_theirs) {
+			kept.Mods[mod] = state;
+		}
+		foreach (var (plugin, on) in older?.Marks ?? []) {
+			kept.Marks[plugin] = on;
+		}
+		foreach (var (plugin, on) in a_ctx.Profile.PluginMarks()) {
+			if (restored != null && restored.TryGetValue(plugin, out var back) && back == on && older!.Marks.ContainsKey(plugin)) {
+				continue;
+			}
+			kept.Marks[plugin] = on;
+		}
+		a_ctx.Journal.Theirs = kept;
+		if (a_ctx.Journal.TrySave() || a_ctx.Journal.TrySave()) {
+			return kept;
+		}
+		try {
+			Directory.CreateDirectory(a_ctx.BackupFolder);
+			Files.WriteAtomic(keptFile, System.Text.Json.JsonSerializer.Serialize(kept));
+			a_ctx.Log.Warn($"the run's record could not be written just now (is the disk full?) - what you changed in Mod Organizer is kept in {keptFile} instead");
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			// held only in memory, the player's changes would be lost to a crash between the lists going back and their being set
+			// again: the lists stay as they are now, the player's changes in them, and the put-back stays on offer
+			throw new IOException("what you changed in Mod Organizer during the run could not be kept anywhere - neither the run's record nor its backup folder takes a write " +
+				$"(is the disk full?), so the profile is not put back now and keeps your changes; put it back once the disk has room ({e.Message})", e);
+		}
+		return kept;
+	}
+
+	// the file in a run's backup folder that holds what the player changed when its record would not take it
+	const string TheirsFile = "your changes during the run.json";
+
+	// What an earlier put-back kept of the player's changes: the newer of the record's and the backup folder's. A file that is
+	// there but does not read may hold the newer of the two: the put-back stops before anything is written (the file and the
+	// record kept as they are, the put-back on offer) - never read as none, which would let it go with what it held
+	static TheirsKept? KeptTheirs(RunContext a_ctx)
+	{
+		TheirsKept? inFile = null;
+		var file = Path.Combine(a_ctx.BackupFolder, TheirsFile);
+		// opened, never first asked whether it is there: a look that cannot see the file (no access, a disk error) answers
+		// "not there" just as an absent one does. Only a file or folder that is truly not there is none
+		try {
+			inFile = System.Text.Json.JsonSerializer.Deserialize<TheirsKept>(Files.ReadSharedText(file)) ?? throw new System.Text.Json.JsonException("it holds nothing");
+		} catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) {
+			throw new IOException($"the file that keeps what you changed in Mod Organizer during the run ({file}) could not be read ({e.Message}) - " +
+				"the profile is not put back now and keeps your changes; put it back once that file can be read", e);
+		}
+		var inRecord = a_ctx.Journal.Theirs;
+		return inRecord == null ? inFile : inFile == null || inRecord.At >= inFile.At ? inRecord : inFile;
+	}
+
+	// what the player changed is all set again: the record lets go of it, and so does the backup folder's file
+	public static void LetGoOfTheirs(RunContext a_ctx)
+	{
+		a_ctx.Journal.Theirs = null;
+		Files.TryDelete(Path.Combine(a_ctx.BackupFolder, TheirsFile));
 	}
 
 	public static void PutBack(RunContext a_ctx, Dictionary<string, byte[]>? a_snap)
@@ -1411,6 +1546,13 @@ public static class Runner
 		var own = a_ctx.Journal.Added.Concat(a_ctx.Journal.Built).Concat(a_ctx.Journal.Retire).Concat(a_ctx.Journal.ParkedMods)
 			.Concat(a_ctx.Journal.UsedOld.Select(u => u.Mod)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 		var theirs = a_ctx.Profile.ChangedByOthers().Where(p => !own.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase);
+		// a put-back cut off after its lists went back (the program stopped) left the player's switches out of them: what it had
+		// kept comes back with them - what the player has changed since wins
+		if (KeptTheirs(a_ctx) is { } cutOff) {
+			foreach (var (mod, state) in cutOff.Mods.Where(p => !own.Contains(p.Key))) {
+				theirs.TryAdd(mod, state);
+			}
+		}
 		if (a_snap != null && a_snap.Count > 0) {
 			a_ctx.Log.Say("the profile as it was before the run, with this run's finished outputs on:");
 			// The mods the run had switched off come back on, and what it built with them: the game now finds other files than
@@ -1432,13 +1574,17 @@ public static class Runner
 			foreach (var m in theirs.Keys.Where(m => !before.ContainsKey(m))) {
 				a_ctx.Profile.Added.Add(m);
 			}
-			// the player's plugin ticks as they left them, read before the order files go back
-			var marks = theirs.Count > 0 ? a_ctx.Profile.PluginMarks() : [];
+			// what the player changed, kept in the run's record before the order files go back
+			a_ctx.MarksLeft.Clear();
+			var marks = theirs.Count == 0 ? [] : KeepTheirs(a_ctx, theirs, a_snap).Marks;
 			a_ctx.Profile.Restore(a_snap);
 			if (theirs.Count > 0) {
 				a_ctx.Log.Warn($"you changed {theirs.Count} mod(s) in Mod Organizer during the run - kept as you left them: " +
 					string.Join(", ", theirs.Select(p => (p.Value == '+' ? "on " : "off ") + p.Key)));
 				ReapplyTheirs(a_ctx, theirs, marks);
+			}
+			if (a_ctx.MarksLeft.Count == 0) {
+				LetGoOfTheirs(a_ctx);
 			}
 		}
 		// an output left empty (its step failed, was stopped, or never ran) never stays in the mod list - one the run made:
@@ -1578,9 +1724,13 @@ public static class Runner
 	// those lines, in a verdict's words
 	static IEnumerable<string> LinesLeftWords(IEnumerable<string> a_mods) => a_mods.Select(m => $"the line this run gave \"{m}\" in the mod list");
 
+	static IEnumerable<string> MarksLeftWords(IEnumerable<string> a_mods) => a_mods.Select(m => $"your plugin ticks of \"{m}\" (its folder could not be read)");
+
 	// an interrupted run (a crash, Stop now, a power cut): every unfinished output back, the profile as before + the finished
 	// outputs on - the window's Restore button and the command line's --restore
-	public static RunOutcome Restore(Journal a_j)
+	// a_lateStartSettled: the player said a start Windows never answered has settled (the window's box, the command line's
+	// --late-start-settled); asked once that start is older than UnansweredStartHold
+	public static RunOutcome Restore(Journal a_j, bool a_lateStartSettled = false)
 	{
 		if (a_j.OwnerAlive) {
 			return new RunOutcome(a_j.State, "that run is still going", a_j.Folder);
@@ -1591,23 +1741,72 @@ public static class Runner
 		}
 		// one put-back at a time, never beside a run
 		using var hold = HoldIfFree();
-		return hold == null ? new RunOutcome(a_j.State, "a run or another put-back is going - try again when it is done", a_j.Folder) : RestoreLocked(a_j);
+		return hold == null ? new RunOutcome(a_j.State, "a run or another put-back is going - try again when it is done", a_j.Folder) : RestoreLocked(a_j, a_lateStartSettled);
 	}
 
-	static RunOutcome RestoreLocked(Journal a_j)
+	// Whether a put-back of this run must first ask the player about a start of Mod Organizer Windows never answered: past
+	// UnansweredStartHold nothing on the PC can tell whether it will still come, so only the player can say it has settled
+	public static bool AsksAboutALateStart(Journal a_j) => a_j.UnansweredStartAt is { } asked && DateTime.UtcNow - asked >= UnansweredStartHold;
+
+	// The setup a put-back or an undo works with. One that is gone or does not read must not leave a profile that can never be
+	// put back (and every later start refused for it): the run's record names its Mod Organizer and its profile, and the
+	// setup adds only where its plugins are placed. Null, with why, only for a record that names no Mod Organizer
+	static Setup? SetupOf(Journal a_j, out string? a_why)
 	{
+		a_why = null;
+		try {
+			return Setup.Load(a_j.SetupFile);
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException or ArgumentException) {
+			a_why = e.Message;
+		}
+		return a_j.Mo2Exe == "" ? null : Setup.FromJson(new System.Text.Json.Nodes.JsonObject {
+			["name"] = a_j.SetupName,
+			["mo2"] = new System.Text.Json.Nodes.JsonObject { ["exe"] = a_j.Mo2Exe, ["instance"] = a_j.Mo2Instance, ["profile"] = a_j.Profile },
+		}, a_j.SetupFile);
+	}
+
+	// The Mod Organizer a run worked in, for putting that run back or undoing it: the one its own record names. The setup may
+	// name another by now (its Mod Organizer changed in Settings, or a new setup made under the same name), and a run's lists
+	// must never be written into another Mod Organizer's profile of the same name. Where the record names none (a record of an
+	// older version) the setup's is the one. Where the record's Mod Organizer or its instance folder is no longer there, nothing
+	// takes its place: the put-back is refused, saying where it worked - another one's profile of that name is not the run's
+	static Mo2Instance Mo2Of(Journal a_j, Setup a_setup)
+	{
+		if (a_j.Mo2Exe == "") {
+			return Mo2Instance.Load(a_setup.Mo2Exe, a_setup.Mo2Instance);
+		}
+		var instance = string.IsNullOrWhiteSpace(a_j.Mo2Instance) ? null : a_j.Mo2Instance;
+		if (!File.Exists(a_j.Mo2Exe) || instance != null && !File.Exists(Path.Combine(instance, "ModOrganizer.ini"))) {
+			throw new IOException($"the Mod Organizer this run worked in is no longer where its record says ({a_j.Mo2Exe}{(instance != null ? ", instance " + instance : "")}) - " +
+				"put it back there to put the run's profile back; another Mod Organizer's profile is never written in its place");
+		}
+		return Mo2Instance.Load(a_j.Mo2Exe, a_j.Mo2Instance);
+	}
+
+	// how long after a start Windows had not answered a put-back still waits: by then that start has come or never will
+	public static TimeSpan UnansweredStartHold { get; set; } = TimeSpan.FromMinutes(15);
+
+	static RunOutcome RestoreLocked(Journal a_j, bool a_lateStartSettled)
+	{
+		// a start Windows had not answered when the run's own put-back stopped could still bring Mod Organizer up over this one:
+		// held for UnansweredStartHold, then put back only once the player says it has settled
+		if (a_j.UnansweredStartAt is { } asked && DateTime.UtcNow - asked < UnansweredStartHold) {
+			return new RunOutcome(RunState.Failed, $"Windows has not answered a start of Mod Organizer that run asked it for at {asked.ToLocalTime():HH:mm} - " +
+				$"it could still come up, so the profile is not written now; put it back after {(asked + UnansweredStartHold).ToLocalTime():HH:mm}", a_j.Folder);
+		}
+		if (a_j.UnansweredStartAt is { } never && !a_lateStartSettled) {
+			return new RunOutcome(RunState.Failed, $"Windows never answered a start of Mod Organizer that run asked it for at {never.ToLocalTime():HH:mm}, so it could still come up - " +
+				"has Mod Organizer come up since? The profile is put back only once you say so (the window asks; on the command line: restore --late-start-settled)", a_j.Folder);
+		}
 		// when the cut-off run last wrote its record, read before this put-back writes it again: the time that run died
 		var lastWritten = File.GetLastWriteTime(a_j.File);
-		Setup setup;
-		try {
-			setup = Setup.Load(a_j.SetupFile);
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException) {
-			return new RunOutcome(RunState.Failed, "the setup does not read: " + e.Message, a_j.Folder);
+		if (SetupOf(a_j, out var noSetup) is not { } setup) {
+			return new RunOutcome(RunState.Failed, "the setup does not read: " + noSetup, a_j.Folder);
 		}
 		// a Mod Organizer that moved, a run folder that cannot be written: said in words, never a crash of the command line
 		Mo2Instance mo2;
 		try {
-			mo2 = Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance);
+			mo2 = Mo2Of(a_j, setup);
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) {
 			return new RunOutcome(RunState.Failed, "could not put the profile back: " + e.Message, a_j.Folder);
 		}
@@ -1623,6 +1822,9 @@ public static class Runner
 			Cancel = CancellationToken.None, BackupFolder = a_j.BackupDir,
 		};
 		log.Say("RESTORE: putting the profile back after the run that did not finish");
+		if (noSetup != null) {
+			log.Warn($"this run's setup does not read ({noSetup}) - the profile is put back all the same, without the setup's own plugin places");
+		}
 		// what the cut-off run last wrote: anything else in the mod list now - changed during the run or since - is the player's,
 		// kept by the put-back as at the end of a run (an older run left no such file: nothing is kept, as before)
 		ctx.Profile.OursFile = Path.Combine(a_j.Folder, Profile.WatchFileName);
@@ -1649,11 +1851,11 @@ public static class Runner
 		if (data != null) {
 			NoteChanges(mo2, data, "putting back " + RunWho(a_j), log);
 		}
-		if (notBack.Count > 0 || filesNotBack.Count > 0 || ctx.LinesLeft.Count > 0) {
+		if (notBack.Count > 0 || filesNotBack.Count > 0 || ctx.LinesLeft.Count > 0 || ctx.MarksLeft.Count > 0) {
 			// something is still out - or a line the run wrote into the mod list could not be taken out again: Restore stays
 			// on offer (the window keeps its button) and says what
 			a_j.NeedsRestore = true;
-			a_j.Verdict = "put back except " + string.Join(", ", notBack.Concat(filesNotBack.Select(Path.GetFileName)).OfType<string>().Concat(LinesLeftWords(ctx.LinesLeft))) +
+			a_j.Verdict = "put back except " + string.Join(", ", notBack.Concat(filesNotBack.Select(Path.GetFileName)).OfType<string>().Concat(LinesLeftWords(ctx.LinesLeft)).Concat(MarksLeftWords(ctx.MarksLeft))) +
 				(notBack.Count > 0 || filesNotBack.Count > 0 ? " (kept off / in the backup)" : "") + " - press \"Put my profile back\" again once the files are free";
 			a_j.TrySave();
 			log.Error(a_j.Verdict);
@@ -1671,6 +1873,7 @@ public static class Runner
 		}
 		a_j.State = RunState.Restored;
 		a_j.NeedsRestore = false;
+		a_j.UnansweredStartAt = null;
 		a_j.Ended ??= DateTime.Now;
 		a_j.Verdict = "put back after an interrupted run - the profile is as it was, with the outputs that finished on" + LostNote(a_j);
 		if (!a_j.TrySave()) {
@@ -1693,15 +1896,12 @@ public static class Runner
 		if (RunUndo.WhyNot(a_j, Journal.All(Path.GetDirectoryName(Path.GetFullPath(a_j.Folder))!).ToList()) is { } why) {
 			return new RunOutcome(a_j.State, why, a_j.Folder);
 		}
-		Setup setup;
-		try {
-			setup = Setup.Load(a_j.SetupFile);
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException) {
-			return new RunOutcome(a_j.State, "the setup does not read: " + e.Message, a_j.Folder);
+		if (SetupOf(a_j, out var noSetup) is not { } setup) {
+			return new RunOutcome(a_j.State, "the setup does not read: " + noSetup, a_j.Folder);
 		}
 		Mo2Instance mo2;
 		try {
-			mo2 = Mo2Instance.Load(setup.Mo2Exe, setup.Mo2Instance);
+			mo2 = Mo2Of(a_j, setup);
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) {
 			return new RunOutcome(a_j.State, "nothing was undone: " + e.Message, a_j.Folder);
 		}
@@ -1717,6 +1917,9 @@ public static class Runner
 		};
 		ctx.Profile.LoadOurs();
 		log.Say("UNDO: putting things back as they were before this run");
+		if (noSetup != null) {
+			log.Warn($"this run's setup does not read ({noSetup}) - the run is undone all the same, without the setup's own plugin places");
+		}
 		try {
 			control.Close();
 			if (data != null) {
@@ -1793,6 +1996,11 @@ public static class Runner
 			// (one that cannot be taken out stops the undo here, as any file it cannot put back does: undone again, it is tried again)
 			if (UnlistWhatTheRunOnlyListed(ctx.Profile, a_j, log, true) is { Count: > 0 } linesLeft) {
 				throw new IOException(string.Join(", ", LinesLeftWords(linesLeft)) + " could not be taken out again");
+			}
+			// (nor is an undo whole while a mod's folder did not read and the player's plugin ticks in it were not all set again:
+			// the record keeps their ticks, and undone again, it sets them)
+			if (ctx.MarksLeft.Count > 0) {
+				throw new IOException(string.Join(", ", MarksLeftWords(ctx.MarksLeft)) + " could not be set again");
 			}
 		} catch (Exception e) {
 			log.Error("undo failed: " + Plain(e));

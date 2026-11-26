@@ -91,6 +91,9 @@ public sealed class GrassStep : IStep
 	public static string? WrapperExit(string a_output) =>
 		Regex.Match(a_output, @"^exit code (-?\d+)\s*\z", RegexOptions.Multiline) is { Success: true } m ? m.Groups[1].Value : null;
 
+	// how much of the wrapper's output a look reads: its last lines, the wrapper's own last line among them
+	const int OutputEnd = 64 * 1024;
+
 	void FasterNgio(RunContext a_ctx, StepSettings a_s)
 	{
 		var exe = a_s.Req("fasterngio_exe");
@@ -121,24 +124,27 @@ public sealed class GrassStep : IStep
 			var sw = Stopwatch.StartNew();
 			var last = Stopwatch.StartNew();
 			var size = -1L;
-			string body;
 			try {
 				while (true) {
 					a_ctx.Cancel.ThrowIfCancellationRequested();
 					a_ctx.Pause(TimeSpan.FromSeconds(2));
-					body = File.Exists(outFile) ? Files.ReadSharedText(outFile) : "";
-					if (WrapperExit(body) != null) {
-						break;
-					}
+					// asked by its length, and only its end read when that is new: everything FasterNGIO has said so far was
+					// read whole at every look
+					var written = new FileInfo(outFile);
+					var length = written.Exists ? written.Length : -1;
 					// the wrapper's first line writes the file: with no FasterNGIO seen and no file, Mod Organizer never started
 					// it - said now, not as "wrote nothing for 10 minutes"
-					if (started == null && !File.Exists(outFile) && sw.Elapsed > TimeSpan.FromSeconds(20)) {
+					if (started == null && length < 0 && sw.Elapsed > TimeSpan.FromSeconds(20)) {
 						throw new StepFailedException("Mod Organizer did not start FasterNGIO (its wrapper never ran) - look at Mod Organizer for a box it shows, then run again");
 					}
-					if (body.Length != size) {
-						size = body.Length;
+					if (length != size) {
+						size = length;
 						last.Restart();
-						var lastLine = body.TrimEnd().Split('\n').LastOrDefault()?.Trim() ?? "";
+						var end = length > 0 ? Files.ReadSharedTailText(outFile, OutputEnd) : "";
+						if (WrapperExit(end) != null) {
+							break;
+						}
+						var lastLine = end.TrimEnd().Split('\n').LastOrDefault()?.Trim() ?? "";
 						if (lastLine != "") {
 							a_ctx.Activity(Key, lastLine.Length > 140 ? lastLine[..140] : lastLine);
 						}
@@ -154,6 +160,7 @@ public sealed class GrassStep : IStep
 				// a stop or a stall: the run's own FasterNGIO ended by its PID
 				StepKit.CloseTool(a_ctx, image);
 			}
+			var body = File.Exists(outFile) ? Files.ReadSharedText(outFile) : "";
 			var lines = body.TrimEnd().Split('\n');
 			foreach (var ln in lines.Where(l => l.Contains("warning", StringComparison.OrdinalIgnoreCase) || l.Contains("error", StringComparison.OrdinalIgnoreCase)).Take(8).Concat(lines.TakeLast(3))) {
 				a_ctx.Log.Detail("| " + ln.TrimEnd());
@@ -176,7 +183,8 @@ public sealed class GrassStep : IStep
 
 	// the old route: NGIO's PrecacheGrass.txt in the game folder, the game started until the cache is complete; a crash is resumed
 	// by starting again. The limits: a first start that dies within 5 minutes is a broken setup; after that short
-	// crashes are normal, but more than 15 restarts, or 3 in a row that add no grass file, stop the step.
+	// crashes are normal, but more than 15 restarts, or 3 in a row that add no grass file, stop the step - and so does the
+	// step's own time limit (the time Faster Archives' window stands open is not counted).
 	void ByGame(RunContext a_ctx, StepSettings a_s)
 	{
 		var mod = a_s.OutputMod!;
@@ -193,6 +201,7 @@ public sealed class GrassStep : IStep
 			var launches = 0;
 			var idle = 0;
 			var offers = 0;
+			var whole = Stopwatch.StartNew();
 			try {
 				while (File.Exists(flag)) {
 					a_ctx.Cancel.ThrowIfCancellationRequested();
@@ -219,10 +228,13 @@ public sealed class GrassStep : IStep
 							Procs.End(g);
 							break;
 						}
-						if (File.Exists(flag) && still.Elapsed > TimeSpan.FromMinutes(20)) {
-							a_ctx.Log.Detail("no new grass file for 20 minutes - the game is stuck, starting it again");
+						if (File.Exists(flag) && still.Elapsed > TimeSpan.FromMinutes(Math.Max(1, a_s.Int("stuck_min", 20)))) {
+							a_ctx.Log.Detail($"no new grass file for {still.Elapsed.TotalMinutes:0} minutes - the game is stuck, starting it again");
 							Procs.End(g);
 							break;
+						}
+						if (whole.Elapsed > a_s.Deadline(360)) {
+							throw new StepFailedException($"the grass cache passed its {a_s.Deadline(360).TotalMinutes:0} minute limit");
 						}
 						a_ctx.Pause(TimeSpan.FromSeconds(10));
 					}
@@ -231,7 +243,9 @@ public sealed class GrassStep : IStep
 					}
 					// Faster Archives closed the game for its offer: no crash, and not one of the cache's own starts
 					if (File.Exists(flag) && FasterArchives.Offered(InGame.LogFolders(a_ctx.Setup, a_ctx.Mo2), launched, a_ctx.Control.Started)) {
+						whole.Stop();
 						FasterArchives.Wait(a_ctx, Key, a_s, ++offers, launched);
+						whole.Start();
 						--launches;
 						continue;
 					}
@@ -244,7 +258,8 @@ public sealed class GrassStep : IStep
 						if (launches - 1 >= a_s.Int("max_restarts", 15)) {
 							throw new StepFailedException($"the game crashed {launches} times - more than is normal");
 						}
-						if (idle >= a_s.Int("max_idle_restarts", 3)) {
+						// (none allowed means the first one that adds nothing stops the step - never a restart that added files)
+						if (idle >= Math.Max(1, a_s.Int("max_idle_restarts", 3))) {
 							throw new StepFailedException($"{idle} restarts in a row built no new grass file - the cache is stuck");
 						}
 					}
@@ -365,7 +380,7 @@ public sealed class ShaderStep : IStep
 				if (text.StartsWith<byte>([0xEF, 0xBB, 0xBF])) {
 					text = text[3..];
 				}
-				boot = JsonNode.Parse(text, null, new System.Text.Json.JsonDocumentOptions { CommentHandling = System.Text.Json.JsonCommentHandling.Skip, AllowTrailingCommas = true })
+				boot = JsonNode.Parse(text, null, JsonRead.ByHand)
 					is JsonObject o && o[BootKey] is JsonObject off
 					? string.Join("|", off.Select(kv => kv.Key + "=" + (kv.Value?.ToJsonString() ?? "null")).Order(StringComparer.Ordinal))
 					: "";
@@ -512,7 +527,7 @@ public sealed class ShaderStep : IStep
 			return "it has no record of a build by this program";
 		}
 		try {
-			var o = JsonNode.Parse(Files.ReadSharedText(stamp)) as JsonObject;
+			var o = JsonNode.Parse(Files.ReadSharedText(stamp), documentOptions: JsonRead.Plain) as JsonObject;
 			// The cache must still hold what it held when it was stamped (nearly all of it), judged by its own count. Judged by a
 			// fixed 50 files, a small shader mod's cache that the step had accepted with fewer read as out of date at every run
 			// and was built again each time. A stamp from before the count was kept is held to the old 50
@@ -668,6 +683,60 @@ public sealed class ShaderStep : IStep
 	// LowFor: how long it has stayed under IdleLine of its peak
 	public sealed record Look(string LogText, int Files, int NewThisStart, TimeSpan SinceNewFile, TimeSpan SinceLogWrite, double? Cores, double PeakCores, TimeSpan LowFor, bool Sane);
 
+	// What the step asks a shader log, kept as the log grows - never the log itself. The step looks every five seconds for
+	// as long as the compile runs (twenty minutes and more), and asked the whole log each time: it was kept as one text that
+	// was made anew at every look that found a new line, and split into its lines again to find the last one that matters -
+	// megabytes made and thrown away at each look. Of every line the log gains, only these are kept: one that says a compile
+	// began or ended, one by which the shader mod shows it runs or that it stood down, and the last count of what is left.
+	// Its Text answers Done, and the step's own two questions, as the whole log did.
+	public sealed class LogDigest
+	{
+		// (lines that say the same thing over and over are kept once: a "[ShaderTiming]" line comes for every shader)
+		const int Most = 400;
+
+		readonly List<string> _kept = [];
+		string? _timing, _remaining;
+
+		// the words the step and Done look for in a log
+		static readonly string[] Marks = ["Shader compilation started", "Shader compilation completed", "Loading Settings Complete", "Loaded theme", "Incompatible DLL", "Remove it to use",
+			"disabled itself", "will not run"];
+
+		public void Restart()
+		{
+			_kept.Clear();
+			(_timing, _remaining) = (null, null);
+		}
+
+		// the whole lines a look found new
+		public void Take(string a_added)
+		{
+			foreach (var raw in a_added.Split('\n', StringSplitOptions.RemoveEmptyEntries)) {
+				var line = raw.TrimEnd('\r');
+				var counts = InGame.RemainingIn(line) != null;
+				if (counts) {
+					_remaining = line;
+				}
+				// (a count that also says a compile began or ended is kept among the marks too: the next count takes its place
+				// as the newest count, never what it said)
+				if (Marks.Any(m => line.Contains(m, StringComparison.Ordinal))) {
+					// (never without end: the oldest go first, and the newest are the ones that are asked about)
+					if (_kept.Count >= Most) {
+						_kept.RemoveAt(0);
+					}
+					_kept.Add(line);
+				} else if (!counts && _timing == null && line.Contains("ShaderTiming", StringComparison.Ordinal)) {
+					_timing = line;
+				}
+			}
+		}
+
+		// what is kept, as lines in the order the log has them (the last count stands last: it is the newest of its kind)
+		public string Text => string.Join("\n", new[] { _timing }.Concat(_kept).Append(_remaining).OfType<string>());
+
+		// ... with the line still being written, which may be the one that says the compile ended
+		public string TextWith(string a_unfinished) => a_unfinished == "" ? Text : Text + "\n" + a_unfinished;
+	}
+
 	// a compile was seen working once the game used this many cores
 	public const double BusyCores = 1.5;
 
@@ -731,13 +800,14 @@ public sealed class ShaderStep : IStep
 		}
 		var how = (a_s.Str("on_crash") ?? "ask").Trim().ToLowerInvariant();
 		if (how == "stop") {
-			throw new StepFailedException(what + " - the step stops here (the setup's \"on_crash\" is \"stop\")");
+			throw new StepFailedException(what + " - the step stops here (its setting \"When the game crashes while compiling\" says stop)");
 		}
 		if (how == "restart") {
 			a_ctx.Log.Detail($"starting the game again to carry on (the setup's \"on_crash\" is \"restart\") - start {a_start + 1}");
 			return;
 		}
-		var wait = TimeSpan.FromMinutes(a_s.Num("crash_wait_min", 30));
+		// (no minutes at all is the usual wait: a question cancelled the moment it is asked would end the step on the first crash)
+		var wait = TimeSpan.FromMinutes(a_s.Num("crash_wait_min", 30) is > 0 and var minutes ? minutes : 30);
 		a_ctx.Log.Warn($"waiting up to {wait.TotalMinutes:0} minutes for your answer: Done (the window's button, or the command \"continue\") starts the game again, Stop ends the run");
 		using var asked = CancellationTokenSource.CreateLinkedTokenSource(a_ctx.Cancel);
 		asked.CancelAfter(wait);
@@ -795,16 +865,25 @@ public sealed class ShaderStep : IStep
 					var peak = 0.0;
 					double? cores = null;
 					Stopwatch? low = null;
-					// this start's shader log, whole (its first lines say whether the shader mod runs and whether a compile is
-					// open), read as it grows
-					var grown = new GrowingText();
+					// this start's shader log, read as it grows and asked by what it says (LogDigest): its first lines say whether
+					// the shader mod runs and whether a compile is open
+					var grown = new GrowingText { KeepAll = false };
+					var said = new LogDigest();
 					while (!g.HasExited) {
 						a_ctx.Cancel.ThrowIfCancellationRequested();
 						// (looked up again at every look: a mapped log folder may only be made during this start)
 						logs = InGame.LogFolders(a_ctx.Setup, a_ctx.Mo2);
 						var log = InGame.NewestShaderLog(logs);
 						var logFresh = log != null && File.GetLastWriteTimeUtc(log) >= started.AddSeconds(-5);
-						var text = logFresh ? grown.Read(log!) : "";
+						var text = "";
+						if (logFresh) {
+							grown.Read(log!);
+							if (grown.Restarted) {
+								said.Restart();
+							}
+							said.Take(grown.Added);
+							text = said.TextWith(grown.Unfinished);
+						}
 						var n = Files.CountFiles(owCache);
 						// the shader mod must show it runs within a few minutes (it stands down beside a DLL it refuses).
 						// Shaders arriving in the cache ARE that sign: a log can be elsewhere (SKSE's log folder moved) or late - a

@@ -46,6 +46,7 @@ public static class AddOns
 	const int Schema = 1;
 	const int DefaultMinutes = 60, MostMinutes = 600, LongestName = 60;
 	static readonly string[] AllowedKeys = ["schema", "name", "author", "page", "program", "arguments", "output", "minutes", "makes", "before", "after"];
+	static readonly string[] Needed = ["name", "author", "program", "output"];
 
 	static string? Text(JsonObject a_o, string a_key) => a_o[a_key] is JsonValue v && v.TryGetValue<string>(out var s) ? s.Trim() : null;
 
@@ -83,14 +84,14 @@ public static class AddOns
 	static bool RelativeInside(string a_path) =>
 		!Path.IsPathRooted(a_path) && !a_path.Replace('\\', '/').Split('/').Contains("..");
 
-	static bool GoodFolderName(string a_name) => a_name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 && a_name != "." && a_name != ".." && !a_name.EndsWith('.');
+	static bool GoodFolderName(string a_name) => Setup.PlainName(a_name);
 
 	// what is wrong with an add-on file, in plain words for its author (none = it is right); a_modDir: also look for the program there
 	public static List<string> Problems(string a_text, string? a_modDir = null)
 	{
 		JsonObject? o;
 		try {
-			o = JsonNode.Parse(a_text, null, new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip }) as JsonObject;
+			o = JsonNode.Parse(a_text, null, JsonRead.ByHand) as JsonObject;
 		} catch (JsonException e) {
 			return ["it is not valid JSON: " + e.Message];
 		}
@@ -102,7 +103,7 @@ public static class AddOns
 		if (o["schema"] is not JsonValue sv || !sv.TryGetValue<int>(out var schema) || schema != Schema) {
 			p.Add($"\"schema\" must be {Schema}");
 		}
-		foreach (var need in new[] { "name", "author", "program", "output" }.Where(k => string.IsNullOrEmpty(Text(o, k)))) {
+		foreach (var need in Needed.Where(k => string.IsNullOrEmpty(Text(o, k)))) {
 			p.Add($"\"{need}\" is missing");
 		}
 		if (Text(o, "name") is { Length: > 0 } name && (name.Length > LongestName || !GoodFolderName(name))) {
@@ -143,7 +144,7 @@ public static class AddOns
 		if (Problems(text, a_modDir).Count > 0) {
 			return null;
 		}
-		var o = (JsonObject)JsonNode.Parse(text, null, new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip })!;
+		var o = (JsonObject)JsonNode.Parse(text, null, JsonRead.ByHand)!;
 		return new AddOn(a_file, a_modDir, Text(o, "name")!, Text(o, "author")!, Text(o, "page") ?? "", Text(o, "program")!, Text(o, "arguments") ?? "", Text(o, "output")!,
 			o["minutes"]?.GetValue<int>() ?? DefaultMinutes, Text(o, "makes"), Text(o, "before"), Text(o, "after"),
 			Hash(bytes, Path.GetFullPath(Path.Combine(a_modDir, Text(o, "program")!))));
@@ -294,7 +295,7 @@ public sealed class AddOnStep(string a_key) : IStep
 		var fresh = Runner.OverwriteFiles(a_ctx).Where(n => (!a_before.TryGetValue(n.Key, out var t) || t != n.Value) && !Files.IsUnder(n.Key, root)).Select(n => n.Key).ToList();
 		if (fresh.Count == 0) {
 			// a tool told to write into the output mod itself: Mod Organizer's virtual folder passes that through
-			if (a_makes != null && a_ctx.Journal.Step(a_step)?.Started is { } since && Path.Combine(a_ctx.Mo2.ModDir(a_mod), a_makes) is var inMod && File.Exists(inMod) && File.GetLastWriteTime(inMod) >= since) {
+			if (a_makes != null && a_ctx.Journal.Step(a_step)?.Started is { } since && Path.Combine(a_ctx.Mo2.ModDir(a_mod), a_makes) is var inMod && File.Exists(inMod) && File.GetLastWriteTimeUtc(inMod) >= since.ToUniversalTime()) {
 				a_ctx.Log.Detail($"{StepCatalog.Name(a_step)} wrote {a_makes} straight into {a_mod}");
 				// its old bytes (kept before the tool started) are what an undo puts back
 				StepKit.Settled(a_ctx, a_mod, [inMod]);

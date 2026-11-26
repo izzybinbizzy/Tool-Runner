@@ -104,11 +104,27 @@ public static class SetupMaker
 			Add("texgen", true, new JsonObject { ["executable"] = tex.Title, ["output_dir"] = Path.Combine(root, "TexGen_Output"), ["output_mod"] = Out("TexGen Output"),
 				["disable_during"] = lodOff.DeepClone(), ["deadline_min"] = 30 });
 		}
+		// AnvilLOD makes the LOD DynDOLOD makes: a profile runs one of the two. With both on the PC DynDOLOD's step is the one
+		// switched on, and each step keeps the other's output off for good once it is the one that runs
+		var anvil = ByBinary(mo2, "AnvilLOD.exe");
 		if (dyn != null) {
 			var root = Path.GetDirectoryName(dyn.Binary)!;
-			Add("dyndolod", true, new JsonObject { ["executable"] = dyn.Title, ["output_dir"] = Path.Combine(root, "DynDOLOD_Output"), ["output_mod"] = Out("DynDOLOD Output"),
+			var o = new JsonObject { ["executable"] = dyn.Title, ["output_dir"] = Path.Combine(root, "DynDOLOD_Output"), ["output_mod"] = Out("DynDOLOD Output"),
 				["enable_during"] = tex != null ? new JsonArray(Out("TexGen Output")) : new JsonArray(), ["disable_during"] = new JsonArray(Out("DynDOLOD Output")),
-				["worldspaces"] = new JsonArray("all"), ["deadline_min"] = 120 });
+				["worldspaces"] = new JsonArray("all"), ["deadline_min"] = 120 };
+			if (anvil != null) o["replaces"] = new JsonArray(Out("AnvilLOD Output"));
+			Add("dyndolod", true, o);
+		}
+		if (anvil != null) {
+			var o = new JsonObject { ["exe"] = anvil.Binary, ["output_mod"] = Out("AnvilLOD Output"), ["deadline_min"] = 60 };
+			if (dyn != null) {
+				o["dyndolod"] = Path.GetDirectoryName(dyn.Binary);
+				o["replaces"] = new JsonArray(Out("DynDOLOD Output"));
+			}
+			// AnvilLOD reads DynDOLOD's rule files: without a DynDOLOD on Mod Organizer's list its folder is not known, and the
+			// step stays off until it is set in Settings (switched on, every start of the setup stopped on it); with DynDOLOD
+			// there, DynDOLOD's step is the one switched on
+			Add("anvillod", false, o);
 		}
 		if (ByBinary(mo2, "Pandora Behaviour Engine+.exe", "Pandora Behaviour Engine.exe") is { } pan) {
 			Add("pandora", true, new JsonObject { ["executable"] = pan.Title, ["args"] = "--auto_run --auto_close", ["output_dir"] = Path.Combine(scratch, "Pandora"),

@@ -23,6 +23,8 @@ public sealed class XLodGenStep : IStep
 		var image = a_s.Str("image") ?? "xLODGenx64.exe";
 		StepKit.ParkDir(a_ctx, outDir, "xLODGen output");
 		var deadline = a_s.Deadline(120);
+		// one limit for the whole step: the wait for its options and the generation after it share it
+		var clock = AwakeClock.StartNew();
 		using (new Toggle(a_ctx, [.. a_s.List("enable_during"), .. StepKit.ToolMods(a_ctx, a_s)], a_s.List("disable_during"), "xLODGen", a_ctx.Cancel)) {
 			try {
 				// xLODGen writes where its -o: says - and that is in Mod Organizer's entry for it, not here: the step puts its own
@@ -33,23 +35,20 @@ public sealed class XLodGenStep : IStep
 				using var proc = a_ctx.Control.RunExecutable(a_s.Req("executable"), image, args, a_ctx.Cancel);
 				var main = StepKit.WaitWindow(a_ctx, image, t => t.Contains("LODGen", StringComparison.Ordinal), TimeSpan.FromMinutes(10), "xLODGen's window");
 				a_ctx.Activity(Key, "xLODGen is reading the load order");
-				var loadingHwnd = (nint)main.Current.NativeWindowHandle;
+				var logBox = new LogBox((nint)main.Current.NativeWindowHandle, 4000);
 				var opts = Find(a_ctx, main, e => Uia.Name(e) == "LODGen Options" && Uia.Type(e) == ControlType.Window, TimeSpan.FromMinutes(15), "xLODGen's options",
-					proc, () => LogText(loadingHwnd));
+					proc, logBox, (clock, deadline));
 				var list = WorldspaceList(a_ctx, opts, TimeSpan.FromSeconds(30));
 				var want = a_s.List("worldspaces");
 				CheckList.Set(a_ctx, list, n => want.Count == 0 || want.Contains("all", StringComparer.OrdinalIgnoreCase) || want.Contains(n.Split(' ')[0], StringComparer.OrdinalIgnoreCase));
 				Uia.Press(Uia.Button(opts, "Generate") ?? throw new StepFailedException("xLODGen's options have no Generate button"));
 				a_ctx.Activity(Key, "generating terrain LOD");
-				var mainHwnd = (nint)main.Current.NativeWindowHandle;
 				var told = Stopwatch.StartNew();
 				Waits.Tool(a_ctx, Key, proc, deadline, () => {
-					// its log box = the memo of the main window holding the most text, looked up every time
-					var txt = LogText(mainHwnd);
-					var tail = txt.Length > 4000 ? txt[^4000..] : txt;
+					var tail = logBox.Tail();
 					if (told.Elapsed >= TimeSpan.FromMinutes(5)) {
 						told.Restart();
-						a_ctx.Log.Detail($"xLODGen's log: {txt.Length} characters, last line: {LastLine(tail)}");
+						a_ctx.Log.Detail($"xLODGen's log: {logBox.Length} characters, last line: {LastLine(tail)}");
 					}
 					if (tail.Contains("LOD generation done", StringComparison.Ordinal)) {
 						return Waits.Poll.Done;
@@ -66,7 +65,7 @@ public sealed class XLodGenStep : IStep
 						a_ctx.Activity(Key, "generating terrain LOD", double.Parse(m.Groups[1].Value, InvariantCulture) / Math.Max(1, double.Parse(m.Groups[2].Value, InvariantCulture)));
 					}
 					return Waits.Poll.Wait;
-				}, a_every: TimeSpan.FromSeconds(5));
+				}, a_every: TimeSpan.FromSeconds(5), a_clock: clock);
 				a_ctx.Log.Detail("xLODGen: LOD generation done");
 				Native.PostMessage((nint)main.Current.NativeWindowHandle, Native.WM_CLOSE, 0, 0);
 				StepKit.LetClose(a_ctx, Key, proc, TimeSpan.FromMinutes(2), "xLODGen");
@@ -110,17 +109,59 @@ public sealed class XLodGenStep : IStep
 		return last.Length > 140 ? last[..140] : last;
 	}
 
-	// the text of the window's log memo: of its memos, the one holding the most text
-	internal static string LogText(nint a_main)
+	// A tool's log box as a wait needs it: the last a_most letters of the main window's fullest memo, looked up at every look.
+	// Which memo that is, is asked by length alone, and its text crosses from the tool's process only when that length is
+	// new, or StaleAfter is over: every memo's whole text was fetched,
+	// and made a text here, at every look
+	internal sealed class LogBox(nint a_main, int a_most)
 	{
-		var best = "";
-		foreach (var h in Native.ChildWindows(a_main).Where(h => Native.ClassName(h) == "TMemo")) {
-			var t = Native.ControlText(h);
-			if (t.Length > best.Length) {
-				best = t;
+		// (a tool that writes its progress again in place keeps the length: its line is read anew this often all the same)
+		static readonly TimeSpan StaleAfter = TimeSpan.FromSeconds(10);
+
+		char[] _buf = [];
+		nint _memo;
+		string _tail = "";
+		long _readAt;
+
+		// how long the whole text was at the last look (0: none, or no answer)
+		public int Length { get; private set; }
+
+		public string Tail()
+		{
+			nint best = 0;
+			var most = 0;
+			foreach (var h in Native.ChildWindows(a_main)) {
+				if (Native.ClassName(h) != "TMemo") {
+					continue;
+				}
+				var n = Native.TextLength(h);
+				if (n < 0) {
+					// its window's thread does not answer: the other memos are that thread's too, and each would be waited for
+					return Nothing();
+				}
+				if (n > most) {
+					(best, most) = (h, n);
+				}
 			}
+			if (best == 0) {
+				return Nothing();
+			}
+			if (best == _memo && most == Length && Environment.TickCount64 - _readAt < StaleAfter.TotalMilliseconds) {
+				return _tail;
+			}
+			var (length, tail) = Native.ControlTail(best, a_most, ref _buf);
+			if (length == 0) {
+				return Nothing();
+			}
+			(_memo, Length, _tail, _readAt) = (best, length, tail, Environment.TickCount64);
+			return tail;
 		}
-		return best;
+
+		string Nothing()
+		{
+			(_memo, Length) = (0, 0);
+			return "";
+		}
 	}
 
 	// xLODGen's options hold more than one check list - its LOD levels ("", 4, 8, 16, 32) as well as the worldspaces, and UI
@@ -158,25 +199,35 @@ public sealed class XLodGenStep : IStep
 		return Regex.Match(tail, @"^.*\bFatal: .*$|^\s*Error: .*$", RegexOptions.Multiline) is { Success: true } m ? m.Value.Trim() : null;
 	}
 
-	// A window of the tool that comes once it has read the load order. a_proc and a_says: the tool itself and what its log
+	// A window of the tool that comes once it has read the load order. a_proc and a_log: the tool itself and what its log
 	// box says - a tool that closed, or whose log names an error while it loads, is said at once with its own words; the wait
 	// used to look for the window alone and end, a quarter of an hour later, with "did not appear"
+	// a_timeout runs from the last time its log said something new: a tool still reading a large load order (a slow disk, a
+	// virus scanner reading every plugin with it) is waited for, one that has gone silent is not. a_most, the step's own
+	// limit on the step's own clock, ends the wait either way
 	internal static AutomationElement Find(RunContext a_ctx, AutomationElement a_root, Func<AutomationElement, bool> a_match, TimeSpan a_timeout, string a_what,
-		Process? a_proc = null, Func<string>? a_says = null)
+		Process? a_proc = null, LogBox? a_log = null, (AwakeClock Clock, TimeSpan Limit)? a_most = null)
 	{
 		var sw = Stopwatch.StartNew();
+		var quiet = Stopwatch.StartNew();
 		var read = TimeSpan.FromSeconds(-10);
 		var said = "";
-		while (sw.Elapsed < a_timeout) {
+		var length = 0;
+		while (quiet.Elapsed < a_timeout && (a_most is not { } most || most.Clock.Elapsed < most.Limit)) {
 			a_ctx.Cancel.ThrowIfCancellationRequested();
 			var hit = Uia.All(a_root).FirstOrDefault(a_match);
 			if (hit != null) {
 				return hit;
 			}
-			// its log is read every few seconds, not every look (the whole text crosses from its process each time)
-			if (a_says != null && sw.Elapsed - read >= TimeSpan.FromSeconds(5)) {
+			// its log is asked every few seconds, not every look
+			if (a_log != null && sw.Elapsed - read >= TimeSpan.FromSeconds(5)) {
 				read = sw.Elapsed;
-				said = a_says();
+				var now = a_log.Tail();
+				// (by its length too: a log that repeats a line grows while its end stays the same)
+				if (a_log.Length != length || !string.Equals(now, said, StringComparison.Ordinal)) {
+					quiet.Restart();
+				}
+				(said, length) = (now, a_log.Length);
 				if (LoadError(said) is { } error) {
 					throw new StepFailedException($"{a_what} never came - the tool stopped while it was loading: {error}");
 				}
@@ -192,7 +243,9 @@ public sealed class XLodGenStep : IStep
 			}
 			a_ctx.Pause(TimeSpan.FromSeconds(1));
 		}
-		throw new StepFailedException($"{a_what} did not appear within {a_timeout.TotalMinutes:0.#} minutes" + LastSaid(said));
+		throw new StepFailedException((quiet.Elapsed >= a_timeout
+			? a_log == null ? $"{a_what} did not appear within {a_timeout.TotalMinutes:0.#} minutes" : $"{a_what} did not appear, and the tool's log said nothing new for {a_timeout.TotalMinutes:0.#} minutes"
+			: $"{a_what} did not appear within the step's {a_most!.Value.Limit.TotalMinutes:0.#} minute limit") + LastSaid(said));
 	}
 
 	static string LastSaid(string a_log) => LastLine(a_log) is { Length: > 0 } last ? $" - the last line of its log: {last}" : "";
@@ -555,11 +608,11 @@ public abstract class DynDolodFamily : IStep
 				var main = StepKit.WaitWindow(a_ctx, image, t => Regex.IsMatch(t, "^" + Tool + @" \d"), TimeSpan.FromMinutes(5), Tool + "'s window");
 				a_ctx.Activity(Key, Tool + " is reading the load order");
 				var startedRun = false;
-				var mainHwnd = (nint)main.Current.NativeWindowHandle;
+				var logBox = new XLodGenStep.LogBox((nint)main.Current.NativeWindowHandle, 3000);
 				Waits.Tool(a_ctx, Key, proc, a_s.Deadline(120), () => {
 					foreach (var box in Uia.Boxes(StepKit.PidsOf(image)())) {
 						if (Regex.IsMatch(box.Text, @"Installation Error|\bError\b") && !box.Text.Contains("PBR textures detected", StringComparison.Ordinal)) {
-							throw new StepFailedException($"{Tool}: {box.Text}");
+							throw new StepFailedException($"{Tool} reported an error: {box.Text}");
 						}
 						if (Uia.Button(box.Element, "No") != null) {
 							// questions: the known ones answered, an unknown one is never guessed (a "delete the output?" would get Yes)
@@ -585,8 +638,7 @@ public abstract class DynDolodFamily : IStep
 							a_ctx.Activity(Key, Tool + " is generating");
 						}
 					}
-					var txt = XLodGenStep.LogText(mainHwnd);
-					txt = txt.Length > 3000 ? txt[^3000..] : txt;
+					var txt = logBox.Tail();
 					if (Regex.IsMatch(txt, DoneRx, RegexOptions.IgnoreCase)) {
 						return Waits.Poll.Done;
 					}

@@ -13,7 +13,7 @@ public sealed class RunSummary
 	public List<Row> Rows { get; } = [];
 
 	public static string Span(TimeSpan a_t) => a_t.TotalMinutes < 1 ? "less than a minute" :
-		a_t.TotalMinutes < 60 ? $"{Math.Max(1, (int)Math.Round(a_t.TotalMinutes))} min" : $"{(int)a_t.TotalHours} h {a_t.Minutes:00} min";
+		Times.HoursAndMinutes(a_t);
 
 	static string Names(IEnumerable<StepRecord> a_steps) => string.Join(", ", a_steps.Select(s => s.Name));
 
@@ -21,7 +21,7 @@ public sealed class RunSummary
 	{
 		// the last moment the run itself wrote down, for a run that was cut off
 		var ended = a_j.Ended ?? a_j.Steps.Select(s => s.Ended ?? s.Started).Where(t => t != null).Max() ?? a_j.Started;
-		var took = Span(ended - a_j.Started);
+		var took = Span(Times.Between(a_j.Started, ended));
 		var cutOff = a_j.State == RunState.Running || a_j.NeedsRestore || a_j.Undoing;
 		var s = new RunSummary {
 			Title = cutOff ? "Did not finish" : a_j.State switch {
@@ -79,9 +79,9 @@ public sealed class RunSummary
 		if (a_j.Retire.Count > 0 && !a_j.Undone) {
 			s.Rows.Add(new Row("Kept off", string.Join(", ", a_j.Retire) + " - replaced by what this run made"));
 		}
-		var timed = done.Where(x => x.Started != null && x.Ended != null).OrderByDescending(x => x.Ended!.Value - x.Started!.Value).Take(3).ToList();
+		var timed = done.Where(x => x.Started != null && x.Ended != null).OrderByDescending(x => Times.Between(x.Started!.Value, x.Ended!.Value)).Take(3).ToList();
 		if (done.Count >= 4) {
-			s.Rows.Add(new Row("Took longest", string.Join(", ", timed.Select(x => $"{x.Name} {Span(x.Ended!.Value - x.Started!.Value)}"))));
+			s.Rows.Add(new Row("Took longest", string.Join(", ", timed.Select(x => $"{x.Name} {Span(Times.Between(x.Started!.Value, x.Ended!.Value))}"))));
 		}
 		foreach (var n in a_j.Notes.Take(5)) {
 			s.Rows.Add(new Row("Note", n));
@@ -142,7 +142,7 @@ public static class RunStatus
 		var l = new List<string>();
 		if (a_s.Run is { } r) {
 			var n = r.Steps.Count(x => x.State is StepState.Done or StepState.Skipped);
-			l.Add($"{a_s.State}: {r.SetupName}, started {r.Started.ToString("MMM d HH:mm", InvariantCulture)} ({RunSummary.Span(DateTime.Now - r.Started)} ago), {n} of {r.Steps.Count} step(s) done");
+			l.Add($"{a_s.State}: {r.SetupName}, started {r.Started.ToString("MMM d HH:mm", InvariantCulture)} ({RunSummary.Span(Times.Between(r.Started, DateTime.Now))} ago), {n} of {r.Steps.Count} step(s) done");
 			if (a_s.Step is { } step) {
 				l.Add($"  now: {step.Name}{(step.Progress is { } p ? $" {p * 100:0} %" : "")}{(a_s.Waiting == "" && step.Activity != "" ? " - " + step.Activity : "")}");
 			} else if (r.Doing != "" && a_s.Waiting == "") {

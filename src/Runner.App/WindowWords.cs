@@ -14,20 +14,38 @@ public static class WindowWords
 {
 	public const string English = "English";
 
-	const string ShippedPrefix = "Language.";
+	// The shipped languages stand in the program as one packed file (as plain text they were a third of the program
+	// file). Its list of names is read without unpacking anything, and a language is unpacked only when it is asked for
+	const string ShippedPack = "Languages.zip";
 
-	// the languages inside the program
-	public static List<string> Shipped() =>
-		[.. typeof(WindowWords).Assembly.GetManifestResourceNames().Where(n => n.StartsWith(ShippedPrefix, StringComparison.Ordinal) && n.EndsWith(".json", StringComparison.Ordinal))
-			.Select(n => n[ShippedPrefix.Length..^".json".Length])];
-
-	public static string? ShippedText(string a_name)
+	static System.IO.Compression.ZipArchive? Pack()
 	{
-		using var s = typeof(WindowWords).Assembly.GetManifestResourceStream(ShippedPrefix + a_name + ".json");
+		var s = typeof(WindowWords).Assembly.GetManifestResourceStream(ShippedPack);
 		if (s == null) {
 			return null;
 		}
-		using var r = new StreamReader(s);
+		try {
+			return new System.IO.Compression.ZipArchive(s, System.IO.Compression.ZipArchiveMode.Read);
+		} catch (InvalidDataException) {
+			s.Dispose();
+			return null;
+		}
+	}
+
+	// the languages inside the program
+	public static List<string> Shipped()
+	{
+		using var pack = Pack();
+		return pack == null ? [] : [.. pack.Entries.Where(e => e.FullName.EndsWith(".json", StringComparison.OrdinalIgnoreCase)).Select(e => e.FullName[..^".json".Length]).Order(StringComparer.Ordinal)];
+	}
+
+	public static string? ShippedText(string a_name)
+	{
+		using var pack = Pack();
+		if (pack?.GetEntry(a_name + ".json") is not { } entry) {
+			return null;
+		}
+		using var r = new StreamReader(entry.Open());
 		return r.ReadToEnd();
 	}
 
@@ -70,7 +88,7 @@ public static class WindowWords
 
 	// a text with names put into it ("Run only {0}"): the language's own form of it, the names as they are; a translation whose
 	// places do not fit falls back to the English form
-	public static string Format(string a_english, params object[] a_args)
+	public static string Format(string a_english, params object?[] a_args)
 	{
 		try {
 			return string.Format(System.Globalization.CultureInfo.CurrentCulture, Word(a_english), a_args);
@@ -78,6 +96,15 @@ public static class WindowWords
 			return string.Format(System.Globalization.CultureInfo.CurrentCulture, a_english, a_args);
 		}
 	}
+
+	// a text with values put into it, as the code writes it ($"Use {name}'s old output?"): the language's own form of it - its key
+	// in a language file is the text with {0}, {1} ... where the values stand - with the values as they are
+	public static string F(FormattableString a_text) => Format(a_text.Format, a_text.GetArguments());
+
+	// what a row of the step list says of itself: a row is made from a template, which the walk over a window does not reach
+	public static string RowLeftOut => Word("left out: a new game has no save to keep clean");
+	public static string RowUsesOld => Word("not run: its old output is used");
+	public static string RowUsualTip => Word("its usual time");
 
 	public static void Use(IReadOnlyDictionary<string, string> a_words)
 	{
@@ -89,11 +116,14 @@ public static class WindowWords
 	}
 
 	// the words of a language file; null, with why, when it does not read
+	// (a language file a player wrote may hold comments and a last comma; made once - JsonWrite says why)
+	static readonly JsonSerializerOptions ReadOptions = new() { AllowTrailingCommas = true, ReadCommentHandling = JsonCommentHandling.Skip };
+
 	public static Dictionary<string, string>? Read(string a_text, out string a_problem)
 	{
 		a_problem = "";
 		try {
-			return JsonSerializer.Deserialize<Dictionary<string, string>>(a_text, new JsonSerializerOptions { AllowTrailingCommas = true, ReadCommentHandling = JsonCommentHandling.Skip }) ?? [];
+			return JsonSerializer.Deserialize<Dictionary<string, string>>(a_text, ReadOptions) ?? [];
 		} catch (JsonException e) {
 			a_problem = e.Message;
 			return null;
@@ -160,7 +190,7 @@ public static class WindowWords
 		}
 		bool Free(DependencyProperty a_p) => !BindingOperations.IsDataBound(a_root, a_p);
 		switch (a_root) {
-			case TextBlock t when Free(TextBlock.TextProperty) && !string.IsNullOrWhiteSpace(t.Text):
+			case TextBlock t when Free(TextBlock.TextProperty) && !MadeOfRuns(t) && !string.IsNullOrWhiteSpace(t.Text):
 				Do(t.Text, w => t.Text = w);
 				break;
 			case ContentControl c when Free(ContentControl.ContentProperty) && c.Content is string s && !string.IsNullOrWhiteSpace(s):
@@ -169,6 +199,11 @@ public static class WindowWords
 			case HeaderedItemsControl h when Free(HeaderedItemsControl.HeaderProperty) && h.Header is string hs && !string.IsNullOrWhiteSpace(hs):
 				Do(hs, w => h.Header = w);
 				break;
+		}
+		// the words a menu entry shows at its right instead of a key ("Double-click"): a key's name ("Ctrl+N") stays as Windows
+		// writes it, and is in no language file
+		if (a_root is MenuItem item && Free(MenuItem.InputGestureTextProperty) && !string.IsNullOrWhiteSpace(item.InputGestureText)) {
+			Do(item.InputGestureText, w => item.InputGestureText = w);
 		}
 		// a window's own title (its title bar and the taskbar's list of windows)
 		if (a_root is Window win && Free(Window.TitleProperty) && !string.IsNullOrWhiteSpace(win.Title)) {
@@ -181,6 +216,11 @@ public static class WindowWords
 			if (Free(AutomationProperties.NameProperty) && AutomationProperties.GetName(fe) is { Length: > 0 } name) {
 				Do(name, w => AutomationProperties.SetName(fe, w));
 			}
+			// what a screen reader says after the name (the Restore button's, a theme card's): left out, it stayed English
+			// in every language, though its translation stood in the language's file
+			if (Free(AutomationProperties.HelpTextProperty) && AutomationProperties.GetHelpText(fe) is { Length: > 0 } help) {
+				Do(help, w => AutomationProperties.SetHelpText(fe, w));
+			}
 			// a context menu is no logical child of what it opens on
 			if (fe.ContextMenu is { } menu) {
 				Walk(menu, a_seen);
@@ -189,6 +229,15 @@ public static class WindowWords
 		foreach (var child in LogicalTreeHelper.GetChildren(a_root).OfType<DependencyObject>().ToList()) {
 			Walk(child, a_seen);
 		}
+	}
+
+	// A text put together from several runs, or from a run a binding fills (the status bar's lights: a colored dot and the
+	// words beside it). Its Text reads as the runs' texts in a row; set, it would throw the runs away - and the light then
+	// stood at the words of the moment for good
+	static bool MadeOfRuns(TextBlock a_t)
+	{
+		var runs = LogicalTreeHelper.GetChildren(a_t).OfType<System.Windows.Documents.Inline>().ToList();
+		return runs.Count > 1 || runs.Any(r => r is System.Windows.Documents.Run run && BindingOperations.IsDataBound(run, System.Windows.Documents.Run.TextProperty));
 	}
 
 	public static void Tree(DependencyObject a_root)
@@ -205,7 +254,7 @@ public static class WindowWords
 		return [.. seen.Order(StringComparer.Ordinal)];
 	}
 
-	// a language file made from what the window shows: new words added with no translation, what a file already holds kept
+	// a language file with every text of the program: new words added with no translation, what a file already holds kept
 	public static string WriteTemplate(DependencyObject a_root, string a_name = "My language")
 	{
 		Directory.CreateDirectory(Folder);
@@ -221,11 +270,26 @@ public static class WindowWords
 		foreach (var s in Seen(a_root)) {
 			words.TryAdd(s, "");
 		}
+		// the other windows open now (Settings, where this is asked for, is one of them)
+		if (Application.Current is { } app && app.Dispatcher.CheckAccess()) {
+			foreach (var open in app.Windows.OfType<Window>().Where(o => !ReferenceEquals(o, a_root))) {
+				foreach (var s in Seen(open)) {
+					words.TryAdd(s, "");
+				}
+			}
+		}
+		// what the code puts together (a line a binding fills, a box that is not open) is in no window's walk: every shipped
+		// language lists those texts, so one of them names them all
+		if (Shipped().FirstOrDefault() is { } any && ShippedText(any) is { } text && Read(text, out _) is { } listed) {
+			foreach (var k in listed.Keys) {
+				words.TryAdd(k, "");
+			}
+		}
 		// two English texts with one translation read back as one: the language in use still has both
 		foreach (var k in s_words.Keys) {
 			words.TryAdd(k, "");
 		}
-		Files.WriteAtomic(file, JsonSerializer.Serialize(words, new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+		Files.WriteAtomic(file, JsonSerializer.Serialize(words, JsonWrite.IndentedLetters));
 		return file;
 	}
 }

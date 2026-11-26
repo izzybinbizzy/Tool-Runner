@@ -23,9 +23,20 @@ dotnet_diagnostic.CA2016.severity = warning
 # do not ignore the result of a method whose result is the point (a new object, a disposable)
 dotnet_diagnostic.CA1806.severity = warning
 
+# What costs memory and time for nothing, each time it runs:
+# a constant array made anew at every call
+dotnet_diagnostic.CA1861.severity = warning
+# JSON options made anew at every call (each set builds its own picture of every type it writes)
+dotnet_diagnostic.CA1869.severity = warning
+# a member that uses nothing of its object is static (no hidden "this" passed, and it can be called without one)
+dotnet_diagnostic.CA1822.severity = warning
+
 # the offline tests make and drop throwaway objects on purpose, each in a test that ends at once
 [Runner.Tests/**.cs]
 dotnet_diagnostic.CA2000.severity = none
 dotnet_diagnostic.CA1001.severity = none
 dotnet_diagnostic.CA2213.severity = none
 dotnet_diagnostic.CA1806.severity = none
+dotnet_diagnostic.CA1861.severity = none
+dotnet_diagnostic.CA1869.severity = none
+dotnet_diagnostic.CA1822.severity = none

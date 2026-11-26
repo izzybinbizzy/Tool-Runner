@@ -22,18 +22,18 @@ public static class ToolsDialog
 	// what a tool's row says about it
 	public static string StateOf(ToolSettings.Learned? a_learned) => a_learned == null
 		? "not set up yet - it runs with whatever its own window last saved"
-		: $"set up {a_learned.At.ToLocalTime().ToString("MMM d HH:mm", InvariantCulture)} - every run uses those settings";
+		: WindowWords.F($"set up {a_learned.At.ToLocalTime().ToString("MMM d HH:mm", InvariantCulture)} - every run uses those settings");
 
 	// what it says once its window has closed. a_error: why its settings were not kept (null: they were)
 	public static string AfterItsWindow(string a_name, ToolSettings.Learned? a_learned, string? a_error) =>
-		a_learned != null ? $"set up now ({a_learned.Files.Count} settings file(s) kept) - every run uses them" :
-		a_error != null && a_error.Contains(ToolSettings.SavedNothing, StringComparison.Ordinal) ? $"left as it is: {a_name} saved nothing new, so it runs with the settings it had" :
-		"not set up: " + (a_error ?? "its window gave no settings");
+		a_learned != null ? WindowWords.F($"set up now ({a_learned.Files.Count} settings file(s) kept) - every run uses them") :
+		a_error != null && a_error.Contains(ToolSettings.SavedNothing, StringComparison.Ordinal) ? WindowWords.F($"left as it is: {a_name} saved nothing new, so it runs with the settings it had") :
+		WindowWords.Format("not set up: {0}", a_error ?? WindowWords.Word("its window gave no settings"));
 
 	// what a tool's row says once its opening has ended, however it ended
 	public static string Outcome(string a_name, ToolOpen.Result a_r) => a_r.How switch {
-		ToolOpen.Ending.NotNow => $"not opened: {a_r.Why} - close it, then set {a_name} up",
-		ToolOpen.Ending.Stopped => a_r.Why ?? "stopped waiting",
+		ToolOpen.Ending.NotNow => WindowWords.F($"not opened: {a_r.Why} - close it, then set {a_name} up"),
+		ToolOpen.Ending.Stopped => a_r.Why ?? WindowWords.Word("stopped waiting"),
 		_ => AfterItsWindow(a_name, a_r.Learned, a_r.Why),
 	};
 
@@ -43,7 +43,7 @@ public static class ToolsDialog
 	// could, or there was none): the tool's settings may be kept all the same, and the mod is still ticked in the player's
 	// profile - said where they look, never only in a log nobody is shown
 	public static string StillOn(string? a_mod) => a_mod == null ? ""
-		: $" The mod \"{a_mod}\", switched on to open it, could not be switched off again: untick it in Mod Organizer (the next run, or the next tool set up here, switches it off too).";
+		: WindowWords.F($" The mod \"{a_mod}\", switched on to open it, could not be switched off again: untick it in Mod Organizer (the next run, or the next tool set up here, switches it off too).");
 
 	// true: go on (shown before a first run: the run starts); false: not now
 	public static bool Run(MainWindow a_owner, MainViewModel a_vm, Setup a_setup, IReadOnlyList<ToolSettings.ToSet> a_tools, bool a_beforeFirstRun)
@@ -75,10 +75,10 @@ public static class ToolsDialog
 		dock.Children.Add(top);
 		top.Children.Add(new TextBlock { Text = "SET UP YOUR TOOLS", Style = (Style)a_owner.FindResource("H1"), Margin = new Thickness(0, 0, 0, 6), FontSize = (double)a_owner.FindResource("SizeHeading1") });
 		top.Children.Add(new TextBlock {
-			Text = (a_beforeFirstRun ? $"\"{a_setup.Name}\" has not run yet. " : "") +
+			Text = (a_beforeFirstRun ? WindowWords.F($"\"{a_setup.Name}\" has not run yet. ") : "") + WindowWords.Word(
 			       "Each tool has settings of its own - which worlds it builds, its presets, its options. Open a tool here, set it up in its own window the way every run " +
 			       "should use it, then save and close it: its settings are kept with this setup and used for every run. A tool you leave as it is runs with whatever its own " +
-			       "window last saved. " + (a_beforeFirstRun ? "You can come back to this any time: Tools, at the top of the window." : "To change a tool's settings later, set it up again here."),
+			       "window last saved. ") + WindowWords.Word(a_beforeFirstRun ? "You can come back to this any time: Tools, at the top of the window." : "To change a tool's settings later, set it up again here."),
 			Style = (Style)a_owner.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 14),
 		});
 
@@ -94,8 +94,8 @@ public static class ToolsDialog
 			var name = new TextBlock { Text = tool.Name, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
 			var state = new TextBlock { Text = StateOf(tool.Learned), Style = (Style)a_owner.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center,
 				Margin = new Thickness(12, 0, 12, 0) };
-			var open = new Button { Content = tool.Learned == null ? "Set it up" : "Set up again", Style = (Style)a_owner.FindResource("Ghost"), VerticalAlignment = VerticalAlignment.Center,
-				ToolTip = $"Opens {tool.Name} in its own window, through Mod Organizer (Mod Organizer is closed first if it is open)" };
+			var open = new Button { Content = WindowWords.Word(tool.Learned == null ? "Set it up" : "Set up again"), Style = (Style)a_owner.FindResource("Ghost"), VerticalAlignment = VerticalAlignment.Center,
+				ToolTip = WindowWords.F($"Opens {tool.Name} in its own window, through Mod Organizer (Mod Organizer is closed first if it is open)") };
 			System.Windows.Automation.AutomationProperties.SetName(open, $"{open.Content}: {tool.Name}");
 			var grid = new Grid { Margin = new Thickness(0, 4, 0, 4) };
 			grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(170) });
@@ -129,7 +129,7 @@ public static class ToolsDialog
 		var stopWalk = false;
 		// the opening under way, and whether the box is to close once it has stopped
 		ToolOpen? opening = null;
-		var openingName = "the tool";
+		var openingName = WindowWords.Word("the tool");
 		var closeAfter = false;
 		// while a run goes its tools are the run's: they are set up when it is done
 		bool InUse() => a_vm.IsRunning || a_vm.Starting;
@@ -152,12 +152,12 @@ public static class ToolsDialog
 			if (opening is not { Stopping: false } o) {
 				return opening != null;
 			}
-			if (!o.StopIfNotOpen() && !Ask.Show(w, $"Stop waiting for {a_name}?", $"{a_name} is open. Its settings are kept once you save and close it there.\n\n" +
-				    $"If you stop waiting, {a_name} stays open, but nothing it saves is kept with this setup.", "Stop waiting", "Keep waiting")) {
+			if (!o.StopIfNotOpen() && !Ask.Show(w, WindowWords.F($"Stop waiting for {a_name}?"), WindowWords.F($"{a_name} is open. Its settings are kept once you save and close it there.") + "\n\n" +
+				    WindowWords.F($"If you stop waiting, {a_name} stays open, but nothing it saves is kept with this setup."), "Stop waiting", "Keep waiting")) {
 				return false;
 			}
 			o.Stop();
-			status.Text = o.Opened ? $"Stopped waiting for {a_name}." : $"Stopping - {a_name} is not opened ...";
+			status.Text = o.Opened ? WindowWords.F($"Stopped waiting for {a_name}.") : WindowWords.F($"Stopping - {a_name} is not opened ...");
 			A11y.Say(w, status.Text);
 			Buttons();
 			return true;
@@ -170,19 +170,19 @@ public static class ToolsDialog
 			opening = o;
 			openingName = a_r.Name;
 			Buttons();
-			a_r.State.Text = $"opening {a_r.Name} ...";
+			a_r.State.Text = WindowWords.F($"opening {a_r.Name} ...");
 			status.Text = "";
 			ToolOpen.Result result;
 			// the main window stays until the tool is closed and its mod is switched off again (WorkInHand)
-			using (a_owner.Working($"{a_r.Name} is open to set it up")) {
+			using (a_owner.Working(WindowWords.F($"{a_r.Name} is open to set it up"))) {
 				result = await o.Go(a_setup, a_r.Step,
-					why => Ask.Show(w, $"{a_r.Name} cannot open yet", $"{Capital(why)}.\n\n{a_r.Name} opens through Mod Organizer, and Mod Organizer is closed first - " +
-					                    $"never while that is open. Close it and set the tool up again, or wait here: {a_r.Name} opens by itself once it has ended, and you can stop " +
-					                    "waiting at any time.", "Wait for it", "Not now"),
+					why => Ask.Show(w, WindowWords.F($"{a_r.Name} cannot open yet"), $"{Capital(why)}.\n\n" +
+					                    WindowWords.F($"{a_r.Name} opens through Mod Organizer, and Mod Organizer is closed first - never while that is open. Close it and set the tool up again, or wait here: {a_r.Name} opens by itself once it has ended, and you can stop waiting at any time."),
+					                    "Wait for it", "Not now"),
 					line => w.Dispatcher.BeginInvoke(() => {
 						// (a line that arrives after the opening ended never covers how it ended)
 						if (opening == o) {
-							a_r.State.Text = o.Opened ? $"{a_r.Name} is open - set it up, save and close it ..." : line;
+							a_r.State.Text = o.Opened ? WindowWords.F($"{a_r.Name} is open - set it up, save and close it ...") : line;
 							Buttons();
 						}
 					}));
@@ -192,8 +192,8 @@ public static class ToolsDialog
 			var learned = result.Learned;
 			if (learned != null) {
 				a_r.SetUp = true;
-				a_r.Open.Content = "Set up again";
-				System.Windows.Automation.AutomationProperties.SetName(a_r.Open, $"Set up again: {a_r.Name}");
+				a_r.Open.Content = WindowWords.Word("Set up again");
+				System.Windows.Automation.AutomationProperties.SetName(a_r.Open, $"{a_r.Open.Content}: {a_r.Name}");
 			}
 			A11y.Say(w, $"{a_r.Name}: {a_r.State.Text}");
 			toolOpen = false;
@@ -216,18 +216,18 @@ public static class ToolsDialog
 		turn.Click += async (_, _) => {
 			if (walking) {
 				stopWalk = true;
-				turn.Content = "Stops after this one ...";
+				turn.Content = WindowWords.Word("Stops after this one ...");
 				Buttons();
 				return;
 			}
 			var todo = rows.Where(r => !r.SetUp).ToList();
 			if (todo.Count == 0) {
-				status.Text = "Every tool is set up already. To change one, use its own button.";
+				status.Text = WindowWords.Word("Every tool is set up already. To change one, use its own button.");
 				return;
 			}
 			walking = true;
 			stopWalk = false;
-			turn.Content = "_Stop after this one";
+			turn.Content = WindowWords.Word("Stop _after this one");
 			foreach (var r in todo) {
 				if (stopWalk) {
 					break;
@@ -235,8 +235,8 @@ public static class ToolsDialog
 				await SetUp(r);
 			}
 			walking = false;
-			turn.Content = "Set up each in _turn";
-			status.Text = stopWalk ? "Stopped. The tools left are as they were." : "That was the last one.";
+			turn.Content = WindowWords.Word("Set up each in _turn");
+			status.Text = WindowWords.Word(stopWalk ? "Stopped. The tools left are as they were." : "That was the last one.");
 			A11y.Say(w, status.Text);
 			Buttons();
 		};
@@ -267,7 +267,7 @@ public static class ToolsDialog
 		bar.Children.Add(stop);
 		bottom.Children.Add(bar);
 		if (InUse()) {
-			status.Text = "A run is going: set its tools up when the run is done.";
+			status.Text = WindowWords.Word("A run is going: set its tools up when the run is done.");
 		}
 		Buttons();
 		// (the scrolling region is what a screen reader meets as a pane of its own: it carries the name)

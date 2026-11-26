@@ -18,7 +18,10 @@ reviews:
         The engine of a Windows program that runs Mod Organizer 2's tools unattended and must leave the player's MO2
         profile exactly as it was. Check that every profile write is atomic and put back on every failure path (exception,
         cancel, a crash between two writes), that a process is only ever ended by a PID this program started, that no window
-        is ever brought to the front, and that file and process handles are disposed.
+        is ever brought to the front, and that file and process handles are disposed. One deliberate exception: what the
+        player changed in Mod Organizer during a run is never lost to a put-back, so a put-back that cannot first keep those
+        changes on disk (the run's record or its backup folder) does not start - the profile keeps them and the put-back
+        stays on offer until a write succeeds.
     - path: "src/Runner.App/**"
       instructions: >-
         WPF window (.NET 10, Fluent theme). Check that nothing slow runs on the UI thread, that bindings name existing

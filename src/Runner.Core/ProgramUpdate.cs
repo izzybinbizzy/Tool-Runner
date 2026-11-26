@@ -83,10 +83,10 @@ public static class ProgramUpdate
 			var found = newest;
 			state = Update(a_dataDir, s => (s ?? new State(a_now, found)) with { At = a_now, Newest = found });
 		}
-		if (newest == "" || !ToolUpdates.IsNewer(a_current, newest) || state?.Off == true) {
+		if (newest == "" || !IsNewer(a_current, newest) || state?.Off == true) {
 			return null;
 		}
-		return state?.SetAside is { } aside && !ToolUpdates.IsNewer(aside, newest) ? null : newest;
+		return state?.SetAside is { } aside && !IsNewer(aside, newest) ? null : newest;
 	}
 
 	// ---- download and install (a new version taken and put in place from inside the program)
@@ -124,6 +124,26 @@ public static class ProgramUpdate
 	// The program's own versions are compared number by number with trailing zeros dropped - never with the tools' rules, which
 	// read a short version as the end of a long one ("0.1.1.0" against "1.1" was taken as the same)
 	public static bool SameVersion(string a_a, string a_b) => Numbers(a_a) is { Count: > 0 } a && a.SequenceEqual(Numbers(a_b));
+
+	// Is a_newest a later version of this program than a_yours? Number by number, a number that is not there counting as 0
+	// (the tools' rule would not do here either: on 1.1.2 it took a new 1.2 for the same version written short). A value
+	// with no number in it is never newer, and nothing is newer than it
+	public static bool IsNewer(string a_yours, string a_newest)
+	{
+		var yours = Numbers(a_yours);
+		var newest = Numbers(a_newest);
+		if (yours.Count == 0 || newest.Count == 0) {
+			return false;
+		}
+		for (var i = 0; i < Math.Max(yours.Count, newest.Count); ++i) {
+			var have = i < yours.Count ? yours[i] : 0;
+			var latest = i < newest.Count ? newest[i] : 0;
+			if (have != latest) {
+				return latest > have;
+			}
+		}
+		return false;
+	}
 
 	static List<int> Numbers(string a_v)
 	{
@@ -373,7 +393,8 @@ public static class ProgramUpdate
 		}
 		// only what an install itself names "(old)" or keeps in Updates: a record edited by hand removes nothing else
 		// - and only in a folder that holds this program: the record names files anywhere on the PC
-		var left = was.Old.Where(f => Path.GetFileNameWithoutExtension(f).EndsWith(" (old)", StringComparison.Ordinal) &&
+		// (a record that names no files at all - written by something else, or cut down by hand - names none)
+		var left = (was.Old ?? []).Where(f => f != null && Path.GetFileNameWithoutExtension(f).EndsWith(" (old)", StringComparison.Ordinal) &&
 			Path.GetDirectoryName(f) is { Length: > 0 } dir && System.IO.File.Exists(Path.Combine(dir, ProgramFile))).ToList();
 		foreach (var f in left.ToList()) {
 			TryDelete(f);
@@ -419,7 +440,7 @@ public static class ProgramUpdate
 				lines.Add(line);
 			}
 		}
-		var keys = SetupChanges.Where(c => ToolUpdates.IsNewer(a_before, c.Since)).Select(c => c.Text).ToList();
+		var keys = SetupChanges.Where(c => IsNewer(a_before, c.Since)).Select(c => c.Text).ToList();
 		if (keys.Count > 0) {
 			lines.Add("");
 			lines.Add("Read differently in your setups from this version on:");

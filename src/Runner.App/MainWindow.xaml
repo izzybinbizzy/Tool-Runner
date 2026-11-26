@@ -90,7 +90,7 @@
         <DockPanel>
           <Button DockPanel.Dock="Right" Content="Not now" Style="{StaticResource Ghost}" Command="{Binding SetAsideNewVersionCommand}" Margin="8,0,0,0"
                   AutomationProperties.HelpText="Not mentioned again until a newer version is out"/>
-          <Button DockPanel.Dock="Right" Content="Open the _download page" Style="{StaticResource Ghost}" Command="{Binding OpenNewVersionCommand}" Margin="8,0,0,0"/>
+          <Button DockPanel.Dock="Right" Content="Op_en the download page" Style="{StaticResource Ghost}" Command="{Binding OpenNewVersionCommand}" Margin="8,0,0,0"/>
           <Button DockPanel.Dock="Right" Content="Download and _install" Style="{StaticResource Primary}" Click="InstallNew_Click"
                   Visibility="{Binding CanInstallNew, Converter={StaticResource Vis}}"
                   ToolTip="Takes the new version from its GitHub release, checks it, and puts it in place of this one. Your setups, run records and backups are not touched."/>
@@ -117,7 +117,7 @@
           <StackPanel>
             <WrapPanel>
               <Button Content="Move _up" Style="{StaticResource Ghost}" Click="Up_Click" ToolTip="Alt+Up" Margin="0,0,8,0"/>
-              <Button Content="Move _down" Style="{StaticResource Ghost}" Click="Down_Click" ToolTip="Alt+Down" Margin="0,0,8,0"/>
+              <Button Content="Move do_wn" Style="{StaticResource Ghost}" Click="Down_Click" ToolTip="Alt+Down" Margin="0,0,8,0"/>
               <Button x:Name="UseOldButton" Content="{Binding UseOldLabel}" Style="{StaticResource Ghost}" Click="UseOld_Click"
                       ToolTip="The selected step is not run and the output its tool made before stays in your game. A box says first exactly what that means for this tool. Pressed again, the step is built anew."/>
             </WrapPanel>
@@ -139,12 +139,12 @@
             <ContextMenu>
               <MenuItem Header="Run _only this step" Click="RunOnly_Click"/>
               <MenuItem Header="Run _from this step" Click="RunFrom_Click"/>
-              <MenuItem Header="Run _until this step" Click="RunUntil_Click"/>
+              <MenuItem Header="Run un_til this step" Click="RunUntil_Click"/>
               <Separator/>
               <MenuItem Header="{Binding UseOldLabel}" Click="UseOld_Click"/>
               <Separator/>
               <MenuItem Header="Open its _settings" Click="StepSettings_Click" InputGestureText="Double-click"/>
-              <MenuItem Header="Open its output mod's f_older" Click="OpenOutput_Click"/>
+              <MenuItem Header="Open its output _mod's folder" Click="OpenOutput_Click"/>
               <MenuItem Header="Open its tool's _page" Click="OpenToolPage_Click"/>
               <Separator/>
               <MenuItem Header="Move _up" Click="Up_Click"/>
@@ -173,13 +173,13 @@
                   <ColumnDefinition Width="22"/>
                 </Grid.ColumnDefinitions>
                 <CheckBox Grid.Column="0" IsChecked="{Binding On}" VerticalAlignment="Center" Margin="0,0,6,0"
-                          AutomationProperties.Name="{Binding Name, StringFormat='Run {0}'}" IsTabStop="False"/>
+                          AutomationProperties.Name="{Binding TickName}" IsTabStop="False"/>
                 <TextBlock x:Name="num" Grid.Column="1" Text="{Binding Number}" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"/>
                 <StackPanel Grid.Column="2" VerticalAlignment="Center">
                   <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
-                  <TextBlock Text="left out: a new game has no save to keep clean" Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                  <TextBlock Text="{x:Static local:WindowWords.RowLeftOut}" Style="{StaticResource MutedText}" TextWrapping="Wrap"
                              Visibility="{Binding LeftOut, Converter={StaticResource Vis}}"/>
-                  <TextBlock x:Name="old" Text="not run: its old output is used" Style="{StaticResource MutedText}" TextWrapping="Wrap"
+                  <TextBlock x:Name="old" Text="{x:Static local:WindowWords.RowUsesOld}" Style="{StaticResource MutedText}" TextWrapping="Wrap"
                              Foreground="{DynamicResource Warn}"
                              Visibility="{Binding UsesOld, Converter={StaticResource Vis}}"/>
                   <TextBlock x:Name="needs" Text="{Binding Needs}" Style="{StaticResource MutedText}" TextWrapping="Wrap" Foreground="{DynamicResource Warn}"
@@ -193,7 +193,7 @@
                 </StackPanel>
                 <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
                   <TextBlock x:Name="elapsed" Text="{Binding Elapsed}" Foreground="{DynamicResource AccentLight}" Margin="0,0,8,0"/>
-                  <TextBlock x:Name="usual" Text="{Binding Usual}" Style="{StaticResource MutedText}" ToolTip="its usual time"/>
+                  <TextBlock x:Name="usual" Text="{Binding Usual}" Style="{StaticResource MutedText}" ToolTip="{x:Static local:WindowWords.RowUsualTip}"/>
                 </StackPanel>
                 <TextBlock x:Name="glyph" Grid.Column="4" Text="{Binding Glyph}" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="{DynamicResource SizeBody}"
                            Foreground="{Binding State, Converter={StaticResource StateBrush}}"/>
@@ -208,7 +208,7 @@
                 <MultiDataTrigger>
                   <MultiDataTrigger.Conditions>
                     <Condition Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True"/>
-                    <Condition Binding="{Binding Source={x:Static SystemParameters.HighContrast}}" Value="True"/>
+                    <Condition Binding="{Binding Path=(SystemParameters.HighContrast)}" Value="True"/>
                   </MultiDataTrigger.Conditions>
                   <Setter TargetName="num" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"/>
                   <Setter TargetName="old" Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"/>
@@ -309,7 +309,7 @@
                       IsEnabled="{Binding IsRunning}" ToolTip="Lets the running step finish, then puts your profile back"/>
               <Button Content="Stop _now" Style="{StaticResource Danger}" Command="{Binding StopNowCommand}" Margin="0,0,8,8"
                       IsEnabled="{Binding IsRunning}" ToolTip="Closes the tool at once and puts your profile back"/>
-              <Button Content="_Dry run" Style="{StaticResource Ghost}" Command="{Binding DryRunCommand}" Margin="0,0,8,8"
+              <Button Content="Dr_y run" Style="{StaticResource Ghost}" Command="{Binding DryRunCommand}" Margin="0,0,8,8"
                       ToolTip="Goes through everything a start would meet and then do - the check, what is switched off, what is built, the room on disk. Nothing is started and nothing is changed (Ctrl+D)"
                       AutomationProperties.AcceleratorKey="Ctrl+D"/>
               <Button Content="Compact _view" Style="{StaticResource Ghost}" Click="Compact_Click" Margin="0,0,8,8"
@@ -371,7 +371,7 @@
             <TextBlock Text="{Binding LastCardTitle}" Style="{StaticResource H2}" Margin="0,0,0,6"/>
             <!-- held to a few lines so the log keeps its room in the smallest window -->
             <ScrollViewer x:Name="LastScroll" MaxHeight="200" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Last run">
-              <TextBlock Text="{Binding LastCardText}" TextWrapping="Wrap" AutomationProperties.Name="Last run"/>
+              <TextBlock Text="{Binding LastCardText}" TextWrapping="Wrap"/>
             </ScrollViewer>
           </StackPanel>
         </Border>
@@ -380,7 +380,7 @@
         <!-- the log: its heading stays; the box can be hidden (the cards above then take its room) or opened in a window of
              its own that can be sized and put on another screen -->
           <DockPanel x:Name="LogHead" Margin="0,0,0,6">
-            <Button DockPanel.Dock="Right" x:Name="LogPop" Content="_Pop out" Style="{StaticResource Ghost}" Click="LogPop_Click" Margin="8,0,0,0"
+            <Button DockPanel.Dock="Right" x:Name="LogPop" Content="Pop ou_t" Style="{StaticResource Ghost}" Click="LogPop_Click" Margin="8,0,0,0"
                     ToolTip="The log in a window of its own: size it, move it to another screen (Ctrl+L)" AutomationProperties.AcceleratorKey="Ctrl+L"/>
             <Button DockPanel.Dock="Right" x:Name="LogHide" Content="Hide" Style="{StaticResource Ghost}" Click="LogHide_Click" Margin="14,0,0,0"
                     ToolTip="Hides the log here; the cards above take its room"/>
@@ -401,7 +401,7 @@
     <StackPanel Grid.Row="3">
     <Border Padding="20,6" Visibility="{Binding Message, Converter={StaticResource NotEmpty}}" Background="{DynamicResource Panel2}"
             BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0">
-      <TextBlock Text="{Binding Message}" Foreground="{Binding MessageKind, Converter={StaticResource KindBrush}}" TextWrapping="Wrap" AutomationProperties.Name="Message"/>
+      <TextBlock Text="{Binding Message}" Foreground="{Binding MessageKind, Converter={StaticResource KindBrush}}" TextWrapping="Wrap"/>
     </Border>
     <Border Background="{DynamicResource Panel}" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Padding="20,6">
       <DockPanel>

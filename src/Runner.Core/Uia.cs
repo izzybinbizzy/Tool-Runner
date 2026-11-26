@@ -317,8 +317,8 @@ public static class Uia
 	public static AutomationElement? WaitWindow(Func<IReadOnlyCollection<int>> a_pids, Func<string, bool> a_title, TimeSpan a_timeout,
 		CancellationToken a_ct)
 	{
-		var until = DateTime.UtcNow + a_timeout;
-		while (DateTime.UtcNow < until) {
+		var waited = System.Diagnostics.Stopwatch.StartNew();
+		while (waited.Elapsed < a_timeout) {
 			a_ct.ThrowIfCancellationRequested();
 			foreach (var h in Native.TopWindowsOf(a_pids())) {
 				if (a_title(Native.WindowText(h)) && FromHandle(h) is { } e) {

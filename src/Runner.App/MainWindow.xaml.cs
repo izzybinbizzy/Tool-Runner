@@ -15,9 +15,14 @@ public partial class MainWindow : Window
 {
 	readonly MainViewModel _vm = new();
 	// How often the window looks: every second while something is going (a run's clock and progress, a start being checked),
-	// seldom while nothing is, hardly at all while it is minimised. A change in the runs folder (RunsWatch) and the window
-	// coming back wake it at once, so a slow look loses nothing
-	static readonly TimeSpan Live = TimeSpan.FromSeconds(1), Calm = TimeSpan.FromSeconds(3), Away = TimeSpan.FromSeconds(20);
+	// seldom while nothing is, more seldom while another program is in front, hardly at all while it is minimised or the
+	// player's own game runs. A change in the runs folder (RunsWatch) and the program coming to the front wake it at once,
+	// so a slow look loses nothing. (Each look asks Windows for its whole list of processes - for the two lights that say
+	// whether Mod Organizer and the game are open: most of what an idle window costs, and all of it for nobody while the
+	// window stands behind the game.)
+	static readonly TimeSpan Live = TimeSpan.FromSeconds(1), Calm = TimeSpan.FromSeconds(3), Aside = TimeSpan.FromSeconds(10), Away = TimeSpan.FromSeconds(20);
+	// one of this program's windows is the one in front (Windows says when that changes)
+	bool _inFront = true;
 	readonly DispatcherTimer _timer = new() { Interval = Live };
 	RunsWatch? _watch;
 	int _woken;
@@ -56,6 +61,11 @@ public partial class MainWindow : Window
 			return false;
 		};
 		_vm.OfferTools = (a_setup, a_tools) => ToolsDialog.Run(this, _vm, a_setup, a_tools, true);
+		_vm.ConfirmStarts = (a_name, a_lines) => {
+			var allowed = false;
+			StartsBox(a_name, a_lines, a_yes => allowed = a_yes).ShowDialog();
+			return allowed;
+		};
 		// the header drops the word "Setup" where the window is narrow
 		SizeChanged += (_, e) => _vm.Roomy = e.NewSize.Width >= 1100;
 		_vm.Freed += () => {
@@ -93,6 +103,11 @@ public partial class MainWindow : Window
 		}
 		SayFooter();
 		PreviewKeyDown += OnKeys;
+		// the program in front or not, whichever of its windows it is (Settings and History are windows of their own)
+		if (Application.Current is { } app) {
+			app.Activated += AppActivated;
+			app.Deactivated += AppDeactivated;
+		}
 		// a mod ticked in Mod Organizer while the window was in the background: each step's last run is worked out again
 		Activated += async (_, _) => {
 			Wake();
@@ -144,7 +159,11 @@ public partial class MainWindow : Window
 	public void WatchRuns(bool a_on)
 	{
 		_watch?.Dispose();
-		_watch = a_on && !App.Headless ? new RunsWatch(AppPaths.Runs, Wake) : null;
+		_watch = a_on && !App.Headless ? new RunsWatch(AppPaths.Runs, () => {
+			Engine.RunsChanged();
+			Wake();
+		}) : null;
+		Engine.RunsWatched(_watch?.Watching == true);
 	}
 
 	// one look, and the pace of the next ones set by what it found
@@ -155,11 +174,15 @@ public partial class MainWindow : Window
 		if (_vm.IsRunning || _tray?.Shown == true) {
 			_tray?.Show(Brand.Name + " - " + _vm.NowTitle + (_vm.FinishAt == "" ? "" : ", " + _vm.FinishAt));
 		}
-		var pace = _vm.Busy ? Live : WindowState == WindowState.Minimized ? Away : Calm;
+		var pace = Pace(_vm.Busy, WindowState == WindowState.Minimized, _vm.GameRunning, _inFront);
 		if (_timer.Interval != pace) {
 			_timer.Interval = pace;
 		}
 	}
+
+	// the time to the next look
+	public static TimeSpan Pace(bool a_busy, bool a_minimized, bool a_gameRuns, bool a_inFront) =>
+		a_busy ? Live : a_minimized || a_gameRuns ? Away : a_inFront ? Calm : Aside;
 
 	// from any thread: a look soon. Wakes that come before it has run are that one look
 	void Wake()
@@ -255,7 +278,9 @@ public partial class MainWindow : Window
 	// the window's keys - from one of its panel windows too, so Ctrl+H or Ctrl+, work wherever the keyboard is
 	void OnKeys(object a_s, KeyEventArgs a_e)
 	{
-		if (!Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) {
+		// (Control without Alt: the two together are AltGr, which types a letter on many keyboards - AltGr+L and AltGr+N on a
+		// Polish one - and that letter must reach the box it is typed into)
+		if ((Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) != ModifierKeys.Control) {
 			return;
 		}
 		switch (a_e.Key) {
@@ -358,7 +383,11 @@ public partial class MainWindow : Window
 			_vm.Say("Select a step in the list first.", "bad");
 			return;
 		}
-		if (_vm.IsRunning || _oldAsked) {
+		if (_oldAsked) {
+			return;
+		}
+		if (_vm.IsRunning) {
+			_vm.Say("A run is going - choose this when it has ended.", "bad");
 			return;
 		}
 		if (row.UsesOld) {
@@ -378,11 +407,11 @@ public partial class MainWindow : Window
 			} else if (look == null) {
 				Ask.Tell(this, "No old output to use", whyNot ?? "", "OK");
 			} else if (!look.Usable) {
-				Ask.Tell(this, $"{row.Name}'s old output cannot be used", string.Join("\n\n", OldOutput.Warning(look, _vm.Setup?.Profile ?? "")), "OK");
-			} else if (Ask.Show(this, $"Use {row.Name}'s old output?", _vm.OldOutputText(look), "Use the old output", "Build it again")) {
+				Ask.Tell(this, WindowWords.F($"{row.Name}'s old output cannot be used"), string.Join("\n\n", OldOutput.Warning(look, _vm.Setup?.Profile ?? "")), "OK");
+			} else if (Ask.Show(this, WindowWords.F($"Use {row.Name}'s old output?"), _vm.OldOutputText(look), "Use the old output", "Build it again")) {
 				await _vm.SetUseOld(row, true);
 			}
-		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) {
 			_vm.Say("The old output could not be looked at: " + e.Message, "bad");
 		} finally {
 			_oldAsked = false;
@@ -439,8 +468,8 @@ public partial class MainWindow : Window
 		}
 		var warn = _vm.WarningsIfMovedTo(a_row, a_to);
 		if (warn.Count > 0 && !Ask.Show(this, "Out of the recommended order",
-			    "Moving this step breaks the order the tools' own instructions give. Things could go wrong if they run out of order:\n\n• " +
-			    string.Join("\n• ", warn) + "\n\nMove it anyway?", "Move anyway", "Keep the order")) {
+			    WindowWords.Word("Moving this step breaks the order the tools' own instructions give. Things could go wrong if they run out of order:") + "\n\n• " +
+			    string.Join("\n• ", warn) + "\n\n" + WindowWords.Word("Move it anyway?"), "Move anyway", "Keep the order")) {
 			return;
 		}
 		await _vm.MoveTo(a_row, a_to);
@@ -732,7 +761,7 @@ public partial class MainWindow : Window
 		void FindNext()
 		{
 			var q = find.Text;
-			Reveal(LogSearch.Next(box.Text, q, box.FoundAt + 1), q.Length, q == "" ? "" : "Not in the log.");
+			Reveal(LogSearch.Next(box.Text, q, box.FoundAt + 1), q.Length, q == "" ? "" : WindowWords.Word("Not in the log."));
 		}
 		next.Click += (_, _) => FindNext();
 		find.KeyDown += (_, e) => {
@@ -746,7 +775,7 @@ public partial class MainWindow : Window
 		{
 			var at = LogSearch.FirstProblem(box.Text);
 			var end = at < 0 ? -1 : box.Text.IndexOf('\n', at);
-			Reveal(at, at < 0 ? 0 : (end < 0 ? box.Text.Length : end) - at, "No line of this log is marked as a problem.");
+			Reveal(at, at < 0 ? 0 : (end < 0 ? box.Text.Length : end) - at, WindowWords.Word("No line of this log is marked as a problem."));
 		}
 		problem.Click += async (_, _) => {
 			// the simple log marks no line (only the detailed one says "!" and "!!!"): the detailed log is shown first, and the
@@ -784,7 +813,7 @@ public partial class MainWindow : Window
 			_logOut = null;
 			_followOut = null;
 			LogHide.IsEnabled = true;
-			LogPop.Content = WindowWords.Word("_Pop out");
+			LogPop.Content = WindowWords.Word("Pop ou_t");
 			LogPop.ToolTip = WindowWords.Word("The log in a window of its own: size it, move it to another screen (Ctrl+L)");
 			if (!_closingAll) {
 				ShowLogHere(_logWasHere);
@@ -943,7 +972,7 @@ public partial class MainWindow : Window
 		return w;
 	}
 
-	TextBlock RenameNotice()
+	static TextBlock RenameNotice()
 	{
 		var t = new TextBlock { Text = "The setup is being renamed. Its settings show here as soon as that is done.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
 		t.SetResourceReference(TextBlock.ForegroundProperty, "Muted");
@@ -998,10 +1027,11 @@ public partial class MainWindow : Window
 		AutomationPropertiesName(filter, "Find a mod or a profile");
 		var look = new Button { Content = "Look now", Style = (Style)FindResource("Ghost"), ToolTip = "Notes what changed in Mod Organizer since the last look" };
 		var tools = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
-		tools.Children.Add(new TextBlock { Text = "Find", Foreground = Brushes2.Get("Muted"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
+		tools.Children.Add(new TextBlock { Text = "Find", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) }.Live(TextBlock.ForegroundProperty, "Muted"));
 		tools.Children.Add(filter);
 		tools.Children.Add(look);
-		var list = new ListBox { Background = Brushes2.Get("Panel2"), BorderBrush = Brushes2.Get("Line") };
+		// the theme's colors as live references: a theme picked while this view is open repaints it too
+		var list = new ListBox().Live(BackgroundProperty, "Panel2").Live(BorderBrushProperty, "Line");
 		ScrollViewer.SetHorizontalScrollBarVisibility(list, ScrollBarVisibility.Disabled);
 		AutomationPropertiesName(list, "MO2 Changelog");
 		list.ItemTemplate = (DataTemplate)System.Windows.Markup.XamlReader.Parse(
@@ -1016,11 +1046,11 @@ public partial class MainWindow : Window
 		}
 		void Show(IEnumerable<Mo2Changes.Change> a_shown) =>
 			rows = a_shown.Reverse().Select(r => new ChangeRow(r.Mod, r.What,
-				$"{r.When.ToString("MMM d, HH:mm", InvariantCulture)}   ·   {(r.Profiles.Count == 0 ? "Mod Organizer's mods" : string.Join(", ", r.Profiles))}   ·   {r.Who}")).ToList();
+				$"{r.When.ToString("MMM d, HH:mm", InvariantCulture)}   ·   {(r.Profiles.Count == 0 ? WindowWords.Word("Mod Organizer's mods") : string.Join(", ", r.Profiles))}   ·   {r.Who}")).ToList();
 		async void Load(bool a_look)
 		{
 			look.IsEnabled = false;
-			note.Text = a_look ? "Looking at Mod Organizer ..." : "Reading ...";
+			note.Text = WindowWords.Word(a_look ? "Looking at Mod Organizer ..." : "Reading ...");
 			try {
 				var (shown, since, found) = await Task.Run(() => {
 					var mo2 = Mo2Instance.Load(setup!.Mo2Exe, setup.Mo2Instance);
@@ -1031,13 +1061,13 @@ public partial class MainWindow : Window
 					return (Mo2Changes.Shown(Mo2Changes.Read(dir), setup.ChangesHideProfiles, setup.ChangesHideMods), Mo2Changes.WatchedSince(dir), n);
 				});
 				Show(shown);
-				note.Text = (since == null ? "Not watched yet: the first look starts it." : $"Watched since {since.Value.ToString("MMM d, yyyy HH:mm", InvariantCulture)}.") +
-					" A change made outside the runner shows with the time it was noticed - when this view opens, on Look now, or when a run starts." +
-					(found > 0 ? $" {found} new." : found == 0 ? " Nothing new." : found == null ? " No new look while a run is going or did not finish." : "") +
-					(rows.Count == 0 && since != null ? " No changes noted yet." : "");
+				note.Text = (since == null ? WindowWords.Word("Not watched yet: the first look starts it.") : WindowWords.Format("Watched since {0}.", since.Value.ToString("MMM d, yyyy HH:mm", InvariantCulture))) +
+					WindowWords.Word(" A change made outside the runner shows with the time it was noticed - when this view opens, on Look now, or when a run starts.") +
+					(found > 0 ? WindowWords.Format(" {0} new.", found) : found == 0 ? WindowWords.Word(" Nothing new.") : found == null ? WindowWords.Word(" No new look while a run is going or did not finish.") : "") +
+					(rows.Count == 0 && since != null ? WindowWords.Word(" No changes noted yet.") : "");
 				Fill();
 			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) {
-				note.Text = "Could not read Mod Organizer: " + e.Message;
+				note.Text = WindowWords.Format("Could not read Mod Organizer: {0}", e.Message);
 			} finally {
 				look.IsEnabled = a_demo == null;
 			}
@@ -1078,8 +1108,8 @@ public partial class MainWindow : Window
 			"<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><StackPanel Margin='2,4'>" +
 			"<TextBlock><Run Text='{Binding When, Mode=OneWay}' FontWeight='SemiBold'/><Run Text='   '/><Run Text='{Binding Setup, Mode=OneWay}'/><Run Text='   '/><Run Text='{Binding Took, Mode=OneWay}'/></TextBlock>" +
 			"<TextBlock Text='{Binding Verdict}' TextWrapping='Wrap' Opacity='0.8' FontSize='{DynamicResource SizeSmall}'/></StackPanel></DataTemplate>");
-		var log = new TextBox { IsReadOnly = true, FontFamily = (System.Windows.Media.FontFamily)FindResource("MonoFont"), FontSize = (double)FindResource("SizeLog"), Background = Brushes2.Get("Panel2"),
-			Foreground = Brushes2.Get("Text"), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
+		var log = new TextBox { IsReadOnly = true, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto }
+			.Live(FontFamilyProperty, "MonoFont").Live(FontSizeProperty, "SizeLog").Live(BackgroundProperty, "Panel2").Live(ForegroundProperty, "Text");
 		AutomationPropertiesName(log, "The run's log");
 		var open = new Button { Content = "Open folder", Style = (Style)FindResource("Ghost"), Margin = new Thickness(0, 0, 8, 0), ToolTip = "This run's folder: its logs and its record" };
 		// one zip for a bug report, names masked; made on the player's press, never sent anywhere
@@ -1090,9 +1120,9 @@ public partial class MainWindow : Window
 			report.IsEnabled = false;
 			try {
 				var zip = await Task.Run(() => BugReport.Make(AppPaths.Data, row == null ? null : Journal.Load(row.Folder), Path.Combine(AppPaths.Data, "Bug reports"), AppVersion));
-				if (Ask.Show(Over("history"), "Bug report made", $"It is ready: {Path.GetFileName(zip)}\n\nIt holds {(row == null ? "the program's own notes" : "this run's logs and record")}, the setup it ran and the " +
-				    "versions of Windows, Mod Organizer, the game and each tool. Your Windows user name and your PC's name are masked. Nothing was sent anywhere.\n\n" +
-				    "To report the bug: open an issue on the program's GitHub page, say what happened and what you expected, and attach this zip.",
+				if (Ask.Show(Over("history"), "Bug report made", WindowWords.F($"It is ready: {Path.GetFileName(zip)}") + "\n\n" + WindowWords.Word(row == null ? "It holds the program's own notes, the setup it ran and the versions of Windows, Mod Organizer, the game and each tool." : "It holds this run's logs and record, the setup it ran and the versions of Windows, Mod Organizer, the game and each tool.") + " " +
+				    WindowWords.Word("Your Windows user name and your PC's name are masked. Nothing was sent anywhere.") + "\n\n" +
+				    WindowWords.Word("To report the bug: open an issue on the program's GitHub page, say what happened and what you expected, and attach this zip."),
 				    "Show the zip and open the issue page", "Close")) {
 					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{zip}\"") { UseShellExecute = true })?.Dispose();
 					if (MainViewModel.OpenPage(BugReport.Issues) is { } why) {
@@ -1125,8 +1155,8 @@ public partial class MainWindow : Window
 					_vm.Say("It cannot be undone: " + e.Message, "bad");
 					return;
 				}
-				if (!Ask.Show(Over("history"), "Undo this run?", "Each output goes back to what it was before this run, and your mod and plugin lists too. Mod Organizer closes for it. The mods you " +
-					"ticked, unticked or installed since stay as you left them; a change of order goes back with the lists. This run's outputs stay in its backup.", "Undo the run", "Keep it")) {
+				if (!Ask.Show(Over("history"), "Undo this run?", WindowWords.Word("Each output goes back to what it was before this run, and your mod and plugin lists too. Mod Organizer closes for it. The mods you " +
+					"ticked, unticked or installed since stay as you left them; a change of order goes back with the lists. This run's outputs stay in its backup."), "Undo the run", "Keep it")) {
 					return;
 				}
 				await _vm.Undo(row.Folder).ConfigureAwait(true);
@@ -1142,7 +1172,7 @@ public partial class MainWindow : Window
 			if (list.SelectedItem is HistoryRow r) {
 				var p = MainViewModel.LogFile(r.Folder, _vm.DetailedLog);
 				try {
-					log.Text = File.Exists(p) ? Tail(p, 150_000) : "(no log)";
+					log.Text = File.Exists(p) ? Tail(p, 150_000) : WindowWords.Word("(no log)");
 					log.ScrollToEnd();
 				} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 					log.Text = e.Message;
@@ -1150,12 +1180,14 @@ public partial class MainWindow : Window
 			}
 		};
 		open.Click += (_, _) => {
-			if (list.SelectedItem is HistoryRow r) {
-				MainViewModel.OpenFolder(r.Folder);
+			if (list.SelectedItem is not HistoryRow r) {
+				_vm.Say("Pick a run first.", "warn");
+			} else if (MainViewModel.OpenFolder(r.Folder) is { } why) {
+				_vm.Say("This run's folder did not open: " + why, "warn");
 			}
 		};
 		if (_vm.History.Count == 0) {
-			log.Text = "No runs of this setup yet.";
+			log.Text = WindowWords.Word("No runs of this setup yet.");
 		}
 		// an empty list says why it is empty (a blank box reads as broken)
 		var empty = new TextBlock { Text = "No runs of this setup yet - its runs show here, newest first, each with its log.", Style = (Style)FindResource("MutedText"),
@@ -1189,7 +1221,7 @@ public partial class MainWindow : Window
 		var bytes = new byte[fs.Length - start];
 		fs.ReadExactly(bytes);
 		var text = System.Text.Encoding.UTF8.GetString(bytes);
-		return start == 0 ? text : "(the start of this log is in its folder)\n" + text[(text.IndexOf('\n') + 1)..];
+		return start == 0 ? text : WindowWords.Word("(the start of this log is in its folder)") + "\n" + text[(text.IndexOf('\n') + 1)..];
 	}
 
 	static void AutomationPropertiesName(DependencyObject a_o, string a_name) => System.Windows.Automation.AutomationProperties.SetName(a_o, a_name);
@@ -1211,6 +1243,10 @@ public partial class MainWindow : Window
 			// (read from a copy made here, on the window's thread: the worker never walks the setup's own step list, which a
 			// step dragged meanwhile rewrites under it)
 			var asItIs = setup.Clone();
+			// (a tool is opened through the setup's Mod Organizer: what the setup starts is asked about first)
+			if (!_vm.StartsFirst(asItIs)) {
+				return;
+			}
 			var tools = await Task.Run(() => ToolSettings.ToSetUp(asItIs));
 			ToolsDialog.Run(this, _vm, asItIs, tools, false);
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException) {
@@ -1248,17 +1284,17 @@ public partial class MainWindow : Window
 		}
 		UiState.Set("version.seen", AppVersion);
 		if (lines.Count > 0) {
-			Ask.Tell(this, $"New in {Brand.Name} {AppVersion}", $"You had version {before} before.\n\n" + string.Join("\n", lines), "Close");
+			Ask.Tell(this, WindowWords.F($"New in {Brand.Name} {AppVersion}"), WindowWords.F($"You had version {before} before.") + "\n\n" + string.Join("\n", lines), "Close");
 		}
 	}
 
 	// what the box before an install says: where the new version comes from, where it goes, and what is never touched
 	static string InstallText(ProgramUpdate.Release a_release, string a_folder) =>
-		$"{Brand.Name} {a_release.Version} is taken from its GitHub release{(a_release.Size > 0 ? $" ({a_release.Size / 1024.0 / 1024:0.0} MB)" : "")}, checked, " +
-		$"and put in place of this version in:\n{a_folder}\n\n" +
-		"Your setups, run records and backups are not touched - they stay in the data folder.\n\n" +
-		"This version's files are set aside beside the new ones until the next start, and every step is taken back if one fails. " +
-		"The program then closes and starts again by itself.";
+		(a_release.Size > 0 ? WindowWords.F($"{Brand.Name} {a_release.Version} ({a_release.Size / 1024.0 / 1024:0.0} MB) is taken from its GitHub release, checked, and put in place of this version in:")
+			: WindowWords.F($"{Brand.Name} {a_release.Version} is taken from its GitHub release, checked, and put in place of this version in:")) + $"\n{a_folder}\n\n" +
+		WindowWords.Word("Your setups, run records and backups are not touched - they stay in the data folder.") + "\n\n" +
+		WindowWords.Word("This version's files are set aside beside the new ones until the next start, and every step is taken back if one fails. " +
+		"The program then closes and starts again by itself.");
 
 	// the off-screen pictures: the banner of a made-up newer version, and the box before its install
 	public void DemoNewVersion(bool a_show) => _vm.DemoNewVersion(a_show ? "1.1" : "");
@@ -1305,7 +1341,7 @@ public partial class MainWindow : Window
 				return;
 			}
 			var folder = Path.GetDirectoryName(AppPaths.Exe) ?? AppContext.BaseDirectory;
-			if (!Ask.Show(this, $"Install {Brand.Name} {release.Version}?", InstallText(release, folder), "Download and install", "Not now")) {
+			if (!Ask.Show(this, WindowWords.F($"Install {Brand.Name} {release.Version}?"), InstallText(release, folder), "Download and install", "Not now")) {
 				return;
 			}
 			// settings typed and not saved are asked about now, before anything is taken down (the program closes at the end);
@@ -1318,7 +1354,7 @@ public partial class MainWindow : Window
 			// The window stays until the new files are in place AND the restart is decided (WorkInHand): closed half way, the program
 			// would stand half replaced, and a close asked for meanwhile must not cut off the start of the new version. A close
 			// asked for while it went happens when the hand is let go - at once on a failure, after the decision on a success
-			var hand = Working($"{Brand.Name} {release.Version} is being installed");
+			var hand = Working(WindowWords.F($"{Brand.Name} {release.Version} is being installed"));
 			var restarted = false;
 			try {
 				try {
@@ -1405,19 +1441,40 @@ public partial class MainWindow : Window
 		}
 	}
 
+	// the box that lists what a setup starts on this PC, asked about once before its first run from the window (the
+	// off-screen pictures draw it without waiting on it); "Not now" is its safe answer and has the keyboard
+	public Window StartsBox(string a_name, IReadOnlyList<string> a_lines, Action<bool> a_done) => Ask.Make(this, "This setup starts programs",
+		WindowWords.Format("Before \"{0}\" runs from this window, look at what it starts on this PC. This is asked once, and again only when one of these has changed outside the window:", a_name) +
+		"\n\n" + string.Join("\n", a_lines.Select(l => "- " + l)) + "\n\n" +
+		WindowWords.Word("Allow it only if you trust where the setup came from. A setup file from another player is brought in safely with New setup > Import a setup file, which takes all of this out."),
+		"Allow it", "Not now", a_done);
+
 	void NewSetup_Click(object a_s, RoutedEventArgs a_e)
 	{
 		if (_vm.IsRunning) {
+			_vm.Say("A run is going - make the setup when it has ended.", "bad");
 			return;
 		}
 		if (_vm.MovingData) {
 			_vm.Say(_vm.WhyNotWriting("made")!, "bad");
 			return;
 		}
-		var made = NewSetupDialog.Run(this);
+		var made = NewSetupDialog.Run(this, out var imported);
 		if (made != null) {
 			_vm.LoadSetups(made);
-			_vm.Say("Setup made. Press Check (F5) to see that every tool is found, then Start.", "good");
+			// made here by the player: what it starts is theirs, and is not asked about at its first START. One brought in from
+			// elsewhere is: what it kept (each step's entry of Mod Organizer's list) is shown before it first starts anything
+			if (imported == null && _vm.Setup is { } own && Files.SamePath(own.File, made)) {
+				MainViewModel.AllowStarts(own);
+			}
+			if (imported == null) {
+				_vm.Say("Setup made. Press Check (F5) to see that every tool is found, then Start.", "good");
+			} else {
+				// what the file brought along that starts something was taken out: said once, with what the player sets now
+				_vm.Say(_vm.Setup?.Mo2Exe is { Length: > 0 } ? "Setup imported. Press Check (F5): it names what a step still needs on this PC." :
+					"Setup imported. Set your Mod Organizer and profile in Settings, then press Check (F5): it names what else a step needs.", "good");
+				Ask.Tell(this, "Setup imported", string.Join("\n", imported), "Close");
+			}
 		}
 	}
 
@@ -1431,14 +1488,15 @@ public partial class MainWindow : Window
 	// the window goes once the run has stopped and put the profile back; a run that does not stop in 10 minutes keeps the window
 	async Task CloseWhenStopped(Journal? a_run)
 	{
-		var until = DateTime.Now.AddMinutes(10);
+		// (counted on a clock that only runs forward: the PC's own may be set, or change for the summer, while this waits)
+		var waited = System.Diagnostics.Stopwatch.StartNew();
 		// every run that appears meanwhile is stopped too: the one a start was still checking for, a queue's next setup (a stopped
 		// run ends the queue)
 		var stopped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		if (a_run != null) {
 			stopped.Add(a_run.Folder);
 		}
-		while (DateTime.Now < until && StillGoing()) {
+		while (waited.Elapsed < TimeSpan.FromMinutes(10) && StillGoing()) {
 			// a stop that could not be written is written again at the next beat
 			if (Engine.Active() is { } next && stopped.Add(next.Folder) && MainViewModel.TrySend(next.Folder, "stop") != null) {
 				stopped.Remove(next.Folder);
@@ -1554,9 +1612,22 @@ public partial class MainWindow : Window
 		});
 	}
 
+	void AppActivated(object? a_s, EventArgs a_e)
+	{
+		_inFront = true;
+		Wake();
+	}
+
+	void AppDeactivated(object? a_s, EventArgs a_e) => _inFront = false;
+
 	protected override void OnClosed(EventArgs a_e)
 	{
 		Theme.Applied -= _vm.Repaint;
+		// (the program holds what it is told of: a window drawn for the off-screen pictures would stay with it)
+		if (Application.Current is { } app) {
+			app.Activated -= AppActivated;
+			app.Deactivated -= AppDeactivated;
+		}
 		_demo = true;
 		_timer.Stop();
 		_watch?.Dispose();

@@ -10,6 +10,40 @@ public static class Preflight
 	// which game processes run now (the offline tests answer "none": a game may be running on the PC they run on)
 	public static Func<List<string>> GameCheck { get; set; } = () => Mo2Control.GameRunning();
 
+	// Two tools set to write into one mod. Each moves what its output mod holds into the run's backup before it fills it:
+	// the one that ran later put the earlier one's new output away, and the run said both were built. (The terrain LOD and
+	// the roads painted into it are one output, made by two steps.) A pattern for the output names without {output} in it
+	// gives every tool the same mod; so does a name typed twice in Settings
+	public static IEnumerable<Issue> SharedOutputs(Setup a_setup, IReadOnlyCollection<string> a_steps) =>
+		a_setup.EnabledSteps.Where(s => a_steps.Contains(s.Key)).SelectMany(OutputsOf)
+			.GroupBy(x => x.Mod, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1 && !g.All(x => x.Key is "xlodgen" or "acmos"))
+			.Select(g => new Issue("", true, $"{string.Join(" and ", g.Select(x => StepCatalog.Name(x.Key)).Distinct())} have the same output mod, \"{g.Key}\" - " +
+				"the one that runs later would move the other's new output into the backup: give each a mod of its own"));
+
+	// the mods a step builds: its output mod, and each shader cache's own (the shader step keeps them in its list of caches)
+	static IEnumerable<(string Key, string Mod)> OutputsOf(Setup.StepEntry a_s)
+	{
+		// (the shader step builds the caches it reads: a list of caches makes an older single output_mod beside it no output
+		// of its own, and one cache named both ways is one output, never two that share a mod)
+		if (a_s.Key == "shaders") {
+			// (each cache once, as the step builds it: two caches given one mod still share it, and are refused)
+			foreach (var cacheMod in ShaderStep.Caches(new StepSettings(a_s.Settings)).Select(c => c.OutputMod)) {
+				yield return (a_s.Key, cacheMod);
+			}
+			yield break;
+		}
+		if (new StepSettings(a_s.Settings).OutputMod is { } mod) {
+			yield return (a_s.Key, mod);
+		}
+		if (a_s.Settings["caches"] is System.Text.Json.Nodes.JsonArray caches) {
+			foreach (var cache in caches.OfType<System.Text.Json.Nodes.JsonObject>()) {
+				if (Setup.Str(cache, "output_mod") is { } own) {
+					yield return (a_s.Key, own);
+				}
+			}
+		}
+	}
+
 	public static List<Issue> Run(Setup a_setup, Mo2Instance a_mo2, IReadOnlyList<string> a_steps)
 	{
 		var outList = new List<Issue>();
@@ -18,6 +52,12 @@ public static class Preflight
 		if (a_setup.NotKnown is { Count: > 0 } notKnown) {
 			outList.Add(new Issue("", false, $"this setup names step(s) this version does not have, left out of the run: {string.Join(", ", notKnown)} - take them out of the setup to stop this note"));
 		}
+		// DynDOLOD and AnvilLOD make the same LOD, and each keeps the other's output off for good: run together, the second
+		// threw the first one's work away - or, each naming the other, both outputs ended switched off
+		if (a_steps.Contains("dyndolod") && a_steps.Contains("anvillod")) {
+			outList.Add(new Issue("", true, "DynDOLOD and AnvilLOD are both switched on - each makes the LOD the other makes: untick one of the two"));
+		}
+		outList.AddRange(SharedOutputs(a_setup, a_steps));
 		var control = new Mo2Control(a_mo2, a_setup.Profile, RunLog.Null);
 		var profile = new Profile(a_mo2, a_setup.Profile, () => control.Running);
 		if (!profile.Exists) {
@@ -58,13 +98,15 @@ public static class Preflight
 		}
 		outList.AddRange(pc);
 		foreach (var d in new[] { a_setup.BackupDir, a_mo2.ModsDir }.Where(d => d != "")) {
-			var root = Path.GetPathRoot(Path.GetFullPath(d));
-			if (root == null) {
+			// the disk the folder really stands on: a mods folder kept on another disk through a junction, a network path (so the
+			// folder is named, never its drive letter - that may be another disk)
+			if (Files.FreeOn(d) is not { } bytes) {
+				outList.Add(new Issue("", false, $"the free room on the disk that holds {d} could not be read, so the {a_setup.MinFreeGb} GB a run needs there was not checked"));
 				continue;
 			}
-			var free = new DriveInfo(root).AvailableFreeSpace / (1024.0 * 1024 * 1024);
+			var free = bytes / (1024.0 * 1024 * 1024);
 			if (free < a_setup.MinFreeGb) {
-				outList.Add(new Issue("", true, $"only {free:0.0} GB free on {root} - the run needs at least {a_setup.MinFreeGb} GB for its outputs and backups"));
+				outList.Add(new Issue("", true, $"only {free:0.0} GB free on the disk that holds {d} - the run needs at least {a_setup.MinFreeGb} GB for its outputs and backups"));
 			}
 		}
 		// what the run is about to remake, added up per disk (the floor above knows nothing of how big this setup's outputs are)
@@ -214,7 +256,8 @@ public static class ToolVersions
 			var v = FileVersionInfo.GetVersionInfo(a_exe);
 			var ver = v.ProductVersion ?? v.FileVersion;
 			return string.IsNullOrWhiteSpace(ver) ? File.GetLastWriteTimeUtc(a_exe).ToString("yyyy-MM-dd HH:mm", InvariantCulture) : ver.Trim();
-		} catch (FileNotFoundException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			// not there, or not to be read right now (a scanner holds it): no version is known
 			return "";
 		}
 	}
@@ -228,18 +271,27 @@ public static class ToolVersions
 			yield break;
 		}
 		var now = Version(exe);
+		if (now == "") {
+			yield break;
+		}
 		var known = Load(a_setup);
-		if (known.TryGetValue(a_key, out var was) && was != now) {
+		if (known.TryGetValue(KeyOf(a_key, exe), out var was) && was != now) {
 			yield return new Issue(a_key, false, $"{StepCatalog.Name(a_key)} changed since the last run that finished ({was} -> {now}) - read its update notes if it fails");
 		}
 	}
+
+	// One store serves every setup in the folder, so a version is kept under the step AND the program's own place: two setups
+	// whose step runs two copies of a tool (two Mod Organizers) keep a version each, and a run of one never reads as the
+	// other's tool having changed
+	static string KeyOf(string a_step, string a_exe) => a_step + " | " + Path.GetFullPath(a_exe).ToUpperInvariant();
 
 	public static Dictionary<string, string> Load(Setup a_setup)
 	{
 		var f = StoreFile(a_setup);
 		try {
 			return File.Exists(f) ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(Files.ReadShared(f)) ?? [] : [];
-		} catch (System.Text.Json.JsonException) {
+		} catch (Exception e) when (e is System.Text.Json.JsonException or IOException or UnauthorizedAccessException) {
+			// a store that does not read is no store: a notice the check would have added is never what stops a start
 			return [];
 		}
 	}
@@ -249,10 +301,12 @@ public static class ToolVersions
 		var known = Load(a_setup);
 		foreach (var k in a_doneSteps) {
 			var s = new StepSettings(a_setup.StepSettings(k) ?? []);
-			if (ProgramOf(a_mo2, s) is { } exe && File.Exists(exe)) {
-				known[k] = Version(exe);
+			if (ProgramOf(a_mo2, s) is { } exe && File.Exists(exe) && Version(exe) is { Length: > 0 } version) {
+				known[KeyOf(k, exe)] = version;
+				// (a version an earlier build kept under the step alone)
+				known.Remove(k);
 			}
 		}
-		Files.WriteAtomic(StoreFile(a_setup), System.Text.Json.JsonSerializer.Serialize(known, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+		Files.WriteAtomic(StoreFile(a_setup), System.Text.Json.JsonSerializer.Serialize(known, JsonWrite.Indented));
 	}
 }

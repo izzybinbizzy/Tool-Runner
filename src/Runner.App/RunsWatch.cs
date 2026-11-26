@@ -2,7 +2,9 @@ namespace ToolRunner.App;
 
 // The runs folder watched for the files the window follows - a run's record, the queue, a refused start - so a change wakes
 // the window's look at once and its timer can be slow while nothing runs. Where Windows cannot watch (a network drive, a
-// folder it may not read) there is no watcher and the timer alone looks: nothing depends on an event.
+// folder it may not read) there is no watcher and the timer alone looks. While one stands, the run records are read whole
+// again only when it reports a change - or, since a watcher can lose one, when JournalCache.WholeEvery is over: nothing
+// depends on an event for longer than that.
 public sealed class RunsWatch : IDisposable
 {
 	public static readonly string[] Followed = ["journal.json", "queue.json", "last queue.txt", "last refusal.txt"];

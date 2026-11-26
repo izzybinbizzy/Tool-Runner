@@ -33,7 +33,7 @@
     },
     "Panel": {
       "value": "#FFFFFF",
-      "where": "cards (the step list, the 'now running' card, the log), the header bar, the status bar, the Settings / History drawer, dialogs"
+      "where": "cards (the step list, the 'now running' card, the log), the header bar, the status bar, the Settings, History and Themes windows, dialogs"
     },
     "Panel2": {
       "value": "#F3F6FA",
@@ -45,7 +45,7 @@
     },
     "Accent": {
       "value": "#1F6FD1",
-      "where": "section headings (STEPS, LOG, THIS SETUP ...), ticked check boxes, the progress bar's end, the drawer's edge"
+      "where": "section headings (STEPS, LOG, THIS SETUP ...), ticked check boxes, the progress bar's end"
     },
     "AccentLight": {
       "value": "#0E4FA0",
@@ -53,7 +53,7 @@
     },
     "AccentDim": {
       "value": "#8DB3E2",
-      "where": "outlined-button borders, unticked check-box borders, the drawer's left edge"
+      "where": "outlined-button borders, unticked check-box borders"
     },
     "Text": {
       "value": "#1B2430",
@@ -93,7 +93,7 @@
     },
     "Shade": {
       "value": "#660B1A2E",
-      "where": "the dimming over the window while the Settings or History drawer is open"
+      "where": "drawn nowhere in this version (Settings and History open in windows of their own); the key is kept so a theme made earlier still reads"
     }
   },
   "gradients": {
@@ -168,7 +168,7 @@
     "IssueNote": "•"
   },
   "statusDots": {
-    "where": "the two dots in the status bar take their colors from the list above: Mod Organizer open = Warn, Skyrim running = Bad, either one closed = Muted",
+    "where": "the Mod Organizer and Skyrim dots in the status bar take their colors from the list above: Mod Organizer open = Warn, Skyrim running = Bad, either one closed = Muted",
     "Mo2Open": "Warn",
     "GameRunning": "Bad",
     "Closed": "Muted"
@@ -178,7 +178,7 @@
     "where": "an .ico or .png file beside the theme file (empty = the program's own): the 30 x 30 logo left of the program's name and the window's taskbar / title-bar icon (the notification-area icon stays the program's own)"
   },
   "_not_in_a_theme": [
-    "the layout: header, step list on the left, the running step and the log on the right, the status bar, the drawers",
+    "the layout: header, step list on the left, the running step and the log on the right, the status bar, the windows Settings, History and Themes open in",
     "the words on screen (labels, messages, the readme)",
     "sounds: the run-finished sound is Windows' own notification sound"
   ]

@@ -331,7 +331,7 @@ public static class Mo2Changes
 	}
 
 	static List<Change> ParseRows(string a_text) =>
-		(JsonNode.Parse(a_text) as JsonArray ?? new JsonArray()).OfType<JsonObject>().Select(RowOf).OfType<Change>().ToList();
+		(JsonNode.Parse(a_text, documentOptions: JsonRead.Plain) as JsonArray ?? new JsonArray()).OfType<JsonObject>().Select(RowOf).OfType<Change>().ToList();
 
 	// the rows to add to: a kept file that does not read is never written over - it is set aside under its own name and a new
 	// one starts
@@ -392,7 +392,7 @@ public static class Mo2Changes
 				["profiles"] = new JsonArray(r.Profiles.Select(p => (JsonNode)JsonValue.Create(p)).ToArray()),
 			});
 		}
-		Files.WriteAtomic(Path.Combine(a_dir, "changes.json"), arr.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+		Files.WriteAtomic(Path.Combine(a_dir, "changes.json"), arr.ToJsonString(JsonWrite.IndentedLetters));
 	}
 
 	static JsonObject LookJson(Look a_l)
@@ -415,7 +415,7 @@ public static class Mo2Changes
 			return null;
 		}
 		try {
-			if (JsonNode.Parse(Files.ReadSharedText(a_file)) is not JsonObject o ||
+			if (JsonNode.Parse(Files.ReadSharedText(a_file), documentOptions: JsonRead.Plain) is not JsonObject o ||
 			    !DateTime.TryParse(o["taken"]?.ToString(), InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var taken)) {
 				return null;
 			}

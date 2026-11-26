@@ -77,6 +77,8 @@ public static class Program
 			.Where(m => m.Name.StartsWith("T_", StringComparison.Ordinal) && m.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)).OrderBy(m => m.MetadataToken);
 		foreach (var t in tests) {
 			var sw = Stopwatch.StartNew();
+			// every test begins with the program's own steps: a stand-in an earlier test put in is never this one's
+			StepRegistry.PutBackOwn();
 			try {
 				t.Invoke(null, null);
 				++s_pass;
@@ -157,6 +159,13 @@ public static class Program
 			return e;
 		}
 		throw new InvalidOperationException(a_what + ": did not throw " + typeof(TE).Name);
+	}
+
+	// when this process (the tests) started, as a run's record keeps it
+	static DateTime StartedUtc()
+	{
+		using var me = Process.GetCurrentProcess();
+		return me.StartTime.ToUniversalTime();
 	}
 
 	// ------------------------------------------------------------------ a fake Mod Organizer on disk
@@ -302,6 +311,13 @@ public static class Program
 		Check(Native.FromBuffer(buf, bytes.Length).Contains("LOD generation done", StringComparison.Ordinal), "packed text with an empty tail read back");
 		var plain = "plain log line".ToCharArray();
 		Equal("plain log line", Native.FromBuffer(plain, plain.Length), "a plain buffer untouched");
+		// only a log's end is made a text: packed or not is told by the whole of it, and its last letters stand in half as many
+		// characters
+		var log = string.Concat(Enumerable.Repeat("[00:01] Tamriel 12 34\r\n", 400)) + "LOD generation done.";
+		Equal("generation done.", Native.TailOf(log, 16), "the end of a plain text");
+		var end = Native.TailOf(Encoding.Unicode.GetString(Encoding.ASCII.GetBytes(log)), 40);
+		Check(end.EndsWith("12 34\r\nLOD generation done.", StringComparison.Ordinal) && end.Length is >= 40 and <= 42, "the end of a packed one, unpacked: " + end);
+		Equal("", Native.TailOf("", 40), "no text");
 	}
 
 	// ------------------------------------------------------------------ MO2's ini
@@ -513,6 +529,14 @@ public static class Program
 		Check(w.Any(x => x.StartsWith("Landscape Fixer runs after xLODGen", StringComparison.Ordinal)), "Landscape Fixer after xLODGen is warned");
 		Equal(2, w.Count, "those two warnings and no other: " + string.Join(" | ", w));
 		Equal(0, StepCatalog.OrderWarnings(StepCatalog.DefaultOrder.ToList()).Count, "the default order is safe");
+		// AnvilLOD stands where DynDOLOD stands: before the patches it reads is warned about, as it is for DynDOLOD
+		var anvil = StepCatalog.OrderWarnings(["anvillod", "pgpatcher", "grass", "playsave"]);
+		Check(anvil.Count == 2 && anvil.Any(x => x.StartsWith("PGPatcher runs after AnvilLOD", StringComparison.Ordinal)) && anvil.Any(x => x.StartsWith("Grass cache runs after AnvilLOD", StringComparison.Ordinal)),
+			"AnvilLOD before PGPatcher and the grass cache: " + string.Join(" | ", anvil));
+		Equal(StepCatalog.OrderWarnings(old).Count, StepCatalog.OrderBreaks(old).Count, "each warning is one broken rule");
+		var first = StepCatalog.OrderBreaks(old)[0];
+		Equal(StepCatalog.OrderWarnings(old)[0], StepCatalog.RunsAfter.Replace("{0}", StepCatalog.Name(first.Before), StringComparison.Ordinal)
+			.Replace("{1}", StepCatalog.Name(first.After), StringComparison.Ordinal).Replace("{2}", first.Why, StringComparison.Ordinal), "the window's text with its three places filled is the check's own line");
 	}
 
 	static void T_PlanOnlyFromUntil()
@@ -526,7 +550,8 @@ public static class Program
 		Throws<ArgumentException>(() => Runner.Plan(s, "dyndolod", null, null), "a step the setup does not have");
 	}
 
-	// a new game has no save to keep clean - the clean save and the final save are left out while it is on
+	// PGLite ticked in the profile switches the PGPatcher step off once, with a notice, and the player's own tick of it is kept
+	// until PGLite is unticked
 	static void T_PgLiteUnticksPgPatcherUntilThePlayerTicksIt()
 	{
 		using var f = new FakeMo2();
@@ -571,7 +596,11 @@ public static class Program
 		var shown = new List<string>();
 		var ended = 0;
 		BoxWatch.Open Box(long a_id, string a_image, bool a_game, string a_title, string a_text, params string[] a_buttons) =>
-			new(a_id, new BoxSeen(a_image, a_game, a_title, a_text, a_buttons), b => pressed.Add($"{a_id}:{b}"));
+			new(a_id, new BoxSeen(a_image, a_game, a_title, a_text, a_buttons), b => {
+				lock (pressed) {
+					pressed.Add($"{a_id}:{b}");
+				}
+			});
 		BoxWatch Watch() => new(() => open, log, shown.Add, () => ++ended) { Wait = TimeSpan.FromSeconds(60) };
 		var t0 = new DateTime(2026, 11, 14, 12, 0, 0, DateTimeKind.Utc);
 
@@ -617,6 +646,17 @@ public static class Program
 		Check(closedBox.Move == BoxMove.Press && closedBox.Button == "No" && closedBox.Note.Contains("does not know", StringComparison.Ordinal), "closed with its declining button, and named: " + closedBox.Note);
 		Equal("Ignore", KnownBoxes.Judge(new BoxSeen("SkyrimSE.exe", true, "Error", "Something failed", ["Abort", "Retry", "Ignore"]), true).Button, "Windows' own three: Ignore");
 		Equal(BoxMove.Stop, KnownBoxes.Judge(new BoxSeen("SkyrimSE.exe", true, "Working", "Packing the archives ...", ["Cancel"]), true).Move, "a box whose one button is Cancel shows something at work: never pressed");
+		// a box in words, as the log and the run's notes name it: whose it is, its title, its words, its buttons
+		Equal("SkyrimSE.exe: \"Error\" - Something failed [Abort / Retry / Ignore]",
+			KnownBoxes.Describe(new BoxSeen("SkyrimSE.exe", true, "Error", "Something failed", ["Abort", "Retry", "Ignore"])), "a box in words");
+		Equal("a program of the run: \"Note\"", KnownBoxes.Describe(new BoxSeen("", false, "Note", "  ", [])), "no program's name, no words, no buttons");
+		Check(KnownBoxes.Describe(new BoxSeen("x.exe", false, "T", new string('a', 400), [])).EndsWith("a ...", StringComparison.Ordinal), "a long text cut short");
+		// a plugin by its ending, in any letter case
+		Check(Plugins.IsPlugin("Skyrim.ESM") && Plugins.IsPlugin("Patch.esl") && !Plugins.IsPlugin("Patch.esp.bak") && !Plugins.IsPlugin("esp"), "a plugin is known by its ending");
+		// the download's name as GitHub lists it: its spaces made dots
+		Check(ProgramUpdate.SameAssetName("Tool.Runner.1.1.zip", "Tool Runner 1.1.zip"), "GitHub's dots for spaces");
+		Check(!ProgramUpdate.SameAssetName(null, "Tool Runner 1.1.zip") && !ProgramUpdate.SameAssetName("Tool.Runner.1.2.zip", "Tool Runner 1.1.zip"),
+			"no name listed, or another version's");
 		Equal(BoxMove.Name, KnownBoxes.Judge(new BoxSeen("TexGenx64.exe", false, "TexGen", "Exit TexGen?", ["Yes", "No"]), true).Move, "a tool's own box is only named, whatever the setup says about the game's");
 
 		pressed.Clear();
@@ -1119,7 +1159,7 @@ public static class Program
 		}
 	}
 
-	// The plan's owed test (7 A3): StartAndLoad's own loop around Faster Archives' offer. The game closes a few seconds into its
+	// StartAndLoad's own loop around Faster Archives' offer. The game closes a few seconds into its
 	// start for the offer (its program runs, the game does not): never taken for a crash - the run waits for that window, then
 	// starts the game again. A stand-in starts the "game" (ping under the offer program's name, this test standing in for the
 	// game); DevBench never answers here (a port nothing listens on), and the second start stops the step
@@ -1298,6 +1338,7 @@ public static class Program
 		Check(Explain.For("", vr.First(i => i.Text.Contains("Skyrim VR", StringComparison.Ordinal)).Text)?.Code == "TR-213", "with its entry in the catalog");
 	}
 
+	// a new game has no save to keep clean - the clean save and the final save are left out while it is on
 	static void T_NewGameLeavesOutTheSaveSteps()
 	{
 		using var f = new FakeMo2();
@@ -1342,9 +1383,9 @@ public static class Program
 	static void T_SetupSaveKeepsUnknownKeys()
 	{
 		using var f = new FakeMo2();
-		var s = f.WriteSetup(("landscapefixer", new JsonObject { ["_note"] = "his note 🔁", ["custom"] = 3 }));
+		var s = f.WriteSetup(("landscapefixer", new JsonObject { ["_note"] = "the player's note 🔁", ["custom"] = 3 }));
 		var back = Setup.Load(f.SetupFile);
-		Equal("his note 🔁", Setup.Str(back.StepSettings("landscapefixer")!, "_note"), "a note key kept");
+		Equal("the player's note 🔁", Setup.Str(back.StepSettings("landscapefixer")!, "_note"), "a note key kept");
 		Equal(3, Setup.Int(back.StepSettings("landscapefixer")!, "custom"), "an unknown key kept");
 		_ = s;
 	}
@@ -1879,7 +1920,7 @@ public static class Program
 	}
 
 	// a form id read either way, a setup read from bytes, a task's own setup file
-	static void T_SmallReadsFromTheReview()
+	static void T_FormIdsAndSetupsAreReadHoweverWritten()
 	{
 		Equal("0x0000003B", DevBench.FormKey(JsonValue.Create("0x3B")), "0x is hex");
 		Equal("0xFF000801", DevBench.FormKey(JsonValue.Create("FF000801")), "an 8-digit id is hex");
@@ -3311,6 +3352,59 @@ public static class Program
 		Check(!Journal.Load(run.Folder).Unfinished, "and the profile is not held up by it");
 	}
 
+	// the instance folder a setup names is the one read, or none: with its ModOrganizer.ini gone, the instance beside the program is
+	// never taken in its place
+	static void T_TheInstanceASetupNamesIsNeverSwappedForAnother()
+	{
+		using var f = new FakeMo2();
+		var moved = Path.Combine(f.Root, "Instance moved away");
+		Directory.CreateDirectory(moved);
+		var refused = "";
+		try {
+			Mo2Instance.Load(f.Exe, moved);
+		} catch (FileNotFoundException e) {
+			refused = e.Message;
+		}
+		Check(refused.Contains("instance folder", StringComparison.Ordinal), "an instance folder with no ModOrganizer.ini is refused, and said: " + refused);
+		var beside = Path.Combine(f.Instance, "ModOrganizer.ini");
+		Check(Files.SamePath(Mo2Instance.Load(f.Exe).IniPath, beside), "with no instance named, the one beside the program");
+		Check(Files.SamePath(Mo2Instance.Load(f.Exe, "  ").IniPath, beside), "a blank names none");
+	}
+
+	// an undo works in the Mod Organizer the run used, also when the setup names another one by now: that other one's profile of
+	// the same name is never written
+	static void T_AnUndoWorksInTheModOrganizerTheRunUsed()
+	{
+		using var f = new FakeMo2();
+		using var other = new FakeMo2();
+		File.WriteAllText(Path.Combine(f.Mods, "Output A", "old.txt"), "old A");
+		// (the two profiles' lists differ, so the run's lists written into the wrong one would show)
+		var otherList = Path.Combine(other.ProfileDir, "modlist.txt");
+		File.WriteAllText(otherList, "+Only In The Other\r\n" + File.ReadAllText(otherList));
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp")));
+		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		// (the run's output starts off: the run switches it on, and only an undo that works in this profile switches it off again)
+		var ownList = Path.Combine(f.ProfileDir, "modlist.txt");
+		File.WriteAllText(ownList, File.ReadAllText(ownList).Replace("+Output A", "-Output A", StringComparison.Ordinal));
+		string States(FakeMo2 a_m) => string.Join(", ", ProfileOf(a_m).States().OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase).Select(p => p.Value + p.Key));
+		var statesBefore = States(f);
+		Check(!ProfileOf(f).IsOn("Output A"), "(the output starts off)");
+		Equal(RunState.Finished, Runner.Run(new RunRequest(f.SetupFile, f.Data)).State, "the run finished");
+		Check(ProfileOf(f).IsOn("Output A"), "the run switched its output on");
+		var j = Journal.All(Runner.RunsDir(f.Data)).First();
+		Check(Files.SamePath(j.Mo2Exe, f.Exe), "the run's record names the Mod Organizer it worked in");
+		var root = Setup.Load(f.SetupFile).Root;
+		root["mo2"] = new JsonObject { ["exe"] = other.Exe, ["instance"] = other.Instance, ["profile"] = "Test" };
+		File.WriteAllText(f.SetupFile, Setup.TextOf(root));
+		var theirs = File.ReadAllBytes(Path.Combine(other.ProfileDir, "modlist.txt"));
+		var r = Runner.Undo(Journal.Load(j.Folder));
+		Equal(RunState.Restored, r.State, "undone: " + r.Verdict);
+		Check(theirs.AsSpan().SequenceEqual(File.ReadAllBytes(Path.Combine(other.ProfileDir, "modlist.txt"))), "the other Mod Organizer's profile is as it was");
+		Check(!ProfileOf(f).IsOn("Output A"), "the undo switched it off again, in the run's own profile");
+		Equal(statesBefore, States(f), "the run's own profile is as it was before the run");
+		Equal("old A", File.ReadAllText(Path.Combine(f.Mods, "Output A", "old.txt")), "the old output is back where the run took it from");
+	}
+
 	// two steps writing one output each keep what they wrote; a tool folder's label never passes for a mod of that name; what a move that
 	// failed left in a tool folder is never taken for the run's
 	static void T_AnUndoKeepsEveryOutputAside()
@@ -3708,7 +3802,7 @@ public static class Program
 		f.WriteSetup(("landscapefixer", []));
 		var ctx = StepContext(f, "landscapefixer");
 		using var log = ctx.Log;
-		using var start = Process.Start(new ProcessStartInfo("cmd.exe", "/d /c start \"\" /b ping -n 40 127.0.0.1 >nul & ping -n 3 127.0.0.1 >nul") { UseShellExecute = false, CreateNoWindow = true })!;
+		using var start = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), "/d /c start \"\" /b ping -n 40 127.0.0.1 >nul & ping -n 3 127.0.0.1 >nul") { UseShellExecute = false, CreateNoWindow = true })!;
 		ctx.Control.Started.Add(start.Id);
 		var mine = new List<int>();
 		try {
@@ -3736,7 +3830,7 @@ public static class Program
 
 		// ... and ended ALONE: what it started keeps running (the game ended over a box it cannot have answered takes nothing
 		// under it with it that the run has no record of)
-		using var parent = Process.Start(new ProcessStartInfo("cmd.exe", "/d /c \"ping -n 30 127.0.0.1 >nul\"") { UseShellExecute = false, CreateNoWindow = true })!;
+		using var parent = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), "/d /c \"ping -n 30 127.0.0.1 >nul\"") { UseShellExecute = false, CreateNoWindow = true })!;
 		using var endParent = new StandIn(parent);
 		var parentBegan = Procs.StartTime(parent.Id) ?? throw new InvalidOperationException("the stand-in's start time could not be read");
 		var child = 0;
@@ -3762,7 +3856,7 @@ public static class Program
 	// ends that tree only
 	static void T_AHeldTreeKeepsEachProcessItsOwn()
 	{
-		using var parent = Process.Start(new ProcessStartInfo("cmd.exe", "/d /c \"ping -n 30 127.0.0.1 >nul\"") { UseShellExecute = false, CreateNoWindow = true })!;
+		using var parent = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), "/d /c \"ping -n 30 127.0.0.1 >nul\"") { UseShellExecute = false, CreateNoWindow = true })!;
 		using var endParent = new StandIn(parent);
 		List<(int Pid, DateTime Started, IDisposable Hold)> tree = [];
 		bool HasPing() => tree.Any(t => Procs.Image(t.Pid).Equals("PING.EXE", StringComparison.OrdinalIgnoreCase));
@@ -4120,6 +4214,30 @@ public static class Program
 		Check(!rows.Any(x => x.Mod == "Master Mod" && x.Who == Mo2Changes.Outside), "never as made outside the runner: " + text);
 	}
 
+	// a run cut off whose setup is gone since: the profile is put back all the same - the run's record names its Mod Organizer and
+	// its profile - so no start is refused for a put-back that could never be made
+	static void T_AProfileIsPutBackWithoutItsSetup()
+	{
+		using var f = new FakeMo2();
+		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
+			ctx.Journal.Pid = 999999;
+			ctx.Journal.Save();
+			throw new CrashForTest();
+		}));
+		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		var before = f.Text("modlist.txt");
+		try {
+			RunUntilCrash(f);
+		} catch (CrashForTest) {
+		}
+		Check(f.Text("modlist.txt") != before, "the cut-off run left its output switched off");
+		File.Delete(f.SetupFile);
+		var r = Runner.Restore(Journal.Interrupted(Runner.RunsDir(f.Data))!);
+		Equal(RunState.Restored, r.State, "put back without its setup: " + r.Verdict);
+		Equal(before, f.Text("modlist.txt"), "the mod list is as it was before the run");
+		Check(Journal.Interrupted(Runner.RunsDir(f.Data)) == null, "nothing is left to put back");
+	}
+
 	// a put-back after a crash: what changed before it (the cut-off run, the player since) is noted apart from the put-back's own
 	static void T_PutBackNotesOnlyItsOwnChanges()
 	{
@@ -4269,7 +4387,7 @@ public static class Program
 		using var f = new FakeMo2();
 		var settings = Path.Combine(f.Root, "tool settings.json");
 		var flag = Path.Combine(f.Root, "flag.txt");
-		File.WriteAllText(settings, "his own");
+		File.WriteAllText(settings, "the player's own");
 		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
 			StepKit.KeepFile(ctx, settings);
 			StepKit.KeepFile(ctx, flag);
@@ -4280,7 +4398,7 @@ public static class Program
 		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
 		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
 		Equal(RunState.Failed, r.State, "failed");
-		Equal("his own", File.ReadAllText(settings), "the changed file is back");
+		Equal("the player's own", File.ReadAllText(settings), "the changed file is back");
 		Check(!File.Exists(flag), "the file it made is gone again");
 
 		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => {
@@ -4296,7 +4414,7 @@ public static class Program
 		}
 		Equal("pointed at the output", File.ReadAllText(settings), "(the crash left it changed)");
 		Equal(RunState.Restored, Runner.Restore(Journal.Interrupted(Runner.RunsDir(f.Data))!).State, "restored");
-		Equal("his own", File.ReadAllText(settings), "Restore put the file back");
+		Equal("the player's own", File.ReadAllText(settings), "Restore put the file back");
 	}
 
 	// what a failed step left in MO2's overwrite would win over the output put back: moved into the run's backup
@@ -4424,7 +4542,7 @@ public static class Program
 	static void T_ReusedPidIsNotTheRun()
 	{
 		var me = Environment.ProcessId;
-		var j = new Journal { Pid = me, PidStarted = Process.GetCurrentProcess().StartTime.ToUniversalTime() };
+		var j = new Journal { Pid = me, PidStarted = StartedUtc() };
 		Check(j.OwnerAlive, "the real owner is alive");
 		j.PidStarted = j.PidStarted.GetValueOrDefault().AddMinutes(-5);
 		Check(!j.OwnerAlive, "the same PID with another start time is not the run");
@@ -4513,12 +4631,17 @@ public static class Program
 		Check(!ToolUpdates.IsNewer("", "1.0"), "no version of ours: never called newer");
 		Check(ToolUpdates.IsNewer("1.9.2", "2.0"), "2.0 (its zero trimmed) is newer than 1.9.2");
 		Check(!ToolUpdates.IsNewer("2.1.0", "2.0"), "2.0 is not newer than 2.1.0");
+		Check(ToolUpdates.IsNewer("1.1.2", "1.2"), "1.2 is newer than 1.1.2, though its numbers end it");
+		Check(ToolUpdates.IsNewer("1.2.1", "2.1"), "2.1 is newer than 1.2.1");
+		Check(!ToolUpdates.IsNewer("1.2", "1.1.2"), "and 1.1.2 is not newer than 1.2");
 		// the line under the rows counts every tool a row names (TexGen and DynDOLOD share one row)
 		var both = new ToolUpdates.Result("texgen", "TexGen / DynDOLOD", "3.0", "", false, "page", "could not ask its page: x", 2);
 		var one = new ToolUpdates.Result("pgpatcher", "PGPatcher", "1.0", "1.0", false, "page2", null);
 		Check(ToolUpdates.Summary([both, one]).StartsWith("2 tool(s) could not be checked", StringComparison.Ordinal), "a shared row's two tools both counted: " + ToolUpdates.Summary([both, one]));
 		Check(ToolUpdates.Summary([both with { Problem = null, Newer = true }, one]).StartsWith("2 tool(s) have a newer version", StringComparison.Ordinal), "both tools of a shared row newer");
 		Equal("Every tool is up to date.", ToolUpdates.Summary([one]), "nothing newer, nothing unchecked");
+		Check(ToolUpdates.SummaryParts([both, one]) is (var withPlace, 2) && withPlace.Contains("{0}", StringComparison.Ordinal) && ToolUpdates.SummaryParts([one]).Count == null,
+			"the same summary with a place for its number, for the window's language");
 	}
 
 	// the settings a tool's own window wrote: found, kept, put in place for a run and put back after
@@ -4558,7 +4681,7 @@ public static class Program
 		Equal(RunState.Finished, r.State, r.Verdict);
 		Check(seen.Contains("by its window", StringComparison.Ordinal), "the run used the learned settings: " + seen);
 		Equal("{\"a\": 3}", File.ReadAllText(settings), "the player's own settings are back after the run");
-		Equal(l.Files.Count, 2, "(learned set)");
+		Equal(2, l.Files.Count, "(learned set)");
 		// a record that names a file anywhere but the tool's own folders (edited by hand, or learned before the tool moved) is
 		// refused before a byte is written there
 		var elsewhere = Path.Combine(f.Root, "Elsewhere", "settings.json");
@@ -4731,7 +4854,7 @@ public static class Program
 		Check(!ToolSettings.OfferFirst(true, false, 2), "a setup that has run: not offered again");
 		Check(!ToolSettings.OfferFirst(false, true, 2), "the player went on from the box before: not offered again");
 		Check(!ToolSettings.OfferFirst(false, false, 0), "no tool with a window of its own: no box");
-		Equal("tools.offered.my lumina", ToolRunner.App.MainViewModel.ToolsOfferedKey(@"C:\Setups\My Lumina.json"), "kept per setup, by its file's name");
+		Equal("tools.offered.my profile", ToolRunner.App.MainViewModel.ToolsOfferedKey(@"C:\Setups\My Profile.json"), "kept per setup, by its file's name");
 
 		// what a row of the box says
 		Check(ToolRunner.App.ToolsDialog.StateOf(null).StartsWith("not set up yet", StringComparison.Ordinal), "a tool not set up says so: " + ToolRunner.App.ToolsDialog.StateOf(null));
@@ -4889,7 +5012,7 @@ public static class Program
 	static void T_ASharedProgramCountsOnlyWhenItIsMo2s()
 	{
 		Check(Mo2Control.IsShared("javaw.exe") && Mo2Control.IsShared("CMD.EXE") && !Mo2Control.IsShared("TexGenx64.exe"), "which programs are anyone's");
-		using var ping = Process.Start(new ProcessStartInfo("ping", "-n 30 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true })!;
+		using var ping = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "PING.EXE"), "-n 30 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true })!;
 		try {
 			Equal(0, Mo2Control.FreshPid("PING.EXE", [], _ => false), "somebody else's is not the tool");
 			Equal(ping.Id, Mo2Control.FreshPid("PING.EXE", [], id => id == ping.Id), "its own is");
@@ -4926,7 +5049,6 @@ public static class Program
 		Check(mo2.RootBuilderDeployed(), "its own mark does");
 	}
 
-	// a language file: a value left empty stays English, a name is only a name, and a file that does not read is not replaced
 	// The languages shipped inside the program: each one reads, gives every text a translation (none left empty), keeps one access
 	// key where the English has one and every key shortcut the English names, and is offered in the language list
 	static void T_EveryShippedLanguageReadsWhole()
@@ -4953,11 +5075,515 @@ public static class Program
 		}
 	}
 
+	// Every text the window's code hands to WindowWords - Word("..."), Format("...", values), F($"...") - has its words in every
+	// shipped language. Read off Runner.App's own source: a text added without its words fails here, not in front of a player
+	static void T_EveryTextTheCodeShowsIsInEveryLanguage()
+	{
+		var app = Path.Combine(Path.GetDirectoryName(SourceDir())!, "Runner.App");
+		if (!Directory.Exists(app)) {
+			Console.WriteLine($"  (skipped: the source is not at {app})");
+			return;
+		}
+		// (the scan itself, on a made-up file: a call inside a comment is no text the window shows, and an escape is read as
+		// the compiler reads it)
+		var fixture = SourceWindowWords("// WindowWords.Word(\"Draft label\")\n/* WindowWords.Word(\"Also a draft\") */\nvar a = WindowWords.Word(\"\\x0041\");\n" +
+			"var b = WindowWords.Word(\"\\x41g\\U0001F600\\a\");\n", "Fixture.cs");
+		Equal("A | Ag\U0001F600\a", string.Join(" | ", fixture.Keys), "only the real calls, their escapes read as the compiler reads them");
+		var keys = new SortedDictionary<string, string>(StringComparer.Ordinal);
+		foreach (var file in Directory.GetFiles(app, "*.cs")) {
+			foreach (var (key, where) in SourceWindowWords(File.ReadAllText(file), Path.GetFileName(file))) {
+				keys.TryAdd(key, where);
+			}
+		}
+		Check(keys.Count > 250, "the texts were found in the source: " + keys.Count);
+		foreach (var language in ToolRunner.App.WindowWords.Shipped()) {
+			var words = ToolRunner.App.WindowWords.Read(ToolRunner.App.WindowWords.ShippedText(language)!, out _)!;
+			var missing = keys.Where(k => !words.ContainsKey(k.Key)).Select(k => $"\"{k.Key}\" ({k.Value})").ToList();
+			Check(missing.Count == 0, $"{language} lacks {missing.Count} text(s) the code shows: {string.Join(" | ", missing.Take(4))}");
+		}
+	}
+
+	// The texts one C# file hands to WindowWords - Word("..."), Format("...", values), F($"...") - each with where it stands.
+	// A call inside a comment hands nothing over, and is left out
+	static SortedDictionary<string, string> SourceWindowWords(string a_code, string a_name)
+	{
+		var keys = new SortedDictionary<string, string>(StringComparer.Ordinal);
+		var comment = SourceCommentMask(a_code);
+		// (in its own file the calls stand without the class's name: the ones its properties make, never a method's own first line)
+		var own = a_name == "WindowWords.cs";
+		foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(a_code, own ? @"(?<![A-Za-z_.])(Word|Format)\(" : @"WindowWords\.(Word|Format|F)\(")) {
+			if (comment[m.Index] || own && a_code[Math.Max(0, m.Index - 30)..m.Index].TrimEnd().EndsWith("string", StringComparison.Ordinal)) {
+				continue;
+			}
+			var start = m.Index + m.Length;
+			var where = $"{a_name}:{a_code.AsSpan(0, start).Count('\n') + 1}";
+			if (m.Groups[1].Value == "F") {
+				var at = start;
+				while (char.IsWhiteSpace(a_code[at])) {
+					++at;
+				}
+				Check(a_code[at] == '$' && a_code[at + 1] == '"', $"{where}: F( takes one $\"...\" text");
+				keys.TryAdd(SourceInterpolated(a_code, at).Format, where);
+			} else {
+				var end = SourceSkip(a_code, start, m.Groups[1].Value == "Format" ? ")," : ")");
+				foreach (var text in SourceLiterals(a_code, start, end).Where(x => x.Trim() != "")) {
+					keys.TryAdd(text, where);
+				}
+			}
+		}
+		return keys;
+	}
+
+	// Which characters of a C# file stand inside a comment (// to the line's end, /* to */). Strings and characters are
+	// stepped over - a // inside a text is no comment - regular, verbatim (@"", with "" for a quote) and interpolated alike
+	static bool[] SourceCommentMask(string a_s)
+	{
+		var mask = new bool[a_s.Length + 1];
+		for (var i = 0; i < a_s.Length; ++i) {
+			var c = a_s[i];
+			var next = i + 1 < a_s.Length ? a_s[i + 1] : '\0';
+			if (c == '/' && next == '/') {
+				var end = a_s.IndexOf('\n', i);
+				end = end < 0 ? a_s.Length : end;
+				Array.Fill(mask, true, i, end - i);
+				i = end;
+			} else if (c == '/' && next == '*') {
+				var end = a_s.IndexOf("*/", i + 2, StringComparison.Ordinal);
+				end = end < 0 ? a_s.Length : end + 2;
+				Array.Fill(mask, true, i, end - i);
+				i = end - 1;
+			} else if (c == '@' && next == '"' || c is '$' or '@' && next is '$' or '@' && i + 2 < a_s.Length && a_s[i + 2] == '"') {
+				// a verbatim text: it ends at a lone quote
+				var j = a_s.IndexOf('"', i) + 1;
+				while (j < a_s.Length && !(a_s[j] == '"' && (j + 1 >= a_s.Length || a_s[j + 1] != '"'))) {
+					j += a_s[j] == '"' ? 2 : 1;
+				}
+				i = j;
+			} else if (c == '"') {
+				i = SourceString(a_s, i).After - 1;
+			} else if (c == '$' && next == '"') {
+				i = SourceInterpolated(a_s, i).After - 1;
+			} else if (c == '\'') {
+				// (an escaped quote or a \u escape closes after its escape: the quote looked for begins past the backslash's own character)
+				i += next == '\\' ? (a_s.IndexOf('\'', i + 3) - i) : 2;
+			}
+		}
+		return mask;
+	}
+
+	// One escape of a C# text at a_s[a_i] (a backslash), read as the compiler reads it: what it stands for, and how many
+	// characters it takes. \x takes one to four hex digits, as many as follow; \U eight, one character past the first plane
+	static (string Value, int Length) SourceEscape(string a_s, int a_i)
+	{
+		static bool Hex(char a_c) => char.IsAsciiHexDigit(a_c);
+		int Digits(int a_most) {
+			var n = 0;
+			while (n < a_most && a_i + 2 + n < a_s.Length && Hex(a_s[a_i + 2 + n])) {
+				++n;
+			}
+			return n;
+		}
+		int Value(int a_n) => int.Parse(a_s.AsSpan(a_i + 2, a_n), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture);
+		var n = a_s[a_i + 1];
+		switch (n) {
+			case 'u':
+				return (((char)Value(4)).ToString(), 6);
+			case 'x': {
+				var d = Digits(4);
+				return (((char)Value(d)).ToString(), 2 + d);
+			}
+			case 'U':
+				return (char.ConvertFromUtf32(Value(8)), 10);
+			default:
+				return ((n switch {
+					'n' => '\n', 't' => '\t', 'r' => '\r', '0' => '\0', 'a' => '\a', 'b' => '\b', 'f' => '\f', 'v' => '\v', 'e' => '\u001b',
+					_ => n,
+				}).ToString(), 2);
+		}
+	}
+
+	// --- C# source read for its texts: a string, an interpolated string, and the code between them
+	// a_s[a_i] opens a plain string: what it holds, and the place after its closing quote
+	static (string Value, int After) SourceString(string a_s, int a_i)
+	{
+		var sb = new StringBuilder();
+		var i = a_i + 1;
+		while (a_s[i] != '"') {
+			if (a_s[i] != '\\') {
+				sb.Append(a_s[i++]);
+				continue;
+			}
+			var (value, length) = SourceEscape(a_s, i);
+			sb.Append(value);
+			i += length;
+		}
+		return (sb.ToString(), i + 1);
+	}
+
+	// from a_i on, code is stepped over - strings, characters, comments, and brackets with all they hold - to the first of
+	// a_closers that stands outside every one of them: its place
+	static int SourceSkip(string a_s, int a_i, string a_closers)
+	{
+		var depth = 0;
+		for (var i = a_i; ; ++i) {
+			var c = a_s[i];
+			if (depth == 0 && a_closers.Contains(c)) {
+				return i;
+			}
+			if (c is '(' or '[' or '{') {
+				++depth;
+			} else if (c is ')' or ']' or '}') {
+				--depth;
+			} else if (c == '"') {
+				i = SourceString(a_s, i).After - 1;
+			} else if (c == '$' && a_s[i + 1] == '"') {
+				i = SourceInterpolated(a_s, i).After - 1;
+			} else if (c == '\'') {
+				i += a_s[i + 1] == '\\' ? 3 : 2;
+			} else if (c == '/' && a_s[i + 1] == '/') {
+				i = a_s.IndexOf('\n', i);
+			}
+		}
+	}
+
+	// a_s[a_i] is the $ of $"...": the text as a FormattableString gives it ({0}, {1:00} where the values stand), and the
+	// place after its closing quote
+	static (string Format, int After) SourceInterpolated(string a_s, int a_i)
+	{
+		var sb = new StringBuilder();
+		var holes = 0;
+		var i = a_i + 2;
+		while (a_s[i] != '"') {
+			var c = a_s[i];
+			if (c == '\\') {
+				var (value, length) = SourceEscape(a_s, i);
+				sb.Append(value);
+				i += length;
+			} else if ((c == '{' || c == '}') && a_s[i + 1] == c) {
+				sb.Append(c).Append(c);
+				i += 2;
+			} else if (c == '{') {
+				// (a value ends at its bracket, or at the comma or colon that begins how it is laid out)
+				var end = SourceSkip(a_s, i + 1, "},:");
+				var spec = "";
+				if (a_s[end] != '}') {
+					var close = SourceSkip(a_s, end, "}");
+					spec = a_s[end..close];
+					end = close;
+				}
+				sb.Append('{').Append(holes.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append(spec).Append('}');
+				++holes;
+				i = end + 1;
+			} else {
+				sb.Append(c);
+				++i;
+			}
+		}
+		return (sb.ToString(), i + 1);
+	}
+
+	// the texts in the expression a_s[a_i..a_stop]: literals joined by + are one text, the two sides of a choice are two, and a
+	// literal a comparison stands right before is none (it is compared with, not shown)
+	static List<string> SourceLiterals(string a_s, int a_i, int a_stop)
+	{
+		var found = new List<string>();
+		string? cur = null;
+		var joined = false;
+		var compared = false;
+		for (var i = a_i; i < a_stop; ++i) {
+			var c = a_s[i];
+			if (c == '"') {
+				var (value, after) = SourceString(a_s, i);
+				if (compared) {
+					compared = false;
+				} else if (cur != null && joined) {
+					cur += value;
+				} else {
+					if (cur != null) {
+						found.Add(cur);
+					}
+					cur = value;
+				}
+				joined = false;
+				i = after - 1;
+			} else if (c == '$' && a_s[i + 1] == '"') {
+				Check(false, "a text with values in it goes through F($\"...\"), never Word or Format: " + a_s[i..Math.Min(a_s.Length, i + 60)]);
+			} else if (c == '/' && a_s[i + 1] == '/') {
+				i = a_s.IndexOf('\n', i);
+			} else if (c == '+') {
+				joined = true;
+			} else if (c is '=' or '!' && a_s[i + 1] == '=') {
+				var next = i + 2;
+				while (char.IsWhiteSpace(a_s[next])) {
+					++next;
+				}
+				compared = a_s[next] == '"';
+				++i;
+			} else if (!char.IsWhiteSpace(c)) {
+				if (c is '?' or ':' or ',') {
+					joined = false;
+				}
+				if ((char.IsLetter(c) || c is '_' or '(') && cur != null && !joined) {
+					found.Add(cur);
+					cur = null;
+				}
+			}
+		}
+		if (cur != null) {
+			found.Add(cur);
+		}
+		return found;
+	}
+
+	// a part of a window drawn again is walked again: a translation that is another text's English, with a translation of its
+	// own, would then be translated twice. And every value a text takes ({0}, {1:0.0}) is in its translation
+	static void T_NoTranslationIsAnotherTextsEnglish()
+	{
+		foreach (var name in ToolRunner.App.WindowWords.Shipped()) {
+			var words = ToolRunner.App.WindowWords.Read(ToolRunner.App.WindowWords.ShippedText(name)!, out _)!;
+			var twice = words.Where(p => p.Value != p.Key && words.TryGetValue(p.Value, out var again) && again != p.Value).Select(p => p.Key).ToList();
+			Check(twice.Count == 0, $"{name}: nothing is translated twice ({string.Join(" | ", twice.Take(5))})");
+			foreach (var (english, word) in words) {
+				var places = System.Text.RegularExpressions.Regex.Matches(english, @"\{\d+(?:[,:][^}]*)?\}").Select(m => m.Value).Order(StringComparer.Ordinal).ToList();
+				var kept = System.Text.RegularExpressions.Regex.Matches(word, @"\{\d+(?:[,:][^}]*)?\}").Select(m => m.Value).Order(StringComparer.Ordinal).ToList();
+				Check(places.SequenceEqual(kept), $"{name}: every value of \"{english}\" has its place in \"{word}\"");
+			}
+		}
+	}
+
+	// the languages packed into the program are the language files, every one, byte for byte, each found by its name (names
+	// with letters of other alphabets too) - and nothing else is in the pack
+	static void T_ThePackedLanguagesAreTheLanguageFiles()
+	{
+		var folder = Path.Combine(Path.GetDirectoryName(SourceDir())!, "Runner.App", "Languages");
+		if (!Directory.Exists(folder)) {
+			Console.WriteLine($"  (skipped: the source is not at {folder})");
+			return;
+		}
+		var files = Directory.GetFiles(folder, "*.json").Select(f => Path.GetFileNameWithoutExtension(f)!).Order(StringComparer.Ordinal).ToList();
+		Check(files.Count >= 12, "the language files were found: " + files.Count);
+		Equal(string.Join("|", files), string.Join("|", ToolRunner.App.WindowWords.Shipped()), "the pack holds every language file and nothing else");
+		foreach (var name in files) {
+			Equal(File.ReadAllText(Path.Combine(folder, name + ".json")), ToolRunner.App.WindowWords.ShippedText(name), name + ": the packed text is the file's");
+		}
+		Equal<string?>(null, ToolRunner.App.WindowWords.ShippedText("No Such Language"), "a language that is not there");
+	}
+
+	// a folder counted, sized and dated without an object for each file comes to what the walk over every file came to
+	static void T_AFolderIsCountedAsEveryFileInIt()
+	{
+		using var f = new FakeMo2();
+		var dir = Path.Combine(f.Root, "counted");
+		Directory.CreateDirectory(Path.Combine(dir, "sub", "deeper"));
+		Directory.CreateDirectory(Path.Combine(dir, "empty"));
+		var written = new[] { ("a.txt", 3, 2026), ("sub/b.dds", 5, 2025), ("sub/deeper/c.nif", 7, 2024), ("sub/.hidden", 11, 2023) };
+		foreach (var (name, size, year) in written) {
+			var file = Path.Combine(dir, name.Replace('/', '\\'));
+			File.WriteAllBytes(file, new byte[size]);
+			File.SetLastWriteTimeUtc(file, new DateTime(year, 3, 4, 5, 6, 7, DateTimeKind.Utc));
+		}
+		File.SetAttributes(Path.Combine(dir, "sub", ".hidden"), FileAttributes.Hidden | FileAttributes.ReadOnly);
+		try {
+			var every = new DirectoryInfo(dir).EnumerateFiles("*", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0 }).ToList();
+			Equal(every.Count, Files.CountFiles(dir), "as many files as the walk over every file finds, a hidden one too");
+			Equal(every.Sum(x => x.Length), Files.SizeOf(dir), "their size");
+			Equal(every.Max(x => x.LastWriteTimeUtc), Files.NewestWrite(dir), "the newest time");
+			Equal(new DateTime(2026, 3, 4, 5, 6, 7, DateTimeKind.Utc), Files.NewestWrite(dir), "... which is the newest file's, in UTC");
+			Equal(4, Files.CountFiles(dir), "four files");
+			Equal(26L, Files.SizeOf(dir), "26 bytes");
+			var gone = Path.Combine(dir, "not there");
+			Check(Files.CountFiles(gone) == 0 && Files.SizeOf(gone) == 0 && Files.NewestWrite(gone) == DateTime.MinValue, "a folder that is not there");
+		} finally {
+			File.SetAttributes(Path.Combine(dir, "sub", ".hidden"), FileAttributes.Normal);
+		}
+	}
+
+	// a shader-log line that counts what is left and also says a compile ended is kept as both: a later count never takes
+	// away that the compile ended
+	static void T_AShaderLogLineWithACountAndAMarkIsKeptAsBoth()
+	{
+		var d = new ShaderStep.LogDigest();
+		// the line alone first: its count is kept with it, not only its mark
+		d.Take("[12:00:00.000] [info] [ShaderTiming] Shader compilation completed, remaining=7\n");
+		Check(d.Text.Contains("Shader compilation completed", StringComparison.Ordinal), "the line that says the compile ended is kept: " + d.Text);
+		Equal<int?>(7, InGame.RemainingIn(d.Text), "and so is its count");
+		// a later count takes the count's place, never the mark's
+		d.Take("[12:00:01.000] [info] [ShaderTiming] slow shader: 10 ms, remaining=3\n");
+		Check(d.Text.Contains("Shader compilation completed", StringComparison.Ordinal), "the line that says the compile ended stays: " + d.Text);
+		Equal<int?>(3, InGame.RemainingIn(d.Text), "the newest count is the one asked");
+		Check(d.Text.EndsWith("slow shader: 10 ms, remaining=3", StringComparison.Ordinal), "and stands last");
+	}
+
+	// what a screen reader says of a control - its name, and the help text after it - goes into the window's language with
+	// the rest of its words; a help text a binding fills is the binding's (a step row's own, already in the language)
+	static void T_AScreenReadersWordsAreInTheWindowsLanguage()
+	{
+		Exception? failed = null;
+		var t = new Thread(() => {
+			try {
+				ToolRunner.App.WindowWords.Use(new Dictionary<string, string> {
+					["Restore"] = "Wiederherstellen", ["Puts it back"] = "Stellt es wieder her", ["Restore the run"] = "Den Lauf wiederherstellen", ["Double-click"] = "Doppelklick",
+				});
+				var button = new System.Windows.Controls.Button { Content = "Restore" };
+				System.Windows.Automation.AutomationProperties.SetName(button, "Restore the run");
+				System.Windows.Automation.AutomationProperties.SetHelpText(button, "Puts it back");
+				var bound = new System.Windows.Controls.Button { Content = "Restore", DataContext = new { Help = "Puts it back" } };
+				System.Windows.Data.BindingOperations.SetBinding(bound, System.Windows.Automation.AutomationProperties.HelpTextProperty, new System.Windows.Data.Binding("Help"));
+				var menu = new System.Windows.Controls.ContextMenu();
+				var entry = new System.Windows.Controls.MenuItem { Header = "Restore", InputGestureText = "Double-click" };
+				var key = new System.Windows.Controls.MenuItem { Header = "Restore", InputGestureText = "Ctrl+N" };
+				menu.Items.Add(entry);
+				menu.Items.Add(key);
+				button.ContextMenu = menu;
+				var panel = new System.Windows.Controls.StackPanel();
+				panel.Children.Add(button);
+				panel.Children.Add(bound);
+				ToolRunner.App.WindowWords.Tree(panel);
+				Check(entry.Header as string == "Wiederherstellen" && entry.InputGestureText == "Doppelklick", "a menu entry's words, and the words at its right");
+				Equal("Ctrl+N", key.InputGestureText, "a key's name stays as Windows writes it");
+				Equal("Wiederherstellen", button.Content as string, "its words");
+				Equal("Den Lauf wiederherstellen", System.Windows.Automation.AutomationProperties.GetName(button), "its name for a screen reader");
+				Equal("Stellt es wieder her", System.Windows.Automation.AutomationProperties.GetHelpText(button), "and the help text after it");
+				Check(System.Windows.Data.BindingOperations.IsDataBound(bound, System.Windows.Automation.AutomationProperties.HelpTextProperty),
+					"a help text a binding fills keeps its binding");
+			} catch (Exception e) when (e is not OutOfMemoryException) {
+				failed = e;
+			} finally {
+				ToolRunner.App.WindowWords.Use(new Dictionary<string, string>());
+			}
+		});
+		t.SetApartmentState(ApartmentState.STA);
+		t.Start();
+		t.Join();
+		if (failed != null) {
+			throw new InvalidOperationException("the walk over a made-up window failed: " + failed.Message, failed);
+		}
+	}
+
+	// a text with values in it is looked up by its form ("Use {0}'s old output?"), the values put in as they are
+	static void T_ATextWithValuesIsLookedUpByItsForm()
+	{
+		var tool = "DynDOLOD";
+		var at = 3;
+		var of = 13;
+		Check(ToolRunner.App.WindowWords.F($"Use {tool}'s old output?") == "Use DynDOLOD's old output?", "with no language in use it reads as written");
+		try {
+			ToolRunner.App.WindowWords.Use(new Dictionary<string, string> {
+				["Use {0}'s old output?"] = "Alte Ausgabe von {0} verwenden?", ["step {0} of {1}"] = "Schritt {0} von {1}", ["broken {0}"] = "kaputt {0} {1}",
+			});
+			Check(ToolRunner.App.WindowWords.F($"Use {tool}'s old output?") == "Alte Ausgabe von DynDOLOD verwenden?", "the language's form of it, the value as it is");
+			Check(ToolRunner.App.WindowWords.F($"step {at} of {of}") == "Schritt 3 von 13", "two values");
+			Check(ToolRunner.App.WindowWords.F($"broken {tool}") == "broken DynDOLOD", "a translation whose places do not fit falls back to the English");
+			Check(ToolRunner.App.WindowWords.F($"not in the file: {tool}") == "not in the file: DynDOLOD", "a text the language lacks stays English");
+		} finally {
+			ToolRunner.App.WindowWords.Use(new Dictionary<string, string>());
+		}
+	}
+
+	static void T_TimeBetweenTwoClockReadings()
+	{
+		// (two instants three hours apart, read as the PC's own clock shows them - in many places a daylight-saving change lies between)
+		var from = new DateTime(2026, 3, 29, 0, 30, 0, DateTimeKind.Utc).ToLocalTime();
+		var to = new DateTime(2026, 3, 29, 3, 30, 0, DateTimeKind.Utc).ToLocalTime();
+		Check(Times.Between(from, to) == TimeSpan.FromHours(3), "three hours are three hours, whatever the clock did between them");
+		Check(Times.WholeMinutes(TimeSpan.FromMinutes(59.6)) == 60 && Times.WholeMinutes(TimeSpan.FromMinutes(-5)) == 0, "whole minutes, never below nothing");
+		Check(Times.HoursAndMinutes(TimeSpan.FromMinutes(59.6)) == "1 h 00 min", "59.6 minutes read 1 h 00 min: " + Times.HoursAndMinutes(TimeSpan.FromMinutes(59.6)));
+		Check(Times.HoursAndMinutes(TimeSpan.FromMinutes(44.4)) == "44 min" && Times.HoursAndMinutes(TimeSpan.FromMinutes(125)) == "2 h 05 min", "minutes, and hours with minutes");
+		Check(RunSummary.Span(TimeSpan.FromMinutes(119.6)) == "2 h 00 min", "the summary rounds the same way: " + RunSummary.Span(TimeSpan.FromMinutes(119.6)));
+		Check(ToolRunner.App.MainViewModel.Short(TimeSpan.FromMinutes(59.6)) == "1h 00m", "the window's short form: " + ToolRunner.App.MainViewModel.Short(TimeSpan.FromMinutes(59.6)));
+		Check(ToolRunner.App.MainViewModel.Short(TimeSpan.FromSeconds(-300)) == "0s", "a time below nothing shows as none");
+		Check(ToolRunner.App.MainViewModel.Long(TimeSpan.FromMinutes(59.6)) == "1 h 00 min", "the window's long form");
+	}
+
+	static void T_NamesWindowsKeepsForDevices()
+	{
+		foreach (var name in new[] { "CON", "nul", "COM1", "LPT9", "NUL.txt", "con.json" }) {
+			Check(Setup.IsDeviceName(name) && !Setup.PlainName(name), name + " is a device's name, no folder's");
+		}
+		foreach (var name in new[] { "Console", "COM10", "Nullable", "My setup", "DynDOLOD Output - My Profile" }) {
+			Check(!Setup.IsDeviceName(name) && Setup.PlainName(name), name + " is a plain name");
+		}
+		Check(SetupFiles.BadName(Path.GetTempPath(), "AUX") is { } why && why.Contains("Windows keeps", StringComparison.Ordinal), "a setup cannot be called AUX");
+	}
+
+	static void T_AThemeColorIsHexDigitsOrAName()
+	{
+		foreach (var good in new[] { "#FFF", "#1F6FD1", "#660B1A2E", "#abcd", "Red", " transparent " }) {
+			Check(ToolRunner.App.Theme.PlainColor(good), good + " is a color");
+		}
+		foreach (var bad in new[] { "", "#12", "#GGGGGG", "ContextColor file:///C:/x.icc 1,0,0", "sc#1,0,0", "#FF FF FF", "Red;Blue" }) {
+			Check(!ToolRunner.App.Theme.PlainColor(bad), "\"" + bad + "\" is refused");
+		}
+	}
+
+	// A theme's picture is kept no larger than it is ever shown: a large one is made small as it is read, a small one is taken
+	// as it is, and its file is let go either way (a theme's folder must stay free to move or remove)
+	static void T_AThemesPictureIsKeptSmall()
+	{
+		// (on a single-threaded apartment of its own, as the window reads a theme's picture and as every other test here that
+		// makes WPF objects runs)
+		Exception? failed = null;
+		var t = new Thread(() => {
+			try {
+				ThemesPictureIsKeptSmall();
+			} catch (Exception e) when (e is not OutOfMemoryException) {
+				failed = e;
+			}
+		});
+		t.SetApartmentState(ApartmentState.STA);
+		t.Start();
+		t.Join();
+		if (failed != null) {
+			throw new InvalidOperationException("a theme's picture: " + failed.Message, failed);
+		}
+	}
+
+	static void ThemesPictureIsKeptSmall()
+	{
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "icon " + Guid.NewGuid().ToString("N")[..8]);
+		Directory.CreateDirectory(dir);
+		try {
+			string Picture(string a_name, int a_wide, int a_high)
+			{
+				var file = Path.Combine(dir, a_name);
+				var made = System.Windows.Media.Imaging.BitmapSource.Create(a_wide, a_high, 96, 96, System.Windows.Media.PixelFormats.Bgra32, null, new byte[a_wide * a_high * 4], a_wide * 4);
+				var png = new System.Windows.Media.Imaging.PngBitmapEncoder();
+				png.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(made));
+				using var to = File.Create(file);
+				png.Save(to);
+				return file;
+			}
+			var wide = ToolRunner.App.Theme.IconFrom(Picture("wide.png", 1200, 600));
+			Equal((256, 128), (wide.PixelWidth, wide.PixelHeight), "a wide picture is read at 256 across, its shape kept");
+			var tall = ToolRunner.App.Theme.IconFrom(Picture("tall.png", 300, 900));
+			Check(tall.PixelHeight == 256 && tall.PixelWidth is >= 85 and <= 86, $"a tall one at 256 high: {tall.PixelWidth} x {tall.PixelHeight}");
+			var small = ToolRunner.App.Theme.IconFrom(Picture("small.png", 64, 64));
+			Equal((64, 64), (small.PixelWidth, small.PixelHeight), "a small one is taken as it is");
+			Check(wide.IsFrozen && tall.IsFrozen && small.IsFrozen, "each can be used from any thread");
+			foreach (var f in Directory.GetFiles(dir)) {
+				File.Delete(f);
+			}
+			Check(Directory.GetFiles(dir).Length == 0, "no picture file is held open after it was read");
+		} finally {
+			Directory.Delete(dir, true);
+		}
+	}
+
+	static void T_SmallTextRulesOfTheWindow()
+	{
+		Check(ToolRunner.App.PanelWindow.Plain("HISTORY") == "History" && ToolRunner.App.PanelWindow.Plain("MO2 CHANGELOG") == "MO2 Changelog", "a heading as a window title");
+		Check(ToolRunner.App.SettingsPanel.TypedPath("  \"C:\\Tools\\x.exe\"  ") == "C:\\Tools\\x.exe", "a path pasted with Explorer's quotes loses them");
+		Check(ToolRunner.App.SettingsPanel.TypedPath(" C:\\a b ") == "C:\\a b" && ToolRunner.App.SettingsPanel.TypedPath("\"") == "\"", "a path without them is only trimmed");
+		Check(ToolRunner.App.Cli.Handles(["frobnicate"]) && !ToolRunner.App.Cli.Handles(["--snapshot"]) && !ToolRunner.App.Cli.Handles([]), "a word that is no command is the command line's to refuse, not the window's to open on");
+	}
+
 	// what the window shows only once it is used - the step editor's labels, the settings choices not picked, the command box's
 	// entries - is in every shipped language as well, not only what a picture of the window showed
 	static void T_EveryShippedLanguageHasTheSettingsTexts()
 	{
-		string[] more = ["{0} (default {1})", "Show setup: {0}", "Settings of {0}", "Run only {0}", "Find in the settings: \"{0}\"", "Stop the test", "Most recent save (any character)",
+		string[] more = [.. ToolFinder.WhereTexts, .. LodGuide.Words, .. ToolUpdates.SummaryTexts, .. StepCatalog.All.Select(s => s.About), StepCatalog.Info(AddOns.KeyPrefix + "x").About, StepCatalog.RunsAfter,
+			.. StepCatalog.MustPrecede.Select(r => r.Why).Distinct(), "LOD output mods switched off before the first step (one per line)", "Plugin places after a run (each: the plugin, then last_master, after:<plugin> or end)", "A plugin's place when a run first ticks it (the plugin: the plugin it goes below)",
+			"{0} (default {1})", "Show setup: {0}", "Settings of {0}", "Run only {0}", "Find in the settings: \"{0}\"", "Stop the test", "Most recent save (any character)",
 			"leave it to me (unanswered, the step stops)", "every run", "never", "skip it during the run (it asks in my own game)",
 			"new cache at every game start", "leave it alone - warn me only", "off", "on", "none", "the step's own", "Data folder (setups, runs, backups): {0}", ToolRunner.App.MainWindow.FooterText, "Data folder: {0}"];
 		var must = ToolRunner.App.SettingsPanel.StepLabels.Concat(more).ToList();
@@ -4978,6 +5604,39 @@ public static class Program
 		}
 	}
 
+	// "Make a language file" lists every text the program can show, also the ones no window holds at that moment
+	static void T_ALanguageFileListsEveryText()
+	{
+		var name = "a test " + Guid.NewGuid().ToString("N")[..8];
+		var mine = Path.Combine(ToolRunner.App.WindowWords.Folder, name + ".json");
+		try {
+			Exception? failed = null;
+			var t = new Thread(() => {
+				try {
+					ToolRunner.App.WindowWords.WriteTemplate(new System.Windows.Controls.StackPanel(), name);
+				} catch (Exception e) {
+					failed = e;
+				}
+			});
+			t.SetApartmentState(ApartmentState.STA);
+			t.Start();
+			t.Join();
+			if (failed != null) {
+				throw failed;
+			}
+			var made = ToolRunner.App.WindowWords.Read(File.ReadAllText(mine), out var problem) ?? [];
+			Check(problem == "", "the file made reads: " + problem);
+			var shipped = ToolRunner.App.WindowWords.Read(ToolRunner.App.WindowWords.ShippedText("Deutsch")!, out _)!;
+			var lacking = shipped.Keys.Where(k => !made.ContainsKey(k)).ToList();
+			Check(lacking.Count == 0, $"the file made lacks {lacking.Count} of the program's texts: {string.Join(" | ", lacking.Take(3))}");
+			Check(made.Count > 0 && made.Values.All(v => v == ""), "every text waits for its translation");
+			Equal("Run xLODGen", new ToolRunner.App.StepRow { Key = "xlodgen", Name = "xLODGen", About = "" }.TickName, "a step's tick, named for a screen reader");
+		} finally {
+			File.Delete(mine);
+		}
+	}
+
+	// a language file: a value left empty stays English, a name is only a name, and a file that does not read is not replaced
 	static void T_ALanguageFileCannotHarmTheWindow()
 	{
 		ToolRunner.App.WindowWords.Use(new Dictionary<string, string> { ["Start"] = "Starten", ["Empty"] = null!, ["Blank"] = "  " });
@@ -5070,6 +5729,46 @@ public static class Program
 		Equal<string?>(null, SynthesisStep.Failure("[INF] [T2] Starting Patcher A Run\n[INF] [T2] Finished patcher run\n"), "a clean run is no failure");
 	}
 
+	// Synthesis's log is judged by what each look added to it, as its whole text would be: it grows to megabytes in a long
+	// run, and was read and searched whole every two seconds
+	static void T_ASynthesisLogIsJudgedAsItGrows()
+	{
+		var noise = string.Concat(Enumerable.Range(0, 3000).Select(i => $"2026-10-27 16:04:{i % 60:00}.000 -04:00 [INF] [T{i % 9}] Patched record {i}\r\n"));
+		const string first = "2026-10-27 16:04:36.640 -04:00 [INF] [T16] ================= Starting Patcher First Run =================\r\n";
+		const string second = "2026-10-27 16:05:36.640 -04:00 [INF] [T16] ================= Starting Patcher Second Patcher Run =================\r\n";
+		const string third = "2026-10-27 16:06:36.640 -04:00 [INF] [T16] ================= Starting Patcher Third Run =================\r\n";
+		const string finished = "2026-10-27 16:07:45.911 -04:00 [INF] [T2] Finished patcher run\r\n";
+		var failed = first + noise + second + noise +
+			"2026-10-27 16:05:45.899 -04:00 [ERR] [T35] System.NotImplementedException: Writing with compression enabled is not currently supported.\r\n" +
+			"2026-10-27 16:05:45.907 -04:00 [ERR] [T35] Error while running:\r\n" + third + noise +
+			"2026-10-27 16:06:45.899 -04:00 [ERR] [T35] a later error\r\n" + finished;
+		var clean = first + noise + second + noise + finished;
+		foreach (var (name, log) in new[] { ("a patcher that failed", failed), ("a clean run", clean), ("a run still going", first + noise + second), ("a log's last line without its end", failed.TrimEnd()) }) {
+			// fed as it grows: in pieces that end anywhere, the last line not yet whole at some looks
+			var digest = new SynthesisStep.LogDigest();
+			var whole = "";
+			for (var at = 0; at < log.Length; at += 7919) {
+				var piece = log[at..Math.Min(log.Length, at + 7919)];
+				var before = whole.Length - (whole.LastIndexOf('\n') + 1);
+				whole += piece;
+				var from = whole.Length - piece.Length - before;
+				var end = whole.LastIndexOf('\n') + 1;
+				if (end > from) {
+					digest.Take(whole[from..end]);
+				}
+				Equal(SynthesisStep.Failure(whole), digest.FailureWith(whole[end..]), $"{name}, {whole.Length} letters in: judged by what was added as by the whole log");
+			}
+			digest.Restart();
+			Equal<string?>(null, digest.Failure, $"{name}: a log begun anew is judged anew");
+		}
+		var why = SynthesisStep.Failure(failed);
+		Check(why != null && why.Contains("\"Second Patcher\"", StringComparison.Ordinal) && why.Contains("compression", StringComparison.Ordinal) && !why.Contains("later", StringComparison.Ordinal),
+			"the first error, and the patcher that had started when it came: " + why);
+		Equal(why, SynthesisStep.Failure(failed.TrimEnd()), "the same of a log whose last line has no end yet");
+		Equal<string?>(null, SynthesisStep.Failure(clean), "a clean run is no failure");
+		Equal<string?>(null, SynthesisStep.Failure(first + noise + second), "a run still going is not judged");
+	}
+
 	// seen in a real run: a window being destroyed answers UI Automation with a raw COM error - a "gone" element, never
 	// a failed step
 	static void T_AWindowGoingAwayIsNotAFailure()
@@ -5083,8 +5782,8 @@ public static class Program
 	// seen in a real run: xLODGen wrote where MO2's entry for it said (-o:), not into the step's output folder
 	static void T_XLodGenWritesWhereTheStepSays()
 	{
-		var mo2Args = Mo2Instance.Unescape(@"-o:\""D:\\Modding\\Old Scratch\\Terrain LOD\"" -sse");
-		Equal(@"-o:""D:\Modding\Old Scratch\Terrain LOD"" -sse", mo2Args, "MO2's ini escaping undone");
+		var mo2Args = Mo2Instance.Unescape(@"-o:\""E:\\Tools\\Old Scratch\\Terrain LOD\"" -sse");
+		Equal(@"-o:""E:\Tools\Old Scratch\Terrain LOD"" -sse", mo2Args, "MO2's ini escaping undone");
 		Equal(@"-o:""C:\New\Terrain LOD"" -sse", XLodGenStep.WithOutput(mo2Args, @"C:\New\Terrain LOD\"), "an -o: there is replaced");
 		Equal(@"-sse -o:""C:\New""", XLodGenStep.WithOutput("-sse -o:C:\\Old", @"C:\New"), "an unquoted one too");
 		Equal(@"-o:""C:\New"" -sse", XLodGenStep.WithOutput("-sse", @"C:\New"), "none there: put first");
@@ -5538,7 +6237,7 @@ public static class Program
 		var keep = Mo2Control.SteamSettle;
 		Mo2Control.SteamSettle = TimeSpan.Zero;
 		try {
-			const string steamGame = @"D:\SteamLibrary\steamapps\common\Skyrim Special Edition";
+			const string steamGame = @"E:\Games\SteamLibrary\steamapps\common\Skyrim Special Edition";
 			Check(Mo2Control.IsSteamGame(steamGame), "a Steam library path");
 			Check(!Mo2Control.IsSteamGame(@"C:\GOG Games\Skyrim Anniversary Edition"), "a GOG path");
 			Check(!Mo2Control.IsSteamGame(f.Game), "a copied game folder with no Steam library");
@@ -5679,25 +6378,23 @@ public static class Program
 	}
 
 	// the leak guard, both ways, with a harmless program (no window of any kind - the "player's screen" is the fake below)
-	static void T_LeakGuardEndsAToolThatShowsOnHisScreen()
+	static void T_LeakGuardEndsAToolThatShowsOnThePlayersScreen()
 	{
 		var keep = HiddenDesktop.OnPlayersDesktop;
 		HiddenDesktop.GuardPoll = TimeSpan.FromMilliseconds(100);
 		try {
-			// pythonw where it is installed (no window of any kind); elsewhere Windows' own ping, which opens none either:
-			// HiddenDesktop.Start gives a console program no console at all (CREATE_NO_WINDOW)
-			var pyw = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Python", "pythoncore-3.14-64", "pythonw.exe");
-			var ping = File.Exists(pyw) ? $"\"{pyw}\" -c \"import time; time.sleep(30)\"" :
-				$"\"{Path.Combine(Environment.SystemDirectory, "PING.EXE")}\" -n 31 127.0.0.1";
+			// Windows' own ping, which opens no window of any kind: HiddenDesktop.Start gives a console program no console at
+			// all (CREATE_NO_WINDOW)
+			var ping = $"\"{Path.Combine(Environment.SystemDirectory, "PING.EXE")}\" -n 31 127.0.0.1";
 			HiddenDesktop.OnPlayersDesktop = _ => [];
-			using (var quiet = new HiddenDesktop("MO2-Tool-Runner-test-a")) {
+			using (var quiet = new HiddenDesktop("Tool-Runner-test-a")) {
 				using var p = quiet.Start(ping, Path.GetTempPath());
 				Thread.Sleep(800);
 				Check(quiet.Leak == null && !p.HasExited, "a tool that stays hidden was ended");
 				Procs.KillTree(p.Id);
 			}
 			HiddenDesktop.OnPlayersDesktop = pids => pids.Count > 0 ? [(nint)1] : [];
-			using (var leaky = new HiddenDesktop("MO2-Tool-Runner-test-b")) {
+			using (var leaky = new HiddenDesktop("Tool-Runner-test-b")) {
 				using var p = leaky.Start(ping, Path.GetTempPath());
 				// (up to 20 s: the suite runs at Idle priority beside other builds, where the guard's look can be late; the tool
 				// itself would run 30 s, so an end inside 20 s is still the guard's)
@@ -5705,7 +6402,7 @@ public static class Program
 				while (!p.HasExited && sw.Elapsed < TimeSpan.FromSeconds(20)) {
 					Thread.Sleep(100);
 				}
-				Check(p.HasExited, "a tool that showed on his screen was not ended");
+				Check(p.HasExited, "a tool that showed on the player's screen was not ended");
 				Check(leaky.Leak?.Contains("player's screen", StringComparison.Ordinal) == true, "no reason given: " + leaky.Leak);
 			}
 		} finally {
@@ -5819,7 +6516,7 @@ public static class Program
 		var p = RunPreview.Build(setup, Mo2Instance.Load(f.Exe, f.Instance), Runner.Plan(setup, null, null, null));
 		Equal(2, p.Steps.Count, "two tools");
 		var off = p.OffForTheRun.ToDictionary(o => o.Mod, o => o.Why);
-		Check(off.TryGetValue("Output A", out var a) && a.Contains("Landscape Fixer", StringComparison.Ordinal), "Output A off, made by SnowFixer");
+		Check(off.TryGetValue("Output A", out var a) && a.Contains("Landscape Fixer", StringComparison.Ordinal), "Output A off, made by Landscape Fixer");
 		Check(off.ContainsKey("Output B") && off.ContainsKey("Replaced"), "Output B and the replaced mod off");
 		Check(off.TryGetValue("Needs B", out var nb) && nb.Contains("OutB.esp", StringComparison.Ordinal), "a mod needing Output B's plugin off with it, said why");
 		Check(!off.ContainsKey("Base Mod"), "nothing else");
@@ -6753,12 +7450,9 @@ public static class Program
 		Equal<QueueRun.State?>(null, QueueRun.Read(data), "no queue read once it ended");
 	}
 
-	// the window's pictures read the way the window reads them: an Icon.ico WPF could not decode crashed the program at start
-	// - a picture like that fails here, never on a player's screen. Covered: every picture compiled into the program
-	// and every picture App.xaml's resources make; NOT a picture a window names by its own address (use the Logo resource way)
 	// the template's rules for a theme, held for every theme the program ships (more themes, each one checked):
 	// text and its quieter kind readable on every panel, the outlined and the primary button's text readable, the three states
-	// readable and apart, borders visible. The work folder's "make themes.py" checks the same before it writes a theme
+	// readable and apart, borders visible
 	static void T_EveryShippedThemeKeepsTheRules()
 	{
 		static double Lum(string a_hex)
@@ -6847,6 +7541,9 @@ public static class Program
 		}
 	}
 
+	// the window's pictures read the way the window reads them: an Icon.ico WPF could not decode crashed the program at start
+	// - a picture like that fails here, never on a player's screen. Covered: every picture compiled into the program
+	// and every picture App.xaml's resources make; NOT a picture a window names by its own address (use the Logo resource way)
 	static void T_EveryWindowPictureLoads()
 	{
 		string[] kinds = [".png", ".ico", ".jpg", ".jpeg", ".bmp", ".gif"];
@@ -7014,15 +7711,15 @@ public static class Program
 		p.EnsureMod("Empty Out");
 		p.EnsureMod("Full Out");
 		File.WriteAllText(Path.Combine(f.Mods, "Full Out", "Built.esp"), "x");
-		f.Mod("His Empty");
-		File.WriteAllText(Path.Combine(f.ProfileDir, "modlist.txt"), "-His Empty\r\n" + f.Text("modlist.txt"));
+		f.Mod("Their Empty");
+		File.WriteAllText(Path.Combine(f.ProfileDir, "modlist.txt"), "-Their Empty\r\n" + f.Text("modlist.txt"));
 		var park = Path.Combine(f.Backups, "run");
 		Check(p.TakeOutEmptyOutput("Empty Out", park), "the empty output was taken out");
 		Check(!p.TakeOutEmptyOutput("Full Out", park), "an output with files stays");
-		Check(!p.TakeOutEmptyOutput("His Empty", park), "a mod the tool did not make stays, empty or not");
+		Check(!p.TakeOutEmptyOutput("Their Empty", park), "a mod the tool did not make stays, empty or not");
 		var list = f.Text("modlist.txt");
 		Check(!list.Contains("Empty Out", StringComparison.Ordinal), "its mod-list line is gone");
-		Check(list.Contains("-Full Out", StringComparison.Ordinal) && list.Contains("-His Empty", StringComparison.Ordinal), "the others keep their lines");
+		Check(list.Contains("-Full Out", StringComparison.Ordinal) && list.Contains("-Their Empty", StringComparison.Ordinal), "the others keep their lines");
 		Check(!Directory.Exists(Path.Combine(f.Mods, "Empty Out")), "its folder left the mods folder");
 		Check(File.Exists(Path.Combine(park, "empty outputs", "Empty Out", "meta.ini")), "its folder is in the run's backup, never erased");
 		Check(!p.Added.Contains("Empty Out") && p.Added.Contains("Full Out"), "it is no longer kept as an added mod");
@@ -7063,7 +7760,7 @@ public static class Program
 		Equal(0x00FFFFFF, ToolRunner.App.WindowFrame.Ref(System.Windows.Media.Colors.White), "white");
 	}
 
-	// "the tool keeps trying to fight you when you're doing something in mo2": what the player ticks, unticks or installs
+	// A run never fights the player: what the player ticks, unticks or installs
 	// while a run goes on is told apart from the run's own switches (and from a step's switch-and-put-back), so the put-back
 	// keeps it instead of undoing it
 	static void T_ThePlayersChangesDuringARunAreTold()
@@ -7345,7 +8042,7 @@ public static class Program
 		Check(mem != null && mem.What.Contains("memory", StringComparison.Ordinal) && mem.Help == "https://dyndolod.info/FAQ", "a sheson tool's out of memory, any letter case, with its FAQ");
 		Check(ToolErrors.Explain("synthesis", "Out of memory") == null, "a tool's own error is only matched for that tool");
 		Check(ToolErrors.Explain("texgen", "the tool crashed") == null, "an error no page names keeps the tool's own words");
-		var master = ToolErrors.Explain("snowfixer", "Snow.esp: Missing Master Skyrim2.esm");
+		var master = ToolErrors.Explain("landscapefixer", "Landscape.esp: Missing Master Skyrim2.esm");
 		Check(master != null && master.Help == null, "a missing master is known for every step");
 		var lines = ToolErrors.Simple("DynDOLOD", StepState.Failed, "Out of memory", mem);
 		Equal(4, lines.Count, "what, what to do, help, the tool's words: " + string.Join(" | ", lines));
@@ -7385,7 +8082,6 @@ public static class Program
 		}
 	}
 
-	// the log's colors: green as planned, yellow a warning, red a failure or what goes off plan - read off the marks both logs write
 	// A long run's log as the window takes it: lines added a few at a time, the oldest cut away past 200,000 characters (as the
 	// window does), every line one colored paragraph. What it keeps must be exactly the newest lines, and the time it takes is
 	// the test's own time in the log (no limit here but a generous one: a busy PC is no failure)
@@ -7429,6 +8125,7 @@ public static class Program
 		}
 	}
 
+	// the log's colors: green as planned, yellow a warning, red a failure or what goes off plan - read off the marks both logs write
 	static void T_TheLogIsColoredByWhatEachLineSays()
 	{
 		Equal("Good", ToolRunner.App.LogView.BrushKey("21:00:01  TexGen started"), "a line as planned (detailed)");
@@ -7576,8 +8273,8 @@ public static class Program
 		Equal("left out for a new game", ToolRunner.App.A11y.StepStatus(true, true, null, "", "", ""), "a save step on a new game");
 		Equal("usually takes 7m, " + ToolRunner.App.MainViewModel.NoDevBench, ToolRunner.App.A11y.StepStatus(true, false, null, "", "7m", "", false, ToolRunner.App.MainViewModel.NoDevBench),
 			"a step DevBench is missing for says so to a screen reader too");
-		Equal("Bottled", new ToolRunner.App.SetupItem("Bottled", @"C:\Data\Setups\Bottled.json").ToString(), "a setup is read by its name, not its path");
-		var row = new ToolRunner.App.HistoryRow("Tue Oct 27  21:02", "Bottled", "1h 41m", "finished: 12 step(s)", true, @"C:\Runs\1").ToString();
+		Equal("My Setup", new ToolRunner.App.SetupItem("My Setup", @"C:\Data\Setups\My Setup.json").ToString(), "a setup is read by its name, not its path");
+		var row = new ToolRunner.App.HistoryRow("Tue Oct 27  21:02", "My Setup", "1h 41m", "finished: 12 step(s)", true, @"C:\Runs\1").ToString();
 		Check(row.Contains("finished", StringComparison.Ordinal) && !row.Contains(@"C:\Runs", StringComparison.Ordinal), "a past run in words: " + row);
 		var said = new List<(string, bool)>();
 		ToolRunner.App.A11y.Heard = (t, i) => said.Add((t, i));
@@ -7619,34 +8316,34 @@ public static class Program
 		}
 	}
 
-	static void CleanRemovalPlans(FakeMo2 f, Setup setup, string setupsDir, string own, string other, string stray, string work)
+	static void CleanRemovalPlans(FakeMo2 a_f, Setup a_setup, string a_setupsDir, string a_own, string a_other, string a_stray, string a_work)
 	{
-		Check(DataRemoval.Make(f.Data, true).Remove.Contains(work, StringComparer.OrdinalIgnoreCase), "its ProgramData work folder goes too");
-		Check(!DataRemoval.Make(f.Data, true).Remove.Any(p => p.EndsWith("not there", StringComparison.Ordinal)), "a work folder that does not exist is not listed");
+		Check(DataRemoval.Make(a_f.Data, true).Remove.Contains(a_work, StringComparer.OrdinalIgnoreCase), "its ProgramData work folder goes too");
+		Check(!DataRemoval.Make(a_f.Data, true).Remove.Any(p => p.EndsWith("not there", StringComparison.Ordinal)), "a work folder that does not exist is not listed");
 		// a setup deleted since: its run record still names its backup, which goes too - a record pointing at a folder not named
 		// like a run backup removes nothing
-		var goneBackup = Path.Combine(setup.BackupDir, "2026-10-30 19-00-00 Gone Setup");
+		var goneBackup = Path.Combine(a_setup.BackupDir, "2026-10-30 19-00-00 Gone Setup");
 		Directory.CreateDirectory(Path.Combine(goneBackup, "profile Test"));
 		// named like a run backup but holding no copy of a profile: not one, never taken
-		var lookalike = Path.Combine(f.Root, "2026-10-30 20-00-00 Lookalike");
+		var lookalike = Path.Combine(a_f.Root, "2026-10-30 20-00-00 Lookalike");
 		Directory.CreateDirectory(lookalike);
-		foreach (var (id, name, backup) in new[] { ("2026-10-30 19-00-00 Gone Setup", "Gone Setup", goneBackup), ("2026-10-30 19-30-00 Odd", "Odd", stray),
+		foreach (var (id, name, backup) in new[] { ("2026-10-30 19-00-00 Gone Setup", "Gone Setup", goneBackup), ("2026-10-30 19-30-00 Odd", "Odd", a_stray),
 			         ("2026-10-30 20-00-00 Lookalike", "Lookalike", lookalike) }) {
-			var done = new Journal { Id = id, Folder = Path.Combine(Runner.RunsDir(f.Data), id), SetupFile = Path.Combine(setupsDir, name + ".json"), SetupName = name,
+			var done = new Journal { Id = id, Folder = Path.Combine(Runner.RunsDir(a_f.Data), id), SetupFile = Path.Combine(a_setupsDir, name + ".json"), SetupName = name,
 				Profile = "Test", BackupDir = backup, Started = DateTime.Now, State = RunState.Finished, Pid = 0 };
 			Directory.CreateDirectory(done.Folder);
 			done.Save();
 		}
-		var all = DataRemoval.Make(f.Data, false);
+		var all = DataRemoval.Make(a_f.Data, false);
 		Equal<string?>(null, all.Refused, "nothing refused");
 		Check(all.Remove.Contains(goneBackup, StringComparer.OrdinalIgnoreCase), "a deleted setup's run backup goes, found through its run record");
 		Check(!all.Remove.Contains(lookalike, StringComparer.OrdinalIgnoreCase), "a folder a record names that holds no profile copy stays");
 		Equal(all.Remove.Count, all.Remove.Distinct(StringComparer.OrdinalIgnoreCase).Count(), "each folder listed once");
-		Check(all.Remove.Contains(own, StringComparer.OrdinalIgnoreCase), "this setup's run backup goes");
-		Check(!all.Remove.Contains(other, StringComparer.OrdinalIgnoreCase) && !all.Remove.Contains(stray, StringComparer.OrdinalIgnoreCase), "another setup's backup and a stray folder stay");
-		Check(all.Remove.Any(p => Files.SamePath(p, f.Data)), "the data folder goes whole");
-		var keep = DataRemoval.Make(f.Data, true);
-		Check(keep.Kept.Any(p => Files.SamePath(p, setupsDir)) && !keep.Remove.Any(p => Files.SamePath(p, setupsDir) || Files.SamePath(p, f.Data)), "the setups kept, so the data folder itself stays");
+		Check(all.Remove.Contains(a_own, StringComparer.OrdinalIgnoreCase), "this setup's run backup goes");
+		Check(!all.Remove.Contains(a_other, StringComparer.OrdinalIgnoreCase) && !all.Remove.Contains(a_stray, StringComparer.OrdinalIgnoreCase), "another setup's backup and a stray folder stay");
+		Check(all.Remove.Any(p => Files.SamePath(p, a_f.Data)), "the data folder goes whole");
+		var keep = DataRemoval.Make(a_f.Data, true);
+		Check(keep.Kept.Any(p => Files.SamePath(p, a_setupsDir)) && !keep.Remove.Any(p => Files.SamePath(p, a_setupsDir) || Files.SamePath(p, a_f.Data)), "the setups kept, so the data folder itself stays");
 		// what would not fit the Recycle Bin is never handed to it (Windows would delete it for good): left in place and named
 		var room = DataRemoval.BinRoom;
 		try {
@@ -7666,11 +8363,11 @@ public static class Program
 		var binned = new List<string>();
 		Equal(0, DataRemoval.Carry(keep, p => { binned.Add(p); return null; }).Count, "all of it went");
 		Check(binned.Count == keep.Remove.Count(p => File.Exists(p) || Directory.Exists(p)), "each entry sent once");
-		var j = new Journal { Id = "x", Folder = Path.Combine(Runner.RunsDir(f.Data), "2026-11-02 21-00-00 " + setup.Name), SetupFile = f.SetupFile, SetupName = setup.Name,
+		var j = new Journal { Id = "x", Folder = Path.Combine(Runner.RunsDir(a_f.Data), "2026-11-02 21-00-00 " + a_setup.Name), SetupFile = a_f.SetupFile, SetupName = a_setup.Name,
 			Started = DateTime.Now, State = RunState.Running, Pid = 0 };
 		Directory.CreateDirectory(j.Folder);
 		j.Save();
-		var refused = DataRemoval.Make(f.Data, false);
+		var refused = DataRemoval.Make(a_f.Data, false);
 		Check(refused.Refused != null, "a run that did not finish refuses the removal");
 		var threw = false;
 		try {
@@ -7685,8 +8382,8 @@ public static class Program
 	// everywhere (paths included) - and a name inside an ordinary word is left alone
 	static void T_BugReportMasksThePlayersNames()
 	{
-		var names = new List<(string, string)> { ("Izzy-PC", "<this PC>"), ("Izzy", "<you>") };
-		Equal(@"C:\Users\<you>\Documents on <this PC>; Izzyland stays", BugReport.Mask(@"C:\Users\izzy\Documents on IZZY-PC; Izzyland stays", names), "whole names, any case");
+		var names = new List<(string, string)> { ("Sam-PC", "<this PC>"), ("Sam", "<you>") };
+		Equal(@"C:\Users\<you>\Documents on <this PC>; Samland stays", BugReport.Mask(@"C:\Users\sam\Documents on SAM-PC; Samland stays", names), "whole names, any case");
 		var realFolder = BugReport.UserFolder;
 		try {
 			// a short user name is never in the names list, but its user folder is masked in every way a path is written
@@ -7729,6 +8426,82 @@ public static class Program
 				Check(text.Contains(Brand.Name + " 1.0", StringComparison.Ordinal) && text.Contains("Windows:", StringComparison.Ordinal), "the versions: " + text);
 			}
 		}
+	}
+
+	// a setup renamed since its last runs: the backups those runs made carry its older name, and its run records still name them.
+	// They are counted and cleaned up with the rest; a folder no record of the setup names, or one that stands elsewhere, never is
+	static void T_BackupsMadeUnderAnOlderNameAreStillTheSetups()
+	{
+		using var f = new FakeMo2();
+		var setup = f.WriteSetup(("pandora", new JsonObject()));
+		var runs = Runner.RunsDir(f.Data);
+		string Named(string a_when, string a_name) => Path.Combine(setup.BackupDir, a_when + " " + a_name);
+		void Backup(string a_dir, string a_id, string a_name, bool a_record = true)
+		{
+			Directory.CreateDirectory(Path.Combine(a_dir, "profile " + setup.Profile));
+			File.WriteAllBytes(Path.Combine(a_dir, "x.bin"), new byte[1000]);
+			if (a_record) {
+				var j = new Journal { Id = a_id, Folder = Path.Combine(runs, a_id), SetupFile = f.SetupFile, SetupName = a_name, Profile = setup.Profile, Started = DateTime.Now,
+					State = RunState.Finished, BackupDir = a_dir };
+				Directory.CreateDirectory(j.Folder);
+				j.Save();
+			}
+		}
+		Backup(Named("2026-11-01 20-00-00", "Old Name"), "r1", "Old Name");
+		Backup(Named("2026-11-02 20-00-00", "Old Name"), "r2", "Old Name");
+		Backup(Named("2026-11-03 20-00-00", setup.Name), "r3", setup.Name);
+		Backup(Named("2026-11-04 20-00-00", setup.Name), "r4", setup.Name);
+		var stranger = Named("2026-10-01 20-00-00", "Old Name");
+		Backup(stranger, "none", "Old Name", false);
+		var elsewhere = Path.Combine(f.Root, "Elsewhere", "2026-10-02 20-00-00 Old Name");
+		Backup(elsewhere, "r0", "Old Name");
+		Equal(2, Runner.BackupsOf(setup).Count, "by their names alone: the ones under its name of today");
+		var listed = Runner.BackupsOf(setup, runs);
+		Equal(4, listed.Count, "with its run records: the ones made under its older name too - " + string.Join(", ", listed.Select(b => b.Dir.Name)));
+		Check(listed[0].Dir.Name.StartsWith("2026-11-04", StringComparison.Ordinal) && listed[3].Dir.Name.StartsWith("2026-11-01", StringComparison.Ordinal), "newest first, whatever the name");
+		var removed = Runner.PruneBackupsOf(setup, runs, null, 3, RunLog.Null);
+		Equal(1, removed.Count, "the oldest of the four goes: " + string.Join(", ", removed));
+		Check(!Directory.Exists(Named("2026-11-01 20-00-00", "Old Name")) && Directory.Exists(Named("2026-11-02 20-00-00", "Old Name")), "the oldest under the old name went, the newer one stays");
+		Check(Directory.Exists(stranger) && Directory.Exists(elsewhere), "a folder no record of the setup names, and one that stands elsewhere, are never touched");
+	}
+
+	// the program's own versions are compared number by number - never by the tools' rule, which reads a short version as the
+	// end of a long one
+	static void T_TheProgramsOwnVersionsCompareNumberByNumber()
+	{
+		Check(ProgramUpdate.IsNewer("1.1.2", "1.2"), "1.2 comes after 1.1.2");
+		Check(ProgramUpdate.IsNewer("1.2.1", "v2.1"), "2.1 comes after 1.2.1");
+		Check(ProgramUpdate.IsNewer("1.0.0.0", "v1.0.1"), "a third number");
+		Check(ProgramUpdate.IsNewer("1.9", "1.10"), "ten comes after nine");
+		Check(!ProgramUpdate.IsNewer("1.1.0.0", "v1.1"), "the same version written two ways");
+		Check(!ProgramUpdate.IsNewer("1.2", "1.1.9"), "an older one");
+		Check(!ProgramUpdate.IsNewer("1.2", "unknown") && !ProgramUpdate.IsNewer("", "1.2"), "a value with no number says nothing");
+	}
+
+	// a tool's version is remembered for the very program a step runs: a setup whose step runs another copy of the tool never
+	// reads the first one's version as its own tool having changed, and a store that does not read holds nothing
+	static void T_AToolsVersionIsKeptForTheProgramItIs()
+	{
+		using var f = new FakeMo2();
+		var mo2 = Mo2Instance.Load(f.Exe, f.Instance);
+		var one = Path.Combine(f.Root, "Tool one", "tool.exe");
+		var two = Path.Combine(f.Root, "Tool two", "tool.exe");
+		foreach (var (exe, at) in new[] { (one, new DateTime(2026, 1, 1, 10, 0, 0, DateTimeKind.Utc)), (two, new DateTime(2026, 2, 2, 10, 0, 0, DateTimeKind.Utc)) }) {
+			Directory.CreateDirectory(Path.GetDirectoryName(exe)!);
+			File.WriteAllText(exe, "x");
+			File.SetLastWriteTimeUtc(exe, at);
+		}
+		var setup = f.WriteSetup(("pandora", new JsonObject { ["exe"] = one }));
+		var first = new StepSettings(new JsonObject { ["exe"] = one });
+		var second = new StepSettings(new JsonObject { ["exe"] = two });
+		Equal(0, ToolVersions.Check(setup, mo2, "pandora", first).Count(), "nothing is known yet");
+		ToolVersions.Remember(setup, mo2, ["pandora"]);
+		Equal(0, ToolVersions.Check(setup, mo2, "pandora", first).Count(), "the same program at the same version");
+		Equal(0, ToolVersions.Check(setup, mo2, "pandora", second).Count(), "another copy of the tool is another program: nothing is known of it");
+		File.SetLastWriteTimeUtc(one, new DateTime(2026, 3, 3, 10, 0, 0, DateTimeKind.Utc));
+		Equal(1, ToolVersions.Check(setup, mo2, "pandora", first).Count(), "the program itself changed: said");
+		File.WriteAllText(Path.Combine(Path.GetDirectoryName(f.SetupFile)!, "tool versions.json"), "{ broken");
+		Equal(0, ToolVersions.Check(setup, mo2, "pandora", first).Count(), "a store that does not read holds nothing");
 	}
 
 	// a setup's run backups are listed newest first with their size, and the clean-up keeps the newest few -
@@ -8118,7 +8891,7 @@ public static class Program
 	static void T_ASharedSetupCarriesNothingOfThisPc()
 	{
 		var setup = Setup.FromJson(JsonNode.Parse("""
-			{ "name": "My Setup", "mo2": { "exe": "C:\\Games\\MO2\\ModOrganizer.exe", "instance": "D:\\MO2\\Instances\\SSE", "profile": "Bottled" },
+			{ "name": "My Setup", "mo2": { "exe": "C:\\Games\\MO2\\ModOrganizer.exe", "instance": "D:\\MO2\\Instances\\Main", "profile": "My Profile" },
 			  "backups": "D:\\Backups", "beforeRun": ["del /q C:\\Temp\\x"], "afterRun": [], "idleMinutes": 3,
 			  "steps": [ { "key": "pgpatcher", "on": true, "output": "PGPatcher Output", "tool_writes": "C:\\Users\\Someone\\pg" },
 			             { "key": "dyndolod", "on": false, "output": "DynDOLOD Output", "args": "-o:\"\\\\nas\\lod\"", "lodWorlds": ["Tamriel", "E:\\x"] } ] }
@@ -8127,7 +8900,7 @@ public static class Program
 		var text = r.Setup.ToJsonString();
 		Check(!SetupShare.HoldsPath(text.Replace("\\\\", "\\")), "no path of this PC is left: " + text);
 		Equal("", r.Setup["mo2"]?["exe"]?.ToString(), "Mod Organizer is the other player's to set");
-		Equal("Bottled", r.Setup["mo2"]?["profile"]?.ToString(), "the profile name is kept as a hint");
+		Equal("My Profile", r.Setup["mo2"]?["profile"]?.ToString(), "the profile name is kept as a hint");
 		Check(r.Setup["beforeRun"] == null && r.Setup["backups"] == null, "no commands, no backup folder");
 		Equal(3, r.Setup["idleMinutes"]?.GetValue<int>(), "its options are kept");
 		Equal(2, (r.Setup["steps"] as JsonArray)?.Count, "every step is kept");
@@ -8145,13 +8918,13 @@ public static class Program
 		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner test share " + Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(dir);
 		try {
-			var source = Path.Combine(dir, "Steps Of Izzy (shared).json");
+			var source = Path.Combine(dir, "Steps Of Sam (shared).json");
 			File.WriteAllText(source, """
-				{ "name": "Steps Of Izzy", "mo2": { "profile": "Izzy Profile" },
-				  "steps": [ { "step": "pgpatcher", "on": true, "settings": { "settings": "PBR", "output_mod": "Izzy Output" } } ] }
+				{ "name": "Steps Of Sam", "mo2": { "profile": "Sam Profile" },
+				  "steps": [ { "step": "pgpatcher", "on": true, "settings": { "settings": "PBR", "output_mod": "Sam Output" } } ] }
 				""");
 			var named = Setup.Load(source);
-			List<(string Name, string Mask)> names = [("Izzy", "<you>"), ("Steps", "<this PC>")];
+			List<(string Name, string Mask)> names = [("Sam", "<you>"), ("Steps", "<this PC>")];
 			var shared = SetupShare.Share(named, "1.0", names);
 			Check(shared.Setup["steps"] is JsonArray { Count: 1 }, "a key that is also a name stays the setup's own key");
 			Equal("<you> Profile", shared.Setup["mo2"]?["profile"]?.ToString(), "a name in a value is masked");
@@ -8159,8 +8932,8 @@ public static class Program
 			Check(shared.Removed.Any(x => x.Contains("PGPatcher settings set \"PBR\"", StringComparison.Ordinal)), "the settings set it names is the other player's to make: " +
 				string.Join("; ", shared.Removed));
 			var (file, _) = SetupShare.Write(named, dir, "1.0", names);
-			Check(!Path.GetFileName(file).Contains("Izzy", StringComparison.OrdinalIgnoreCase), "the file name masked too: " + Path.GetFileName(file));
-			Check(File.ReadAllText(source).Contains("Izzy Output", StringComparison.Ordinal), "the setup itself is untouched");
+			Check(!Path.GetFileName(file).Contains("Sam", StringComparison.OrdinalIgnoreCase), "the file name masked too: " + Path.GetFileName(file));
+			Check(File.ReadAllText(source).Contains("Sam Output", StringComparison.Ordinal), "the setup itself is untouched");
 			File.WriteAllText(Path.Combine(dir, "Mine (shared).json"), """{ "name": "Mine", "mo2": { "exe": "C:\\MO2\\ModOrganizer.exe" } }""");
 			var mine = Setup.Load(Path.Combine(dir, "Mine (shared).json"));
 			var (again, _) = SetupShare.Write(mine, dir, "1.0", names);
@@ -8387,6 +9160,16 @@ public static class Program
 		// a setup file may hold a setting with no name at all: it has no label, and nothing fails over it
 		steps.Add(new() { ["step"] = "acmos", ["settings"] = new JsonObject { [""] = "nameless" } });
 		Equal("ACMOS Road Generator", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "nameless", -1)), "a setting with an empty name is still searched");
+		// in another language the label is searched by the words the window shows, and still by its English ones
+		try {
+			ToolRunner.App.WindowWords.Use(new Dictionary<string, string> { ["Output mod"] = "Ausgabe-Mod", ["{0} min"] = "{0} Minuten" });
+			Equal("TexGen", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "ausgabe", -1)), "a label in the window's language");
+			Equal("TexGen", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "output mod", -1)), "and in English all the same");
+			Equal("5 Minuten", ToolRunner.App.MainViewModel.Long(TimeSpan.FromMinutes(5)), "a time's unit in the window's language");
+		} finally {
+			ToolRunner.App.WindowWords.Use(new Dictionary<string, string>());
+		}
+		Equal("5 min", ToolRunner.App.MainViewModel.Long(TimeSpan.FromMinutes(5)), "and in English");
 	}
 
 	// a step dragged to any place, a check that also looks for updates, windows that keep their size
@@ -8429,10 +9212,10 @@ public static class Program
 			"another setup picked, or none: what was asked for the first is not shown under it");
 		var picked = Setup.FromJson(new JsonObject(), @"C:\Setups\B.json");
 		Equal(null, ToolRunner.App.SettingsPanel.NotThisSetup(@"c:\setups\b.json", "B", picked), "settings opened for the setup that is picked are saved to it");
-		var why = ToolRunner.App.SettingsPanel.NotThisSetup(@"C:\Setups\A.json", "Lumina", picked) ?? "";
-		Check(why.StartsWith("Not saved", StringComparison.Ordinal) && why.Contains("\"Lumina\"", StringComparison.Ordinal) && why.Contains($"\"{picked.Name}\"", StringComparison.Ordinal),
+		var why = ToolRunner.App.SettingsPanel.NotThisSetup(@"C:\Setups\A.json", "First", picked) ?? "";
+		Check(why.StartsWith("Not saved", StringComparison.Ordinal) && why.Contains("\"First\"", StringComparison.Ordinal) && why.Contains($"\"{picked.Name}\"", StringComparison.Ordinal),
 			"settings opened for one setup are not saved while another is picked - both are named: " + why);
-		Check((ToolRunner.App.SettingsPanel.NotThisSetup(@"C:\Setups\A.json", "Lumina", null) ?? "").Contains("no setup", StringComparison.Ordinal), "nor while none is picked");
+		Check((ToolRunner.App.SettingsPanel.NotThisSetup(@"C:\Setups\A.json", "First", null) ?? "").Contains("no setup", StringComparison.Ordinal), "nor while none is picked");
 
 		// The window's own sizes: kept at once, written a moment later and never on the window's thread - and whatever is kept
 		// is in the file once the program asks for it as it closes, the newest of each
@@ -8633,9 +9416,6 @@ public static class Program
 			"a mod the setup itself names for the step is its own choice, plugin or not - and still switched on, for the steps that do not read that list");
 	}
 
-	// before the first step that loads a save the player's saves are copied into the run's backup - saves and co-saves,
-	// nothing else, once a run, the original untouched; the setup can switch it off; no room, no folder, a Stop or a copy that cannot be
-	// made never stops the run or leaves a part behind
 	// a save unchanged since the last run's copy shares that copy's file; a changed one gets its own
 	static void T_UnchangedSavesAreSharedBetweenBackups()
 	{
@@ -8680,6 +9460,9 @@ public static class Program
 		Check(!ToolSettings.KeepsModOn(true, false) && !ToolSettings.KeepsModOn(false, false), "no Stop: the mod goes back");
 	}
 
+	// before the first step that loads a save the player's saves are copied into the run's backup - saves and co-saves,
+	// nothing else, once a run, the original untouched; the setup can switch it off; no room, no folder, a Stop or a copy that cannot be
+	// made never stops the run or leaves a part behind
 	static void T_TheSavesAreCopiedBeforeAnInGameStep()
 	{
 		using var f = new FakeMo2();
@@ -8841,8 +9624,7 @@ public static class Program
 		Check(w.AsksNo("You can also search for missing content in the Creations menu."), "a box's own English text, off that file");
 	}
 
-	// a save that did not happen is said in the player's words, and names the way forward (the real proof of the force
-	// is in-game, on the full run's list)
+	// a save that did not happen is said in the player's words, and names the way forward
 	static void T_ASaveThatDidNotHappenIsSaid()
 	{
 		var first = InGame.SaveNotMade("Tool Runner - clean save", false);
@@ -9032,6 +9814,43 @@ public static class Program
 		Equal(RootBuilderAddOn.State.Current, RootBuilderAddOn.StateOf(mo2), "and brought level");
 	}
 
+	// AnvilLOD takes DynDOLOD's place: found like any tool, its step made by New setup - switched off where DynDOLOD is there
+	// too, each keeping the other's output off -, and the two never run together
+	static void T_AnvilLodIsAStepANewSetupMakes()
+	{
+		using var f = new FakeMo2();
+		foreach (var (mod, exe) in new[] { ("DynDOLOD Tool", "DynDOLODx64.exe"), ("Anvil Tool", "AnvilLOD.exe") }) {
+			Directory.CreateDirectory(Path.Combine(f.Mods, mod));
+			File.WriteAllText(Path.Combine(f.Mods, mod, exe), "");
+		}
+		var found = ToolFinder.Find(Mo2Instance.Load(f.Exe, f.Instance), [f.Mods]);
+		Equal(ToolFinder.Found.NotListed, found.Single(r => r.Tool.Step == "anvillod").State, "AnvilLOD is one of the tools looked for");
+		// with AnvilLOD alone in the list its step is there, with its program and its output - and off: it reads DynDOLOD's rule
+		// files, whose folder is not known without DynDOLOD on the list (switched on, every start of the setup stopped on it)
+		ToolFinder.AddFound(Mo2Instance.Load(f.Exe, f.Instance), found.Where(r => r.Tool.Step == "anvillod"));
+		var alone = SetupMaker.Make(f.Exe, f.Instance, "Test", "Anvil only", f.Data);
+		var only = alone.Steps.Single(s => s.Key == "anvillod");
+		Check(!only.On && Files.SamePath(Setup.Str(only.Settings, "exe")!, Path.Combine(f.Mods, "Anvil Tool", "AnvilLOD.exe")) && Setup.Str(only.Settings, "output_mod") == "AnvilLOD Output - Test",
+			"its step, off, with its program and its output: " + only.Settings.ToJsonString());
+		Check(only.Settings["dyndolod"] == null, "DynDOLOD's folder is left for the player to set, never written as nothing");
+		Check(alone.Steps.All(s => s.Key != "dyndolod") && Setup.List(only.Settings, "replaces").Count == 0, "no DynDOLOD: nothing for it to keep off");
+		// with both, DynDOLOD's step is on and AnvilLOD's is there, off; each names the other's output
+		ToolFinder.AddFound(Mo2Instance.Load(f.Exe, f.Instance), ToolFinder.Find(Mo2Instance.Load(f.Exe, f.Instance), [f.Mods]));
+		var both = SetupMaker.Make(f.Exe, f.Instance, "Test", "Both", f.Data);
+		var (dyn, anvil) = (both.Steps.Single(s => s.Key == "dyndolod"), both.Steps.Single(s => s.Key == "anvillod"));
+		Check(dyn.On && !anvil.On, "DynDOLOD's step is the one switched on");
+		Equal("AnvilLOD Output - Test", Setup.List(dyn.Settings, "replaces").Single(), "DynDOLOD keeps AnvilLOD's output off");
+		Equal("DynDOLOD Output - Test", Setup.List(anvil.Settings, "replaces").Single(), "and AnvilLOD DynDOLOD's");
+		Check(Files.SamePath(Setup.Str(anvil.Settings, "dyndolod")!, Path.Combine(f.Mods, "DynDOLOD Tool")), "AnvilLOD is told where DynDOLOD's rule files are");
+		var order = both.Steps.Select(s => s.Key).ToList();
+		Check(order.IndexOf("dyndolod") < order.IndexOf("anvillod") && StepCatalog.OrderWarnings(order).Count == 0, "in an order the tools' own rules allow: " + string.Join(", ", order));
+		// the two switched on together are refused, with what to do
+		var mo2 = Mo2Instance.Load(f.Exe, f.Instance);
+		var refused = Preflight.Run(both, mo2, ["dyndolod", "anvillod"]).Where(i => i.Blocking && i.Text.Contains("both switched on", StringComparison.Ordinal)).ToList();
+		Check(refused.Count == 1 && RunnerErrors.Find(refused[0].Text)?.Code == "TR-323", "both at once is refused: " + string.Join(" | ", refused.Select(i => i.Text)));
+		Check(!Preflight.Run(both, mo2, ["dyndolod"]).Any(i => i.Text.Contains("both switched on", StringComparison.Ordinal)), "one of them is not");
+	}
+
 	// the tools on the PC named against Mod Organizer's list, the found ones added to it with every other line left alone
 	static void T_TheFirstStartHelperFindsTools()
 	{
@@ -9211,7 +10030,10 @@ public static class Program
 		Check(AddOns.InSetup(setup, changedNow) && !AddOns.Allowed(setup, changedNow), "so Settings offers it again");
 		// the real step: what starts is what was allowed
 		f.WriteSetup((addOn.Key, setup.Steps[2].Settings.DeepClone().AsObject()));
-		Throws<StepFailedException>(() => step.Run(StepContext(f, addOn.Key), settings), "changed after the pre-check: it does not start");
+		var changedCtx = StepContext(f, addOn.Key);
+		using (changedCtx.Log) {
+			Throws<StepFailedException>(() => step.Run(changedCtx, settings), "changed after the pre-check: it does not start");
+		}
 		var other = f.WriteSetup(("synthesis", new JsonObject()), ("pgpatcher", new JsonObject()), ("texgen", new JsonObject()), ("playsave", new JsonObject()));
 		// an output name that is one of the player's mods
 		Check(AddOns.OutputTaken(mo2, other, changedNow) == null, "a name nobody has");
@@ -9456,6 +10278,8 @@ public static class Program
 		var bottled = "[2026-11-10 12:04:00.425] [info] Loaded CommunityShaders 1-9-0-0\n" + slow + string.Concat(Enumerable.Repeat("[2026-11-10 12:13:38.804] [info] [ReverseZ.cpp:683] ReverseZ: camera\n", 400));
 		Equal<int?>(549, InGame.RemainingIn(bottled), "its last count is read however many lines follow it");
 		Equal<int?>(null, InGame.RemainingIn("Open Shaders 2.20.0\n"), "a log without such lines");
+		Equal<int?>(7, InGame.RemainingIn("[12:00:00] [ShaderTiming] remaining=7\n[12:00:01] [ShaderTiming] remaining=99999999999\n"),
+			"a count past what a number holds is no count: the one before it is the newest");
 		ShaderStep.Look At(string a_log, int a_files, double a_sinceFile, double? a_cores, double a_peak, double a_low, bool a_sane = true, double a_sinceLog = 400, int? a_new = null) =>
 			new(a_log, a_files, a_new ?? a_files, TimeSpan.FromSeconds(a_sinceFile), TimeSpan.FromSeconds(a_sinceLog), a_cores, a_peak, TimeSpan.FromSeconds(a_low), a_sane);
 
@@ -9990,15 +10814,44 @@ public static class Program
 			}
 		}
 		using (var f = new FakeMo2()) {
-			var sw = Stopwatch.StartNew();
-			var stepAt = TimeSpan.Zero;
-			StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => stepAt = sw.Elapsed));
-			var s = f.WriteSetup(("landscapefixer", []));
-			s.Root["beforeRun"] = new JsonArray($"start \"\" /b \"{ping}\" -n 30 127.0.0.1");
-			s.Save();
-			var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
-			Equal(RunState.Finished, r.State, r.Verdict);
-			Check(stepAt > TimeSpan.Zero && stepAt < TimeSpan.FromSeconds(15), $"the first step began after {stepAt.TotalSeconds:0.0} s, not once the program left behind had ended (29 s)");
+			// (ping under a name of this test's own, so the copy left behind is ended by that name once the test is over)
+			var leftDir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "left behind " + Guid.NewGuid().ToString("N")[..8]);
+			var leftName = "left behind " + Guid.NewGuid().ToString("N")[..8] + ".exe";
+			// (inside the try: a copy that fails half way still has its folder taken away)
+			try {
+				Directory.CreateDirectory(leftDir);
+				File.Copy(ping, Path.Combine(leftDir, leftName));
+				var sw = Stopwatch.StartNew();
+				var stepAt = TimeSpan.Zero;
+				StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => stepAt = sw.Elapsed));
+				var s = f.WriteSetup(("landscapefixer", []));
+				s.Root["beforeRun"] = new JsonArray($"start \"\" /b \"{Path.Combine(leftDir, leftName)}\" -n 30 127.0.0.1");
+				s.Save();
+				var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
+				Equal(RunState.Finished, r.State, r.Verdict);
+				Check(stepAt > TimeSpan.Zero && stepAt < TimeSpan.FromSeconds(15), $"the first step began after {stepAt.TotalSeconds:0.0} s, not once the program left behind had ended (29 s)");
+			} finally {
+				// each one held open first, then known by the name read through that very handle (this test's own, unique): a number
+				// that went to another program after it was listed is never ended
+				foreach (var pid in Procs.Pids(leftName)) {
+					try {
+						using var p = Process.GetProcessById(pid);
+						_ = p.SafeHandle;
+						if (!p.HasExited && p.ProcessName.Equals(Path.GetFileNameWithoutExtension(leftName), StringComparison.OrdinalIgnoreCase)) {
+							p.Kill(true);
+							p.WaitForExit(10_000);
+						}
+					} catch (Exception e) when (e is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException) {
+						// (gone already, or a child of it would not go)
+					}
+				}
+				try {
+					if (Directory.Exists(leftDir)) {
+						Directory.Delete(leftDir, true);
+					}
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+				}
+			}
 		}
 	}
 
@@ -10129,7 +10982,7 @@ public static class Program
 		File.SetLastWriteTime(j.File, died);
 		File.Move(f.Exe, f.Exe + ".gone");
 		var missing = Runner.Restore(Journal.Load(j.Folder));
-		Check(missing.State == RunState.Failed && missing.Verdict.Contains("was not found", StringComparison.Ordinal), "a Mod Organizer that is gone is said: " + missing.Verdict);
+		Check(missing.State == RunState.Failed && missing.Verdict.Contains("no longer where its record says", StringComparison.Ordinal), "a Mod Organizer that is gone is said: " + missing.Verdict);
 		File.Move(f.Exe + ".gone", f.Exe);
 		File.SetLastWriteTime(j.File, died);
 		Equal(RunState.Restored, Runner.Restore(Journal.Load(j.Folder)).State, "restored once it is back");
@@ -10143,7 +10996,7 @@ public static class Program
 		File.Move(f.Exe, f.Exe + ".gone");
 		try {
 			var undo = Runner.Undo(Journal.Load(done.Folder!));
-			Check(undo.Verdict.Contains("nothing was undone", StringComparison.Ordinal) && undo.Verdict.Contains("was not found", StringComparison.Ordinal), "Undo says it too: " + undo.Verdict);
+			Check(undo.Verdict.Contains("nothing was undone", StringComparison.Ordinal) && undo.Verdict.Contains("no longer where its record says", StringComparison.Ordinal), "Undo says it too: " + undo.Verdict);
 		} finally {
 			File.Move(f.Exe + ".gone", f.Exe);
 		}
@@ -10176,7 +11029,7 @@ public static class Program
 	// to the window while its engine lives - Stop and the close guard reach it - and nothing to put back
 	static void T_ARunAtItsLastChoresIsStillTheRunGoing()
 	{
-		var j = new Journal { State = RunState.Finished, FinishingUp = true, Pid = Environment.ProcessId, PidStarted = Process.GetCurrentProcess().StartTime.ToUniversalTime() };
+		var j = new Journal { State = RunState.Finished, FinishingUp = true, Pid = Environment.ProcessId, PidStarted = StartedUtc() };
 		Check(j.Live && !j.Unfinished, "live, and nothing to put back");
 		Check(ToolRunner.App.Engine.Active([j]) == j, "the window follows it as the run going");
 		j.FinishingUp = false;
@@ -10195,6 +11048,52 @@ public static class Program
 
 	// a window that takes messages only: never on anyone's screen
 	static nint MessageWindow(string a_text) => CreateWindowExW(0, "STATIC", a_text, 0, 0, 0, 0, 0, -3, 0, 0, 0);
+
+	// Mod Organizer is started through Windows' management service, so it is that service's child and none of the run's (a
+	// child of a job-limited process makes it fail to start the script extender). The start itself, with a command that
+	// shows nothing and ends by itself: where it runs, under whom, and what a program that is not there comes to
+	static void T_ADetachedStartIsNoChildOfTheProgram()
+	{
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "detached " + Guid.NewGuid().ToString("N")[..8]);
+		Directory.CreateDirectory(dir);
+		var pid = 0;
+		DateTime? startedAt = null;
+		try {
+			var file = Path.Combine(dir, "ran in.txt");
+			var cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+			// (it waits ten minutes: alive for as long as it is looked at, whatever this test's thread is given, and ended below by
+			// the identity read the moment it started - while it lives its number is nobody else's)
+			pid = Mo2Control.StartDetached($"\"{cmd}\" /c cd > \"{file}\" & ping -n 600 127.0.0.1 > nul", Environment.SystemDirectory, 0);
+			startedAt = Procs.StartTime(pid);
+			Check(pid > 0 && pid != Environment.ProcessId && startedAt != null, $"Windows gave the process's number: {pid}");
+			var parent = Procs.Snapshot().FirstOrDefault(r => r.Pid == pid).Parent;
+			Check(parent != 0 && parent != Environment.ProcessId, $"it is no child of this process (its parent: {parent})");
+			using (var host = Process.GetProcessById(parent)) {
+				Check(host.ProcessName.StartsWith("WmiPrvSE", StringComparison.OrdinalIgnoreCase), "its parent is Windows' own management host: " + host.ProcessName);
+			}
+			var sw = Stopwatch.StartNew();
+			while (sw.Elapsed < TimeSpan.FromSeconds(10) && !(File.Exists(file) && new FileInfo(file).Length > 0)) {
+				Thread.Sleep(100);
+			}
+			Check(File.Exists(file) && string.Equals(File.ReadAllText(file).Trim(), Environment.SystemDirectory, StringComparison.OrdinalIgnoreCase),
+				"it ran in the folder it was given, with its command line whole");
+			var gone = Path.Combine(dir, "no such folder", "none.exe");
+			try {
+				Mo2Control.StartDetached($"\"{gone}\"", dir, 0);
+				Check(false, "a program that is not there is not started");
+			} catch (InvalidOperationException e) {
+				Check(e.Message.StartsWith("Windows could not start \"" + gone, StringComparison.Ordinal) && e.Message.Contains("(code ", StringComparison.Ordinal),
+					"a program that is not there is said, with Windows' own code: " + e.Message);
+			}
+		} finally {
+			// the command this test started, ended by its number and the start time read when it began (and its ping with it) -
+			// never a program that took its number later - and waited for, then its folder
+			if (pid > 0 && startedAt is { } at) {
+				Procs.KillTree(pid, at);
+			}
+			Directory.Delete(dir, true);
+		}
+	}
 
 	// A tool whose window thread hangs never holds the step that reads it: a message to it has a time limit, no answer reads as
 	// no text, and the step's own clock goes on (a plain send once sat there for as long as the tool hung)
@@ -10218,10 +11117,13 @@ public static class Program
 			owner.Start();
 			made.Wait();
 			Check(hung != 0, "(a hung window to ask)");
-			Equal("its log says done", Native.ControlText(mine), "a window that answers is read whole");
+			var buf = Array.Empty<char>();
+			Equal((17, "its log says done"), Native.ControlTail(mine, 4000, ref buf), "a window that answers is read whole");
+			Equal((17, "done"), Native.ControlTail(mine, 4, ref buf), "or by its end alone");
+			Check(buf.Length >= 18, "into the buffer its caller keeps");
 			var sw = Stopwatch.StartNew();
 			Check(!Native.TrySend(hung, Native.WM_GETTEXTLENGTH, 0, 0, out _), "a hung window gives no answer");
-			Equal("", Native.ControlText(hung), "and reads as no text");
+			Equal((0, ""), Native.ControlTail(hung, 4000, ref buf), "and reads as no text");
 			Check(sw.Elapsed < TimeSpan.FromSeconds(5), $"within the limit, not for as long as it hangs: {sw.Elapsed.TotalSeconds:0.0} s");
 		} finally {
 			Native.SendLimitMs = keep;
@@ -10353,6 +11255,16 @@ public static class Program
 		Check(File.ReadAllBytes(pluginsTxt).AsSpan().IndexOf(ansi.GetBytes("*" + Name + "\r\n")) >= 0, "its line is as Mod Organizer wrote it, byte for byte");
 		p.ActivatePlugins(["Output A"]);
 		Check(File.ReadAllBytes(pluginsTxt).AsSpan().SequenceEqual(before), "ticked again, the whole file is as it was, byte for byte");
+		// a copy of the file kept for a put-back is read as the file itself: the same names, the same ticks, blanks round a line
+		// taken off in both
+		File.WriteAllBytes(pluginsTxt, [.. before, .. ansi.GetBytes("  *Spaced.esp \r\n")]);
+		var live = p.PluginMarks();
+		var kept = Profile.MarksOf(p.Snapshot());
+		Check(live.Count == kept.Count && live.All(kv => kept.TryGetValue(kv.Key, out var on) && on == kv.Value),
+			"the kept copy gives the same ticks as the file: " + string.Join(", ", kept.Select(kv => kv.Key + "=" + kv.Value)));
+		Check(kept.TryGetValue(Name, out var accented) && accented && kept.TryGetValue("Spaced.esp", out var spaced) && spaced && p.ActivePlugins().Contains("Spaced.esp"),
+			"by their real names, the accented one and the one with blanks round it");
+		File.WriteAllBytes(pluginsTxt, before);
 		// a plugin new to both files: both are written again, each in its own way
 		f.Mod("Fresh", ("Fresh.esp", false, []));
 		p.ActivatePlugins(["Fresh"]);
@@ -10533,7 +11445,7 @@ public static class Program
 		foreach (var name in new[] { @"C:\Users\x\Documents", "a/b", "..", ".", "ends with a dot.", "ends with a space ", "a:b", "" }) {
 			Check(!Setup.PlainName(name), "not a mod's name: \"" + name + "\"");
 		}
-		foreach (var name in new[] { "Output A", "DynDOLOD Output - Bottled Shaders", "Größe (v1.2) ж", "PG_1" }) {
+		foreach (var name in new[] { "Output A", "DynDOLOD Output - My Profile", "Größe (v1.2) ж", "PG_1" }) {
 			Check(Setup.PlainName(name), "a mod's name: " + name);
 		}
 		var nested = f.WriteSetup(
@@ -10542,10 +11454,10 @@ public static class Program
 		Equal(2, nested.Problems().Count(p => p.Contains("not a mod's name", StringComparison.Ordinal)), "a cache's mod and a list's entry are checked too: " + string.Join("; ", nested.Problems()));
 
 		var own = f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
-		own.Root["beforeRun"] = new JsonArray("claim take");
-		own.Root["afterRun"] = new JsonArray("claim give", "tidy up");
+		own.Root["beforeRun"] = new JsonArray("prepare.cmd");
+		own.Root["afterRun"] = new JsonArray("restore.cmd", "tidy up");
 		var lines = RunPreview.Build(own, Mo2Instance.Load(f.Exe, f.Instance), Runner.Plan(own, null, null, null)).Lines(_ => null);
-		Check(lines.Any(l => l.Contains("before the first step: claim take", StringComparison.Ordinal)) && lines.Any(l => l.Contains("after the run: tidy up", StringComparison.Ordinal)),
+		Check(lines.Any(l => l.Contains("before the first step: prepare.cmd", StringComparison.Ordinal)) && lines.Any(l => l.Contains("after the run: tidy up", StringComparison.Ordinal)),
 			"the preview names the setup's own commands: " + string.Join(" | ", lines));
 		Equal(3, own.TakeOutCommands(), "a setup brought in from elsewhere has its commands taken out");
 		Check(own.BeforeRun.Count == 0 && own.AfterRun.Count == 0, "none is left");
@@ -10965,6 +11877,151 @@ public static class Program
 		Check(!Directory.EnumerateDirectories(f.Root, "*Elsewhere*", SearchOption.AllDirectories).Any(), "no folder of that name anywhere");
 	}
 
+	// what a plugin holds is read off its headers alone: its groups, a tree among its statics, a landscape inside a worldspace; a
+	// file cut short gives what could be read, and a file that is no plugin gives nothing
+	static void T_APluginsKindsAreReadOffItsHeaders()
+	{
+		static byte[] Rec(string a_type, uint a_flags, int a_data) =>
+			[.. Encoding.ASCII.GetBytes(a_type), .. BitConverter.GetBytes((uint)a_data), .. BitConverter.GetBytes(a_flags), .. new byte[12], .. new byte[a_data]];
+		static byte[] Grup(string a_label, params byte[][] a_inside)
+		{
+			var body = a_inside.SelectMany(b => b).ToArray();
+			return [.. Encoding.ASCII.GetBytes("GRUP"), .. BitConverter.GetBytes((uint)(24 + body.Length)), .. Encoding.ASCII.GetBytes(a_label), .. new byte[12], .. body];
+		}
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "kinds " + Guid.NewGuid().ToString("N")[..8]);
+		Directory.CreateDirectory(dir);
+		try {
+			var plain = Path.Combine(dir, "Plain.esp");
+			File.WriteAllBytes(plain, [.. Rec("TES4", 0, 10), .. Grup("STAT", Rec("STAT", 0, 7)), .. Grup("WRLD", Rec("WRLD", 0, 3), Grup("\0\0\0\0", Rec("CELL", 0, 0)))]);
+			var kinds = Plugins.Kinds(plain, true);
+			Check(kinds.SetEquals(["STAT", "WRLD"]), "statics with no tree and a worldspace with no landscape: " + string.Join(",", kinds.Order(StringComparer.Ordinal)));
+			var rich = Path.Combine(dir, "Rich.ESM");
+			byte[] richBytes = [.. Rec("TES4", 0, 10), .. Grup("GRAS", Rec("GRAS", 0, 4)), .. Grup("STAT", Rec("STAT", 0, 7), Rec("STAT", 0x40, 2)),
+				.. Grup("WRLD", Rec("WRLD", 0, 3), Grup("\0\0\0\0", Rec("CELL", 0, 0), Grup("\0\0\0\0", Rec("REFR", 0, 5), Rec("LAND", 0, 9))))];
+			File.WriteAllBytes(rich, richBytes);
+			kinds = Plugins.Kinds(rich, true);
+			Check(kinds.SetEquals(["GRAS", "STAT", "TREE", "WRLD", "LAND"]), "a tree among the statics and a landscape in the worldspace: " + string.Join(",", kinds.Order(StringComparer.Ordinal)));
+			Check(!Plugins.Kinds(rich, false).Contains("LAND"), "a landscape is looked for only when asked");
+			Check(Plugins.TopGroups(rich).SetEquals(["GRAS", "STAT", "WRLD"]), "the top groups alone");
+			var cut = Path.Combine(dir, "Cut.esp");
+			File.WriteAllBytes(cut, richBytes[..^12]);
+			kinds = Plugins.Kinds(cut, true);
+			Check(kinds.Contains("GRAS") && kinds.Contains("TREE") && kinds.Contains("WRLD") && !kinds.Contains("LAND"), "a plugin cut short gives what could be read: " + string.Join(",", kinds.Order(StringComparer.Ordinal)));
+			var none = Path.Combine(dir, "Not one.esp");
+			File.WriteAllText(none, "this is no plugin, only a file named like one");
+			Equal(0, Plugins.Kinds(none, true).Count, "a file that is no plugin holds nothing");
+			Equal(0, Plugins.TopGroups(none).Count, "nor any group");
+			File.WriteAllText(Path.Combine(dir, "readme.esp.txt"), "x");
+			Check(Plugins.IsPlugin("a.ESP") && Plugins.IsPlugin("b.esl") && Plugins.IsPlugin("c.Esm") && !Plugins.IsPlugin("d.esp.bak") && !Plugins.IsPlugin("e.bsa"), "a plugin by the end of its name");
+			Equal("Cut.esp|Not one.esp|Plain.esp|Rich.ESM", string.Join("|", Plugins.InMod(dir).Order(StringComparer.Ordinal)), "the plugins in a mod's folder");
+			Equal(0, Plugins.InMod(Path.Combine(dir, "not there")).Count, "a folder that is not there holds none");
+		} finally {
+			Directory.Delete(dir, true);
+		}
+	}
+
+	// small things each said once: a release file under the name GitHub gives it, an output's name from its pattern, a version
+	// with a number in it, a mod's page off Mod Organizer's own record
+	static void T_SmallNamesAndPages()
+	{
+		Check(ProgramUpdate.SameAssetName("Tool.Runner.1.1.zip", "Tool Runner 1.1.zip"), "GitHub's dots for our spaces");
+		Check(ProgramUpdate.SameAssetName("tool.runner.1.1.ZIP", "Tool Runner 1.1.zip"), "case does not count");
+		Check(!ProgramUpdate.SameAssetName("Tool.Runner.1.10.zip", "Tool Runner 1.1.zip"), "another version is another file");
+		Check(!ProgramUpdate.SameAssetName(null, "Tool Runner 1.1.zip"), "no name is no match");
+		Equal("DynDOLOD Output - My Profile", SetupMaker.OutputName("{output} - {profile}", "DynDOLOD Output", "My Profile"), "the usual pattern");
+		Equal("My Profile (DynDOLOD Output)", SetupMaker.OutputName("{PROFILE} ({Output})", "DynDOLOD Output", "My Profile"), "a pattern of the player's own, however it is cased");
+		Check(ToolUpdates.HasVersion("3.0.0.217") && ToolUpdates.HasVersion("Alpha-217") && !ToolUpdates.HasVersion("unknown") && !ToolUpdates.HasVersion(""), "a version has a number in it");
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "pages " + Guid.NewGuid().ToString("N")[..8]);
+		Directory.CreateDirectory(dir);
+		try {
+			Equal<string?>(null, LodGuide.NexusPage(dir), "a mod with no record has no page");
+			var meta = Path.Combine(dir, "meta.ini");
+			File.WriteAllText(meta, "[General]\r\ngameName=SkyrimSE\r\nmodid=68518\r\nversion=3.0.0.0\r\n[installedFiles]\r\n1\\modid=1\r\n");
+			Equal<string?>("https://www.nexusmods.com/skyrimspecialedition/mods/68518", LodGuide.NexusPage(dir), "its page on Nexus");
+			File.WriteAllText(meta, "[General]\r\ngameName=Skyrim\r\nmodid=12\r\n");
+			Equal<string?>("https://www.nexusmods.com/skyrim/mods/12", LodGuide.NexusPage(dir), "a mod made for the older game keeps its own page");
+			File.WriteAllText(meta, "[General]\r\ngameName=SkyrimSE\r\nmodid=0\r\n");
+			Equal<string?>(null, LodGuide.NexusPage(dir), "a mod installed by hand (no number) has none");
+			File.WriteAllText(meta, "[General]\r\ngameName=Fallout4\r\nmodid=7\r\n");
+			Equal<string?>(null, LodGuide.NexusPage(dir), "nor one of a game it does not know");
+		} finally {
+			Directory.Delete(dir, true);
+		}
+	}
+
+	// a link to another folder (a junction), inside a folder the run handles or as that folder itself: what it points at is never
+	// counted, changed or emptied behind the player's back, and a tool's folder that is a link keeps its place
+	static void T_ALinkToAnotherFolderIsLeftAsItIs()
+	{
+		using var f = new FakeMo2();
+		// (made by Windows' own call, never a command processor: a "%" in the temp folder's name stays a "%")
+		static bool Junction(string a_link, string a_to)
+		{
+			Program.Junction(a_link, a_to);
+			return Directory.Exists(a_link);
+		}
+		var kept = Path.Combine(f.Root, "Kept elsewhere");
+		var holds = Path.Combine(f.Root, "Holds a link");
+		Directory.CreateDirectory(kept);
+		Directory.CreateDirectory(Path.Combine(holds, "sub"));
+		var theirs = Path.Combine(kept, "theirs.txt");
+		var own = Path.Combine(holds, "sub", "own.txt");
+		File.WriteAllText(theirs, "12345");
+		File.WriteAllText(own, "123");
+		if (!Junction(Path.Combine(holds, "link"), kept)) {
+			Console.WriteLine("      (no junction could be made here: skipped)");
+			return;
+		}
+		File.SetAttributes(theirs, FileAttributes.ReadOnly);
+		try {
+			Equal(1, Files.CountFiles(holds), "the files behind a link are not counted");
+			Equal(3L, Files.SizeOf(holds), "nor their size");
+			Equal(1, Files.LinksUnder(holds).Count, "the link is named");
+			// a read-only file of the folder's own does not stop its removal; the one behind the link keeps its mark
+			File.SetAttributes(own, FileAttributes.ReadOnly);
+			Files.DeleteDir(holds);
+			Check(!Directory.Exists(holds), "the folder is gone");
+			Check(File.Exists(theirs) && File.GetAttributes(theirs).HasFlag(FileAttributes.ReadOnly), "the file behind the link is there, read-only as it was");
+			// a folder that is itself a link is removed as the link
+			var gone = Path.Combine(f.Root, "A link to remove");
+			Check(Junction(gone, kept), "a junction to remove");
+			Files.DeleteDir(gone);
+			Check(!Directory.Exists(gone) && File.Exists(theirs), "removed as a link, what it points at untouched");
+			// a folder that is itself a link moves as the link
+			var link = Path.Combine(f.Root, "A link");
+			Check(Junction(link, kept), "a second junction");
+			var moved = Path.Combine(f.Root, "Moved", "A link");
+			Files.MoveDirectory(link, moved);
+			Check(!Directory.Exists(link) && Files.IsLink(moved) && File.Exists(theirs), "moved as a link, what it points at untouched");
+			Directory.Delete(moved);
+		} finally {
+			File.SetAttributes(theirs, FileAttributes.Normal);
+		}
+		// a tool's own folder that is a link: its old content goes to the run's backup, the link stays for the tool to write into
+		var toolLink = Path.Combine(f.Root, "tool out link");
+		var toolReal = Path.Combine(f.Root, "tool out elsewhere");
+		Directory.CreateDirectory(toolReal);
+		File.WriteAllText(Path.Combine(toolReal, "old.txt"), "old");
+		Check(Junction(toolLink, toolReal), "a third junction");
+		var stays = false;
+		var inBackup = 0;
+		StepRegistry.Replace(new FakeStep("synthesis", (ctx, s) => {
+			StepKit.ParkDir(ctx, toolLink, "linked tool folder");
+			stays = Files.IsLink(toolLink) && !File.Exists(Path.Combine(toolReal, "old.txt"));
+			inBackup = Directory.GetFiles(Path.Combine(ctx.BackupFolder, "outputs"), "old.txt", SearchOption.AllDirectories).Length;
+		}));
+		f.WriteSetup(("synthesis", new JsonObject()));
+		try {
+			Equal(RunState.Finished, Runner.Run(new RunRequest(f.SetupFile, f.Data)).State, "the run finished");
+			Check(stays, "the link stays where it is, emptied");
+			Equal(1, inBackup, "its old content is in the backup");
+		} finally {
+			if (Directory.Exists(toolLink) && Files.IsLink(toolLink)) {
+				Directory.Delete(toolLink);
+			}
+		}
+	}
+
 	// the small faults of the file work: a link inside what is moved, a mod list with two kinds of line ending, an output mod
 	// half made, a game folder that is gone, a place that is no place
 	static void T_TheSmallFaultsOfTheFileWork()
@@ -11122,6 +12179,125 @@ public static class Program
 		Check(p.States()["DLC: Dawnguard"] == '*', "left as it was");
 	}
 
+	// Every setting a step reads off its own settings is one the Settings window can show: written by a new setup, or offered
+	// with its default when the step's file does not hold it. Read off the source, so a setting added to a step without its
+	// row in the window fails here
+	static void T_EverySettingAStepReadsIsOffered()
+	{
+		var steps = Path.Combine(SourceDir(), "Steps");
+		if (!Directory.Exists(steps)) {
+			Console.WriteLine($"  (skipped: the source is not at {steps})");
+			return;
+		}
+		var reads = new System.Text.RegularExpressions.Regex(@"\ba_s\.(?:Str|Req|Int|Num|Bool|List)\(""(\w+)""");
+		var classAt = new System.Text.RegularExpressions.Regex(@"(?m)^public (?:sealed |abstract |static |partial )*class (\w+)(?: : (\w+))?");
+		var keyAt = new System.Text.RegularExpressions.Regex(@"string Key => ""(\w+)""");
+		// what a new setup writes for the step, or the step cannot run without (the check names it)
+		string[] basics = ["executable", "output_mod", "then_move_to_mod", "output_dir", "launch_executable", "exe", "by", "fasterngio_exe", "reads", "dyndolod", "worldspaces",
+			"interior_cell", "wait_s", "dyndolod_wait_s", "dyndolod_off", "save", "shader_mod", "settings_mod", "tool_writes", "file", "sha", "image", "replaces"];
+		HashSet<string> KeysIn(string a_text) => [.. reads.Matches(a_text).Select(m => m.Groups[1].Value)];
+		var keysOf = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+		var baseOf = new Dictionary<string, string>(StringComparer.Ordinal);
+		var stepOf = new Dictionary<string, string>(StringComparer.Ordinal);
+		foreach (var file in Directory.GetFiles(steps, "*.cs")) {
+			var text = File.ReadAllText(file);
+			var marks = classAt.Matches(text);
+			for (var i = 0; i < marks.Count; i++) {
+				var body = text[marks[i].Index..(i + 1 < marks.Count ? marks[i + 1].Index : text.Length)];
+				var name = marks[i].Groups[1].Value;
+				keysOf[name] = KeysIn(body);
+				if (marks[i].Groups[2].Success) {
+					baseOf[name] = marks[i].Groups[2].Value;
+				}
+				if (keyAt.Match(body) is { Success: true } k) {
+					stepOf[name] = k.Groups[1].Value;
+				}
+			}
+		}
+		Check(stepOf.Count >= 13, $"the steps were found in the source ({stepOf.Count}): {string.Join(", ", stepOf.Values)}");
+		foreach (var (name, step) in stepOf) {
+			var read = new HashSet<string>(keysOf[name], StringComparer.Ordinal);
+			if (baseOf.TryGetValue(name, out var parent) && keysOf.TryGetValue(parent, out var theirs)) {
+				read.UnionWith(theirs);
+			}
+			var offered = ToolRunner.App.SettingsPanel.OfferedKeys(step);
+			var hidden = read.Where(k => !offered.Contains(k) && !basics.Contains(k)).Order(StringComparer.Ordinal).ToList();
+			Check(hidden.Count == 0, $"{step} reads {hidden.Count} setting(s) its page never offers: {string.Join(", ", hidden)}");
+		}
+		// What the game steps share: a game start that loads a save (InGame). Each save step is held to what IT reads - the
+		// InGame functions its own class calls, and the ones those call - on its own page: a setting both read is on both pages
+		var inGameText = File.ReadAllText(Path.Combine(SourceDir(), "InGame.cs"));
+		var methodAt = new System.Text.RegularExpressions.Regex(@"(?m)^\t(?:public |internal |private )*static [^\n=;]*?\b(\w+)(?:<[^>\n]*>)?\(");
+		var methods = methodAt.Matches(inGameText);
+		var bodyOf = new Dictionary<string, string>(StringComparer.Ordinal);
+		for (var i = 0; i < methods.Count; i++) {
+			var body = inGameText[methods[i].Index..(i + 1 < methods.Count ? methods[i + 1].Index : inGameText.Length)];
+			bodyOf[methods[i].Groups[1].Value] = bodyOf.GetValueOrDefault(methods[i].Groups[1].Value, "") + body;
+		}
+		var callAt = new System.Text.RegularExpressions.Regex(@"\b(\w+)\(");
+		HashSet<string> ReadThrough(IEnumerable<string> a_calls)
+		{
+			var seen = new HashSet<string>(StringComparer.Ordinal);
+			var todo = new Stack<string>(a_calls.Where(bodyOf.ContainsKey));
+			var keys = new HashSet<string>(StringComparer.Ordinal);
+			while (todo.Count > 0) {
+				var m = todo.Pop();
+				if (!seen.Add(m)) {
+					continue;
+				}
+				keys.UnionWith(KeysIn(bodyOf[m]));
+				foreach (var c in callAt.Matches(bodyOf[m]).Select(x => x.Groups[1].Value).Where(bodyOf.ContainsKey)) {
+					todo.Push(c);
+				}
+			}
+			return keys;
+		}
+		var gameSteps = File.ReadAllText(Path.Combine(steps, "GameSteps.cs"));
+		var stepClasses = classAt.Matches(gameSteps);
+		var inGameAll = new HashSet<string>(StringComparer.Ordinal);
+		// (a phase the run itself carries out for a step - the clean save's first half, before every output goes off - calls
+		// InGame from the run, not from the step's class: counted for that step too)
+		var phases = new System.Text.RegularExpressions.Regex(@"RunPhase\([^,]+,\s*""(\w+)""[^\n]*?\bInGame\.(\w+)\(")
+			.Matches(File.ReadAllText(Path.Combine(SourceDir(), "Runner.cs"))).Select(m => (Step: m.Groups[1].Value, Call: m.Groups[2].Value)).ToList();
+		Check(phases.Any(p => p is { Step: "cleansave", Call: "Deactivate" }), "the clean save's first half was found in the run: " + string.Join(", ", phases));
+		foreach (var (cls, step) in new[] { ("CleanSaveStep", "cleansave"), ("PlaySaveStep", "playsave") }) {
+			var at = stepClasses.FirstOrDefault(m => m.Groups[1].Value == cls);
+			Check(at != null, $"{cls} was found in the source");
+			if (at == null) {
+				continue;
+			}
+			var next = stepClasses.FirstOrDefault(m => m.Index > at.Index)?.Index ?? gameSteps.Length;
+			var calls = new System.Text.RegularExpressions.Regex(@"\bInGame\.(\w+)\(").Matches(gameSteps[at.Index..next]).Select(x => x.Groups[1].Value)
+				.Concat(phases.Where(p => p.Step == step).Select(p => p.Call));
+			var stepReads = ReadThrough(calls);
+			// (so the page's own wait is held to it: the clean save's first half reads it before its save)
+			Check(stepReads.Contains("settle_s"), $"{step} is found to read its wait before a save (settle_s): taken off its page, that would fail here");
+			inGameAll.UnionWith(stepReads);
+			var offered = ToolRunner.App.SettingsPanel.OfferedKeys(step);
+			var lost = stepReads.Where(k => !offered.Contains(k) && !basics.Contains(k)).Order(StringComparer.Ordinal).ToList();
+			Check(lost.Count == 0, $"{step} reads, through the game's own steps, settings its page never offers: {string.Join(", ", lost)}");
+		}
+		Check(inGameAll.Count >= 6, $"the save steps' settings were found in the source ({inGameAll.Count})");
+		var offer = KeysIn(File.ReadAllText(Path.Combine(SourceDir(), "GameMods.cs")));
+		Check(offer.Contains("max_offers") && offer.Contains("offer_wait_min"), "Faster Archives' two settings were found in the source");
+		foreach (var step in (string[])["cleansave", "playsave", "shaders", "grass"]) {
+			var offered = ToolRunner.App.SettingsPanel.OfferedKeys(step);
+			Check(offer.All(offered.Contains), $"{step} offers what Faster Archives' wait reads");
+		}
+		// each has words of its own, never the setting's raw name
+		foreach (var step in StepCatalog.DefaultOrder) {
+			var bare = ToolRunner.App.SettingsPanel.OfferedKeys(step).Where(k => !ToolRunner.App.SettingsPanel.StepLabels.Contains(ToolRunner.App.SettingsPanel.LabelOf(k, step))).ToList();
+			Check(bare.Count == 0, $"{step}: no label for {string.Join(", ", bare)}");
+		}
+		// the two save steps have no time limit of their own, so none is offered; every other step's is
+		Check(!ToolRunner.App.SettingsPanel.OfferedKeys("cleansave").Contains("deadline_min") && !ToolRunner.App.SettingsPanel.OfferedKeys("playsave").Contains("deadline_min") &&
+		      ToolRunner.App.SettingsPanel.OfferedKeys("grass").Contains("deadline_min"), "a time limit is offered where one is read");
+		Equal("Wait after the teleport (seconds)", ToolRunner.App.SettingsPanel.LabelOf("settle_s", "playsave"), "the save steps' wait is named for what it is");
+		Equal("Wait before closing (seconds)", ToolRunner.App.SettingsPanel.LabelOf("settle_s", "shaders"), "the shader step's too");
+		Check(ToolRunner.App.SettingsPanel.OfferedKeys("playsave").Contains("save") && ToolRunner.App.SettingsPanel.LabelOf("save", "playsave") != ToolRunner.App.SettingsPanel.LabelOf("save", "cleansave"),
+			"the final save's own save is offered, under words of its own");
+	}
+
 	static void T_EveryRefusalIsInTheCatalog()
 	{
 		Equal(RunnerErrors.All.Count, RunnerErrors.All.Select(e => e.Code).Distinct().Count(), "one code per entry");
@@ -11175,6 +12351,929 @@ public static class Program
 		Check(missing.Count == 0, $"{missing.Count} refusal(s) with no catalog entry (RunnerErrors.cs) - " + string.Join(" || ", missing.Take(6)));
 	}
 
+	// a step's numbers come out of a file anyone may have written: one below zero is the step's own default, minutes are one at least
+	static void T_AStepsNumbersAreHeldToWhatTheWindowAllows()
+	{
+		var s = new StepSettings(new JsonObject { ["start_min"] = -5, ["wait_s"] = -1, ["quiet_min"] = 0, ["idle_s"] = 0, ["crash_wait_min"] = -2.5, ["offer_wait_min"] = 0.02,
+			["min_files"] = 0, ["max_restarts"] = 7, ["build_min"] = 2.9 });
+		Equal(8, s.Int("start_min", 8), "minutes below zero: the default");
+		Equal(60, s.Int("wait_s", 60), "seconds below zero: the default");
+		Equal(1, s.Int("quiet_min", 5), "no minutes at all: one minute");
+		Equal(0, s.Int("idle_s", 45), "no seconds is a number");
+		Equal(0, s.Int("min_files", 100), "and so is no file");
+		Equal(7, s.Int("max_restarts", 3), "a number as it stands");
+		Equal(2, s.Int("build_min", 15), "a number with a fraction, where a whole one is read: its whole part");
+		Equal(30.0, s.Num("crash_wait_min", 30), "a wait below zero: the default");
+		Equal(0.02, s.Num("offer_wait_min", 30), "a part of a minute stands");
+		Equal(15, s.Int("not there", 15), "what the file does not hold: the default");
+		Equal(TimeSpan.FromMinutes(1), new StepSettings(new JsonObject { ["deadline_min"] = 0 }).Deadline(60), "a time limit of none is one minute");
+		Equal(TimeSpan.FromMinutes(60), new StepSettings(new JsonObject { ["deadline_min"] = -3 }).Deadline(60), "one below zero is the step's own");
+		// what Settings writes into the setup it shows: a whole number as a long, any other as a double
+		var typed = new JsonObject { ["keepBackups"] = JsonValue.Create(20L), ["minFreeGb"] = JsonValue.Create(35L), ["guidedReminderMin"] = JsonValue.Create(2.5), ["idleMinutes"] = 4,
+			["name"] = "a word", ["far"] = JsonValue.Create(5_000_000_000L) };
+		Equal(20, Setup.Int(typed, "keepBackups"), "a whole number typed in Settings is that number before the setup is loaded again");
+		Equal(35.0, Setup.Num(typed, "minFreeGb"), "... asked for either way");
+		Equal(2.5, Setup.Num(typed, "guidedReminderMin"), "a number with a fraction");
+		Equal(2, Setup.Int(typed, "guidedReminderMin"), "... and its whole part");
+		Equal(4, Setup.Int(typed, "idleMinutes"), "a number the code put there");
+		Equal(4.0, Setup.Num(typed, "idleMinutes"), "... asked for as one with a fraction");
+		Check(Setup.Int(typed, "name") == null && Setup.Num(typed, "name") == null && Setup.Int(typed, "none") == null, "a word, and nothing, are no number");
+		Check(Setup.Int(typed, "far") == null && Setup.Num(typed, "far") == 5_000_000_000d, "a number past what a whole one holds is none where a whole one is asked for");
+		var read = Setup.RootOf("""{ "keepBackups": 20, "guidedReminderMin": 2.5, "name": "seven" }""")!;
+		Check(Setup.Int(read, "keepBackups") == 20 && Setup.Num(read, "keepBackups") == 20d && Setup.Num(read, "guidedReminderMin") == 2.5 && Setup.Int(read, "name") == null,
+			"read from a file, the same answers");
+		Equal(20, new StepSettings(new JsonObject { ["min_files"] = JsonValue.Create(20L) }).Int("min_files", 100), "a step's number typed in Settings too");
+		// written by hand: quotes round a number or a switch, one name where a list is read, a number past every time
+		var hand = Setup.RootOf("""
+			{ "deadline_min": "90", "wait_s": " 45 ", "crash_wait_min": "2.5", "on": "false", "newGame": "True", "replaces": "Old Output", "enable_during": ["A", "B", ""],
+			  "word": "ninety", "comma": "1,5", "nan": "NaN", "far": "1e400", "huge": 1e300, "list": 7, "empty": "  ", "yes": "yes" }
+			""")!;
+		Check(Setup.Int(hand, "deadline_min") == 90 && Setup.Int(hand, "wait_s") == 45 && Setup.Num(hand, "crash_wait_min") == 2.5, "a number in quotes is that number");
+		Check(Setup.Bool(hand, "on") == false && Setup.Bool(hand, "newGame") == true, "a switch in quotes is that switch");
+		Check(Setup.Bool(hand, "yes") == null && Setup.Bool(hand, "deadline_min") == null && Setup.Bool(hand, "none") == null, "any other word is no switch");
+		Check(Setup.Num(hand, "word") == null && Setup.Num(hand, "comma") == null && Setup.Num(hand, "nan") == null && Setup.Num(hand, "far") == null && Setup.Num(hand, "empty") == null,
+			"a word, a comma, and what is no number are none");
+		Equal("Old Output", string.Join("|", Setup.List(hand, "replaces")), "one name where a list is read is a list of it");
+		Equal("A|B", string.Join("|", Setup.List(hand, "enable_during")), "a list as before");
+		Check(Setup.List(hand, "list").Count == 0 && Setup.List(hand, "empty").Count == 0 && Setup.List(hand, "none").Count == 0, "a number, blanks and nothing are no list");
+		Equal(30.0, new StepSettings(hand).Num("huge", 30), "a wait past every time: the default");
+		Equal(TimeSpan.FromMinutes(90), new StepSettings(hand).Deadline(60), "the time limit in quotes is the step's");
+		var byHand = Setup.FromJson(new JsonObject { ["beforeRun"] = "start.bat", ["steps"] = new JsonArray(new JsonObject { ["step"] = "texgen", ["on"] = "false" }) });
+		Check(!byHand.Steps[0].On, "a step switched \"false\" is off");
+		Equal(1, SetupShare.Share(byHand, "1.0", []).Removed.Count(r => r.Contains("beforeRun", StringComparison.Ordinal)), "one command given as a word is named when the setup is shared");
+		Equal(1, byHand.TakeOutCommands(), "... and taken out of a setup that is brought in");
+		Check(Setup.Num(Setup.RootOf("""{ "far": 1e400 }""")!, "far") == null, "a number past what a number holds is none");
+		bool Due(double a_every) => ToolRunner.App.MainViewModel.ReminderDue(a_every, new DateTime(2026, 1, 1), new DateTime(2026, 1, 1, 0, 5, 0));
+		Check(!Due(1e300) && !Due(double.NaN) && !Due(0) && !Due(6) && Due(5) && Due(1), "a reminder every 1e300 minutes is never due, and no error");
+	}
+
+	// a shader log is asked by what it says, kept as it grows: the answer is the whole log's, and the log itself is never kept
+	static void T_AShaderLogIsKeptAsWhatItSays()
+	{
+		static ShaderStep.Look Of(string a_text, int a_files = 500) => new(a_text, a_files, 400, TimeSpan.FromSeconds(40), TimeSpan.FromSeconds(40), 0.2, 6.0, TimeSpan.FromSeconds(40), true);
+		var noise = string.Concat(Enumerable.Range(0, 3000).Select(i => $"[12:00:{i % 60:00}.000] [info] compiled shader {i} in 12 ms\n"));
+		var timing = string.Concat(Enumerable.Range(0, 500).Select(i => $"[12:01:{i % 60:00}.000] [info] [ShaderTiming] slow shader {i}: 900 ms, remaining={500 - i}\n"));
+		// Open Shaders: its own lines open and close a compile
+		var open = "Open Shaders 2.20.0\nLoading Settings Complete\n" + noise + "[12:00:05] Shader compilation started\n" + noise;
+		var closed = open + "[12:20:00] Shader compilation completed in 1200 s\n";
+		// Bottled Shaders: a count of what is left
+		var counting = "Loaded theme\n" + noise + timing;
+		var counted = counting + "[12:30:00.000] [info] [ShaderTiming] slow shader: 900 ms, remaining=0\n";
+		foreach (var (name, log) in new[] { ("a compile still open", open), ("a compile that closed", closed), ("a count still above none", counting), ("a count at none", counted),
+			         ("a shader mod that stood down", "Incompatible DLL found: Remove it to use this mod\n" + noise), ("a log that says nothing", noise) }) {
+			// fed as it grows: in pieces that end anywhere, the last line not yet whole at some looks
+			var digest = new ShaderStep.LogDigest();
+			var whole = "";
+			for (var at = 0; at < log.Length; at += 7919) {
+				var piece = log[at..Math.Min(log.Length, at + 7919)];
+				var before = whole.Length - (whole.LastIndexOf('\n') + 1);
+				whole += piece;
+				// (the lines this piece made whole: from the end of the last whole line before it to the last line end now)
+				var from = whole.Length - piece.Length - before;
+				var end = whole.LastIndexOf('\n') + 1;
+				if (end > from) {
+					digest.Take(whole[from..end]);
+				}
+				var text = digest.TextWith(whole[end..]);
+				Equal(ShaderStep.Done(Of(whole), 50, TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(30)), ShaderStep.Done(Of(text), 50, TimeSpan.FromMinutes(5), TimeSpan.FromSeconds(30)),
+					$"{name}, {whole.Length} letters in: is the compile over - asked of what is kept as of the whole log");
+				Equal(InGame.RemainingIn(whole), InGame.RemainingIn(text), $"{name}: the last count of what is left");
+			}
+			var kept = digest.Text;
+			Check(kept.Length < 60_000 && kept.Length <= log.Length, $"{name}: what is kept stays small ({kept.Length} letters of {log.Length})");
+			Equal(System.Text.RegularExpressions.Regex.IsMatch(log, "Loading Settings Complete|Loaded theme|Shader compilation started|ShaderTiming"),
+				System.Text.RegularExpressions.Regex.IsMatch(kept, "Loading Settings Complete|Loaded theme|Shader compilation started|ShaderTiming"), $"{name}: whether the shader mod shows it runs");
+			Equal(System.Text.RegularExpressions.Regex.Match(log, @"^.*(Incompatible DLL|Remove it to use|disabled itself|will not run).*$", System.Text.RegularExpressions.RegexOptions.Multiline).Value,
+				System.Text.RegularExpressions.Regex.Match(kept, @"^.*(Incompatible DLL|Remove it to use|disabled itself|will not run).*$", System.Text.RegularExpressions.RegexOptions.Multiline).Value,
+				$"{name}: the line it stood down with");
+			digest.Restart();
+			Equal("", digest.Text, "a log that began anew is asked anew");
+		}
+		// the reader that feeds it: only what a look found new, the log never kept
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "digest " + Guid.NewGuid().ToString("N")[..8]);
+		Directory.CreateDirectory(dir);
+		try {
+			var file = Path.Combine(dir, "shader.log");
+			File.WriteAllText(file, "first line\nsecond li");
+			var reader = new GrowingText { KeepAll = false };
+			Equal("first line\n", reader.Read(file), "the first look: every whole line");
+			Check(reader.Restarted && reader.Added == "first line\n" && reader.Unfinished == "second li", "... told as a new beginning, with the line still being written apart");
+			File.AppendAllText(file, "ne\nthird\n");
+			Equal("second line\nthird\n", reader.Read(file), "the next look: only what it found new");
+			Check(!reader.Restarted && reader.Unfinished == "", "... and no new beginning");
+			Equal("", reader.Read(file), "a look that finds nothing new gives nothing");
+			File.WriteAllText(file, "another log\n");
+			Equal("another log\n", reader.Read(file), "a file that was replaced is read from its start");
+			Check(reader.Restarted, "... and told as a new beginning");
+			// files counted, summed and dated off the walk itself
+			File.WriteAllBytes(Path.Combine(dir, "five.bin"), new byte[5]);
+			Directory.CreateDirectory(Path.Combine(dir, "sub"));
+			File.WriteAllBytes(Path.Combine(dir, "sub", "seven.bin"), new byte[7]);
+			Equal(3, Files.CountFiles(dir), "every file under a folder is counted");
+			Equal(Files.Under(dir).Sum(f => f.Length), Files.SizeOf(dir), "their sizes add up to what the files themselves say");
+			Equal(Files.Under(dir).Max(f => f.LastWriteTimeUtc), Files.NewestWrite(dir), "and the newest of them is found");
+			Equal(0, Files.CountFiles(Path.Combine(dir, "not there")), "a folder that is not there holds none");
+		} finally {
+			Directory.Delete(dir, true);
+		}
+	}
+
+	// a run's record holds what the run wrote, never what is worked out from it at the moment it is asked: who is alive is
+	// a question to Windows, and a record that stored the answer stored it out of date
+	static void T_ARecordHoldsWhatWasWrittenNotWhatIsWorkedOut()
+	{
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "record " + Guid.NewGuid().ToString("N")[..8], "2026-11-01 10-00-00 worked out");
+		Directory.CreateDirectory(dir);
+		try {
+			var j = new Journal { Id = Path.GetFileName(dir), Folder = dir, SetupName = "worked out", Started = DateTime.Now, State = RunState.Running, Pid = Environment.ProcessId,
+				Steps = [new StepRecord { Key = "texgen", State = StepState.Running }] };
+			j.Save();
+			var text = File.ReadAllText(j.File);
+			Check(!text.Contains("OwnerAlive", StringComparison.Ordinal) && !text.Contains("Unfinished", StringComparison.Ordinal) && !text.Contains("\"Live\"", StringComparison.Ordinal),
+				"none of the three worked-out answers is in the file");
+			Check(text.Contains("\"State\": \"Running\"", StringComparison.Ordinal) && text.Contains("\"Pid\"", StringComparison.Ordinal), "what they are worked out from is");
+			var read = Journal.Load(dir);
+			Check(read.Unfinished && read.Live, "read back, a run that is going is unfinished and live");
+			// a record an older version wrote still names them - with answers of the moment it was saved: they are passed over
+			// (the run's own state, at the record's top level - a step's state further in stays as it is)
+			File.WriteAllText(j.File, text.Replace("\n  \"State\": \"Running\"", "\n  \"State\": \"Finished\", \"Unfinished\": true, \"OwnerAlive\": true", StringComparison.Ordinal).
+				Replace("\"Pid\": " + Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture), "\"Pid\": 0", StringComparison.Ordinal));
+			var old = Journal.Load(dir);
+			Check(old.State == RunState.Finished && !old.Unfinished && !old.OwnerAlive, "an older record's stored answers are not believed: the run finished, and nobody owns it");
+		} finally {
+			Directory.Delete(Path.GetDirectoryName(dir)!, true);
+		}
+	}
+
+	// the window's look: every run folder is asked about only when something says a record changed - where the folder is watched
+	static void T_ALookDoesNotWalkEveryRunFolderWhileNothingChanged()
+	{
+		using var f = new FakeMo2();
+		var runs = Runner.RunsDir(f.Data);
+		Journal Record(string a_id, RunState a_state)
+		{
+			var j = new Journal { Id = a_id, Folder = Path.Combine(runs, a_id), SetupFile = f.SetupFile, SetupName = "walk", Started = DateTime.Now, State = a_state,
+				Steps = [new StepRecord { Key = "texgen", State = StepState.Done }] };
+			Directory.CreateDirectory(j.Folder);
+			j.Save();
+			return j;
+		}
+		var first = Record("2026-11-01 10-00-00 walk", RunState.Finished);
+		Record("2026-11-02 10-00-00 walk", RunState.Finished);
+		var every = JournalCache.WholeEvery;
+		try {
+			// a command: nothing watches, every read is whole
+			var plain = new JournalCache(runs);
+			Equal(2, plain.Read().Count, "both records");
+			_ = plain.Read();
+			Equal(2, plain.WholeReads, "with no watcher every read looks at every run folder, as it always did");
+			// the window: watched
+			var cache = new JournalCache(runs) { Watched = true };
+			Equal(2, cache.Read().Count, "both records, read whole the first time");
+			for (var i = 0; i < 5; ++i) {
+				Equal(2, cache.Read().Count, "... and handed out again");
+			}
+			Equal(1, cache.WholeReads, "while nothing changed the run folders are not looked at again");
+			var handed = cache.Read();
+			handed.Clear();
+			Equal(2, cache.Read().Count, "what a caller does to the list it was handed is its own");
+			// this process writes a record (an undo, a put-back): seen at once, without the watcher's word
+			first.Undone = true;
+			first.Save();
+			Check(cache.Read().First(j => j.Id == first.Id).Undone && cache.WholeReads == 2, "a record this process wrote is read at the very next look");
+			// a run folder comes: the runs folder's own time says so
+			var third = Record("2026-11-03 10-00-00 walk", RunState.Finished);
+			Equal(3, cache.Read().Count, "a new run is there at the next look");
+			var wholeNow = cache.WholeReads;
+			_ = cache.Read();
+			Equal(wholeNow, cache.WholeReads, "... and then nothing is looked at again");
+			// another program changed a record: the watcher says so
+			cache.Touch();
+			_ = cache.Read();
+			Equal(wholeNow + 1, cache.WholeReads, "the watcher's word makes the next look a whole one");
+			// a run folder goes
+			Directory.Delete(third.Folder, true);
+			Equal(2, cache.Read().Count, "a run that is gone is gone at the next look");
+			// the trusted time over: looked at whole again, watcher or not
+			JournalCache.WholeEvery = TimeSpan.Zero;
+			wholeNow = cache.WholeReads;
+			Thread.Sleep(20);
+			_ = cache.Read();
+			Equal(wholeNow + 1, cache.WholeReads, "past the trusted time every run folder is looked at again");
+		} finally {
+			JournalCache.WholeEvery = every;
+		}
+		// the look's pace
+		Equal(TimeSpan.FromSeconds(1), ToolRunner.App.MainWindow.Pace(true, false, true, false), "something going: every second, wherever the window is");
+		Equal(TimeSpan.FromSeconds(3), ToolRunner.App.MainWindow.Pace(false, false, false, true), "nothing going, the program in front");
+		Equal(TimeSpan.FromSeconds(10), ToolRunner.App.MainWindow.Pace(false, false, false, false), "another program in front");
+		Equal(TimeSpan.FromSeconds(20), ToolRunner.App.MainWindow.Pace(false, true, false, true), "minimised");
+		Equal(TimeSpan.FromSeconds(20), ToolRunner.App.MainWindow.Pace(false, false, true, true), "the player's own game running");
+	}
+
+	// two tools set to write into one output mod: refused before anything is switched - but the terrain LOD and its roads are one output
+	static void T_TwoToolsWithOneOutputModAreRefused()
+	{
+		static JsonObject Step(string a_key, string a_setting, string a_mod, bool a_on = true) =>
+			new() { ["step"] = a_key, ["on"] = a_on, ["settings"] = new JsonObject { [a_setting] = a_mod } };
+		var one = Setup.FromJson(new JsonObject { ["steps"] = new JsonArray(Step("synthesis", "output_mod", "My Outputs"), Step("xlodgen", "output_mod", "Terrain"),
+			Step("acmos", "then_move_to_mod", "terrain"), Step("texgen", "output_mod", "my outputs"), Step("dyndolod", "output_mod", "DynDOLOD Output"), Step("pandora", "output_mod", "My Outputs", false)) });
+		var all = one.EnabledSteps.Select(s => s.Key).ToList();
+		var found = Preflight.SharedOutputs(one, all).ToList();
+		Equal(1, found.Count, "one pair shares a mod; the terrain LOD and its roads are one output, and a step that is off writes nothing: " + string.Join(" | ", found.Select(i => i.Text)));
+		Check(found[0].Blocking && found[0].Text.StartsWith(StepCatalog.Name("synthesis") + " and " + StepCatalog.Name("texgen") + " have the same output mod, \"My Outputs\"", StringComparison.Ordinal),
+			"both are named, with the mod: " + found[0].Text);
+		Equal("TR-324", RunnerErrors.Find(found[0].Text)?.Code, "... and it comes with what to do");
+		Equal(0, Preflight.SharedOutputs(one, ["texgen", "dyndolod"]).Count(), "a run of only one of the two is no clash");
+		// a shader cache's own output mod counts too: two caches set to one mod, or a cache set to another step's output
+		static JsonObject Caches(params string[] a_outputs) => new() { ["step"] = "shaders", ["on"] = true, ["settings"] = new JsonObject {
+			["caches"] = new JsonArray([.. a_outputs.Select(o => (JsonNode)new JsonObject { ["shader_mod"] = "Shaders " + o, ["output_mod"] = o })]) } };
+		var twoCaches = Setup.FromJson(new JsonObject { ["steps"] = new JsonArray(Caches("Shader Cache", "shader cache")) });
+		var cacheFound = Preflight.SharedOutputs(twoCaches, ["shaders"]).ToList();
+		Check(cacheFound.Count == 1 && cacheFound[0].Text.StartsWith(StepCatalog.Name("shaders") + " have the same output mod", StringComparison.Ordinal),
+			"two caches with one output mod: " + string.Join(" | ", cacheFound.Select(i => i.Text)));
+		var cacheAndStep = Setup.FromJson(new JsonObject { ["steps"] = new JsonArray(Caches("Shared Output"), Step("synthesis", "output_mod", "Shared Output")) });
+		Equal(1, Preflight.SharedOutputs(cacheAndStep, ["shaders", "synthesis"]).Count(), "a cache and another step with one output mod");
+		Equal(0, Preflight.SharedOutputs(Setup.FromJson(new JsonObject { ["steps"] = new JsonArray(Caches("One", "Two")) }), ["shaders"]).Count(), "two caches of their own");
+		// what a pattern without {output} makes of a new setup's names
+		Equal(SetupMaker.OutputName("{profile} outputs", "TexGen Output", "P"), SetupMaker.OutputName("{profile} outputs", "DynDOLOD Output", "P"), "a pattern without {output} names every output alike");
+	}
+
+	// what a setup starts on this PC by itself is listed, and marked so that the window asks about it once
+	static void T_WhatASetupStartsIsListedAndMarked()
+	{
+		var s = Setup.FromJson(new JsonObject {
+			["mo2"] = new JsonObject { ["exe"] = @"D:\MO2\ModOrganizer.exe", ["profile"] = "P" }, ["beforeRun"] = new JsonArray("first.bat"), ["afterRun"] = "last.bat",
+			["steps"] = new JsonArray(
+				new JsonObject { ["step"] = "xlodgen", ["on"] = true, ["settings"] = new JsonObject { ["exe"] = @"D:\Tools\xLODGenx64.exe", ["output_mod"] = "xLODGen Output", ["executable"] = "xLODGen" } },
+				new JsonObject { ["step"] = "texgen", ["on"] = false, ["settings"] = new JsonObject { ["wrapper"] = @"D:\Tools\wrap.cmd", ["deadline_min"] = 30 } }) }, @"D:\Data\Setups\Mine.json");
+		var lines = s.Starts();
+		Equal(@"Mod Organizer: D:\MO2\ModOrganizer.exe|a command before each run: first.bat|a command after each run: last.bat|" +
+			StepCatalog.Name("xlodgen") + @" (exe): D:\Tools\xLODGenx64.exe|" + StepCatalog.Name("xlodgen") + " (Mod Organizer's entry): xLODGen|" +
+			StepCatalog.Name("texgen") + @" (wrapper): D:\Tools\wrap.cmd", string.Join("|", lines),
+			"Mod Organizer, its commands, each program a step names and each entry of Mod Organizer's list it starts - of a step that is off too");
+		var mark = s.StartsMark();
+		((JsonObject)s.Root["steps"]![1]!)["on"] = true;
+		((JsonObject)s.Root["steps"]![0]!["settings"]!)["output_mod"] = "Another Output";
+		s.Root["minFreeGb"] = 30;
+		Equal(mark, s.StartsMark(), "a step switched, a mod's name, a number: what it starts is the same, and so is its mark");
+		s.Root["afterRun"] = "other.bat";
+		Check(s.StartsMark() != mark, "another command is another mark");
+		Equal("starts.allowed.mine", ToolRunner.App.MainViewModel.StartsAllowedKey(s.File), "kept per setup, by its file's name");
+		Equal(2, s.TakeOutCommands(), "brought in from elsewhere, its commands go");
+		s.TakeOutWhatStartsPrograms();
+		// (a step's entry of Mod Organizer's list stays: it names only a program the player put on that list, and the step needs
+		// it - so the setup still asks before it starts it)
+		Equal(StepCatalog.Name("xlodgen") + " (Mod Organizer's entry): xLODGen", string.Join("|", s.Starts()), "... and its programs: only its step's entry is left, and asked about");
+		Equal(0, Setup.FromJson(new JsonObject { ["steps"] = new JsonArray() }).Starts().Count, "a setup with nothing in it starts nothing");
+		// a program a step starts is one by the setting's name, whatever its file is called
+		var odd = Setup.FromJson(new JsonObject { ["steps"] = new JsonArray(new JsonObject { ["step"] = "synthesis", ["settings"] = new JsonObject {
+			["exe_path"] = @"D:\Tools\Synthesis\Synthesis", ["fasterngio_exe"] = @"D:\Tools\ngio.bin", ["output_mod"] = "Synthesis Output", ["note"] = "a saver.scr", ["image"] = "Synthesis.exe" } }) });
+		Equal(3, odd.Starts().Count, "Synthesis's own program path, a program under any name, a value that ends like one: " + string.Join(" | ", odd.Starts()));
+		Check(!odd.Starts().Any(l => l.Contains("(image)", StringComparison.Ordinal)), "the name a tool's process runs under starts nothing, and is not listed");
+		Equal(4, odd.TakeOutWhatStartsPrograms().Count, "... and each is taken out of a setup that is brought in (that name with them, as before)");
+		Equal("Synthesis Output", Setup.Str(odd.Steps[0].Settings, "output_mod"), "what names no program stays");
+	}
+
+	// a setup file from another player: brought in with nothing left that starts a program here, under a name that is free
+	static void T_ASetupFromElsewhereIsBroughtInUnderAFreeName()
+	{
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "bring in " + Guid.NewGuid().ToString("N")[..8]);
+		Directory.CreateDirectory(dir);
+		try {
+			var from = Path.Combine(dir, "Their Setup (shared).json");
+			File.WriteAllText(from, """
+				{ "name": "Their Setup", "mo2": { "exe": "C:\\Their\\ModOrganizer.exe", "profile": "Default" }, "backups": "C:\\Their\\Backups", "beforeRun": "start.bat",
+				  "steps": [ { "step": "texgen", "settings": { "executable": "TexGen", "exe": "C:\\Their\\TexGenx64.exe", "output_mod": "TexGen Output" } } ] }
+				""");
+			var setups = Path.Combine(dir, "Setups");
+			var first = SetupShare.BringIn(from, null, setups);
+			Check(first.File == Path.Combine(setups, "Their Setup.json") && File.Exists(first.File), "brought in under its own name: " + string.Join(" | ", first.Lines));
+			var read = Setup.Load(first.File!);
+			Check(read.Mo2Exe == "" && read.BeforeRun.Count == 0 && read.BackupDir == "" && Setup.Str(read.Steps[0].Settings, "exe") == null, "nothing in it starts a program or names a path of the other PC");
+			Equal("TexGen Output", Setup.Str(read.Steps[0].Settings, "output_mod"), "what is no path and no program stays");
+			Check(first.Lines.Any(l => l.Contains("its 1 own command(s)", StringComparison.Ordinal)) && first.Lines.Any(l => l.StartsWith("taken out", StringComparison.Ordinal)),
+				"what went is said: " + string.Join(" | ", first.Lines));
+			var again = SetupShare.BringIn(from, null, setups);
+			Check(again.File == null && !again.NoName && again.Lines[0].StartsWith("a setup with that name exists", StringComparison.Ordinal), "a name that is taken is said, and nothing is written");
+			var free = SetupShare.BringIn(from, null, setups, true);
+			Equal<string?>(Path.Combine(setups, "Their Setup (2).json"), free.File, "the window brings it in under the next free name");
+			Equal("Their Setup (2)", Setup.Load(free.File!).Name, "... which is its name inside too");
+			Equal<string?>(Path.Combine(setups, "Their Setup (3).json"), SetupShare.BringIn(from, null, setups, true).File, "and the one after it");
+			Equal<string?>(Path.Combine(setups, "Mine.json"), SetupShare.BringIn(from, "Mine", setups).File, "a name given for it");
+			var kept = SetupShare.BringIn(from, "Kept Here", setups, false, dir);
+			Check(Setup.Load(kept.File!).BackupDir == Path.Combine(dir, "Backups") && Setup.Str(Setup.Load(kept.File!).Root, "scratch") == Path.Combine(dir, "Scratch") &&
+				kept.Lines.Any(l => l.Contains("where a new setup keeps them", StringComparison.Ordinal)), "its backups and scratch are this program's own, as a new setup's are");
+			var store = SetupShare.BringIn(from, "output sizes", setups);
+			Check(store.File == null && store.NoName && !File.Exists(Path.Combine(setups, "output sizes.json")), "the name of one of the program's own files is no setup's name");
+			Equal<string?>(Path.Combine(setups, "output sizes (2).json"), SetupShare.BringIn(from, "output sizes", setups, true).File, "... the window gives it the next free one");
+			var none = SetupShare.BringIn(from, "..", setups);
+			Check(none.File == null && none.NoName, "a name with nothing plain in it");
+			// brought in from the New setup box: for the Mod Organizer and profile picked there, its outputs named after that profile
+			File.WriteAllText(from, """
+				{ "name": "Friend", "mo2": { "exe": "", "profile": "Their Profile" }, "outputPattern": "{output} - {profile}", "lodOutputs": ["DynDOLOD Output - Their Profile", "Kept As It Is"],
+				  "steps": [ { "step": "texgen", "settings": { "output_mod": "TexGen Output - Their Profile", "disable_during": ["DynDOLOD Output - their profile", "Some Mod"], "deadline_min": 30 } },
+				             { "step": "shaders", "settings": { "caches": [ { "shader_mod": "Open Shaders - Their Profile", "output_mod": "Shader Cache - Their Profile" } ] } } ] }
+				""");
+			var mine = SetupShare.BringIn(from, null, setups, true, dir, new SetupShare.ForProfile(@"D:\MO2\ModOrganizer.exe", @"D:\MO2", "My Profile"));
+			var m = Setup.Load(mine.File!);
+			Check(m.Mo2Exe == @"D:\MO2\ModOrganizer.exe" && m.Mo2Instance == @"D:\MO2" && m.Profile == "My Profile", "it is made for the Mod Organizer and profile picked: " + string.Join(" | ", mine.Lines));
+			Equal("TexGen Output - My Profile", Setup.Str(m.Steps[0].Settings, "output_mod"), "an output named after the other profile is named after this one");
+			Equal("DynDOLOD Output - My Profile|Some Mod", string.Join("|", Setup.List(m.Steps[0].Settings, "disable_during")), "... in a list too, whatever its letters' case; a mod of the player's stays");
+			Equal("DynDOLOD Output - My Profile|Kept As It Is", string.Join("|", m.LodOutputs), "... and among the LOD outputs");
+			var cache = (JsonObject)((JsonArray)m.Steps[1].Settings["caches"]!)[0]!;
+			Check(Setup.Str(cache, "output_mod") == "Shader Cache - My Profile" && Setup.Str(cache, "shader_mod") == "Open Shaders - Their Profile", "a cache's output too - never the shader mod it is built for, which is a mod of the player's");
+			Check(mine.Lines.Any(l => l.StartsWith("4 output mod name(s) made for the profile \"Their Profile\"", StringComparison.Ordinal)), "how many were named anew is said: " + string.Join(" | ", mine.Lines));
+			Equal(30, Setup.Int(m.Steps[0].Settings, "deadline_min"), "what is no name stays");
+			var same = SetupShare.BringIn(from, "Same Profile", setups, false, dir, new SetupShare.ForProfile(@"D:\MO2\ModOrganizer.exe", @"D:\MO2", "their profile"));
+			Equal("TexGen Output - Their Profile", Setup.Str(Setup.Load(same.File!).Steps[0].Settings, "output_mod"), "for a profile of the same name nothing is named anew");
+			File.WriteAllText(from, """{ "name": "..", "mo2": {}, "steps": [] }""");
+			Equal<string?>(Path.Combine(setups, "Their Setup (shared).json"), SetupShare.BringIn(from, null, setups).File, "a file whose own name is none is kept under its file's name");
+			File.WriteAllText(from, """{ "steps": "none" }""");
+			Check(SetupShare.BringIn(from, null, setups).Lines[0].StartsWith("not a setup file", StringComparison.Ordinal), "a file that is no setup");
+			Equal("Example", ToolRunner.App.Cli.ImportName("Example. "), "the command line's name for it is the same one");
+		} finally {
+			Directory.Delete(dir, true);
+		}
+	}
+
+	// what the command line prints once nobody reads it any more is dropped: never an error, never another exit code
+	static void T_PrintingToAReaderThatIsGoneIsNoError()
+	{
+		using var to = new ClosingWriter();
+		using var o = new ToolRunner.App.ConsoleAttach.ReaderGone(to);
+		o.WriteLine("one");
+		o.Write("two");
+		o.Write('!');
+		Equal("one" + Environment.NewLine + "two!", to.Text, "while it is read, every write goes through");
+		to.Gone = true;
+		o.WriteLine("three");
+		o.Write('x');
+		o.Flush();
+		to.Gone = false;
+		o.WriteLine("four");
+		Equal("one" + Environment.NewLine + "two!", to.Text, "after the first write that failed nothing more is tried");
+		Equal(1, to.Failed, "... the reader is asked once, not at every line");
+	}
+
+	sealed class ClosingWriter() : StringWriter(System.Globalization.CultureInfo.InvariantCulture)
+	{
+		public bool Gone;
+		public int Failed;
+		public string Text => ToString();
+
+		public override void Write(char a_value)
+		{
+			Fail();
+			base.Write(a_value);
+		}
+
+		public override void Write(string? a_value)
+		{
+			Fail();
+			base.Write(a_value);
+		}
+
+		public override void WriteLine(string? a_value)
+		{
+			Fail();
+			base.WriteLine(a_value);
+		}
+
+		void Fail()
+		{
+			if (Gone) {
+				++Failed;
+				throw new IOException("The pipe is being closed.");
+			}
+		}
+	}
+
+	// the command line: an option its command does not have, one without what it names, a stray word - refused, never passed over
+	static void T_TheCommandLineRefusesWhatACommandDoesNotTake()
+	{
+		static string? Not(params string[] a_args) => ToolRunner.App.Cli.NotTaken(a_args);
+		Check(Not("run", "--setup", "x.json", "--form", "texgen")?.StartsWith("--form is no option of run (it takes: --setup, --only, --from, --until, --json)", StringComparison.Ordinal) == true,
+			"a misspelt option is said, with the ones the command has: " + Not("run", "--setup", "x.json", "--form", "texgen"));
+		Equal("--only needs what it names right after it", Not("run", "--setup", "x.json", "--only"), "an option at the end with nothing after it");
+		Equal("--setup needs what it names right after it", Not("run", "--setup", "--only", "texgen"), "an option followed by another option");
+		Check(Not("run", "--setup", "x.json", "texgen")?.StartsWith("\"texgen\" is not expected there", StringComparison.Ordinal) == true, "a word that belongs to no option");
+		Check(Not("check", "--setup", @"D:\My", @"Setups\x.json")?.Contains("goes in quotes", StringComparison.Ordinal) == true, "a path with a blank typed without quotes");
+		Equal("--setup is given twice", Not("run", "--setup", "a.json", "--setup", "b.json"), "one setup per run");
+		Equal<string?>(null, Not("queue", "--setup", "a.json", "--setup", "b.json", "--keep-going"), "a queue names as many as it runs");
+		Equal<string?>(null, Not("run", "--setup", @"D:\My Setups\x.json", "--only", "addon:My Tool", "--json"), "what the window itself starts a run with");
+		Equal<string?>(null, Not("run", "--setup", "x.json", "--from", "texgen", "--until", "dyndolod"), "a run from one step to another");
+		Equal<string?>(null, Not("tools", "--mo2", "ModOrganizer.exe", "--instance", "D:\\MO2", "--add", "--json"), "every option of a command at once");
+		Equal<string?>(null, Not("status"), "a command alone");
+		Equal<string?>(null, Not("addon-check", "my addon.json"), "the one command that takes a word of its own");
+		Check(Not("addon-check", "my", "addon.json") != null, "... and only one");
+		Equal("--json is no option of stop (it takes none)", Not("stop", "--json"), "a command that takes nothing");
+		Equal("--json is no option of lod (it takes: --setup, --step)", Not("lod", "--setup", "x.json", "--step", "grass", "--json"), "--json where a command prints no JSON");
+		Equal<string?>(null, Not("frobnicate", "--anything"), "a word that is no command is said to be none elsewhere");
+		Equal<string?>(null, Not(), "nothing typed");
+		// every command the help line names takes its options from the table (one left out would take anything again) - read off
+		// the source, when it is there (the checks above run without it)
+		var cliFile = Path.Combine(Path.GetDirectoryName(SourceDir())!, "Runner.App", "Cli.cs");
+		if (!File.Exists(cliFile)) {
+			Console.WriteLine($"  (the help line's scan skipped: the source is not at {cliFile})");
+			return;
+		}
+		var cli = File.ReadAllText(cliFile);
+		var help = System.Text.RegularExpressions.Regex.Match(cli, "Console\\.WriteLine\\(\"Tool Runner - ([^\"]+)\"\\)").Groups[1].Value.Split('|').Select(c => c.Trim()).Where(c => c != "").ToList();
+		Check(help.Count >= 20, "the help line's commands were read: " + help.Count);
+		foreach (var command in help) {
+			Check(Not(command, "--no-such-option") is { } said && said.Contains("is no option of " + command, StringComparison.Ordinal), command + " refuses an option it does not have");
+		}
+	}
+
+	// a name written twice in one object: the file does not read, said where it is read - never an error at the first look into it
+	static void T_ANameTwiceInAFileIsAFileThatDoesNotRead()
+	{
+		Throws<System.Text.Json.JsonException>(() => Setup.RootOf("""{ "minFreeGb": 20, "steps": [], "minFreeGb": 30 }"""), "a setup with a setting twice");
+		Throws<System.Text.Json.JsonException>(() => Setup.RootOf("""{ "steps": [ { "step": "texgen", "settings": { "deadline_min": 60, "deadline_min": 90 } } ] }"""), "... or a step's setting twice");
+		Throws<System.Text.Json.JsonException>(() => Setup.Parse(System.Text.Encoding.UTF8.GetBytes("""{ "name": "a", "name": "b" }"""), "x.json"), "... read as the preview reads it");
+		Check(Setup.RootOf("""{ "name": "a", "Name": "b", /* a note */ "steps": [], }""") is { Count: 3 }, "two names that differ by their case are two names; a comment and a last comma as before");
+		var addOn = AddOns.Problems("""{ "schema": 1, "name": "A", "name": "B" }""");
+		Check(addOn.Count == 1 && addOn[0].StartsWith("it is not valid JSON", StringComparison.Ordinal), "an add-on file with a name twice is said to its author: " + string.Join("; ", addOn));
+		Check(LauncherStep.SettingsProblem("""{ "Mo2InstancePath": "a", "Mo2InstancePath": "b" }""", "Landscape Fixer") is { } why && why.Contains("does not read as settings", StringComparison.Ordinal),
+			"a tool's settings file with one stops its step before anything is changed");
+	}
+
+	// A start Windows' management service answered too late may have reached the open Mod Organizer all the same: the tool it
+	// starts is waited for and comes back to the run, which puts it on its record (left off it, it held Mod Organizer open)
+	static void T_AToolStartedAfterALateAnswerIsTheRuns() => FastReady(() => {
+		using var f = new FakeMo2();
+		var c = new Mo2Control(Mo2Instance.Load(f.Exe, f.Instance), "Test", RunLog.Null) {
+			ReadyProbe = () => new(true, true, TimeSpan.FromSeconds(9), null),
+			Launch = (_, _) => throw new Mo2Control.StartUnansweredException("Windows could not start x (its management service did not answer within 2 minutes)", Task.FromResult(0)),
+		};
+		var looks = 0;
+		Equal<int?>(4242, c.LaunchTool("x", () => ++looks >= 3 ? 4242 : 0, TimeSpan.FromSeconds(10), default), "the tool that came is handed back");
+		var none = new Mo2Control(Mo2Instance.Load(f.Exe, f.Instance), "Test", RunLog.Null) {
+			ReadyProbe = () => new(true, true, TimeSpan.FromSeconds(9), null),
+			Launch = (_, _) => throw new Mo2Control.StartUnansweredException("late", Task.FromResult(0)),
+		};
+		Equal<int?>(null, none.LaunchTool("x", () => 0, TimeSpan.FromSeconds(2), default), "and none that never came is made up");
+		// a Stop pressed while Windows still had not answered: a tool Mod Organizer started meanwhile goes on the run's record,
+		// so the Stop ends it (a stand-in program of the test's own plays the tool)
+		using var cts = new CancellationTokenSource();
+		using var tool = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "PING.EXE"), "-n 30 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false })!;
+		try {
+			var stopped = new Mo2Control(Mo2Instance.Load(f.Exe, f.Instance), "Test", RunLog.Null) {
+				ReadyProbe = () => new(true, true, TimeSpan.FromSeconds(9), null),
+				Launch = (_, _) => {
+					cts.Cancel();
+					throw new Mo2Control.StartUnansweredException("late", Task.FromResult(0));
+				},
+			};
+			Thrown<OperationCanceledException>(() => stopped.LaunchTool("x", () => tool.Id, TimeSpan.FromSeconds(10), cts.Token), "the Stop ends the wait");
+			Check(stopped.Started.Contains(tool.Id), "the tool that came meanwhile is on the run's record");
+		} finally {
+			tool.Kill();
+			tool.WaitForExit(10_000);
+		}
+	});
+
+	// A start of Mod Organizer is on the run's record from before it is asked until Windows answers it, and one that cannot be
+	// put on record is never asked. One Windows answered too late: nothing counts as closed - so no profile is written - until
+	// its own answer comes, and the process that answer names is never taken for the run's (its number may have changed hands
+	// before the answer came), so a Mod Organizer the player opens is never closed as the run's
+	static void T_ALateModOrganizerStartIsWaitedFor() => FastReady(() => {
+		using var f = new FakeMo2();
+		var answer = new TaskCompletionSource<int>();
+		var keep = Mo2Control.LateStartWait;
+		Mo2Control.LateStartWait = TimeSpan.FromSeconds(1);
+		// (a stand-in program of the test's own plays the Mod Organizer that came up late)
+		using var late = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "PING.EXE"), "-n 30 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false })!;
+		try {
+			var told = new List<DateTime?>();
+			var c = new Mo2Control(Mo2Instance.Load(f.Exe, f.Instance), "Test", RunLog.Null) {
+				RunningProbe = () => false,
+				ReadyProbe = () => new(true, true, TimeSpan.FromSeconds(9), null),
+				Launch = (_, _) => {
+					Check(told.Count == 1 && told[0] != null, "the start is on record before it is asked (a crash while Windows works on it leaves it there)");
+					throw new Mo2Control.StartUnansweredException("late", answer.Task);
+				},
+				UnansweredChanged = a_at => {
+					told.Add(a_at);
+					return true;
+				},
+			};
+			Thrown<Mo2Control.StartUnansweredException>(() => c.Start(default), "the start says it was not answered");
+			Check(told.Count == 2 && told[1] == told[0], "and stays on record while it is not answered");
+			Check(c.UnansweredSince is { } since && DateTime.UtcNow - since < TimeSpan.FromMinutes(1), "when it was asked is there to be kept in the run's record");
+			Thrown<Mo2BusyException>(() => c.Close(), "nothing counts as closed while its answer is still to come");
+			answer.SetResult(late.Id);
+			c.Close();
+			Check(!c.RunProcesses().Contains(late.Id) && c.UnansweredSince == null, "the process a late answer names is never taken for the run's own");
+			Check(told.Count == 3 && told[2] == null, "and once it is answered, none is left to keep");
+			// a start answered in time is on record only while it is asked
+			var quick = new List<DateTime?>();
+			var answered = new Mo2Control(Mo2Instance.Load(f.Exe, f.Instance), "Test", RunLog.Null) {
+				RunningProbe = () => false,
+				ReadyProbe = () => new(true, true, TimeSpan.FromSeconds(9), null),
+				Launch = (_, _) => late.Id,
+				UnansweredChanged = a_at => {
+					quick.Add(a_at);
+					return true;
+				},
+			};
+			answered.Start(default);
+			Check(quick.Count == 2 && quick[0] != null && quick[1] == null && answered.UnansweredSince == null, "a start answered in time leaves nothing on record");
+			// the run's record would not take it: Mod Organizer is not started at all, and the refusal is said
+			var launched = false;
+			var refused = new Mo2Control(Mo2Instance.Load(f.Exe, f.Instance), "Test", RunLog.Null) {
+				RunningProbe = () => false,
+				ReadyProbe = () => new(true, true, TimeSpan.FromSeconds(9), null),
+				Launch = (_, _) => {
+					launched = true;
+					return late.Id;
+				},
+				UnansweredChanged = a_at => a_at == null,
+			};
+			var e = Thrown<IOException>(() => refused.Start(default), "a start that cannot be put on record is refused");
+			Check(!launched && refused.UnansweredSince == null && RunnerErrors.Find(e.Message)?.Code == "TR-217", "and never asked of Windows: " + e.Message);
+		} finally {
+			Mo2Control.LateStartWait = keep;
+			late.Kill();
+			late.WaitForExit(10_000);
+		}
+	});
+
+	// A Mod Organizer a late answer names that Windows does not list yet still counts as running for the seconds one started at
+	// once gets: the close after that answer does not read "closed" in that moment (a put-back would write under it) - and the
+	// process stays someone else's all the same
+	static void T_ALateModOrganizerNotListedYetStillCountsAsRunning() => FastReady(() => {
+		using var f = new FakeMo2();
+		var keepWait = Mo2Control.LateStartWait;
+		var keepGrace = Mo2Control.StartingGrace;
+		Mo2Control.LateStartWait = TimeSpan.FromSeconds(1);
+		Mo2Control.StartingGrace = TimeSpan.FromSeconds(3);
+		// (a stand-in program of the test's own plays the Mod Organizer that is up but not listed under its name yet)
+		using var late = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "PING.EXE"), "-n 30 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false })!;
+		try {
+			var answer = new TaskCompletionSource<int>();
+			var c = new Mo2Control(Mo2Instance.Load(f.Exe, f.Instance), "Test", RunLog.Null) {
+				ReadyProbe = () => new(true, true, TimeSpan.FromSeconds(9), null),
+				Launch = (_, _) => throw new Mo2Control.StartUnansweredException("late", answer.Task),
+				TheirsProbe = () => [],
+			};
+			// (asked the way a tool is: the start of Mod Organizer itself would first look for programs left in its virtual folder)
+			Equal<int?>(null, c.LaunchTool("x", () => 0, TimeSpan.FromSeconds(1), default), "(a request not answered in time)");
+			answer.SetResult(late.Id);
+			var took = Stopwatch.StartNew();
+			c.Close();
+			Check(took.Elapsed >= TimeSpan.FromSeconds(2.5), $"the close waits out the seconds a new Mod Organizer may go unlisted ({took.Elapsed.TotalSeconds:0.0} s)");
+			Check(!c.RunProcesses().Contains(late.Id), "and the process is still never the run's own");
+		} finally {
+			Mo2Control.LateStartWait = keepWait;
+			Mo2Control.StartingGrace = keepGrace;
+			late.Kill();
+			late.WaitForExit(10_000);
+		}
+	});
+
+	// a put-back that stopped on a start Windows had not answered keeps that start's time in the run's record: pressed again
+	// soon, it is refused and says until when; after that it asks the player whether that start has settled, and goes ahead
+	// only on their word (the window's box, the command line's --late-start-settled)
+	static void T_APutBackWaitsForAStartWindowsHadNotAnswered()
+	{
+		using var f = new FakeMo2();
+		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		var j = new Journal { Id = "late", Folder = Path.Combine(Runner.RunsDir(f.Data), "late"), SetupFile = Path.GetFullPath(f.SetupFile), SetupName = "Test", Profile = "Test",
+			Mo2Exe = f.Exe, Mo2Instance = f.Instance, Started = DateTime.Now.AddHours(-1), State = RunState.Failed, NeedsRestore = true, UnansweredStartAt = DateTime.UtcNow };
+		Directory.CreateDirectory(j.Folder);
+		j.Save();
+		var held = Runner.Restore(Journal.Load(j.Folder), true);
+		Check(held.State == RunState.Failed && held.Verdict.Contains("has not answered a start", StringComparison.Ordinal) && RunnerErrors.Find(held.Verdict)?.Code == "TR-215",
+			"refused while that start could still come, even with the player's word, and said: " + held.Verdict);
+		Check(!Runner.AsksAboutALateStart(Journal.Load(j.Folder)), "(nothing is asked of the player while it is held)");
+		var old = Journal.Load(j.Folder);
+		old.UnansweredStartAt = DateTime.UtcNow - Runner.UnansweredStartHold - TimeSpan.FromMinutes(1);
+		old.Save();
+		Check(Runner.AsksAboutALateStart(Journal.Load(j.Folder)), "after the hold the player is asked");
+		var asked = Runner.Restore(Journal.Load(j.Folder));
+		Check(asked.State == RunState.Failed && RunnerErrors.Find(asked.Verdict)?.Code == "TR-218" && Journal.Load(j.Folder).NeedsRestore,
+			"without the player's word nothing is written and the put-back stays on offer: " + asked.Verdict);
+		var after = Runner.Restore(Journal.Load(j.Folder), true);
+		Check(after.State == RunState.Restored && Journal.Load(j.Folder).UnansweredStartAt == null, "with it, the profile is put back and the start is let go of: " + after.Verdict);
+	}
+
+	// What the player changed during the run, kept before a put-back's lists go back: the newer of the run's record and the
+	// backup folder's file is the one read; and a put-back cut off after its lists went back (the program stopped) brings the
+	// player's switches back from it
+	static void T_ThePlayersChangesAreKeptAcrossACutOffPutBack()
+	{
+		using var f = new FakeMo2();
+		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		var ctx = StepContext(f, "landscapefixer");
+		using var ctxLog = ctx.Log;
+		Directory.CreateDirectory(ctx.BackupFolder);
+		var file = Path.Combine(ctx.BackupFolder, "your changes during the run.json");
+		var t0 = DateTime.UtcNow.AddMinutes(-10);
+		TheirsKept Kept(DateTime a_at, char a_base) => new() { At = a_at, Mods = new(StringComparer.OrdinalIgnoreCase) { ["Base Mod"] = a_base } };
+		// the file newer than the record: the file's is read
+		ctx.Journal.Theirs = Kept(t0, '+');
+		File.WriteAllText(file, System.Text.Json.JsonSerializer.Serialize(Kept(t0.AddMinutes(1), '-')));
+		Equal('-', Runner.KeepTheirs(ctx, new Dictionary<string, char>()).Mods["Base Mod"], "the newer keeping (the file's) is the one read");
+		// the record newer than the file: the record's
+		ctx.Journal.Theirs = Kept(t0.AddMinutes(2), '+');
+		File.WriteAllText(file, System.Text.Json.JsonSerializer.Serialize(Kept(t0.AddMinutes(1), '-')));
+		Equal('+', Runner.KeepTheirs(ctx, new Dictionary<string, char>()).Mods["Base Mod"], "the newer keeping (the record's) is the one read");
+		// and what the player changes now wins over both
+		Equal('-', Runner.KeepTheirs(ctx, new Dictionary<string, char> { ["Base Mod"] = '-' }).Mods["Base Mod"], "what is read now wins");
+		// a put-back cut off after its lists went back: the profile is as before the run, the player's switch only in the record
+		Runner.LetGoOfTheirs(ctx);
+		var snap = ctx.Profile.Snapshot();
+		ctx.Journal.Theirs = Kept(DateTime.UtcNow, '-');
+		ctx.Journal.Save();
+		Check(ctx.Profile.IsOn("Base Mod"), "(the lists went back: the player's switch is not in them)");
+		Runner.PutBack(ctx, snap);
+		Check(!ctx.Profile.IsOn("Base Mod"), "the put-back brings the player's switch back from what it had kept");
+		Check(ctx.Journal.Theirs == null && !File.Exists(file), "and lets go of what it kept once all of it is set again");
+		// a tick the player set on a plugin the lists had unticked: after the lists went back, the tick read now is the lists'
+		// (unticked), and the tick the player had set (kept) stands - one the player changes again since would win
+		var mods = Path.Combine(f.ProfileDir, "modlist.txt");
+		var plugins = Path.Combine(f.ProfileDir, "plugins.txt");
+		File.WriteAllText(mods, File.ReadAllText(mods).Replace("+Base Mod", "-Base Mod", StringComparison.Ordinal));
+		File.WriteAllText(plugins, File.ReadAllText(plugins).Replace("*BaseMod.esp", "BaseMod.esp", StringComparison.Ordinal));
+		var before = ctx.Profile.Snapshot();
+		ctx.Journal.Theirs = new TheirsKept { At = DateTime.UtcNow, Mods = new(StringComparer.OrdinalIgnoreCase) { ["Base Mod"] = '+' },
+			Marks = new(StringComparer.OrdinalIgnoreCase) { ["BaseMod.esp"] = true } };
+		ctx.Journal.Save();
+		Runner.PutBack(ctx, before);
+		Check(ctx.Profile.IsOn("Base Mod") && f.Text("plugins.txt").Contains("*BaseMod.esp", StringComparison.Ordinal),
+			"the player's mod and their tick are back, never the lists' untick in their place: " + f.Text("plugins.txt"));
+		// the backup folder's file of what the player changed is there but does not read: it may hold the newer changes, so the
+		// put-back stops before anything is written, and the file and the record stay as they are
+		Directory.CreateDirectory(ctx.BackupFolder);
+		File.WriteAllText(file, "{ not whole");
+		var keptRecord = ctx.Journal.Theirs;
+		var listsBefore = File.ReadAllBytes(mods);
+		var ticksBefore = File.ReadAllBytes(plugins);
+		var unread = Thrown<IOException>(() => Runner.PutBack(ctx, before), "a put-back whose kept changes do not read stops");
+		Check(RunnerErrors.Find(unread.Message)?.Code == "TR-219", "and says why: " + unread.Message);
+		Check(File.ReadAllText(file) == "{ not whole" && ctx.Journal.Theirs == keptRecord, "the file and the record are kept as they were");
+		Check(File.ReadAllBytes(mods).AsSpan().SequenceEqual(listsBefore) && File.ReadAllBytes(plugins).AsSpan().SequenceEqual(ticksBefore), "nothing of the profile was written");
+		Thrown<IOException>(() => Runner.KeepTheirs(ctx, new Dictionary<string, char> { ["Base Mod"] = '-' }, before), "a step's put-back stops on it too");
+		File.Delete(file);
+		// one that cannot even be looked at (a folder in its place: Windows' "is it there" answers no, opening it is refused) is
+		// not taken for one that is not there
+		Directory.CreateDirectory(file);
+		Check(!File.Exists(file), "(the plain look says no file is there)");
+		var unseen = Thrown<IOException>(() => Runner.PutBack(ctx, before), "a put-back whose kept changes cannot be looked at stops");
+		Check(RunnerErrors.Find(unseen.Message)?.Code == "TR-219" && File.ReadAllBytes(mods).AsSpan().SequenceEqual(listsBefore), "and writes nothing: " + unseen.Message);
+		Directory.Delete(file);
+		// neither the run's record nor its backup folder takes a write: the put-back stops before its lists go back - the
+		// player's changes stay in the profile, never held in memory alone - and says so
+		var listsNow = File.ReadAllBytes(mods);
+		var ticksNow = File.ReadAllBytes(plugins);
+		var blocked = Path.Combine(f.Data, "no folder here");
+		Directory.CreateDirectory(f.Data);
+		File.WriteAllText(blocked, "");
+		ctx.Journal.Folder = blocked;
+		Directory.Delete(ctx.BackupFolder, true);
+		File.WriteAllText(ctx.BackupFolder, "");
+		ctx.Journal.Theirs = new TheirsKept { At = DateTime.UtcNow, Mods = new(StringComparer.OrdinalIgnoreCase) { ["Base Mod"] = '+' } };
+		var refused = Thrown<IOException>(() => Runner.PutBack(ctx, before), "a put-back that cannot keep the player's changes anywhere stops");
+		Check(RunnerErrors.Find(refused.Message)?.Code == "TR-216", "and says why: " + refused.Message);
+		Check(File.ReadAllBytes(mods).AsSpan().SequenceEqual(listsNow) && File.ReadAllBytes(plugins).AsSpan().SequenceEqual(ticksNow), "before its lists went back: the profile is as it was");
+		File.Delete(ctx.BackupFolder);
+	}
+
+	// a ticked mod whose folder would not be read: the player's marks of its plugins are never dropped for it - every mark no
+	// other ticked mod's plugin explains is set as they had it - and the log says so
+	static void T_APlayersPluginMarksStayWhenAModDoesNotRead()
+	{
+		using var f = new FakeMo2();
+		f.Mod("Locked Mod", ("Locked.esp", false, []));
+		File.AppendAllText(Path.Combine(f.ProfileDir, "modlist.txt"), "+Locked Mod\r\n");
+		File.AppendAllText(Path.Combine(f.ProfileDir, "plugins.txt"), "*Locked.esp\r\n");
+		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		var ctx = StepContext(f, "landscapefixer");
+		// (closed on every way out, so the scratch folder goes; closed again early below to read it, which does no harm)
+		using var ctxLog = ctx.Log;
+		var locked = new DirectoryInfo(Path.Combine(f.Mods, "Locked Mod"));
+		var me = System.Security.Principal.WindowsIdentity.GetCurrent().User!;
+		var deny = new System.Security.AccessControl.FileSystemAccessRule(me, System.Security.AccessControl.FileSystemRights.ListDirectory, System.Security.AccessControl.AccessControlType.Deny);
+		var acl = System.IO.FileSystemAclExtensions.GetAccessControl(locked);
+		acl.AddAccessRule(deny);
+		System.IO.FileSystemAclExtensions.SetAccessControl(locked, acl);
+		try {
+			if (Plugins.TryInMod(locked.FullName, out _)) {
+				Console.WriteLine("      (the folder still reads here: skipped)");
+				return;
+			}
+			Runner.ReapplyTheirs(ctx, new Dictionary<string, char>(StringComparer.OrdinalIgnoreCase) { ["Locked Mod"] = '+' },
+				new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase) { ["Locked.esp"] = false, ["BaseMod.esp"] = false });
+			var plugins = f.Text("plugins.txt");
+			Check(plugins.Contains("\nLocked.esp", StringComparison.Ordinal) && !plugins.Contains("*Locked.esp", StringComparison.Ordinal), "its plugin is as the player had it: " + plugins);
+			Check(plugins.Contains("*BaseMod.esp", StringComparison.Ordinal), "a plugin a ticked mod that reads holds is left to that mod");
+			Check(ctx.MarksLeft.Contains("Locked Mod"), "and the put-back stays on offer, naming the mod: " + string.Join(", ", ctx.MarksLeft));
+			ctx.Log.Dispose();
+			Check(File.ReadAllText(Path.Combine(ctx.Journal.Folder, "log.txt")).Contains("Locked Mod could not be read", StringComparison.Ordinal), "and the log names the mod");
+		} finally {
+			acl.RemoveAccessRule(deny);
+			System.IO.FileSystemAclExtensions.SetAccessControl(locked, acl);
+		}
+	}
+
+	// More of a setup file that comes from anywhere, read as meant: the entry of Mod Organizer's list a step starts is among what
+	// the setup starts; a negative fraction is no number; a shader step's cache named both ways is one output; lodOutputs as one
+	// name is named after the profile too; a file that is no setup is said so, apart from a name that is taken
+	static void T_MoreOfASetupFromAnywhereIsReadAsMeant()
+	{
+		var withEntry = Setup.FromJson(new JsonObject { ["mo2"] = new JsonObject(), ["steps"] = new JsonArray(new JsonObject { ["step"] = "pgpatcher", ["on"] = true, ["settings"] = new JsonObject { ["executable"] = "PGPatcher" } }) });
+		Check(withEntry.Starts().Any(l => l.Contains("PGPatcher", StringComparison.Ordinal) && l.Contains("Mod Organizer's entry", StringComparison.Ordinal)), "a step's entry is among what it starts: " + string.Join(" | ", withEntry.Starts()));
+		var changed = Setup.FromJson(new JsonObject { ["mo2"] = new JsonObject(), ["steps"] = new JsonArray(new JsonObject { ["step"] = "pgpatcher", ["on"] = true, ["settings"] = new JsonObject { ["executable"] = "Something Else" } }) });
+		Check(withEntry.StartsMark() != changed.StartsMark(), "another entry asks again");
+		Equal(60, new StepSettings(new JsonObject { ["deadline_min"] = -0.5 }).Int("deadline_min", 60), "a negative fraction is no number: the default stands");
+		Equal(1, new StepSettings(new JsonObject { ["deadline_min"] = 0 }).Int("deadline_min", 60), "a zero of minutes is one");
+		Equal(2, new StepSettings(new JsonObject { ["deadline_min"] = 2.7 }).Int("deadline_min", 60), "a positive fraction is made whole");
+		var shaders = Setup.FromJson(new JsonObject { ["mo2"] = new JsonObject(), ["steps"] = new JsonArray(new JsonObject { ["step"] = "shaders", ["on"] = true,
+			["settings"] = new JsonObject { ["output_mod"] = "Cache", ["shader_mod"] = "Shader Mod", ["caches"] = new JsonArray(new JsonObject { ["shader_mod"] = "Shader Mod", ["output_mod"] = "Cache" }) } }) });
+		Equal(0, Preflight.SharedOutputs(shaders, ["shaders"]).Count(), "one cache named both ways is one output, never shared with itself");
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "lod outputs " + Guid.NewGuid().ToString("N")[..8]);
+		Directory.CreateDirectory(dir);
+		try {
+			var from = Path.Combine(dir, "shared.json");
+			File.WriteAllText(from, """{ "name": "Shared", "mo2": { "profile": "Old" }, "lodOutputs": "DynDOLOD Output - Old", "steps": [ { "step": "dyndolod", "on": true, "settings": { "output_mod": "DynDOLOD Output - Old" } } ] }""");
+			var setups = Path.Combine(dir, "Setups");
+			var got = SetupShare.BringIn(from, null, setups, true, dir, new SetupShare.ForProfile(@"D:\MO2\ModOrganizer.exe", @"D:\MO2", "New"));
+			Check(got.File != null, "brought in: " + string.Join(" | ", got.Lines));
+			var root = Setup.Load(got.File!).Root;
+			Equal("DynDOLOD Output - New", root["lodOutputs"]?.ToString(), "lodOutputs given as one name follows the step's output");
+			var notOne = Path.Combine(dir, "not one.json");
+			File.WriteAllText(notOne, """{ "steps": "none" }""");
+			var refused = SetupShare.BringIn(notOne, "Not One", setups, false, dir);
+			Check(refused.File == null && refused.NotASetup && !refused.NoName, "a file that is no setup is said to be none: " + string.Join(" | ", refused.Lines));
+			var taken = SetupShare.BringIn(from, Path.GetFileNameWithoutExtension(got.File!), setups, false, dir);
+			Check(taken.File == null && !taken.NotASetup, "a name that is taken is no fault of the file");
+		} finally {
+			Directory.Delete(dir, true);
+		}
+	}
+
+	// A growing log read by what each look added gives only that: a line still being written comes once, with the look that
+	// ends it - never also from the look that found it unfinished
+	static void T_AGrowingLogGivesAnUnfinishedLineOnce()
+	{
+		var dir = Path.Combine(Path.GetTempPath(), "Tool Runner tests", "growing " + Guid.NewGuid().ToString("N")[..8]);
+		Directory.CreateDirectory(dir);
+		try {
+			var file = Path.Combine(dir, "tool.log");
+			File.WriteAllText(file, "progress");
+			var g = new GrowingText { KeepAll = false };
+			Equal("", g.Read(file), "an unfinished first line is not given yet");
+			Equal("progress", g.Unfinished, "it is the unfinished one");
+			File.AppendAllText(file, "\nnext");
+			Equal("progress\n", g.Read(file), "it comes once, with the look that ends it");
+		} finally {
+			Directory.Delete(dir, true);
+		}
+	}
+
+	// a bug report is made when a file it would hold cannot be read: that file's place says why
+	// a put-back whose run's Mod Organizer is no longer where its record says is refused - the setup's Mod Organizer of today,
+	// with a profile of the same name, is never written in its place
+	static void T_APutBackNeverWritesIntoAnotherModOrganizer()
+	{
+		using var f = new FakeMo2();
+		using var other = new FakeMo2();
+		other.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		var j = new Journal { Id = "gone", Folder = Path.Combine(Runner.RunsDir(other.Data), "gone"), SetupFile = Path.GetFullPath(other.SetupFile), SetupName = "Test", Profile = "Test",
+			Mo2Exe = f.Exe, Mo2Instance = f.Instance, Started = DateTime.Now.AddHours(-1), State = RunState.Failed, NeedsRestore = true };
+		Directory.CreateDirectory(j.Folder);
+		j.Save();
+		// the run's Mod Organizer moved away since
+		File.Delete(Path.Combine(f.Instance, "ModOrganizer.ini"));
+		var list = Path.Combine(other.ProfileDir, "modlist.txt");
+		var before = File.ReadAllBytes(list);
+		var r = Runner.Restore(Journal.Load(j.Folder));
+		Check(r.State == RunState.Failed && r.Verdict.Contains("no longer where its record says", StringComparison.Ordinal), "refused, and said: " + r.Verdict);
+		Check(before.AsSpan().SequenceEqual(File.ReadAllBytes(list)), "the other Mod Organizer's profile is as it was");
+	}
+
+	static void T_ABugReportIsMadeWithAFileItCannotRead()
+	{
+		using var f = new FakeMo2();
+		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
+		var j = new Journal { Id = "r1", Folder = Path.Combine(Runner.RunsDir(f.Data), "r1"), SetupFile = Path.GetFullPath(f.SetupFile), SetupName = "Test", Profile = "Test",
+			Started = DateTime.Now, State = RunState.Finished };
+		Directory.CreateDirectory(j.Folder);
+		j.Save();
+		var outDir = Path.Combine(f.Root, "Reports");
+		string zip;
+		// (held open by nobody else's leave: no read of it goes through while this handle stands)
+		using (new FileStream(f.SetupFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) {
+			zip = BugReport.Make(f.Data, j, outDir, "1.0");
+		}
+		using var z = System.IO.Compression.ZipFile.OpenRead(zip);
+		using var setupEntry = new StreamReader(z.GetEntry("setup.json")!.Open());
+		Check(setupEntry.ReadToEnd().StartsWith("(this file could not be read", StringComparison.Ordinal), "the setup's place says it could not be read");
+	}
+
+	// The words of every StepFailedException one C# file makes, in the order they stand: "new StepFailedException(...)", and a
+	// target-typed "new(...)" where the type it makes is a StepFailedException - a helper declared to return one (by => or by
+	// return), or a local or field of that type. A call in a comment, and one that only hands on a text made elsewhere, has none
+	static List<string> StepFailureTexts(string a_src)
+	{
+		var at = new SortedDictionary<int, int>();
+		foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(a_src, @"\bnew StepFailedException\(")) {
+			at[m.Index] = m.Index + m.Length;
+		}
+		// a local or field of the type, or a helper that gives one with =>
+		foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(a_src, @"\bStepFailedException\??\s+\w+\s*(?:=|\([^()]*\)\s*=>)\s*(new)\(")) {
+			at[m.Groups[1].Index] = m.Index + m.Length;
+		}
+		// a helper with a body: each "return new(" up to its closing bracket
+		foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(a_src, @"\bStepFailedException\??\s+\w+\s*\([^()]*\)\s*\{")) {
+			var depth = 1;
+			var end = m.Index + m.Length;
+			while (end < a_src.Length && depth > 0) {
+				depth += a_src[end] == '{' ? 1 : a_src[end] == '}' ? -1 : 0;
+				++end;
+			}
+			foreach (System.Text.RegularExpressions.Match r in System.Text.RegularExpressions.Regex.Matches(a_src[(m.Index + m.Length)..end], @"\breturn\s+(new)\(")) {
+				var from = m.Index + m.Length;
+				at[from + r.Groups[1].Index] = from + r.Index + r.Length;
+			}
+		}
+		var texts = new List<string>();
+		foreach (var (start, open) in at) {
+			var line = a_src.LastIndexOf('\n', start) + 1;
+			if (a_src.AsSpan(line, start - line).Contains("//", StringComparison.Ordinal)) {
+				continue;
+			}
+			// (a failure that only hands on a text made elsewhere - a tool's own box, a check's finding - has no words of its own here)
+			var text = string.Join(" ", ReadCall(a_src, open).Strings);
+			if (text.Trim().Length >= 8) {
+				texts.Add(text);
+			}
+		}
+		return texts;
+	}
+
+	// ... and every text a step fails with: its own words, or the tool's, come with a code and what to do
+	static void T_EveryFailureOfAStepIsInTheCatalog()
+	{
+		var core = SourceDir();
+		if (!Directory.Exists(core)) {
+			Console.WriteLine($"  (skipped: the source is not at {core})");
+			return;
+		}
+		var missing = new List<string>();
+		var seen = 0;
+		// (the scan itself, on a made-up file: each way a failure is made is found, a target-typed new() in a helper included)
+		var fixture = StepFailureTexts("""
+			static StepFailedException Lost() => new("the fixture's helper found no usable input");
+			static StepFailedException Gone() { return new("the fixture's other helper found nothing"); }
+			void A() { StepFailedException e = new("the fixture's local found nothing either"); throw e; }
+			void B() => throw new StepFailedException("the fixture's plain one");
+			// new StepFailedException("a comment is no failure")
+			""");
+		Equal("the fixture's helper found no usable input | the fixture's other helper found nothing | the fixture's local found nothing either | the fixture's plain one",
+			string.Join(" | ", fixture), "every form of a step's failure is found, a comment's is not");
+		foreach (var file in Directory.EnumerateFiles(core, "*.cs", SearchOption.AllDirectories).Where(p => !p.Contains(@"\obj\", StringComparison.Ordinal) && !p.Contains(@"\bin\", StringComparison.Ordinal))) {
+			foreach (var text in StepFailureTexts(File.ReadAllText(file))) {
+				++seen;
+				if (RunnerErrors.Find(text + " ") == null) {
+					missing.Add($"{Path.GetFileName(file)}: {text.Trim()}");
+				}
+			}
+		}
+		Check(seen >= 120, $"the scan found the steps' failures ({seen})");
+		Check(missing.Count == 0, $"{missing.Count} failure(s) of a step with no catalog entry (RunnerErrors.cs) - " + string.Join(" || ", missing.Take(6)));
+		// the nearer entry wins: a limit before "the window did not come", an empty result before the tool's name
+		Equal("TR-408", RunnerErrors.Find("xLODGen's options did not appear within the step's 120 minute limit")?.Code, "the step's limit");
+		Equal("TR-433", RunnerErrors.Find("xLODGen's options did not appear, and the tool's log said nothing new for 15 minutes")?.Code, "a window that never came");
+		Equal("TR-411", RunnerErrors.Find("the grass cache looks empty (3 files)")?.Code, "almost nothing made");
+		Equal("TR-433", RunnerErrors.Find("DynDOLOD: no Start button in its options window (DynDOLOD needs Expert mode)")?.Code, "the window, not the tool's own words");
+		Equal(RunnerErrors.ToolsOwnWords, RunnerErrors.Find("Pandora: something only Pandora would say")?.Code, "what a tool itself said");
+		Equal(RunnerErrors.ToolsOwnWords, RunnerErrors.Find("DynDOLOD reported an error: Error: could not start the export, did not write the file")?.Code,
+			"the tool's own words choose no entry of the runner's");
+		Equal(RunnerErrors.ToolsOwnWords, RunnerErrors.All[^1].Code, "and that entry is the last one asked");
+		// every place a tool's or the game's own words follow the runner's: only the runner's words choose
+		Equal(RunnerErrors.ToolsOwnWords, RunnerErrors.Find("Pandora logged errors: could not start the engine | the job ended with exit code 3")?.Code, "Pandora's log lines choose nothing");
+		Equal(RunnerErrors.ToolsOwnWords, RunnerErrors.Find("PGPatcher asks a question this step does not answer: could not start the export?")?.Code, "nor a tool's question");
+		Equal("TR-415", RunnerErrors.Find("the game shows a box this step does not answer: Mod Organizer is open | could not start the export")?.Code, "a game box's own words choose nothing");
+		Equal("TR-415", RunnerErrors.Find("the game shows a Windows box this step does not answer: the command ended with exit code 1")?.Code, "nor a Windows box's");
+		Equal("TR-433", RunnerErrors.Find("Landscape Fixer shows no usable Generate button. Its window shows: could not start, ended with exit code 2.")?.Code, "nor what a tool's window shows");
+		Check(RunnerErrors.Find("the after-run command ended with exit code 4: cmd /c exit 4") is { } own && own.Code != RunnerErrors.ToolsOwnWords, "the runner's own exit-code words are never cut away");
+		// a tool's own documented error goes before the catalog's general words for "the tool said so"
+		var memory = Explain.For("dyndolod", "DynDOLOD: Error: Out of memory");
+		Check(memory is { Code: null, Help: "https://dyndolod.info/FAQ" }, "the tool's own help first: " + memory);
+		Check(Explain.For("pandora", "Pandora: something only Pandora would say") is { Code: RunnerErrors.ToolsOwnWords }, "the general words where the tool's help has none");
+		// a place that is no place is named at the check, where it was read as "end"
+		var odd = Setup.FromJson(new JsonObject { ["placement"] = JsonNode.Parse("[[\"Mine.esp\", \"afer:Skyrim.esm\"], [\"Other.esp\", \"after:Skyrim.esm\"], [\"Last.esp\", \"end\"], [\"Top.esp\", \"last_master\"]]") }).Problems();
+		var named = odd.Where(p => p.Contains("a place is last_master", StringComparison.Ordinal)).ToList();
+		Check(named.Count == 1 && named[0].Contains("Mine.esp", StringComparison.Ordinal) && RunnerErrors.Find(named[0])?.Code == "TR-118", "the one slip is named, the three places are not: " + string.Join(" | ", odd));
+		// a plugin named twice under "placeAfter" in other letters is read once, the first time - never a throw after a step
+		var twice = Setup.FromJson(new JsonObject { ["placeAfter"] = JsonNode.Parse("{\"DynDOLOD.esm\": \"PGPatcher.esp\", \"dyndolod.esm\": \"Other.esp\", \"Lone.esp\": 3}") });
+		Equal(2, twice.PlaceAfter.Count, "each plugin once (a number is a value too)");
+		Equal("PGPatcher.esp", twice.PlaceAfter["DYNDOLOD.ESM"], "the first one, found in any letter case");
+	}
+
 	// ... and that guard is a real one: a planted refusal nobody put in the catalog is caught, a note and a known one are not
 	static void T_ARefusalWithoutAnEntryIsCaught()
 	{
@@ -11216,7 +13315,7 @@ public static class Program
 		// the nearer entry wins where two share words
 		Equal("TR-407", RunnerErrors.Find("Steam did not start within 3 minutes - start it, then start the run again")?.Code, "Steam's own, not the tool start's");
 		Equal("TR-406", RunnerErrors.Find("DynDOLOD did not start within 3 minutes")?.Code, "a tool that did not come up");
-		Equal("TR-116", RunnerErrors.Find("could not start: claim.cmd")?.Code, "a setup's own command");
+		Equal("TR-116", RunnerErrors.Find("could not start: prepare.cmd")?.Code, "a setup's own command");
 		Equal("TR-111", RunnerErrors.Find("Mod Organizer's program is not set")?.Code, "the setup's folder, not a step's setting");
 		Equal("TR-410", RunnerErrors.Find("the step's setting \"executable\" is not set")?.Code, "a step's setting");
 		var lines = Explain.Lines("", "another Mod Organizer is open (C:\\Other\\ModOrganizer.exe) - close it first");
@@ -11225,7 +13324,7 @@ public static class Program
 
 	// the program's own small files beside the setups are no setups; an output two steps name is
 	// counted once; a shader cache (most runs build none) never refuses a start; a tool's own words are never taken for the runner's
-	static void T_TheReviewBeforeOnePointZero()
+	static void T_StoreFilesSharedOutputsAndAToolsOwnWords()
 	{
 		Check(Setup.IsStore(@"C:\x\Setups\tool versions.json") && Setup.IsStore(@"C:\x\Setups\Output Sizes.json") && !Setup.IsStore(@"C:\x\Setups\My Profile.json"),
 			"the tools' versions and the outputs' sizes are the program's own files, a setup is not");
@@ -11245,14 +13344,15 @@ public static class Program
 		setup.Root["shaderRebuild"] = "always";
 		Check(DiskForecast.Build(setup, mo2, setup.EnabledSteps, probes).Disks.Single().Parts.Any(p => p.Needed && p.What.Contains("Output A", StringComparison.Ordinal)),
 			"unless the setup rebuilds the caches every run");
-		Check(RunnerErrors.Find("DynDOLOD: the output path is not set in this preset, and there are no steps left") == null, "a tool's own words are not taken for the runner's");
+		Equal(RunnerErrors.ToolsOwnWords, RunnerErrors.Find("DynDOLOD: the output path is not set in this preset, and there are no steps left")?.Code,
+			"a tool's own words are told as the tool's own, never taken for one of the runner's refusals");
 		Equal("TR-112", RunnerErrors.Find("the setup has no steps")?.Code, "the setup's own are");
 	}
 
 	// a kept file whose backup is on a drive that is not there is asked
 	// again; a folder half moved into the backup gets its part back beside what stayed; the cache that stood in overwrite never
 	// comes back over a new cache; the grass wrapper's exit line stands alone; the window says a run ended only once it is over
-	static void T_TheReviewOfTheEngineFixes()
+	static void T_BackupsThatAreGoneAndHalfMovedFoldersComeRight()
 	{
 		using var f = new FakeMo2();
 		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }));
@@ -11745,7 +13845,7 @@ public static class Program
 	// process's own name read back, several names answered at once - and a process that ended is gone though its handle is still held
 	static void T_AProcessIsFoundByItsImageInOneLook()
 	{
-		using var ping = Process.Start(new ProcessStartInfo("ping", "-n 30 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true })!;
+		using var ping = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "PING.EXE"), "-n 30 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true })!;
 		try {
 			Check(Procs.Pids("ping.exe").Contains(ping.Id) && Procs.Pids("PING").Contains(ping.Id), "its id, by its image in any case, with or without .exe");
 			Check(Procs.Running("Ping.exe") && !Procs.Running("no such program 7f3a.exe") && !Procs.Running("pin.exe"), "running or not, by the whole name");

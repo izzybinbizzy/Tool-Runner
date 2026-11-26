@@ -126,6 +126,10 @@ public sealed class RunContext
 	// (the list was held by another program). The profile is not whole back while one is left: the put-back stays on offer
 	public List<string> LinesLeft { get; } = [];
 
+	// After a put-back: the ticked mods whose folder would not be read, so the player's plugin ticks of them could not all be
+	// set again. The put-back stays on offer while one is left (the marks it needs are kept in the run's record)
+	public List<string> MarksLeft { get; } = [];
+
 	public void SetAfter(params string[] a_mods) => PendingEnable.AddRange(a_mods);
 
 	// one output of a step that makes several is complete: on record as built at once, so it stays - and is switched on at the
@@ -210,12 +214,19 @@ public sealed class StepSettings(JsonObject a_o)
 	public JsonObject Raw { get; } = a_o;
 	public string? Str(string a_key) => Setup.Str(Raw, a_key);
 	public string Req(string a_key) => Str(a_key) is { Length: > 0 } s ? s : throw new StepFailedException($"the step's setting \"{a_key}\" is not set");
-	public int Int(string a_key, int a_default) => Setup.Int(Raw, a_key) ?? a_default;
-	public double Num(string a_key, double a_default) => Setup.Num(Raw, a_key) ?? a_default;
+	// A number of a setup file that can come from anywhere (shared, brought in, written by hand): one below zero is no
+	// number - the step's own default stands - and a time in whole minutes is one minute at least. The Settings window
+	// holds a typed number to the same two rules; a number read past them made a step fail at once on "its -5 minute limit"
+	// (the sign is read before the number is made whole: -0.5 would be 0, and as minutes taken for one)
+	public int Int(string a_key, int a_default) =>
+		Setup.Num(Raw, a_key) is { } d && d >= 0 && Setup.Int(Raw, a_key) is { } n ? (a_key.EndsWith("_min", StringComparison.Ordinal) ? Math.Max(1, n) : n) : a_default;
+	// (nor is one past what a whole number holds: as minutes it was more time than there is, and the step ended on that)
+	public double Num(string a_key, double a_default) => Setup.Num(Raw, a_key) is { } d && d >= 0 && d <= int.MaxValue ? d : a_default;
 	public bool Bool(string a_key, bool a_default) => Setup.Bool(Raw, a_key) ?? a_default;
 	public List<string> List(string a_key) => Setup.List(Raw, a_key);
 	public string? OutputMod => Str("output_mod") ?? Str("then_move_to_mod");
-	public TimeSpan Deadline(int a_defaultMin) => TimeSpan.FromMinutes(Int("deadline_min", a_defaultMin));
+	// (a setup written by hand may say 0 or less: a step then failed at once on "its -5 minute limit")
+	public TimeSpan Deadline(int a_defaultMin) => TimeSpan.FromMinutes(Math.Max(1, Int("deadline_min", a_defaultMin)));
 }
 
 // Mods on / off for one step (MO2 closed) and ALWAYS put back afterwards: the order files are saved before and written back
@@ -234,9 +245,12 @@ public sealed class Toggle : IDisposable
 		// a Stop already asked for: nothing is switched and nothing started
 		a_ct.ThrowIfCancellationRequested();
 		var st = a_ctx.Profile.States();
-		var en = a_enable.Where(m => st.ContainsKey(m)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-		var dis = a_disable.Where(m => st.ContainsKey(m) && !en.Contains(m, StringComparer.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-		foreach (var m in a_enable.Concat(a_disable).Where(m => !st.ContainsKey(m)).Distinct()) {
+		// (each list gone through once, whatever the caller handed in: one that is worked out as it is read was worked out
+		// three times)
+		var (enable, disable) = (a_enable.ToList(), a_disable.ToList());
+		var en = enable.Where(m => st.ContainsKey(m)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+		var dis = disable.Where(m => st.ContainsKey(m) && !en.Contains(m, StringComparer.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+		foreach (var m in enable.Concat(disable).Where(m => !st.ContainsKey(m)).Distinct()) {
 			a_ctx.Log.Detail($"(not in this profile, skipped: {m})");
 		}
 		a_ctx.Control.Close(null, a_ct);
@@ -284,7 +298,7 @@ public sealed class Toggle : IDisposable
 		// files go back, laid back over them after, and still counted as the player's (the expectation goes back to before the
 		// step), so the run's final put-back sees and keeps it too
 		var theirs = _ctx.Profile.ChangedByOthers();
-		var marks = theirs.Count > 0 ? _ctx.Profile.PluginMarks() : [];
+		var marks = theirs.Count > 0 ? Runner.KeepTheirs(_ctx, theirs, _snap).Marks : [];
 		try {
 			_ctx.Profile.Restore(_snap);
 		} catch (Mo2OpenException) {
@@ -295,7 +309,7 @@ public sealed class Toggle : IDisposable
 			// looked at again: nothing was put back yet (the refusal comes before the first file is written), and the Mod
 			// Organizer that came up may have saved a change of the player's since the look above
 			theirs = _ctx.Profile.ChangedByOthers();
-			marks = theirs.Count > 0 ? _ctx.Profile.PluginMarks() : [];
+			marks = theirs.Count > 0 ? Runner.KeepTheirs(_ctx, theirs, _snap).Marks : [];
 			_ctx.Profile.Restore(_snap);
 		}
 		_ctx.Profile.OursBack(_oursBefore);
@@ -314,8 +328,13 @@ public sealed class Toggle : IDisposable
 		if (theirs.Count > 0) {
 			var expected = _ctx.Profile.OursNow();
 			_ctx.Log.Detail($"kept what you changed in Mod Organizer during {_label}: " + string.Join(", ", theirs.Select(p => (p.Value == '+' ? "on " : "off ") + p.Key)));
+			_ctx.MarksLeft.Clear();
 			Runner.ReapplyTheirs(_ctx, theirs, marks);
 			_ctx.Profile.OursBack(expected);
+			// all set again: what was kept of it goes (kept on, a switch the player undid later would come back from it)
+			if (_ctx.MarksLeft.Count == 0) {
+				Runner.LetGoOfTheirs(_ctx);
+			}
 		}
 		// What the player switched in Mod Organizer changes the files the game finds, whatever was counted or taken back
 		// above for the step's own switches. Each such switch counts once, when it is first met here: by what the run has
@@ -379,14 +398,15 @@ public static class Waits
 	// a_progress: for a tool driven through its window - what its window says; a change counts as work, and so does CPU its CHILD
 	// processes use (a long patcher shows nothing new for minutes), never the window process's own (a
 	// window drawing itself uses CPU while the tool does nothing - Synthesis sat 4 min on its main screen)
+	// a_clock: the step's own clock, when an earlier wait of the step counts against the same limit
 	public static void Tool(RunContext a_ctx, string a_step, Process a_proc, TimeSpan a_deadline, Func<Poll> a_poll,
-		Func<bool>? a_onIdle = null, TimeSpan? a_every = null, Func<string>? a_progress = null)
+		Func<bool>? a_onIdle = null, TimeSpan? a_every = null, Func<string>? a_progress = null, AwakeClock? a_clock = null)
 	{
 		string? lastSeen = null;
 		var every = a_every ?? TimeSpan.FromSeconds(2);
 		// time the PC was awake: a closed lid or the player's own Sleep in the middle of a long tool is not time the tool had,
 		// and on waking neither its limit nor the idle rule may have run out
-		var sw = AwakeClock.StartNew();
+		var sw = a_clock ?? AwakeClock.StartNew();
 		TimeSpan? goneAt = null;
 		var idleLimit = IdleForTests ?? TimeSpan.FromMinutes(Math.Max(1, a_ctx.Setup.IdleMinutes));
 		var lastCpu = TimeSpan.Zero;

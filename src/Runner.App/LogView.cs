@@ -122,14 +122,9 @@ public sealed class LogView : RichTextBox
 		_ => a_line.Trim().Length == 0 ? "Text" : "Good",
 	};
 
-	public static string Mark(string a_line)
-	{
-		var at = a_line.IndexOf("  ", StringComparison.Ordinal);
-		// (only right after the time at a line's start, as the search reads it: two spaces further in are the line's own words)
-		if (at < 0 || at > 12) {
-			return "";
-		}
-		var rest = a_line.AsSpan(at + 2);
-		return rest.StartsWith("!!! ") ? "!!! " : rest.StartsWith("! ") ? "! " : "";
-	}
+	public static string Mark(string a_line) => LogSearch.Mark(a_line) switch {
+		2 => "!!! ",
+		1 => "! ",
+		_ => "",
+	};
 }

@@ -1,3 +1,4 @@
+using System.IO.Enumeration;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -110,7 +111,13 @@ public static partial class Files
 		var tail = new byte[a_most];
 		var got = fs.ReadAtLeast(tail, a_most, false);
 		var line = Array.IndexOf(tail, (byte)'\n', 0, got);
-		return DecodeText(tail[(line < 0 ? 0 : line + 1)..got]);
+		var from = line < 0 ? 0 : line + 1;
+		// (no line's end in the tail - one very long line: the rest of a letter cut in two at the tail's start is left out, or
+		// the whole tail would no longer read as UTF-8)
+		while (line < 0 && from < got && from < 3 && (tail[from] & 0xC0) == 0x80) {
+			++from;
+		}
+		return DecodeText(tail[from..got]);
 	}
 
 	static readonly UTF8Encoding StrictUtf8 = new(false, true);
@@ -200,21 +207,73 @@ public static partial class Files
 		if (!Directory.Exists(a_dir)) {
 			return;
 		}
+		// a folder that is itself a link goes as the link: what it points at is never touched
+		if (IsLink(a_dir)) {
+			Directory.Delete(a_dir);
+			return;
+		}
 		try {
+			// a link inside goes first, as the link alone: Windows' own delete of the whole tree asks a junction to come off as
+			// a volume, and some PCs refuse that ("The parameter is incorrect")
+			foreach (var link in LinksUnder(a_dir)) {
+				Directory.Delete(link);
+			}
 			Directory.Delete(a_dir, true);
 		} catch (UnauthorizedAccessException) {
-			foreach (var f in new DirectoryInfo(a_dir).EnumerateFiles("*", SearchOption.AllDirectories).Where(f => f.IsReadOnly)) {
+			foreach (var f in Under(a_dir).Where(f => f.IsReadOnly)) {
 				f.IsReadOnly = false;
 			}
 			Directory.Delete(a_dir, true);
 		}
 	});
 
-	public static int CountFiles(string a_dir) =>
-		Directory.Exists(a_dir) ? Directory.EnumerateFiles(a_dir, "*", SearchOption.AllDirectories).Count() : 0;
+	static readonly EnumerationOptions Whole = new() { RecurseSubdirectories = true, AttributesToSkip = 0, IgnoreInaccessible = false };
 
-	public static long SizeOf(string a_dir) =>
-		Directory.Exists(a_dir) ? new DirectoryInfo(a_dir).EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length) : 0;
+	// Every file under a folder. A folder inside that is a link to another folder (a junction, a symbolic link) is not gone
+	// into: what it points at stands somewhere else and is no part of this folder, and a link to a folder above itself would
+	// never end. A folder that cannot be read stops the walk, as it stops Windows' own
+	public static IEnumerable<FileInfo> Under(string a_dir) => Under<FileInfo>(a_dir, (ref FileSystemEntry a_e) => (FileInfo)a_e.ToFileSystemInfo());
+
+	// ... each as what the caller asks of it, taken off the walk's own entry: a count, a size or a time needs no object and
+	// no path made for every file
+	static FileSystemEnumerable<T> Under<T>(string a_dir, FileSystemEnumerable<T>.FindTransform a_as) => new(a_dir, a_as, Whole) {
+		ShouldIncludePredicate = (ref FileSystemEntry a_e) => !a_e.IsDirectory,
+		ShouldRecursePredicate = (ref FileSystemEntry a_e) => (a_e.Attributes & FileAttributes.ReparsePoint) == 0,
+	};
+
+	// the links to other folders under a folder: the ones Under does not go into
+	public static List<string> LinksUnder(string a_dir) =>
+		[.. new FileSystemEnumerable<string>(a_dir, (ref FileSystemEntry a_e) => a_e.ToFullPath(), Whole) {
+			ShouldIncludePredicate = (ref FileSystemEntry a_e) => a_e.IsDirectory && (a_e.Attributes & FileAttributes.ReparsePoint) != 0,
+			ShouldRecursePredicate = (ref FileSystemEntry a_e) => (a_e.Attributes & FileAttributes.ReparsePoint) == 0,
+		}];
+
+	// (A cache step counts its cache at every look, every few seconds for as long as it runs: a grass cache is tens of
+	// thousands of files, a shader cache thousands. Counted through Under, each look made an object and a path for every one
+	// of them, only to throw them away)
+	public static int CountFiles(string a_dir)
+	{
+		if (!Directory.Exists(a_dir)) {
+			return 0;
+		}
+		var n = 0;
+		foreach (var _ in Under<byte>(a_dir, (ref FileSystemEntry a_e) => 0)) {
+			++n;
+		}
+		return n;
+	}
+
+	public static long SizeOf(string a_dir)
+	{
+		if (!Directory.Exists(a_dir)) {
+			return 0;
+		}
+		long sum = 0;
+		foreach (var length in Under<long>(a_dir, (ref FileSystemEntry a_e) => a_e.Length)) {
+			sum += length;
+		}
+		return sum;
+	}
 
 	public static DateTime NewestWrite(string a_dir)
 	{
@@ -222,9 +281,9 @@ public static partial class Files
 			return DateTime.MinValue;
 		}
 		var newest = DateTime.MinValue;
-		foreach (var f in new DirectoryInfo(a_dir).EnumerateFiles("*", SearchOption.AllDirectories)) {
-			if (f.LastWriteTimeUtc > newest) {
-				newest = f.LastWriteTimeUtc;
+		foreach (var written in Under<DateTime>(a_dir, (ref FileSystemEntry a_e) => a_e.LastWriteTimeUtc.UtcDateTime)) {
+			if (written > newest) {
+				newest = written;
 			}
 		}
 		return newest;
@@ -291,6 +350,11 @@ public static partial class Files
 	{
 		var parent = Path.GetDirectoryName(Path.GetFullPath(a_dst)) ?? throw new ArgumentException("no folder: " + a_dst);
 		Directory.CreateDirectory(parent);
+		// a folder that is itself a link goes as the link it is, like one found inside a folder that is moved
+		if (IsLink(a_src)) {
+			MoveLink(a_src, a_dst);
+			return;
+		}
 		// .NET refuses a rename between two paths whose roots read differently before Windows is even asked (one volume reached
 		// under two names: a junction on another drive, SUBST) - copied, like another volume
 		var oneRoot = string.Equals(Path.GetPathRoot(Path.GetFullPath(a_src)), Path.GetPathRoot(parent), StringComparison.OrdinalIgnoreCase);
@@ -467,6 +531,22 @@ public sealed class GrowingText
 	byte[] _head = [];
 	Encoding _how = new UTF8Encoding(false);
 
+	// False: the lines read so far are not kept, and Read gives only what the look added (Added). For a reader that takes
+	// what it needs from each addition: kept whole, a log of megabytes was made anew as one text at every look that found
+	// a new line
+	public bool KeepAll { get; init; } = true;
+
+	// what the last Read found new: the whole lines that were not there at the look before - every whole line, when the
+	// file was read from its start (Restarted)
+	public string Added { get; private set; } = "";
+
+	// the line still being written at the last Read (it has no end yet, and is read again at the next look)
+	public string Unfinished { get; private set; } = "";
+
+	// the last Read began the file from its start: its first look, a file that was replaced, or one that turned out to be
+	// written another way than its first lines said
+	public bool Restarted { get; private set; }
+
 	public string Read(string a_path)
 	{
 		using var fs = new FileStream(a_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -487,13 +567,17 @@ public sealed class GrowingText
 			// the PC's own code page, and is read from its start again as that
 			string? lines = null;
 			if (_how.CodePage != Utf8 || Files.TryStrictUtf8(added, end, out lines)) {
-				_lines += lines ?? _how.GetString(added, 0, end);
+				(Added, Unfinished, Restarted) = (lines ?? _how.GetString(added, 0, end), end == read ? "" : _how.GetString(added, end, read - end), false);
 				_pos += end;
 				// (a file that was shorter than the head kept of it has grown past it: the head is filled up, so a replaced file is told)
 				if (_head.Length < HeadSize) {
 					_head = head[..headGot];
 				}
-				return end == read ? _lines : _lines + _how.GetString(added, end, read - end);
+				if (!KeepAll) {
+					return Added;
+				}
+				_lines += Added;
+				return Unfinished == "" ? _lines : _lines + Unfinished;
 			}
 		}
 		fs.Position = 0;
@@ -504,14 +588,24 @@ public sealed class GrowingText
 		_path = a_path;
 		_head = all[..Math.Min(HeadSize, got)];
 		_pos = cut;
+		Restarted = true;
 		if (cut == 0) {
 			// no whole line yet, or two bytes a letter: nothing is kept, and the next look reads all of it again
 			_lines = "";
-			return Files.DecodeText(all[..got], out _how);
+			var text = Files.DecodeText(all[..got], out _how);
+			(Added, Unfinished) = Wide(_how) ? (text, "") : ("", text);
+			// (a reader that takes only what each look added gets only that: the unfinished line comes with the look that ends it)
+			return KeepAll ? text : Added;
 		}
 		// each part decoded once: the whole lines, which alone tell how the file is written, then what follows them
-		_lines = Files.DecodeText(all[..cut], out _how);
-		return cut == got ? _lines : _lines + _how.GetString(all, cut, got - cut);
+		var wholeLines = Files.DecodeText(all[..cut], out _how);
+		(Added, Unfinished) = (wholeLines, cut == got ? "" : _how.GetString(all, cut, got - cut));
+		if (!KeepAll) {
+			_lines = "";
+			return Added;
+		}
+		_lines = wholeLines;
+		return Unfinished == "" ? _lines : _lines + Unfinished;
 	}
 
 	static bool Wide(Encoding a_how) => a_how.CodePage is 1200 or 1201;
