@@ -76,10 +76,8 @@ public partial class MainWindow
 			_vm.Say($"No page is known for {row.Name}'s tool.", "warn");
 			return;
 		}
-		try {
-			System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(help.Url) { UseShellExecute = true });
-		} catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException) {
-			_vm.Say($"{help.What} did not open: {e.Message}", "bad");
+		if (MainViewModel.OpenPage(help.Url) is { } why) {
+			_vm.Say($"{help.What} did not open: {why}", "bad");
 		}
 	}
 
@@ -90,6 +88,10 @@ public partial class MainWindow
 	async void DuplicateSetup_Click(object a_s, RoutedEventArgs a_e)
 	{
 		if (_copying || _vm.IsRunning || _vm.SelectedSetup is not { } item) {
+			return;
+		}
+		if (_vm.MovingData) {
+			_vm.Say(_vm.WhyNotWriting("copied")!, "bad");
 			return;
 		}
 		// the name offered first is looked for on the disk too (a free "(copy n)"): on a worker, as every check of the name is
@@ -105,7 +107,13 @@ public partial class MainWindow
 		if (name == null) {
 			return;
 		}
+		// (a data move may have begun while the name was typed: the copy never runs beside it)
+		if (_vm.MovingData) {
+			_vm.Say(_vm.WhyNotWriting("copied")!, "bad");
+			return;
+		}
 		_copying = true;
+		_vm.CopyingSetup = true;
 		// the window's own work: closing waits for it, so a copy is never cut off half made
 		using var hold = _vm.Working("a setup is being copied");
 		try {
@@ -117,6 +125,7 @@ public partial class MainWindow
 			_vm.Say("The copy could not be made: " + e.Message, "bad");
 		} finally {
 			_copying = false;
+			_vm.CopyingSetup = false;
 		}
 	}
 
@@ -130,6 +139,10 @@ public partial class MainWindow
 		// (a queue between two setups too: the next setup it starts is read by its file)
 		if (StillGoing() || _vm.IsRunning) {
 			_vm.Say("A run or a queue is going - rename the setup when it has ended.", "bad");
+			return;
+		}
+		if (_vm.MovingData) {
+			_vm.Say(_vm.WhyNotWriting("renamed")!, "bad");
 			return;
 		}
 		// Settings stands open on the setup's old file: its Save would write there - it closes first, asked about what is typed

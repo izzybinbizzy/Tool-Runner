@@ -438,7 +438,8 @@ public static class Theme
 			s_followHighContrast = false;
 			try {
 				Files.WriteAtomic(ChoiceFile, a_name);
-			} catch (IOException) {
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+				// (the look is in use now; only the next start does not know it)
 			}
 		}
 		return problems;
@@ -457,7 +458,7 @@ public static class Theme
 			try {
 				return (Color)ColorConverter.ConvertFromString(a_text.Trim());
 			} catch (FormatException) {
-				a_problems.Add($"{a_where}: \"{a_text}\" is not a colour (#RRGGBB or #AARRGGBB)");
+				a_problems.Add($"{a_where}: \"{a_text}\" is not a color (#RRGGBB or #AARRGGBB)");
 				return null;
 			}
 		}

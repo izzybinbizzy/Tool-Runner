@@ -201,6 +201,9 @@ public static class NewSetupDialog
 
 		var create = new Button { Content = "_Make the setup", Style = (Style)a_owner.FindResource("Primary"), Margin = new Thickness(0, 0, 10, 0), IsDefault = true };
 		var cancel = new Button { Content = "Cancel", Style = (Style)a_owner.FindResource("Ghost"), IsCancel = true };
+		// while the setup is being made the box stays open: closed then, the setup would be written all the same and never shown
+		var making = false;
+		w.Closing += (_, e) => e.Cancel = making;
 		create.Click += async (_, _) => {
 			if (profile.SelectedItem is not string p || name.Text.Trim() == "") {
 				note.Text = "Pick Mod Organizer, a profile and a name.";
@@ -220,18 +223,24 @@ public static class NewSetupDialog
 			// it looks through every mod (thousands on a big list): off the window's thread, the window says so
 			var (exeText, inst, setupName, pat) = (exe.Text.Trim(), InstanceDir(), Safe(name.Text.Trim()), pattern.Text.Trim() == "" ? "{output} - {profile}" : pattern.Text.Trim());
 			create.IsEnabled = false;
+			cancel.IsEnabled = false;
+			making = true;
 			note.Text = "Looking through your mods for the tools ...";
 			note.Foreground = Brushes2.Get("Muted");
 			try {
 				var s = await Task.Run(() => SetupMaker.Make(exeText, inst, p, setupName, AppPaths.Data, pat));
 				s.Save(file);
 				made = file;
-				w.Close();
 			} catch (Exception e) {
 				note.Text = "Not made: " + e.Message;
 				note.Foreground = Brushes2.Get("Bad");
 			} finally {
+				making = false;
 				create.IsEnabled = true;
+				cancel.IsEnabled = true;
+			}
+			if (made != null) {
+				w.Close();
 			}
 		};
 		var bar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 18, 0, 0) };

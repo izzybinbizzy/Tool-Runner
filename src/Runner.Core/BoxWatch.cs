@@ -157,9 +157,10 @@ public sealed class BoxWatch : IDisposable
 			if (!_open.TryGetValue(b.Id, out var k)) {
 				k = _open[b.Id] = new Known { First = a_now };
 				// the game's among the log's warnings; a tool's or Mod Organizer's as a plain line (their steps show boxes as a matter of course)
-				_log.Say("a box is open - " + KnownBoxes.Describe(b.Box), b.Box.Game ? Level.Warn : Level.Detail);
+				// (one left to the player is a failure of the plan: red)
+				_log.Say("a box is open - " + KnownBoxes.Describe(b.Box), !b.Box.Game ? Level.Detail : v.Move == BoxMove.Stop ? Level.Error : Level.Warn);
 				if (v.Move == BoxMove.Stop) {
-					_log.Simple($"Note: the game shows a box nobody here can answer - {KnownBoxes.Describe(b.Box)} - answer it within {Wait.TotalSeconds:0} seconds, or the step stops");
+					_log.Simple($"The game shows a message box this run cannot answer - {KnownBoxes.Describe(b.Box)} - answer it within {Wait.TotalSeconds:0} seconds, or the step stops", Level.Error);
 				}
 				if (b.Box.Game && v.Move is BoxMove.Press or BoxMove.Stop && v.Note != Crdw.Answered) {
 					lock (_saidGate) {

@@ -14,9 +14,9 @@ namespace ToolRunner.App;
 public partial class MainWindow : Window
 {
 	readonly MainViewModel _vm = new();
-	// How often the window looks: every second while something is going (a run's clock and progress, a start being checked, the
-	// countdown before the PC sleeps), seldom while nothing is, hardly at all while it is minimised. A change in the runs folder
-	// (RunsWatch) and the window coming back wake it at once, so a slow look loses nothing
+	// How often the window looks: every second while something is going (a run's clock and progress, a start being checked),
+	// seldom while nothing is, hardly at all while it is minimised. A change in the runs folder (RunsWatch) and the window
+	// coming back wake it at once, so a slow look loses nothing
 	static readonly TimeSpan Live = TimeSpan.FromSeconds(1), Calm = TimeSpan.FromSeconds(3), Away = TimeSpan.FromSeconds(20);
 	readonly DispatcherTimer _timer = new() { Interval = Live };
 	RunsWatch? _watch;
@@ -30,7 +30,7 @@ public partial class MainWindow : Window
 	string _historyView = "history";
 	// the log in a window of its own, with its text box and its Follow tick there
 	PanelWindow? _logWindow;
-	TextBox? _logOut;
+	LogView? _logOut;
 	CheckBox? _followOut;
 	// whether the log was shown in the main window before it went into its own
 	bool _logWasHere = true;
@@ -91,7 +91,7 @@ public partial class MainWindow : Window
 		if (!App.Headless) {
 			_watch = new RunsWatch(AppPaths.Runs, Wake);
 		}
-		Footer.Text = $"Ctrl+K do anything  ·  Ctrl+Enter start  ·  F5 check  ·  Ctrl+D dry run  ·  Ctrl+H history  ·  Ctrl+L log  ·  Ctrl+J compact  ·  Ctrl+T themes  ·  Ctrl+, settings   ·   version {AppVersion}";
+		Footer.Text = $"Ctrl+K commands  ·  Ctrl+Enter start  ·  F5 check  ·  Ctrl+D dry run  ·  Ctrl+H history  ·  Ctrl+L log  ·  Ctrl+J compact  ·  Ctrl+T themes  ·  Ctrl+, settings   ·   version {AppVersion}";
 		Footer.ToolTip = "Data folder: " + AppPaths.Data;
 		PreviewKeyDown += OnKeys;
 		// a mod ticked in Mod Organizer while the window was in the background: each step's last run is worked out again
@@ -131,6 +131,14 @@ public partial class MainWindow : Window
 	// work the window carries itself (Settings' own buttons): it is not closed in the middle of it
 	public IDisposable Working(string a_what) => _vm.Working(a_what);
 
+	// The runs folder watched, or let go. It is let go while the program's data is removed: Windows moves no folder to the
+	// Recycle Bin while a folder inside it is watched (the timer alone looks meanwhile)
+	public void WatchRuns(bool a_on)
+	{
+		_watch?.Dispose();
+		_watch = a_on && !App.Headless ? new RunsWatch(AppPaths.Runs, Wake) : null;
+	}
+
 	// one look, and the pace of the next ones set by what it found
 	async Task Look()
 	{
@@ -168,9 +176,6 @@ public partial class MainWindow : Window
 		}
 	}
 
-	// which moments of the power countdown were already said (-1 = its start)
-	readonly HashSet<int> _powerSaid = [];
-
 	void Announce(object? a_s, System.ComponentModel.PropertyChangedEventArgs a_e)
 	{
 		switch (a_e.PropertyName) {
@@ -185,17 +190,6 @@ public partial class MainWindow : Window
 			break;
 		case nameof(MainViewModel.Verdict) when _vm.Verdict != "":
 			A11y.Say(this, _vm.NowTitle + ": " + _vm.Verdict, true);
-			break;
-		case nameof(MainViewModel.PowerText):
-			// the countdown changes every second: it is said once when it starts and at 30 and 10 seconds, never each second (a
-			// screen reader would be interrupted until the Cancel button is out of reach)
-			var left = System.Text.RegularExpressions.Regex.Match(_vm.PowerText, @"in (\d+) s") is { Success: true } m ? int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) : -1;
-			if (_vm.PowerText == "") {
-				_powerSaid.Clear();
-			} else if (_powerSaid.Count == 0 || (left is 30 or 10 && _powerSaid.Add(left))) {
-				_powerSaid.Add(-1);
-				A11y.Say(this, _vm.PowerText, true);
-			}
 			break;
 		case nameof(MainViewModel.NewVersion) when _vm.NewVersion != "":
 			A11y.Say(this, _vm.NewVersion);
@@ -556,7 +550,7 @@ public partial class MainWindow : Window
 
 	// ---------------------------------------------------------------- the log
 	// the log grows by appending (re-setting a long text every second re-lays the whole box); kept under 200,000 characters
-	// the box's length, counted as text is added: reading LogBox.Text to measure it copies the whole box (up to 400 KB, a fresh
+	// the box's length, counted as text is added: reading the box's whole text to measure it copies it (up to 400 KB, a fresh
 	// large-object allocation) every second of a run
 	int _logChars;
 
@@ -567,15 +561,15 @@ public partial class MainWindow : Window
 		}
 		_logChars += a_add.Length;
 		var trim = _logChars > 200_000;
-		void Into(TextBox a_box, bool a_follow)
+		void Into(LogView a_box, bool a_follow)
 		{
 			if (a_reset) {
 				a_box.Clear();
 			}
 			if (a_add.Length > 0) {
-				a_box.AppendText(a_add);
+				a_box.AppendLines(a_add);
 				if (trim) {
-					a_box.Text = a_box.Text[^Math.Min(150_000, a_box.Text.Length)..];
+					a_box.KeepLast(150_000);
 				}
 			}
 			if (a_follow) {
@@ -588,7 +582,8 @@ public partial class MainWindow : Window
 			Into(outBox, _followOut?.IsChecked == true);
 		}
 		if (trim) {
-			_logChars = 150_000;
+			// what the box kept, whole lines only, is the count from here
+			_logChars = LogBox.Length;
 		}
 	}
 
@@ -682,8 +677,8 @@ public partial class MainWindow : Window
 			return open;
 		}
 		var w = new PanelWindow(this, "log", "LOG", 960, 640);
-		var box = new TextBox { IsReadOnly = true, IsUndoEnabled = false, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-			TextWrapping = TextWrapping.NoWrap, Text = LogBox.Text };
+		var box = new LogView();
+		box.AppendLines(LogBox.Text);
 		box.SetResourceReference(FontFamilyProperty, "MonoFont");
 		box.SetResourceReference(FontSizeProperty, "SizeLog");
 		box.SetResourceReference(BackgroundProperty, "Panel2");
@@ -695,7 +690,7 @@ public partial class MainWindow : Window
 			ToolTip = "Every line of the run, for finding a fault. Unticked: the run step by step in plain words." };
 		detailed.SetBinding(System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty, new System.Windows.Data.Binding(nameof(MainViewModel.DetailedLog)) { Source = _vm, Mode = System.Windows.Data.BindingMode.TwoWay });
 		var wrap = new CheckBox { Content = "Wrap lines", Margin = new Thickness(0, 0, 14, 0), VerticalAlignment = VerticalAlignment.Center };
-		wrap.Click += (_, _) => box.TextWrapping = wrap.IsChecked == true ? TextWrapping.Wrap : TextWrapping.NoWrap;
+		wrap.Click += (_, _) => box.Wrap = wrap.IsChecked == true;
 		var copy = new Button { Content = "Copy all", Style = (Style)FindResource("Ghost"), ToolTip = "The whole log shown here, to the clipboard" };
 		copy.Click += (_, _) => {
 			try {
@@ -724,14 +719,12 @@ public partial class MainWindow : Window
 			}
 			found.Text = "";
 			follow.IsChecked = false;
-			box.Focus();
-			box.Select(a_at, a_length);
-			box.ScrollToLine(box.GetLineIndexFromCharacterIndex(a_at));
+			box.Reveal(a_at, a_length);
 		}
 		void FindNext()
 		{
 			var q = find.Text;
-			Reveal(LogSearch.Next(box.Text, q, box.SelectionLength > 0 ? box.SelectionStart + 1 : box.CaretIndex), q.Length, q == "" ? "" : "Not in the log.");
+			Reveal(LogSearch.Next(box.Text, q, box.FoundAt + 1), q.Length, q == "" ? "" : "Not in the log.");
 		}
 		next.Click += (_, _) => FindNext();
 		find.KeyDown += (_, e) => {
@@ -795,9 +788,7 @@ public partial class MainWindow : Window
 	}
 
 	// ---------------------------------------------------------------- panels, each in a window of its own
-	void History_Click(object a_s, RoutedEventArgs a_e) => ShowPanel("history");
 	void Settings_Click(object a_s, RoutedEventArgs a_e) => ShowPanel("settings");
-	void Themes_Click(object a_s, RoutedEventArgs a_e) => ShowPanel("themes");
 
 	// every panel window closed (the off-screen pictures between two of them)
 	public void ClosePanels()
@@ -1095,10 +1086,12 @@ public partial class MainWindow : Window
 				    "versions of Windows, Mod Organizer, the game and each tool. Your Windows user name and your PC's name are masked. Nothing was sent anywhere.\n\n" +
 				    "To report the bug: open an issue on the program's GitHub page, say what happened and what you expected, and attach this zip.",
 				    "Show the zip and open the issue page", "Close")) {
-					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{zip}\"") { UseShellExecute = true });
-					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(BugReport.Issues) { UseShellExecute = true });
+					System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"/select,\"{zip}\"") { UseShellExecute = true })?.Dispose();
+					if (MainViewModel.OpenPage(BugReport.Issues) is { } why) {
+						_vm.Say("The issue page did not open: " + why, "bad");
+					}
 				}
-			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException) {
+			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException or System.ComponentModel.Win32Exception) {
 				_vm.Say("The bug report could not be made: " + e.Message, "bad");
 			} finally {
 				report.IsEnabled = true;
@@ -1120,7 +1113,7 @@ public partial class MainWindow : Window
 						_vm.Say("It cannot be undone: " + why + ".", "bad");
 						return;
 					}
-				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or System.Text.Json.JsonException) {
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or InvalidDataException or System.Text.Json.JsonException) {
 					_vm.Say("It cannot be undone: " + e.Message, "bad");
 					return;
 				}
@@ -1143,7 +1136,7 @@ public partial class MainWindow : Window
 				try {
 					log.Text = File.Exists(p) ? Tail(p, 150_000) : "(no log)";
 					log.ScrollToEnd();
-				} catch (IOException e) {
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 					log.Text = e.Message;
 				}
 			}
@@ -1410,6 +1403,10 @@ public partial class MainWindow : Window
 		if (_vm.IsRunning) {
 			return;
 		}
+		if (_vm.MovingData) {
+			_vm.Say(_vm.WhyNotWriting("made")!, "bad");
+			return;
+		}
 		var made = NewSetupDialog.Run(this);
 		if (made != null) {
 			_vm.LoadSetups(made);
@@ -1435,8 +1432,9 @@ public partial class MainWindow : Window
 			stopped.Add(a_run.Folder);
 		}
 		while (DateTime.Now < until && StillGoing()) {
-			if (Engine.Active() is { } next && stopped.Add(next.Folder)) {
-				Commands.Send(next.Folder, "stop");
+			// a stop that could not be written is written again at the next beat
+			if (Engine.Active() is { } next && stopped.Add(next.Folder) && MainViewModel.TrySend(next.Folder, "stop") != null) {
+				stopped.Remove(next.Folder);
 			}
 			await Task.Delay(1000);
 		}
@@ -1503,12 +1501,13 @@ public partial class MainWindow : Window
 					? "Closing the window stops the run as soon as it starts (nothing has been changed yet), and a queue starts no further setup. The window closes once that is done."
 					: "Closing the window stops the run: the tool it is running is closed and your profile put back, as with Stop now. The window closes once that is done.",
 				"Stop the run and close", "Keep the window open")) {
-				if (run != null) {
-					Commands.Send(run.Folder, "stop");
+				if (run != null && MainViewModel.TrySend(run.Folder, "stop") is { } why) {
+					_vm.Say("The run did not get the stop: " + why + " - the window stays open; close it again to try once more.", "bad");
+				} else {
+					_vm.Say("Stopping the run - the window closes once your profile is back.", "warn");
+					_stopping = true;
+					_ = CloseWhenStopped(run);
 				}
-				_vm.Say("Stopping the run - the window closes once your profile is back.", "warn");
-				_stopping = true;
-				_ = CloseWhenStopped(run);
 			}
 			a_e.Cancel = true;
 		}

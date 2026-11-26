@@ -328,6 +328,40 @@ public static partial class Files
 	[return: MarshalAs(UnmanagedType.Bool)]
 	private static partial bool CloseHandle(nint a_handle);
 
+	[DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
+	static extern uint GetFinalPathNameByHandle(nint a_handle, [Out] char[] a_path, uint a_length, uint a_flags);
+
+	// Where a folder that is there really is, as Windows itself names it: a junction, a link, a SUBST drive letter or a mapped
+	// network drive followed to the folder behind it (a network folder as \\server\share\...). Null when Windows will not say
+	public static string? FinalPath(string a_dir)
+	{
+		const uint ReadAttributes = 0x80, ShareAll = 7, OpenExisting = 3, BackupSemantics = 0x02000000;
+		var h = CreateFile(Path.GetFullPath(a_dir), ReadAttributes, ShareAll, 0, OpenExisting, BackupSemantics, 0);
+		if (h == -1) {
+			return null;
+		}
+		try {
+			var name = new char[1024];
+			var n = GetFinalPathNameByHandle(h, name, (uint)name.Length, 0);
+			// (too small: Windows says how much it needs, and it is asked once more with that)
+			if (n >= name.Length) {
+				name = new char[n + 1];
+				n = GetFinalPathNameByHandle(h, name, (uint)name.Length, 0);
+			}
+			if (n == 0 || n >= name.Length) {
+				return null;
+			}
+			return PlainFinalName(new string(name, 0, (int)n));
+		} finally {
+			CloseHandle(h);
+		}
+	}
+
+	// Windows' final name of a folder as a plain path: "\\?\C:\x" is C:\x, a share's "\\?\UNC\server\share\x" is
+	// \\server\share\x
+	public static string PlainFinalName(string a_name) =>
+		a_name.StartsWith(@"\\?\UNC\", StringComparison.Ordinal) ? @"\\" + a_name[8..] : a_name.StartsWith(@"\\?\", StringComparison.Ordinal) ? a_name[4..] : a_name;
+
 	// the volume a folder is really on (a junction is followed to where it leads); null when Windows will not say
 	static uint? VolumeOf(string a_dir)
 	{

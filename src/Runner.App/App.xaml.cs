@@ -277,11 +277,11 @@ public partial class App : Application
 		var demo = new RunPreview();
 		demo.Steps.AddRange([new("synthesis", "Synthesis", "Synthesis - " + name, false), new("xlodgen", "xLODGen", "xLODGen Output - " + name, false),
 			new("texgen", "TexGen", "TexGen Output - " + name, false), new("dyndolod", "DynDOLOD", "DynDOLOD Output - " + name, false),
-			new("playsave", "Save to play", null, false)]);
+			new("playsave", "Final save", null, false)]);
 		demo.OffForTheRun.AddRange([("Synthesis - " + name, "made by Synthesis"), ("xLODGen Output - " + name, "made by xLODGen"),
 			("TexGen Output - " + name, "made by TexGen"), ("DynDOLOD Output - " + name, "made by DynDOLOD"),
 			("Some Patch", "SomePatch.esp needs Synthesis.esp from Synthesis - " + name)]);
-		demo.StartsTheGame.Add("Save to play");
+		demo.StartsTheGame.Add("Final save");
 		var box = ShowBox(w, demo);
 		Picture(box, a_dir, "6 preview before a run");
 		box.Close();
@@ -339,10 +339,10 @@ public partial class App : Application
 		// the preview before a run (his checklist 270), for a made-up run
 		var demo = new RunPreview();
 		demo.Steps.AddRange([new("synthesis", "Synthesis", "Synthesis Output", false), new("xlodgen", "xLODGen", "xLODGen Output", false),
-			new("dyndolod", "DynDOLOD", "DynDOLOD Output", false), new("playsave", "Save to play", null, false)]);
+			new("dyndolod", "DynDOLOD", "DynDOLOD Output", false), new("playsave", "Final save", null, false)]);
 		demo.OffForTheRun.AddRange([("Synthesis Output", "made by Synthesis"), ("xLODGen Output", "made by xLODGen"), ("DynDOLOD Output", "made by DynDOLOD"),
 			("Some Patch", "SomePatch.esp needs Synthesis.esp from Synthesis Output")]);
-		demo.StartsTheGame.Add("Save to play");
+		demo.StartsTheGame.Add("Final save");
 		var box = Ask.Make(w, "What this run will do", string.Join("\n", demo.Lines(k => k == "dyndolod" ? TimeSpan.FromMinutes(24) : k == "synthesis" ? TimeSpan.FromMinutes(2) : null)),
 			"Start the run", "Not now", _ => { });
 		box.ShowActivated = false;
@@ -444,6 +444,15 @@ public partial class App : Application
 		w.Demo(true);
 		Pump(w, 600);
 		Save("6 a guided step");
+		// the same run in some of the shipped themes, a dark and a light one among them: what a theme reaches (drawn while the
+		// made-up setup still has its steps - the first start below has none)
+		foreach (var theme in new[] { Theme.BlackAndGold, "Midnight", "Paper", Theme.ColorBlind }) {
+			var themeProblems = Theme.Apply(theme, false);
+			Pump(w, 800);
+			Save("8 a run going - " + theme + (themeProblems.Count > 0 ? " - with problems" : ""));
+		}
+		Theme.Apply(Theme.Default, false);
+		Pump(w, 400);
 		// the run waits on the player's own Mod Organizer: its band without a Done button
 		w.DemoWaitsOutside();
 		Pump(w, 600);
@@ -484,15 +493,6 @@ public partial class App : Application
 		Pump(dryBox, 600);
 		Save("7b a dry run that would be refused", dryBox);
 		dryBox.Close();
-		w.Demo(true);
-		Pump(w, 400);
-		// the same run in some of the shipped themes, a dark and a light one among them: what a theme reaches
-		foreach (var theme in new[] { Theme.BlackAndGold, "Midnight", "Paper", Theme.ColorBlind }) {
-			var themeProblems = Theme.Apply(theme, false);
-			Pump(w, 800);
-			Save("8 a run going - " + theme + (themeProblems.Count > 0 ? " - with problems" : ""));
-		}
-		Theme.Apply(Theme.Default, false);
 		w.Close();
 		if (squeezed.Count > 0) {
 			File.WriteAllLines(Path.Combine(a_dir, "layout problems.txt"), squeezed);

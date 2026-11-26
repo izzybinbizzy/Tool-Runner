@@ -34,7 +34,7 @@ public static class A11y
 	}
 
 	// a whole step in one sentence, for the step list's screen-reader status (its glyph and color say it to the eye)
-	public static string StepStatus(bool a_on, bool a_leftOut, StepState? a_state, string a_elapsed, string a_usual, string a_note, bool a_usesOld = false)
+	public static string StepStatus(bool a_on, bool a_leftOut, StepState? a_state, string a_elapsed, string a_usual, string a_note, bool a_usesOld = false, string a_needs = "")
 	{
 		var parts = new List<string>();
 		if (!a_on) {
@@ -55,6 +55,9 @@ public static class A11y
 		});
 		if (a_note != "") {
 			parts.Add(a_note);
+		}
+		if (a_needs != "") {
+			parts.Add(a_needs);
 		}
 		return string.Join(", ", parts.Where(p => p != ""));
 	}

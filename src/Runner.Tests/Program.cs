@@ -41,6 +41,38 @@ public static class Program
 		InGame.FreeBytes = _ => 1L << 50;
 		DiskForecast.Real = DiskForecast.Real with { Free = _ => 1L << 50 };
 		SystemChecks.SteamRunning = () => false;
+		// nor this PC's own data: the tests' data folder stands beside them before anything asks for one, so an app-data
+		// folder this PC chose for every copy of the program is never taken for theirs
+		// (two runs from the same folder take turns: the data folder beside them is shared, and one run's clean-up would take it
+		// from under the other)
+		using var oneRun = new Mutex(false, "Local\\ToolRunnerTests " + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(AppContext.BaseDirectory.ToUpperInvariant())))[..16]);
+		try {
+			oneRun.WaitOne();
+		} catch (AbandonedMutexException) {
+			// the run before was stopped without letting go: the turn is this run's
+		}
+		var testData = Path.Combine(AppContext.BaseDirectory, Brand.Name + " Data");
+		var madeData = !Directory.Exists(testData);
+		Directory.CreateDirectory(testData);
+		try {
+			RunAll(filter);
+		} finally {
+			// (made by this run: gone with it, a test that failed too; one that was there before stays as it was)
+			if (madeData) {
+				try {
+					Directory.Delete(testData, true);
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+					Console.WriteLine("the tests' data folder could not be removed: " + e.Message);
+				}
+			}
+		}
+		Console.WriteLine();
+		Console.WriteLine(s_fail == 0 ? $"=== ALL {s_pass} TESTS PASS ===" : $"=== {s_fail} FAILED, {s_pass} passed ===");
+		return s_fail == 0 ? 0 : 1;
+	}
+
+	static void RunAll(string filter)
+	{
 		var tests = typeof(Program).GetMethods(System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)
 			.Where(m => m.Name.StartsWith("T_", StringComparison.Ordinal) && m.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)).OrderBy(m => m.MetadataToken);
 		foreach (var t in tests) {
@@ -57,9 +89,6 @@ public static class Program
 				Console.WriteLine(e.InnerException?.StackTrace?.Split('\n').FirstOrDefault()?.Trim());
 			}
 		}
-		Console.WriteLine();
-		Console.WriteLine(s_fail == 0 ? $"=== ALL {s_pass} TESTS PASS ===" : $"=== {s_fail} FAILED, {s_pass} passed ===");
-		return s_fail == 0 ? 0 : 1;
 	}
 
 	static void Check(bool a_ok, string a_what)
@@ -84,6 +113,39 @@ public static class Program
 			return;
 		}
 		throw new InvalidOperationException(a_what + ": did not throw " + typeof(TE).Name);
+	}
+
+	[System.Runtime.InteropServices.DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+	static extern Microsoft.Win32.SafeHandles.SafeFileHandle OpenForLink(string a_name, uint a_access, uint a_share, nint a_security, uint a_how, uint a_flags, nint a_template);
+
+	[System.Runtime.InteropServices.DllImport("kernel32.dll", EntryPoint = "DeviceIoControl", SetLastError = true)]
+	[return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+	static extern bool SetReparse(Microsoft.Win32.SafeHandles.SafeFileHandle a_handle, uint a_code, byte[] a_in, int a_inSize, nint a_out, int a_outSize, out int a_returned, nint a_overlapped);
+
+	// A junction a_link -> a_target made by Windows' own call: no command processor, so nothing in either path is read as
+	// anything but itself (a "%" in a temp folder's name included)
+	static void Junction(string a_link, string a_target)
+	{
+		var target = Path.GetFullPath(a_target);
+		var named = Encoding.Unicode.GetBytes(@"\??\" + target);
+		var shown = Encoding.Unicode.GetBytes(target);
+		// a mount point's reparse data: tag, length, then the two names' places and lengths, then the names (each ending in 0)
+		var dataLength = 8 + named.Length + 2 + shown.Length + 2;
+		var data = new byte[8 + dataLength];
+		BitConverter.GetBytes(0xA0000003u).CopyTo(data, 0);
+		BitConverter.GetBytes((ushort)dataLength).CopyTo(data, 4);
+		BitConverter.GetBytes((ushort)0).CopyTo(data, 8);
+		BitConverter.GetBytes((ushort)named.Length).CopyTo(data, 10);
+		BitConverter.GetBytes((ushort)(named.Length + 2)).CopyTo(data, 12);
+		BitConverter.GetBytes((ushort)shown.Length).CopyTo(data, 14);
+		named.CopyTo(data, 16);
+		shown.CopyTo(data, 16 + named.Length + 2);
+		Directory.CreateDirectory(a_link);
+		const uint Write = 0x40000000, OpenExisting = 3, BackupSemantics = 0x02000000, OpenReparsePoint = 0x00200000, SetReparsePoint = 0x000900A4;
+		using var h = OpenForLink(a_link, Write, 0, 0, OpenExisting, BackupSemantics | OpenReparsePoint, 0);
+		if (h.IsInvalid || !SetReparse(h, SetReparsePoint, data, data.Length, 0, 0, out _, 0)) {
+			throw new IOException($"the junction {a_link} could not be made (error {System.Runtime.InteropServices.Marshal.GetLastWin32Error()})");
+		}
 	}
 
 	// the same, handing back what was thrown (to read its message)
@@ -464,7 +526,7 @@ public static class Program
 		Throws<ArgumentException>(() => Runner.Plan(s, "dyndolod", null, null), "a step the setup does not have");
 	}
 
-	// his ask 2026-11-03: a new game has no save to keep clean - the clean save and the save to play are left out while it is on
+	// his ask 2026-11-03: a new game has no save to keep clean - the clean save and the final save are left out while it is on
 	static void T_PgLiteUnticksPgPatcherUntilThePlayerTicksIt()
 	{
 		using var f = new FakeMo2();
@@ -837,10 +899,10 @@ public static class Program
 			}
 			Check(!ctx.SwitchedBack, "and with nothing switched there is nothing to put back after the list was made");
 			ctx.FreshList = false;
-			// The save to play runs after the run's record says finished. A file kept for it is on record as "to put back" in
+			// The final save runs after the run's record says finished. A file kept for it is on record as "to put back" in
 			// the very write that records the file - before the file is changed (said only after the change, a crash in
 			// between left a changed file that nothing offered to put back)
-			var forPlay = Path.Combine(f.Root, "changed for the save to play.ini");
+			var forPlay = Path.Combine(f.Root, "changed for the final save.ini");
 			File.WriteAllText(forPlay, "as it was");
 			ctx.Journal.InGameAfter = true;
 			ctx.Journal.NeedsRestore = false;
@@ -1257,7 +1319,7 @@ public static class Program
 		Equal(0, Preflight.Run(ng, Mo2Instance.Load(f.Exe, f.Instance), ng.EnabledSteps.Select(x => x.Key).ToList()).Count(i => i.Step is "cleansave" or "playsave"),
 			"no save step asks for a save");
 		var lines = RunPreview.Build(ng, Mo2Instance.Load(f.Exe, f.Instance), Runner.Plan(ng, null, null, null)).Lines(_ => null);
-		Check(lines.Any(l => l.Contains("new game", StringComparison.Ordinal) && l.Contains("Clean save", StringComparison.Ordinal) && l.Contains("Save to play", StringComparison.Ordinal)),
+		Check(lines.Any(l => l.Contains("new game", StringComparison.Ordinal) && l.Contains("Clean save", StringComparison.Ordinal) && l.Contains("Final save", StringComparison.Ordinal)),
 			"the preview says what is left out: " + string.Join(" | ", lines));
 		Check(!lines.Any(l => l.StartsWith("The game starts", StringComparison.Ordinal)), "and that the game does not start");
 		ng.Root["steps"]!.AsArray().OfType<JsonObject>().Where(o => Setup.Str(o, "step") is "landscapefixer" or "synthesis").ToList().ForEach(o => o["on"] = false);
@@ -1781,7 +1843,7 @@ public static class Program
 		Check(aTicked != ShaderStep.Fingerprint(mo2, a, p, notA), "its own shader files changed (ticked or not): A's cache is stale");
 	}
 
-	// the fourth review, H1: the save to play never starts from an old clean save when the player played after it
+	// the fourth review, H1: the final save never starts from an old clean save when the player played after it
 	static void T_SaveToPlayStartsFromTheRightSave()
 	{
 		var mon = new DateTime(2026, 10, 26, 3, 0, 0, DateTimeKind.Utc);
@@ -1800,7 +1862,7 @@ public static class Program
 			new StepRecord { Key = "pandora", Started = null },
 		};
 		var times = InGame.GameTimes(steps, mon.AddMinutes(40)).ToList();
-		Equal(2, times.Count, "the clean save and the save to play");
+		Equal(2, times.Count, "the clean save and the final save");
 		Check(!times.Any(t => mon.AddMinutes(15) >= t.From && mon.AddMinutes(15) <= t.To), "a save made during DynDOLOD is the player's");
 		// the fifth review, N1: a run that died in a game step - its open step ends where its record stopped, so a save made a
 		// day later is still the player's
@@ -1857,7 +1919,7 @@ public static class Program
 		a_ctx.SetAfter(a_mod);
 	}
 
-	// A whole run with the directory cache mod loading its cache blind: the save to play makes the game's list anew after
+	// A whole run with the directory cache mod loading its cache blind: the final save makes the game's list anew after
 	// everything the run changed, so nothing is left to say - and a command of the setup that runs after it counts as a
 	// change again, said with what to do if it changes game files (CodeRabbit on pull request #35)
 	static void T_ACommandAfterTheRunCountsAsAChange()
@@ -1872,7 +1934,7 @@ public static class Program
 		var asThePlayerHasIt = "[General]\r\nShowPopUp=b:false\r\nMode=s:LOAD\r\n";
 		File.WriteAllText(own, asThePlayerHasIt);
 		StepRegistry.Replace(new FakeStep("landscapefixer", (ctx, s) => WriteOutput(ctx, "landscapefixer", "Output A", "OutA.esp")));
-		// the save to play's game start, as far as the game's list goes
+		// the final save's game start, as far as the game's list goes
 		var modeAtTheStart = "";
 		StepRegistry.Replace(new FakeStep("playsave", (ctx, s) => {
 			GameStart.Prepare(ctx);
@@ -1883,7 +1945,7 @@ public static class Program
 		setup.Save();
 		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
 		Equal(RunState.Finished, r.State, r.Verdict);
-		Equal("CACHE", modeAtTheStart, "the save to play's game start makes the list anew: the run changed the game's files before it");
+		Equal("CACHE", modeAtTheStart, "the final save's game start makes the list anew: the run changed the game's files before it");
 		var j = Journal.Load(r.Folder!);
 		Equal(0, j.FilesChanged, "and nothing changed after that list was made");
 		Check(!j.Notes.Any(n => n.Contains("Cached Recursive Directory Walk", StringComparison.Ordinal)), "so nothing is left to say about it: " + string.Join(" | ", j.Notes));
@@ -2023,7 +2085,7 @@ public static class Program
 		File.WriteAllText(Path.Combine(f.Mods, "Empty Output", "grass", "Tamriel", "x0y0.cgid"), "cache");
 		gate = Runner.CheckStart(new RunRequest(f.SetupFile, f.Data));
 		Check(gate.Starts, "a file in a folder of it makes it an output: " + gate.Why);
-		// a run of only the shader caches or the save to play switches no output off and none back on: an old output that
+		// a run of only the shader caches or the final save switches no output off and none back on: an old output that
 		// is not there is not that run's business, and does not stop it (the run of a tool is stopped, as above)
 		// (a setup with a shader step that is switched on, asked for alone - and, as the control, together with a tool)
 		var realShaders = StepRegistry.For("shaders")!;
@@ -5790,6 +5852,330 @@ public static class Program
 		}
 	}
 
+	// His 675 ("Yes; a"): the data kept in Windows' app-data folder - copied whole, its paths repointed, the old folder gone; never
+	// over a folder that holds anything, and a copy that fails leaves the data where it was
+	static void T_TheDataMovesWholeToTheAppDataFolder()
+	{
+		var root = Path.Combine(Path.GetTempPath(), "mo2 tool runner tests", "data move " + Guid.NewGuid().ToString("N")[..8]);
+		var from = Path.Combine(root, "beside", Brand.Name + " Data");
+		var to = Path.Combine(root, "appdata", Brand.Name);
+		try {
+			Directory.CreateDirectory(Path.Combine(from, "Setups"));
+			Directory.CreateDirectory(Path.Combine(from, "Runs", "2026-01-01 00-00-00 Test"));
+			Directory.CreateDirectory(Path.Combine(from, "empty folder"));
+			File.WriteAllText(Path.Combine(from, "Setups", "Test.json"), "{ \"name\": \"Test\" }");
+			var record = new JsonObject { ["SetupFile"] = Path.Combine(from, "Setups", "Test.json"), ["Other"] = @"D:\elsewhere\x.json" };
+			File.WriteAllText(Path.Combine(from, "Runs", "2026-01-01 00-00-00 Test", "journal.json"), record.ToJsonString());
+			// a folder that holds anything is never moved into
+			Directory.CreateDirectory(to);
+			File.WriteAllText(Path.Combine(to, "something.txt"), "x");
+			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from, to), "a folder that holds files is refused");
+			Check(File.Exists(Path.Combine(from, "Setups", "Test.json")), "and the data stays where it was");
+			File.Delete(Path.Combine(to, "something.txt"));
+			// a folder inside the data, or one that holds it, would be copied into itself and removed with it
+			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from, Path.Combine(from, "inside")), "a folder inside the data is refused");
+			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from, Path.GetDirectoryName(from)!), "a folder that holds the data is refused");
+			Check(File.Exists(Path.Combine(from, "Setups", "Test.json")) && !Directory.Exists(Path.Combine(from, "inside")), "and nothing moved");
+			Check(DataFolder.MoveTo(from, to) == null, "nothing is left to do by hand");
+			Check(!Directory.Exists(from), "the old folder is gone");
+			Check(!File.Exists(Path.Combine(to, ".renamed from.txt")), "every path was repointed: the copy carries no mark of a move to finish");
+			Check(File.ReadAllText(Path.Combine(to, "Setups", "Test.json")).Contains("Test", StringComparison.Ordinal) && Directory.Exists(Path.Combine(to, "empty folder")), "every file and folder is in the new place");
+			var moved = (JsonObject)JsonNode.Parse(File.ReadAllText(Path.Combine(to, "Runs", "2026-01-01 00-00-00 Test", "journal.json")))!;
+			Check(Files.SamePath(moved["SetupFile"]!.GetValue<string>(), Path.Combine(to, "Setups", "Test.json")) && moved["Other"]!.GetValue<string>() == @"D:\elsewhere\x.json",
+				"a path into the data folder follows it, any other path stays");
+			Check(DataFolder.Chosen(to) && !DataFolder.StandsIn(Path.GetDirectoryName(from)!, " Data"), "the next start finds no data beside the program and the new place marked as the player's choice");
+			// an app-data folder that only holds data (a copy that could not write beside itself kept it there) is no choice of the
+			// player's: a new copy elsewhere keeps its own folder beside it
+			var other = Path.Combine(root, "other appdata");
+			Directory.CreateDirectory(Path.Combine(other, "Runs"));
+			Check(DataFolder.HasData(other) && !DataFolder.Chosen(other), "data alone is not the player's choice");
+			// a copy of a move that was cut off before it counted (its mark names the folder it came from) is made again
+			var from2 = Path.Combine(root, "beside 2", Brand.Name + " Data");
+			var to2 = Path.Combine(root, "appdata 2", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from2, "Setups"));
+			File.WriteAllText(Path.Combine(from2, "Setups", "Two.json"), "{ \"name\": \"Two\" }");
+			Directory.CreateDirectory(to2);
+			File.WriteAllText(Path.Combine(to2, ".renamed from.txt"), from2);
+			// (half of the data's own file, as a copy cut off in the middle of it leaves it)
+			Directory.CreateDirectory(Path.Combine(to2, "Setups"));
+			File.WriteAllText(Path.Combine(to2, "Setups", "Two.json"), "{ \"na");
+			File.WriteAllText(Path.Combine(to2, ".copied.txt"), "Setups\\Two.json\n");
+			Check(DataFolder.MoveTo(from2, to2) == null && File.ReadAllText(Path.Combine(to2, "Setups", "Two.json")).Contains("\"Two\"", StringComparison.Ordinal),
+				"a half copy of the same move is replaced by the whole one");
+			// a move that counted (the old folder's mark) is finished by the next start, whatever was left of it
+			var old3 = Path.Combine(root, "beside 3", Brand.Name + " Data");
+			var to3 = Path.Combine(root, "appdata 3", Brand.Name);
+			Directory.CreateDirectory(old3);
+			Directory.CreateDirectory(to3);
+			File.WriteAllText(Path.Combine(old3, DataFolder.MovedMark), to3);
+			Check(DataFolder.MovedTo(old3) is { } where && Files.SamePath(where, to3), "the mark names where the data went");
+			DataFolder.FinishMove(old3, to3);
+			Check(DataFolder.Chosen(to3) && !Directory.Exists(old3), "the new folder is the player's choice and the old one is gone");
+			// the old folder's mark goes last: while a file of it is held, the mark stays for the next start to finish the move
+			var old4 = Path.Combine(root, "beside 4", Brand.Name + " Data");
+			var to4 = Path.Combine(root, "appdata 4", Brand.Name);
+			Directory.CreateDirectory(old4);
+			Directory.CreateDirectory(to4);
+			File.WriteAllText(Path.Combine(old4, DataFolder.MovedMark), to4);
+			File.WriteAllText(Path.Combine(old4, "held.json"), "{}");
+			using (new FileStream(Path.Combine(old4, "held.json"), FileMode.Open, FileAccess.Read, FileShare.None)) {
+				DataFolder.FinishMove(old4, to4);
+				Check(File.Exists(Path.Combine(old4, DataFolder.MovedMark)), "a file that will not go keeps the mark beside it");
+			}
+			DataFolder.FinishMove(old4, to4);
+			Check(!Directory.Exists(old4) && !Directory.EnumerateDirectories(Path.GetDirectoryName(old4)!).Any(), "and the next start removes the rest, the mark last, nothing left beside it");
+			// the old folder leaves its data-folder name before its mark goes: what a stop at that moment leaves is no data folder
+			var beside8 = Path.Combine(root, "beside 8");
+			Directory.CreateDirectory(Path.Combine(beside8, Brand.Name + " Data (being removed 1a2b3c4d)"));
+			Check(!DataFolder.StandsIn(beside8, " Data"), "a folder left half way through its removal is never taken for the data");
+			// the copy is made beside the new place and takes its name when whole: one left by a cut-off move is this move's and
+			// goes; a path that only looks as if it lies in the data ("../") is left as it was
+			var from7 = Path.Combine(root, "beside 7", Brand.Name + " Data");
+			var to7 = Path.Combine(root, "appdata 7", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from7, "Setups"));
+			File.WriteAllText(Path.Combine(from7, "Setups", "Up.json"), "{ \"mo2\": \"" + (from7 + "/../MO2").Replace("\\", "\\\\", StringComparison.Ordinal) + "\" }");
+			Directory.CreateDirectory(to7 + " (being copied)");
+			// (as a cut-off move leaves it: its mark names the data folder it came from first, then part of the copy)
+			File.WriteAllText(Path.Combine(to7 + " (being copied)", ".renamed from.txt"), from7);
+			Directory.CreateDirectory(Path.Combine(to7 + " (being copied)", "Setups"));
+			File.WriteAllText(Path.Combine(to7 + " (being copied)", "Setups", "Up.json"), "{ \"mo");
+			// (and its own list, which names each file before it is copied)
+			File.WriteAllText(Path.Combine(to7 + " (being copied)", ".copied.txt"), "Setups\\Up.json\n");
+			Check(DataFolder.MoveTo(from7, to7) == null && File.Exists(Path.Combine(to7, "Setups", "Up.json")) && !Directory.Exists(to7 + " (being copied)"),
+				"a copy left by a cut-off move is replaced, and the whole copy takes the new place's name");
+			Equal((from7 + "/../MO2").Replace("\\", "/", StringComparison.Ordinal),
+				JsonNode.Parse(File.ReadAllText(Path.Combine(to7, "Setups", "Up.json")))!["mo2"]!.GetValue<string>().Replace("\\", "/", StringComparison.Ordinal), "a path that leaves the data folder by \"..\" stays as it was");
+			// a copy of a move that never counted (its source still holds the data) is never taken for the data folder
+			var parent9 = Path.Combine(root, "appdata 9");
+			var source9 = Path.Combine(root, "beside 9", Brand.Name + " Data");
+			Directory.CreateDirectory(Path.Combine(source9, "Setups"));
+			Directory.CreateDirectory(Path.Combine(parent9, Brand.Name));
+			File.WriteAllText(Path.Combine(parent9, Brand.Name, ".renamed from.txt"), source9);
+			Check(Files.SamePath(DataFolder.Adopt(parent9, "", () => false), source9) && File.Exists(Path.Combine(parent9, Brand.Name, ".renamed from.txt")),
+				"the data stays where it came from, and the copy keeps its mark for the move to be made again");
+			// a cut-off move retried: its own staged copy goes, a file another program put in it meanwhile stays (and the move waits)
+			var from13 = Path.Combine(root, "beside 13", Brand.Name + " Data");
+			var to13 = Path.Combine(root, "appdata 13", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from13, "Setups"));
+			File.WriteAllText(Path.Combine(from13, "Setups", "S.json"), "{}");
+			File.WriteAllText(Path.Combine(from13, "Setups", "T.json"), "{}");
+			Directory.CreateDirectory(Path.Combine(to13 + " (being copied)", "Setups"));
+			File.WriteAllText(Path.Combine(to13 + " (being copied)", ".renamed from.txt"), from13);
+			File.WriteAllText(Path.Combine(to13 + " (being copied)", ".copied.txt"), "Setups\\S.json\n");
+			File.WriteAllText(Path.Combine(to13 + " (being copied)", "Setups", "S.json"), "{}");
+			// (another program's file, where a data file not copied yet would have gone)
+			File.WriteAllText(Path.Combine(to13 + " (being copied)", "Setups", "T.json"), "theirs");
+			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from13, to13), "a staged copy that also holds another's file");
+			Check(File.ReadAllText(Path.Combine(to13 + " (being copied)", "Setups", "T.json")) == "theirs" && !File.Exists(Path.Combine(to13 + " (being copied)", "Setups", "S.json")),
+				"its own copy is gone; the other file stays, though a data file of that name was still to come");
+			// a move that fails while it copies: what it copied by its own list goes, a file another program put there stays
+			var from15 = Path.Combine(root, "beside 15", Brand.Name + " Data");
+			var to15 = Path.Combine(root, "appdata 15", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from15, "Setups"));
+			File.WriteAllText(Path.Combine(from15, "Setups", "A.json"), "{ \"a\": 1 }");
+			DataFolder.AfterCopy = a_staging => {
+				File.WriteAllText(Path.Combine(a_staging, "theirs.txt"), "x");
+				// (and a copy that will not read back whole: the move fails)
+				File.WriteAllText(Path.Combine(a_staging, "Setups", "A.json"), "{ \"a\": 2 }");
+			};
+			try {
+				Throws<IOException>(() => DataFolder.MoveTo(from15, to15), "a copy that does not read back whole");
+			} finally {
+				DataFolder.AfterCopy = null;
+			}
+			Check(File.Exists(Path.Combine(to15 + " (being copied)", "theirs.txt")) && !File.Exists(Path.Combine(to15 + " (being copied)", "Setups", "A.json")) &&
+				File.Exists(Path.Combine(from15, "Setups", "A.json")), "takes back only what it copied; another's file stays, and the data is where it was");
+			// another program's file at a data file's name, made the moment before that file is copied: the copy fails, and the
+			// file - never on the copy's list - stays
+			var from17 = Path.Combine(root, "beside 17", Brand.Name + " Data");
+			var to17 = Path.Combine(root, "appdata 17", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from17, "Setups"));
+			File.WriteAllText(Path.Combine(from17, "Setups", "B.json"), "{}");
+			DataFolder.BeforeCopy = a_target => File.WriteAllText(a_target, "theirs");
+			try {
+				Throws<IOException>(() => DataFolder.MoveTo(from17, to17), "a file put where a copy goes, the moment before");
+			} finally {
+				DataFolder.BeforeCopy = null;
+			}
+			Check(File.ReadAllText(Path.Combine(to17 + " (being copied)", "Setups", "B.json")) == "theirs", "that file stays as it was");
+			// a cut-off move whose last copy is not on its list yet (stopped between the copy and the list): that file stays, and
+			// the move waits for it - no file the list does not name is taken away
+			var from18 = Path.Combine(root, "beside 18", Brand.Name + " Data");
+			var to18 = Path.Combine(root, "appdata 18", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from18, "Setups"));
+			File.WriteAllText(Path.Combine(from18, "Setups", "C.json"), "{}");
+			Directory.CreateDirectory(Path.Combine(to18 + " (being copied)", "Setups"));
+			File.WriteAllText(Path.Combine(to18 + " (being copied)", ".renamed from.txt"), from18);
+			File.WriteAllText(Path.Combine(to18 + " (being copied)", ".copied.txt"), "");
+			File.WriteAllText(Path.Combine(to18 + " (being copied)", "Setups", "C.json"), "{}");
+			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from18, to18), "a cut-off copy holding a file its list does not name");
+			Check(File.Exists(Path.Combine(to18 + " (being copied)", "Setups", "C.json")), "that file stays");
+			// the save itself, after a move removed the old folder: refused, and the folder is not made again
+			var saveData = Path.Combine(root, "beside 19", Brand.Name + " Data");
+			var saveFile = Path.Combine(saveData, "Setups", "Saved.json");
+			Directory.CreateDirectory(Path.GetDirectoryName(saveFile)!);
+			Equal<string?>(null, ToolRunner.App.MainViewModel.WriteSetup(saveData, saveFile, "{ \"name\": \"Saved\" }", Path.Combine(saveData, "Setup backups")), "a save where the data is writes");
+			Check(File.ReadAllText(saveFile).Contains("Saved", StringComparison.Ordinal), "and the file holds it");
+			Directory.Delete(saveData, true);
+			Check(ToolRunner.App.MainViewModel.WriteSetup(saveData, saveFile, "{ \"name\": \"Saved\" }", Path.Combine(saveData, "Setup backups"))?.Contains("no longer in", StringComparison.Ordinal) == true &&
+				!Directory.Exists(saveData), "a save after the old folder is gone is refused and makes nothing again");
+			// ... and one cut off after its copy took its place: the copy goes, another's file in the new place stays
+			var from14 = Path.Combine(root, "beside 14", Brand.Name + " Data");
+			var to14 = Path.Combine(root, "appdata 14", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from14, "Setups"));
+			File.WriteAllText(Path.Combine(from14, "Setups", "S.json"), "{}");
+			Directory.CreateDirectory(Path.Combine(to14, "Setups"));
+			File.WriteAllText(Path.Combine(to14, ".renamed from.txt"), from14);
+			File.WriteAllText(Path.Combine(to14, "Setups", "S.json"), "{}");
+			File.WriteAllText(Path.Combine(to14, ".copied.txt"), "Setups\\S.json\n");
+			File.WriteAllText(Path.Combine(to14, "theirs.txt"), "x");
+			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from14, to14), "a published copy that also holds another's file");
+			Check(File.Exists(Path.Combine(to14, "theirs.txt")) && !File.Exists(Path.Combine(to14, "Setups", "S.json")) && File.Exists(Path.Combine(from14, "Setups", "S.json")),
+				"its own copy is gone, the other file stays, the data is where it was");
+			// a "(being copied)" folder that holds someone else's files is not this move's: the move waits for it, the files stay
+			var from11 = Path.Combine(root, "beside 11", Brand.Name + " Data");
+			var to11 = Path.Combine(root, "appdata 11", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from11, "Setups"));
+			Directory.CreateDirectory(to11 + " (being copied)");
+			File.WriteAllText(Path.Combine(to11 + " (being copied)", "theirs.txt"), "x");
+			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from11, to11), "a staging folder holding another's file is refused");
+			Check(File.Exists(Path.Combine(to11 + " (being copied)", "theirs.txt")), "and that file stays");
+			// the old folder that cannot be marked after the copy took its place: the copy goes again, but only what the move put
+			// there - a file another program put in the new place meanwhile stays
+			var from12 = Path.Combine(root, "beside 12", Brand.Name + " Data");
+			var to12 = Path.Combine(root, "appdata 12", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from12, "Setups"));
+			File.WriteAllText(Path.Combine(from12, "Setups", "S.json"), "{}");
+			DataFolder.AfterPublish = a_to => {
+				File.WriteAllText(Path.Combine(a_to, "theirs.txt"), "x");
+				// (the old folder's mark cannot be written: a folder stands where it would go)
+				Directory.CreateDirectory(Path.Combine(from12, DataFolder.MovedMark));
+			};
+			try {
+				Throws<IOException>(() => DataFolder.MoveTo(from12, to12), "a move whose old folder cannot be marked");
+			} finally {
+				DataFolder.AfterPublish = null;
+			}
+			Check(File.Exists(Path.Combine(to12, "theirs.txt")) && !File.Exists(Path.Combine(to12, "Setups", "S.json")) && !Directory.Exists(Path.Combine(to12, "Setups")),
+				"takes back only its own copy: another's file in the new place stays");
+			Check(File.Exists(Path.Combine(from12, "Setups", "S.json")), "and the data is still where it was");
+			Directory.Delete(Path.Combine(from12, DataFolder.MovedMark));
+			// a folder inside the data that is a link to another folder stops the move: it would be copied as what it leads to
+			var from10 = Path.Combine(root, "beside 10", Brand.Name + " Data");
+			var elsewhere10 = Path.Combine(root, "backups elsewhere");
+			Directory.CreateDirectory(from10);
+			Directory.CreateDirectory(elsewhere10);
+			Junction(Path.Combine(from10, "Backups"), elsewhere10);
+			Check(Directory.Exists(Path.Combine(from10, "Backups")), "the test's junction inside the data was made");
+			Check(Thrown<InvalidOperationException>(() => DataFolder.MoveTo(from10, Path.Combine(root, "appdata 10", Brand.Name)), "a link inside the data").Message.Contains("is a link to another folder", StringComparison.Ordinal),
+				"a link inside the data stops the move, named");
+			Directory.Delete(Path.Combine(from10, "Backups"));
+			// one writer of the data at a time, across copies of the program: a second hold waits for the first, then goes on
+			Task second;
+			using (DataFolder.HoldWrites()) {
+				second = Task.Run(() => {
+					using var h = DataFolder.HoldWrites();
+				});
+				Check(!second.Wait(300), "a second writer waits while the first holds the data");
+			}
+			Check(second.Wait(5000), "and goes on once the first lets go");
+			// a save that waited for a move finds where the data stands once it may write: a move that removed the old folder whole
+			// (its mark with it) leaves nothing to write into, and the save is refused rather than making the old folder again
+			var waitedData = Path.Combine(root, "beside 16", Brand.Name + " Data");
+			Directory.CreateDirectory(Path.Combine(waitedData, "Setups"));
+			Equal<string?>(null, DataFolder.WhyNotWritable(waitedData), "the data where it is may be written");
+			Task<string?> waitingSave;
+			using (DataFolder.HoldWrites()) {
+				waitingSave = Task.Run(() => {
+					using var h = DataFolder.HoldWrites();
+					return DataFolder.WhyNotWritable(waitedData);
+				});
+				Check(!waitingSave.Wait(300), "the save waits for the move");
+				Directory.Delete(waitedData, true);
+			}
+			Check(waitingSave.Wait(5000) && waitingSave.Result?.Contains("no longer in", StringComparison.Ordinal) == true && !Directory.Exists(waitedData),
+				"and, the old folder gone, is refused without making it again: " + waitingSave.Result);
+			Directory.CreateDirectory(waitedData);
+			File.WriteAllText(Path.Combine(waitedData, DataFolder.MovedMark), to);
+			Check(DataFolder.WhyNotWritable(waitedData)?.Contains("has moved to", StringComparison.Ordinal) == true, "a folder that still holds the move mark is refused too, naming where the data went");
+			// a setup written by hand (a comment, a comma after its last value, a path with forward slashes) is repointed too
+			var from5 = Path.Combine(root, "beside 5", Brand.Name + " Data");
+			var to5 = Path.Combine(root, "appdata 5", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from5, "Setups"));
+			File.WriteAllText(Path.Combine(from5, "Setups", "Hand.json"), "{\n  // written by hand\n  \"backups\": \"" + from5.Replace('\\', '/') + "/Backups\",\n}");
+			Check(DataFolder.MoveTo(from5, to5) == null, "a setup written by hand moves");
+			var hand = JsonNode.Parse(File.ReadAllText(Path.Combine(to5, "Setups", "Hand.json")), documentOptions: new System.Text.Json.JsonDocumentOptions { CommentHandling = System.Text.Json.JsonCommentHandling.Skip, AllowTrailingCommas = true })!;
+			Check(Files.SamePath(hand["backups"]!.GetValue<string>(), Path.Combine(to5, "Backups")), "and its path into the data, written with forward slashes, follows it: " + hand["backups"]);
+			// a file that does not read as JSON but names the old folder stops the move: it would go on naming it after
+			var from6 = Path.Combine(root, "beside 6", Brand.Name + " Data");
+			var to6 = Path.Combine(root, "appdata 6", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from6, "Setups"));
+			File.WriteAllText(Path.Combine(from6, "Setups", "Broken.json"), "{ \"backups\": \"" + from6.Replace("\\", "\\\\", StringComparison.Ordinal) + "\\\\Backups\", ");
+			Throws<IOException>(() => DataFolder.MoveTo(from6, to6), "a file naming the data folder that cannot be repointed stops the move");
+			Check(File.Exists(Path.Combine(from6, "Setups", "Broken.json")) && !Directory.Exists(to6), "and the data stays where it was, nothing of the copy left");
+			// a link that leads into the data folder is that folder, whatever its own path says
+			var link = Path.Combine(root, "link into the data");
+			Directory.CreateDirectory(Path.Combine(from5 + " again", "inside"));
+			Junction(link, Path.Combine(from5 + " again", "inside"));
+			// (both paths taken literally: a "%" that a command processor would read as a variable is only a letter here)
+			var percent = Path.Combine(root, "100%PATH% here");
+			Directory.CreateDirectory(Path.Combine(percent, "target"));
+			Junction(Path.Combine(percent, "link"), Path.Combine(percent, "target"));
+			Check(Files.FinalPath(Path.Combine(percent, "link")) is { } leads && Files.SamePath(leads, Path.Combine(percent, "target")), "a junction in a folder whose name holds %...% leads where it was made to");
+			Directory.Delete(Path.Combine(percent, "link"));
+			Check(Directory.Exists(link), "the test's junction was made");
+			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from5 + " again", link), "a link is refused as the new place");
+			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from5 + " again", Path.Combine(link, "deeper")), "a folder reached through a link into the data is refused");
+			Directory.Delete(link);
+			// a SUBST drive letter that stands for a folder inside the data is that folder too
+			var letter = Enumerable.Range('G', 19).Select(c => (char)c).FirstOrDefault(c => !Directory.Exists(c + @":\"));
+			Check(letter != default, "a free drive letter for the test");
+			bool Subst(string a_args)
+			{
+				using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("subst.exe", a_args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true })!;
+				p.WaitForExit();
+				return p.ExitCode == 0;
+			}
+			// (taken back only when this run made it: a letter another run took meanwhile stays that run's)
+			Check(Subst($"{letter}: \"{Path.Combine(from5 + " again", "inside")}\""), "the test's drive letter was made");
+			try {
+				Check(Directory.Exists(letter + @":\"), "the test's drive letter stands");
+				Throws<InvalidOperationException>(() => DataFolder.MoveTo(from5 + " again", $@"{letter}:\deeper"), "a folder on a drive letter that stands for one inside the data is refused");
+			} finally {
+				Subst($"{letter}: /d");
+			}
+			// data reached by a network path - which may be this very PC's own folder (\\localhost\C$\...) - is never moved: how it
+			// stands to the new place cannot be told (where Windows will not open that path, it is refused all the same)
+			var local = Path.GetFullPath(from5 + " again");
+			var viaNetwork = @"\\localhost\" + local[0] + "$" + local[2..];
+			Throws<InvalidOperationException>(() => DataFolder.MoveTo(viaNetwork, Path.Combine(local, "inside", "deeper")), "data reached by a network path is not moved");
+			Check(Directory.Exists(Path.Combine(local, "inside")) && !Directory.Exists(Path.Combine(local, "inside", "deeper")), "and nothing was copied");
+			// Windows' own names, as GetFinalPathNameByHandle gives them, read as plain paths: a share's is a network path, which the
+			// move refuses (no share opens for a test here - this PC's only shares are Windows' admin ones, refused without rights)
+			Equal(@"\\server\share\Tool Runner Data", Files.PlainFinalName(@"\\?\UNC\server\share\Tool Runner Data"), "a share's final name is its network path");
+			Equal(@"C:\Users\x\Tool Runner", Files.PlainFinalName(@"\\?\C:\Users\x\Tool Runner"), "a local folder's final name is its plain path");
+			Equal(@"D:\plain", Files.PlainFinalName(@"D:\plain"), "a name without the prefix stays as it is");
+			// the same with Windows answering for the share (no share of this PC opens for certain): the refusal is the network one
+			var realName = DataFolder.FinalPathOf;
+			var elsewhere = Path.Combine(root, "appdata net", Brand.Name);
+			try {
+				DataFolder.FinalPathOf = a_dir => Files.SamePath(a_dir, local) ? @"\\localhost\share\Tool Runner Data" : realName(a_dir);
+				var fromNet = Thrown<InvalidOperationException>(() => DataFolder.MoveTo(local, elsewhere), "data whose folder Windows names on the network");
+				Check(fromNet.Message.Contains("the data is in a network folder", StringComparison.Ordinal), "is refused for that: " + fromNet.Message);
+				DataFolder.FinalPathOf = a_dir => Files.SamePath(a_dir, Path.GetDirectoryName(Path.GetDirectoryName(elsewhere)!)!) ? @"\\server\share" : realName(a_dir);
+				var toNet = Thrown<InvalidOperationException>(() => DataFolder.MoveTo(local, elsewhere), "a new place Windows names on the network");
+				Check(toNet.Message.Contains("is a network folder", StringComparison.Ordinal), "is refused for that: " + toNet.Message);
+			} finally {
+				DataFolder.FinalPathOf = realName;
+			}
+			Check(Directory.Exists(local) && !Directory.Exists(elsewhere), "and nothing was copied either way");
+		} finally {
+			if (Directory.Exists(root)) {
+				Directory.Delete(root, true);
+			}
+		}
+	}
+
 	// the rename: the takeover's own check for an old copy, as the program runs it (no stand-in): a running program file under
 	// the old name keeps the old folder where it is; once it ends, the folder is taken over
 	static void T_DataFolderWaitsForARunningOldCopy()
@@ -6532,6 +6918,8 @@ public static class Program
 					File.Copy(f, Path.Combine(scratch, rel));
 				}
 			}
+			// its own data folder beside it before it starts: an app-data folder this PC chose for every copy never takes it
+			Directory.CreateDirectory(Path.Combine(scratch, Brand.Name + " Data"));
 			using var desk = new HiddenDesktop("SUP-test-windowless");
 			// a folder Windows refuses to make: the snapshot's first step throws
 			using var p = desk.Start($"\"{exe}\" --snapshot \"{Path.Combine(Path.GetTempPath(), "bad<name>")}\"", AppContext.BaseDirectory);
@@ -6710,45 +7098,6 @@ public static class Program
 		Check(at.Contains(@"C:\\Game", StringComparison.Ordinal) && !at.Contains("null", StringComparison.Ordinal), "the folder written, its backslashes escaped");
 		var own = "{ \"DataPathOverride\": \"E:\\\\Mine\" }";
 		Equal(own, SynthesisStep.WithDataFolder(own, @"C:\Other"), "a data folder the player set stays");
-	}
-
-	// ------------------------------------------------------------------ after the run: sleep or shut down (his checklist 461)
-	static void T_PowerAfterDecidesAndCanBeCancelled()
-	{
-		using var f = new FakeMo2();
-		var setup = f.WriteSetup(("pandora", new JsonObject()));
-		Equal(PowerAfter.Kind.None, PowerAfter.Read(setup), "off unless set");
-		Check(PowerAfter.OnlyFinished(setup), "only after a finished run, unless set");
-		setup.Root["afterRunPower"] = "shutdown";
-		Equal(PowerAfter.Kind.Shutdown, PowerAfter.Read(setup), "shut down");
-		Equal(PowerAfter.Kind.Shutdown, PowerAfter.Decide(PowerAfter.Kind.Shutdown, true, RunState.Finished), "a finished run");
-		Equal(PowerAfter.Kind.None, PowerAfter.Decide(PowerAfter.Kind.Shutdown, true, RunState.Failed), "a failed run keeps the PC on");
-		Equal(PowerAfter.Kind.Sleep, PowerAfter.Decide(PowerAfter.Kind.Sleep, false, RunState.Failed), "unless the setup says any run");
-		Equal(PowerAfter.Kind.None, PowerAfter.Decide(PowerAfter.Kind.Sleep, false, RunState.Stopped), "a run the player stopped never does");
-		// the notice: the window sees it, the action comes after it; a cancel stops it
-		var done = new List<PowerAfter.Kind>();
-		var waits = 0;
-		Check(PowerAfter.Carry(PowerAfter.Kind.Sleep, f.Data, RunLog.Null, done.Add, _ => {
-			if (waits++ == 0) {
-				Check(PowerAfter.Look(f.Data) is { Action: "Sleep" }, "the notice is there for the window");
-			}
-		}), "done after the notice");
-		Equal(1, done.Count, "the action once");
-		Equal(60, waits, "a minute of notice, a second at a time");
-		Equal<PowerAfter.Pending?>(null, PowerAfter.Look(f.Data), "the notice is gone");
-		done.Clear();
-		waits = 0;
-		Check(!PowerAfter.Carry(PowerAfter.Kind.Shutdown, f.Data, RunLog.Null, done.Add, _ => {
-			if (++waits == 10) {
-				PowerAfter.Cancel(f.Data);
-			}
-		}), "cancelled");
-		Equal(0, done.Count, "nothing done");
-		Check(!File.Exists(PowerAfter.CancelFile(f.Data)) && !File.Exists(PowerAfter.File(f.Data)), "nothing left behind");
-		// a cancel left from before never stops the next one
-		PowerAfter.Cancel(f.Data);
-		Check(PowerAfter.Carry(PowerAfter.Kind.Sleep, f.Data, RunLog.Null, done.Add, _ => { }), "an old cancel is not this one's");
-		Check(!PowerAfter.Carry(PowerAfter.Kind.None, f.Data, RunLog.Null, done.Add, _ => throw new InvalidOperationException("no wait for nothing")), "none does nothing");
 	}
 
 	// ------------------------------------------------------------------ each step's last run (his checklist 450)
@@ -6970,6 +7319,13 @@ public static class Program
 				log.Detail("a detail");
 				log.Simple("the simple line");
 			}
+			using (var marks = new RunLog(Path.Combine(dir, "marks"))) {
+				marks.Simple("a warning", Level.Warn);
+				marks.Simple("a failure", Level.Error);
+			}
+			var markLines = File.ReadAllLines(Path.Combine(dir, "marks", RunLog.SimpleName));
+			Check(markLines.Length == 2 && markLines[0].EndsWith("  ! a warning", StringComparison.Ordinal) && markLines[1].EndsWith("  !!! a failure", StringComparison.Ordinal),
+				"the simple log marks a warning and a failure as the detailed log does: " + string.Join(" | ", markLines));
 			var simple = File.ReadAllLines(Path.Combine(dir, RunLog.SimpleName));
 			var detailed = File.ReadAllText(Path.Combine(dir, "log.txt"));
 			Check(simple.Length == 1 && System.Text.RegularExpressions.Regex.IsMatch(simple[0], @"^\d\d:\d\d  the simple line$"), "the simple log holds only its own line, with the time: " + string.Join(" | ", simple));
@@ -6983,6 +7339,63 @@ public static class Program
 		}
 	}
 
+	// the log's colors: green as planned, yellow a warning, red a failure or what goes off plan - read off the marks both logs write
+	// A long run's log as the window takes it: lines added a few at a time, the oldest cut away past 200,000 characters (as the
+	// window does), every line one colored paragraph. What it keeps must be exactly the newest lines, and the time it takes is
+	// the test's own time in the log (no limit here but a generous one: a busy PC is no failure)
+	static void T_ALongLogIsAddedAndCutWhole()
+	{
+		Exception? failed = null;
+		var t = new Thread(() => {
+			try {
+				var box = new ToolRunner.App.LogView();
+				var added = 0;
+				var sw = Stopwatch.StartNew();
+				for (var batch = 0; batch < 3000; ++batch) {
+					var lines = string.Join("\n", Enumerable.Range(0, 3).Select(i => $"21:{batch % 60:00}:{i:00}  {(i == 1 ? "! " : i == 2 && batch % 50 == 0 ? "!!! " : "")}line {batch * 3 + i} of a long run's log, about as long as most")) + "\n";
+					box.AppendLines(lines);
+					added += lines.Length;
+					if (added > 200_000) {
+						box.KeepLast(150_000);
+						added = box.Length;
+					}
+				}
+				var took = sw.Elapsed;
+				var text = box.Text;
+				Check(text.Length <= 200_000 && text.EndsWith("line 8999 of a long run's log, about as long as most\n", StringComparison.Ordinal), $"the newest lines are kept ({text.Length} characters)");
+				Check(text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length == box.Document.Blocks.Count, "one paragraph for each line kept");
+				Check(text.StartsWith("21:", StringComparison.Ordinal), "the cut falls between whole lines");
+				Check(took < TimeSpan.FromSeconds(60), $"9,000 lines added in {took.TotalSeconds:0.0} s");
+				// a newest line longer than the whole budget: every line before it goes, and it stays whole
+				box.AppendLines(new string('x', 160_000) + "\n");
+				box.KeepLast(150_000);
+				Check(box.Document.Blocks.Count == 1 && box.Text.TrimEnd('\n').Length == 160_000, $"a line over the budget is kept alone and whole ({box.Document.Blocks.Count} lines, {box.Length} characters)");
+				Console.WriteLine($"      9,000 lines added and cut in {took.TotalMilliseconds:0} ms");
+			} catch (Exception e) {
+				failed = e;
+			}
+		});
+		t.SetApartmentState(ApartmentState.STA);
+		t.Start();
+		t.Join();
+		if (failed != null) {
+			throw failed;
+		}
+	}
+
+	static void T_TheLogIsColoredByWhatEachLineSays()
+	{
+		Equal("Good", ToolRunner.App.LogView.BrushKey("21:00:01  TexGen started"), "a line as planned (detailed)");
+		Equal("Good", ToolRunner.App.LogView.BrushKey("21:00:01    a detail"), "a detail");
+		Equal("Good", ToolRunner.App.LogView.BrushKey("21:00  1/3 TexGen started"), "a line as planned (simple)");
+		Equal("Warn", ToolRunner.App.LogView.BrushKey("21:00:02  ! a box is open - the game's notice"), "a warning (detailed)");
+		Equal("Warn", ToolRunner.App.LogView.BrushKey("21:00  ! Note: something worth a look"), "a warning (simple)");
+		Equal("Bad", ToolRunner.App.LogView.BrushKey("21:00:03  !!! the step failed"), "a failure (detailed)");
+		Equal("Bad", ToolRunner.App.LogView.BrushKey("21:00  !!! The game shows a message box this run cannot answer"), "what goes off plan (simple)");
+		Equal("Good", ToolRunner.App.LogView.BrushKey("21:00  a line that says ! somewhere"), "a mark only counts right after the time");
+		Equal("Text", ToolRunner.App.LogView.BrushKey(""), "an empty line has no color of its own");
+	}
+
 	static void T_FailedRunsSimpleLogSaysWhatToDo()
 	{
 		using var f = new FakeMo2();
@@ -6991,8 +7404,13 @@ public static class Program
 		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("pgpatcher", []));
 		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
 		Equal(RunState.Failed, r.State, "failed");
-		var simple = File.ReadAllLines(Path.Combine(r.Folder!, RunLog.SimpleName)).Select(l => l[7..]).ToList();
-		var all = string.Join(" | ", simple);
+		var marked = File.ReadAllLines(Path.Combine(r.Folder!, RunLog.SimpleName)).Select(l => l[7..]).ToList();
+		// (the lines of a failure carry the failure's mark, as in the detailed log - the window colors them red)
+		var simple = marked.Select(l => l.StartsWith("!!! ", StringComparison.Ordinal) ? l[4..] : l.StartsWith("! ", StringComparison.Ordinal) ? l[2..] : l).ToList();
+		var all = string.Join(" | ", marked);
+		Check(marked.Any(l => l == "!!! PGPatcher did not finish: A plugin needs a master plugin that is not loaded.") && marked[^1].StartsWith("!!! Failed: ", StringComparison.Ordinal),
+			"the failure and the verdict are marked as failures: " + all);
+		Check(marked[0].Contains("started: 2 step(s)", StringComparison.Ordinal) && !marked[0].StartsWith('!'), "a line as planned has no mark: " + all);
 		Check(simple[0].Contains("started: 2 step(s)", StringComparison.Ordinal), "the run's start: " + all);
 		Check(simple.Any(l => l.StartsWith("1/2 ", StringComparison.Ordinal) && l.EndsWith(" started", StringComparison.Ordinal)) &&
 			simple.Any(l => l == "2/2 PGPatcher started"), "each step's start, numbered: " + all);
@@ -7001,6 +7419,11 @@ public static class Program
 		Check(simple.Any(l => l.StartsWith("What to do: Install and tick the missing master", StringComparison.Ordinal)), "what to do: " + all);
 		Check(simple.Any(l => l == "The tool's own words: PGPatcher.esp requires master Gone.esm"), "the tool's own words: " + all);
 		Check(simple[^1].StartsWith("Failed: stopped at PGPatcher", StringComparison.Ordinal), "the verdict last: " + all);
+		// the summary above the verdict: its title and why the run ended in red, what to do in yellow, its other rows as planned
+		Check(marked.Any(l => l.StartsWith("!!! Stopped by a problem after ", StringComparison.Ordinal)) && marked.Any(l => l.StartsWith("!!!   Why: PGPatcher", StringComparison.Ordinal)),
+			"the summary says how the run ended in red: " + all);
+		Check(marked.Any(l => l.StartsWith("!   Next: ", StringComparison.Ordinal)) && marked.Any(l => l.StartsWith("  Steps: ", StringComparison.Ordinal)),
+			"what comes next in yellow, the steps as planned: " + all);
 		var detailed = File.ReadAllText(Path.Combine(r.Folder!, "log.txt"));
 		Check(detailed.Contains("! what it means: A plugin needs a master", StringComparison.Ordinal), "the detailed log says what it means too");
 	}
@@ -7105,6 +7528,8 @@ public static class Program
 		Equal("failed, PGPatcher.esp requires master Gone.esm", ToolRunner.App.A11y.StepStatus(true, false, StepState.Failed, "1m", "", "PGPatcher.esp requires master Gone.esm"), "a failure with its reason");
 		Equal("switched off, usually takes 24m", ToolRunner.App.A11y.StepStatus(false, false, null, "", "24m", ""), "a switched-off step");
 		Equal("left out for a new game", ToolRunner.App.A11y.StepStatus(true, true, null, "", "", ""), "a save step on a new game");
+		Equal("usually takes 7m, " + ToolRunner.App.MainViewModel.NoDevBench, ToolRunner.App.A11y.StepStatus(true, false, null, "", "7m", "", false, ToolRunner.App.MainViewModel.NoDevBench),
+			"a step DevBench is missing for says so to a screen reader too");
 		Equal("Bottled", new ToolRunner.App.SetupItem("Bottled", @"C:\Data\Setups\Bottled.json").ToString(), "a setup is read by its name, not its path");
 		var row = new ToolRunner.App.HistoryRow("Tue Oct 27  21:02", "Bottled", "1h 41m", "finished: 12 step(s)", true, @"C:\Runs\1").ToString();
 		Check(row.Contains("finished", StringComparison.Ordinal) && !row.Contains(@"C:\Runs", StringComparison.Ordinal), "a past run in words: " + row);
@@ -7742,7 +8167,7 @@ public static class Program
 	}
 
 	// the in-game steps with a character picked: that character's newest save even when another character played since, a save
-	// of another character never loaded (named or an earlier clean save), and the save to play starting from the picked one's
+	// of another character never loaded (named or an earlier clean save), and the final save starting from the picked one's
 	// (CodeRabbit on #25)
 	static void T_TheInGameStepsUseThePickedCharactersSaves()
 	{
@@ -7778,7 +8203,7 @@ public static class Program
 		Check(InGame.OldCleanSave(p, "Lydia") != null, "one of the picked character's is");
 		var player = InGame.NewestPlayerSave(p, null, "Björn");
 		Equal("Save2_Bjorn", InGame.PlaySaveFrom(null, null, InGame.OldCleanSave(p, "Björn"), player, InGame.SaveTime(p, player)).Save,
-			"the save to play starts from the picked character's save, not the newer clean save of another");
+			"the final save starts from the picked character's save, not the newer clean save of another");
 		// the steps themselves pass the picked character on - each case below stops before any game would start
 		var setup = f.WriteSetup(("cleansave", new JsonObject()), ("playsave", new JsonObject()));
 		setup.Root["character"] = "Björn";
@@ -7801,10 +8226,10 @@ public static class Program
 		}
 		var named = new StepSettings(new JsonObject { ["save"] = "Save3_Lydia" });
 		Check(Refused(() => InGame.Deactivate(ctx, named)).Contains("is Lydia's, not Björn's", StringComparison.Ordinal), "the clean save refuses a named save of another character");
-		Check(Refused(() => InGame.PlaySave(ctx, named)).Contains("is Lydia's, not Björn's", StringComparison.Ordinal), "so does the save to play");
+		Check(Refused(() => InGame.PlaySave(ctx, named)).Contains("is Lydia's, not Björn's", StringComparison.Ordinal), "so does the final save");
 		File.Delete(Path.Combine(saves, "Save2_Bjorn.ess"));
 		Equal("no save to load", Refused(() => InGame.PlaySave(ctx, new StepSettings(new JsonObject()))),
-			"with no save of the picked character, the save to play never falls back to another character's clean save");
+			"with no save of the picked character, the final save never falls back to another character's clean save");
 		// the clean save's own pick on the automatic route (DevBench ticked - a stand-in file, nothing runs): no save of the picked
 		// character is refused by name before anything starts, never another character's newest taken instead
 		var dev = Path.Combine(f.Mods, "DevBench", "SKSE", "Plugins");
@@ -8001,6 +8426,38 @@ public static class Program
 			ToolRunner.App.UiState.SaveAtClose();
 			Check(!ToolRunner.App.UiState.Unsaved && ToolRunner.App.UiState.WrittenAtClose && JsonNode.Parse(File.ReadAllText(kept))!["test.width"]!.GetValue<double>() == 1100,
 				"a last write that goes through is in the file");
+			// The program's data removed: a removal that left something behind changes nothing; after one that took all of it,
+			// what the closing window still sets is kept in memory only - written, it would make the data folder again
+			ToolRunner.App.UiState.FileForTests = kept;
+			Check(!ToolRunner.App.UiState.RemoveWith(() => false), "a removal that did not take everything says so");
+			ToolRunner.App.UiState.Set("test.width", 1200);
+			ToolRunner.App.UiState.Save();
+			Equal(1200.0, JsonNode.Parse(File.ReadAllText(kept))!["test.width"]!.GetValue<double>(), "and leaves the window's own writes as they were");
+			Check(ToolRunner.App.UiState.RemoveWith(() => {
+				File.Delete(kept);
+				return true;
+			}) && !ToolRunner.App.UiState.Unsaved, "a removal that took everything leaves nothing to write");
+			ToolRunner.App.UiState.Set("test.height", 700);
+			ToolRunner.App.UiState.SaveAtClose();
+			Check(!File.Exists(kept) && !ToolRunner.App.UiState.Unsaved, "what the closing window sets after it is never written: the removed data stays removed");
+			Equal(700.0, ToolRunner.App.UiState.Number("test.height") ?? 0, "(it is still kept for as long as the program runs)");
+			// ... and the window lets go of its watch on the runs folder for a removal (MainWindow.WatchRuns): Windows moves no
+			// folder - to the Recycle Bin or anywhere - while a folder inside it is watched
+			var watched = Path.Combine(f.Root, "Data watched");
+			Directory.CreateDirectory(Path.Combine(watched, "Runs"));
+			using (var watch = new ToolRunner.App.RunsWatch(Path.Combine(watched, "Runs"), () => { })) {
+				// (the watch must be on, or this proves nothing)
+				Check(watch.Watching, "the runs folder is watched");
+				var refused = false;
+				try {
+					Directory.Move(watched, watched + " moved");
+				} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+					refused = true;
+				}
+				Check(refused, "a data folder whose runs folder is watched is not moved");
+			}
+			Directory.Move(watched, watched + " moved");
+			Check(Directory.Exists(watched + " moved") && !Directory.Exists(watched), "with the watch let go it is");
 		} finally {
 			ToolRunner.App.UiState.FileForTests = null;
 		}
@@ -9348,7 +9805,7 @@ public static class Program
 		Equal(before, f.Text("modlist.txt"), "nothing changed");
 	}
 
-	// "stop after this step" pressed during the last tool holds before the save to play too (it once started the game all the same)
+	// "stop after this step" pressed during the last tool holds before the final save too (it once started the game all the same)
 	static void T_StopAfterHoldsBeforeTheSaveToPlay()
 	{
 		using var f = new FakeMo2();
@@ -9362,8 +9819,8 @@ public static class Program
 		f.WriteSetup(("landscapefixer", new JsonObject { ["output_mod"] = "Output A" }), ("playsave", []));
 		var r = Runner.Run(new RunRequest(f.SetupFile, f.Data));
 		Equal(RunState.Stopped, r.State, "stopped: " + r.Verdict);
-		Check(!played, "the game was not started for the save to play");
-		Check(r.Verdict.Contains("carry on from Save to play", StringComparison.Ordinal), "and it says where to carry on: " + r.Verdict);
+		Check(!played, "the game was not started for the final save");
+		Check(r.Verdict.Contains("carry on from Final save", StringComparison.Ordinal), "and it says where to carry on: " + r.Verdict);
 		Check(ProfileOf(f).IsOn("Output A"), "the finished output on");
 	}
 
@@ -10043,7 +10500,7 @@ public static class Program
 	}
 
 	// "run again from the failed step" is a new run: the place the player stood at before the clean save is taken from the run
-	// that made that save (without it the save to play was made in the test cell)
+	// that made that save (without it the final save was made in the test cell)
 	static void T_ARetryFindsThePlaceTheCleanSaveCameFrom()
 	{
 		using var f = new FakeMo2();
@@ -10472,9 +10929,7 @@ public static class Program
 		File.WriteAllText(Path.Combine(kept, "theirs.txt"), "x");
 		File.WriteAllText(Path.Combine(from, "plain.txt"), "y");
 		var link = Path.Combine(from, "link");
-		using (var mk = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), $"/d /c mklink /J \"{link}\" \"{kept}\"") { CreateNoWindow = true, UseShellExecute = false })!) {
-			mk.WaitForExit();
-		}
+		Junction(link, kept);
 		if (Directory.Exists(link)) {
 			Check(Files.IsLink(link) && !Files.IsLink(kept), "a junction is a link, a plain folder is none");
 			Files.MoveContents(from, into);
@@ -11039,6 +11494,8 @@ public static class Program
 					File.Copy(file, Path.Combine(scratch, rel));
 				}
 			}
+			// its own data folder beside it before it starts: an app-data folder this PC chose for every copy never takes it
+			Directory.CreateDirectory(Path.Combine(scratch, Brand.Name + " Data"));
 			(int Exit, string Out) Ask(params string[] a_args)
 			{
 				var psi = new ProcessStartInfo(Path.Combine(scratch, Brand.Name + ".exe")) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, WorkingDirectory = scratch };
@@ -11263,7 +11720,7 @@ public static class Program
 	{
 		var followed = ToolRunner.App.RunsWatch.Followed;
 		Check(followed.Contains("journal.json") && followed.Contains(Path.GetFileName(QueueRun.File("x"))) && followed.Contains(Path.GetFileName(QueueRun.LastFile("x"))) &&
-		      followed.Contains(Path.GetFileName(PowerAfter.File("x"))) && followed.Contains(Path.GetFileName(ToolRunner.App.Engine.RefusalFile)), "every file the window's look reads is followed");
+		      followed.Contains(Path.GetFileName(ToolRunner.App.Engine.RefusalFile)), "every file the window's look reads is followed");
 		var dir = Path.Combine(Path.GetTempPath(), "mo2 tool runner tests", "runs watch " + Guid.NewGuid().ToString("N")[..8]);
 		try {
 			using var woke = new ManualResetEventSlim();

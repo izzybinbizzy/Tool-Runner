@@ -19,7 +19,44 @@ public static class UiState
 	// a width and a height kept together are one write
 	static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(150);
 
-	public static string File => FileForTests ?? Path.Combine(AppPaths.Data, "window.json");
+	public static string File => FileForTests ?? Path.Combine(s_movedTo ?? AppPaths.Data, "window.json");
+
+	// the data folder moved while the program runs (Settings > Keep data through updates): what the window still writes before it
+	// closes goes there, never into the old folder - written there, it would stand again and the next start would take it
+	static volatile string? s_movedTo;
+
+	// The data folder moved by a_move to a_to with no write of the window's in between: what is kept goes into the old folder
+	// first (it moves along), and a write that comes during the move waits and then goes to the new place. One that landed
+	// between the old folder's removal and the switch would make a data folder beside the program again, and the next start
+	// would take that nearly empty one
+	public static void MoveWith(Action a_move, string a_to)
+	{
+		lock (Disk) {
+			Save();
+			a_move();
+			s_movedTo = a_to;
+		}
+	}
+
+	// the program's data was removed (Settings > Remove program data): nothing is written from then on
+	static bool s_removed;
+
+	// The program's data removed by a_remove with no write of the window's in between. When it says all of it went, nothing
+	// the window remembers is written again: the window closes next, and its sizes written as it closes would make the data
+	// folder anew with this one file in it. Hands on what a_remove said
+	public static bool RemoveWith(Func<bool> a_remove)
+	{
+		lock (Disk) {
+			if (!a_remove()) {
+				return false;
+			}
+			lock (Gate) {
+				s_removed = true;
+				s_unsaved = false;
+			}
+			return true;
+		}
+	}
 
 	// the offline tests keep it in a file of their own (and start from nothing kept, before and after)
 	public static string? FileForTests
@@ -31,6 +68,7 @@ public static class UiState
 				s_state = null;
 				s_unsaved = false;
 				s_closed = false;
+				s_removed = false;
 			}
 		}
 	}
@@ -89,7 +127,7 @@ public static class UiState
 				return;
 			}
 			state[a_key] = a_value;
-			if (App.Headless) {
+			if (App.Headless || s_removed) {
 				return;
 			}
 			s_unsaved = true;
