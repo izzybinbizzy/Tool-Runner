@@ -351,12 +351,16 @@ public static partial class Files
 			if (n == 0 || n >= name.Length) {
 				return null;
 			}
-			var s = new string(name, 0, (int)n);
-			return s.StartsWith(@"\\?\UNC\", StringComparison.Ordinal) ? @"\\" + s[8..] : s.StartsWith(@"\\?\", StringComparison.Ordinal) ? s[4..] : s;
+			return PlainFinalName(new string(name, 0, (int)n));
 		} finally {
 			CloseHandle(h);
 		}
 	}
+
+	// Windows' final name of a folder as a plain path: "\\?\C:\x" is C:\x, a share's "\\?\UNC\server\share\x" is
+	// \\server\share\x
+	public static string PlainFinalName(string a_name) =>
+		a_name.StartsWith(@"\\?\UNC\", StringComparison.Ordinal) ? @"\\" + a_name[8..] : a_name.StartsWith(@"\\?\", StringComparison.Ordinal) ? a_name[4..] : a_name;
 
 	// the volume a folder is really on (a junction is followed to where it leads); null when Windows will not say
 	static uint? VolumeOf(string a_dir)

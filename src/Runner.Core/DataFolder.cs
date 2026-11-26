@@ -223,7 +223,9 @@ public static class DataFolder
 		// only what this move made. One left by a move that was cut off is this move's too, and goes first
 		var staging = to + " (being copied)";
 		if (Directory.Exists(staging)) {
-			if (Files.IsLink(staging)) {
+			// (only a folder this move made goes: one whose mark names this data folder, or one that holds nothing but that mark
+			// half written - anything else in it is someone's, and the move waits for it to be moved away)
+			if (Files.IsLink(staging) || !LeftByThisMove(staging, from)) {
 				throw new InvalidOperationException($"{staging} is in the way - move it away, then try again");
 			}
 			Files.DeleteDir(staging);
@@ -268,6 +270,7 @@ public static class DataFolder
 				Directory.Delete(to);
 			}
 			Directory.Move(staging, to);
+			AfterPublish?.Invoke(to);
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			TakeBack(staging, e, "the data could not be moved");
 		}
@@ -275,7 +278,14 @@ public static class DataFolder
 		try {
 			Files.WriteAtomic(Path.Combine(from, MovedMark), to);
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
-			TakeBack(to, e, "the old folder could not be marked as moved");
+			// (the copy has its place by now, where another program may have put something since: only what this move put
+			// there goes)
+			try {
+				RemoveCopy(to, from, dirs, want.Keys);
+			} catch (Exception e2) when (e2 is IOException or UnauthorizedAccessException) {
+				throw new IOException($"the old folder could not be marked as moved ({e.Message}), and the copy could not all be removed again ({to}) - delete what is left of it yourself; your data is still where it was", e);
+			}
+			throw new IOException($"the old folder could not be marked as moved ({e.Message}) - it is still where it was", e);
 		}
 		// what is left after the mark never takes the move back: a start that finds the mark finishes both
 		try {
@@ -293,6 +303,36 @@ public static class DataFolder
 			return null;
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
 			return $"The old folder could not all be removed ({e.Message}); the next start removes what is left of {from}.";
+		}
+	}
+
+	// the offline tests only: called the moment the copy has taken its place
+	public static Action<string>? AfterPublish { get; set; }
+
+	// a staging folder a cut-off move of a_from left: its mark names a_from, or it holds nothing but that mark half written
+	static bool LeftByThisMove(string a_staging, string a_from)
+	{
+		var mark = Path.Combine(a_staging, Pending);
+		if (File.Exists(mark)) {
+			return Files.SamePath(File.ReadAllText(mark).Trim(), a_from);
+		}
+		var half = "." + Pending + ".";
+		return !Directory.EnumerateDirectories(a_staging).Any() &&
+			Directory.EnumerateFiles(a_staging).All(f => Path.GetFileName(f).StartsWith(half, StringComparison.Ordinal) && f.EndsWith(".tmp", StringComparison.Ordinal));
+	}
+
+	// a copy that took its place taken away again: only the files and folders this move put there (and its mark); a folder that
+	// holds anything else stays with it
+	static void RemoveCopy(string a_to, string a_from, List<string> a_dirs, IEnumerable<string> a_files)
+	{
+		foreach (var rel in a_files) {
+			Files.Delete(Path.Combine(a_to, rel));
+		}
+		Files.Delete(Path.Combine(a_to, Pending));
+		foreach (var d in a_dirs.Select(d => Path.Combine(a_to, Path.GetRelativePath(a_from, d))).OrderByDescending(d => d.Length).Append(a_to)) {
+			if (Directory.Exists(d) && !Directory.EnumerateFileSystemEntries(d).Any()) {
+				Directory.Delete(d);
+			}
 		}
 	}
 
