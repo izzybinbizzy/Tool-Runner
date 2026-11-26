@@ -1241,7 +1241,8 @@ public static class SettingsPanel
 			(others.Count == 0 ? "" : $" Also in the settings of: {string.Join(", ", others)} (pick it on the Steps page).");
 	}
 
-	// the steps (all but a_skip) whose settings hold a_q - in a setting's name, its label or its value
+	// the steps (all but a_skip) whose settings hold a_q - in a setting's name, its label (in English and as the step editor
+	// shows it, in the window's language) or its value
 	public static List<string> StepsWith(IReadOnlyList<JsonObject> a_steps, string a_q, int a_skip)
 	{
 		bool Has(string? a_t) => (a_t ?? "").Contains(a_q, StringComparison.OrdinalIgnoreCase);
@@ -1254,7 +1255,7 @@ public static class SettingsPanel
 			return [];
 		}
 		return a_steps.Select((s, i) => (s, i)).Where(x => x.i != a_skip && x.s["settings"] is JsonObject o &&
-				o.Any(p => Has(p.Key) || Has(Label(p.Key)) || Holds(p.Value)))
+				o.Any(p => Has(p.Key) || Has(Label(p.Key)) || Has(WindowWords.Word(Label(p.Key))) || Holds(p.Value)))
 			.Select(x => StepCatalog.Name(Setup.Str(x.s, "step") ?? "")).Distinct(StringComparer.Ordinal).ToList();
 	}
 
