@@ -115,7 +115,7 @@ public sealed partial class MainViewModel : Observable
 	public StepRow? SelectedStep { get; set { if (Set(ref field, value)) { ShowLastCard(); OnPropertyChanged(nameof(UseOldLabel)); } } }
 
 	// the button under the steps and the right-click entry: what pressing it does for the selected step
-	public string UseOldLabel => SelectedStep?.UsesOld == true ? "Build it a_gain" : "Use o_ld output";
+	public string UseOldLabel => WindowWords.Word(SelectedStep?.UsesOld == true ? "Build it a_gain" : "Use o_ld output");
 	public bool Mo2Open { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(Mo2Text)); } }
 	public bool GameRunning { get; set { if (Set(ref field, value)) OnPropertyChanged(nameof(GameText)); } }
 	public string Mo2Text => Mo2Open ? "Mod Organizer open" : "Mod Organizer closed";

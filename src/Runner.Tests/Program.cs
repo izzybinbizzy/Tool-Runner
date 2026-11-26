@@ -4932,6 +4932,57 @@ public static class Program
 	}
 
 	// a language file: a value left empty stays English, a name is only a name, and a file that does not read is not replaced
+	// The languages shipped inside the program: each one reads, gives every text a translation (none left empty), keeps one access
+	// key where the English has one and every key shortcut the English names, and is offered in the language list
+	static void T_EveryShippedLanguageReadsWhole()
+	{
+		var shipped = ToolRunner.App.WindowWords.Shipped();
+		foreach (var name in new[] { "Deutsch", "Español", "Français", "Italiano", "Polski", "Português (Brasil)", "Türkçe", "Русский", "Українська", "日本語", "简体中文", "한국어" }) {
+			Check(shipped.Contains(name), "shipped: " + name);
+		}
+		var offered = ToolRunner.App.WindowWords.Available();
+		Check(offered[0] == ToolRunner.App.WindowWords.English && shipped.All(offered.Contains), "English first, then every shipped language: " + string.Join(", ", offered));
+		foreach (var name in shipped) {
+			var words = ToolRunner.App.WindowWords.Read(ToolRunner.App.WindowWords.ShippedText(name)!, out var problem);
+			Check(words != null, $"{name} reads: {problem}");
+			Check(words!.Count >= 300, $"{name} holds the window's texts ({words.Count})");
+			foreach (var (english, word) in words) {
+				Check(!string.IsNullOrWhiteSpace(word), $"{name}: no empty translation for {english}");
+				if (english.Count(c => c == '_') == 1) {
+					Check(word.Count(c => c == '_') == 1, $"{name}: one access key in {word}");
+				}
+				foreach (var key in System.Text.RegularExpressions.Regex.Matches(english, @"Ctrl\+(?:Enter|[A-Z,])|\bF\d\b").Select(m => m.Value)) {
+					Check(word.Contains(key, StringComparison.Ordinal), $"{name}: {key} kept in {word}");
+				}
+			}
+		}
+	}
+
+	// what the window shows only once it is used - the step editor's labels, the settings choices not picked, the command box's
+	// entries - is in every shipped language as well, not only what a picture of the window showed
+	static void T_EveryShippedLanguageHasTheSettingsTexts()
+	{
+		string[] more = ["{0} (default {1})", "Show setup: {0}", "Settings of {0}", "Run only {0}", "Find in the settings: \"{0}\"", "Stop the test", "Most recent save (any character)",
+			"leave it to me (unanswered, the step stops)", "every run", "never", "skip it during the run (it asks in my own game)",
+			"new cache at every game start", "leave it alone - warn me only", "off", "on", "none", "the step's own", "Data folder (setups, runs, backups): {0}", ToolRunner.App.MainWindow.FooterText, "Data folder: {0}"];
+		var must = ToolRunner.App.SettingsPanel.StepLabels.Concat(more).ToList();
+		Check(must.Count >= 55, $"the texts looked for ({must.Count})");
+		foreach (var name in ToolRunner.App.WindowWords.Shipped()) {
+			var words = ToolRunner.App.WindowWords.Read(ToolRunner.App.WindowWords.ShippedText(name)!, out _)!;
+			var missing = must.Where(m => !words.ContainsKey(m)).ToList();
+			Check(missing.Count == 0, $"{name} lacks {missing.Count}: {string.Join(" | ", missing.Take(5))}");
+		}
+		// a text with a name put into it: the language's own form, and English when a translation's places do not fit
+		try {
+			ToolRunner.App.WindowWords.Use(new Dictionary<string, string> { ["Run only {0}"] = "Nur {0} ausführen" });
+			Equal("Nur xLODGen ausführen", ToolRunner.App.WindowWords.Format("Run only {0}", "xLODGen"), "the language's own form");
+			ToolRunner.App.WindowWords.Use(new Dictionary<string, string> { ["Run only {0}"] = "Nur {1} ausführen" });
+			Equal("Run only xLODGen", ToolRunner.App.WindowWords.Format("Run only {0}", "xLODGen"), "a translation whose places do not fit: English");
+		} finally {
+			ToolRunner.App.WindowWords.Use(new Dictionary<string, string>());
+		}
+	}
+
 	static void T_ALanguageFileCannotHarmTheWindow()
 	{
 		ToolRunner.App.WindowWords.Use(new Dictionary<string, string> { ["Start"] = "Starten", ["Empty"] = null!, ["Blank"] = "  " });
@@ -8332,6 +8383,14 @@ public static class Program
 		Equal("TexGen", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "output_mod", -1)), "a setting's own name");
 		Equal("", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "TexGen Output", 0)), "never the step already open");
 		Equal(0, ToolRunner.App.SettingsPanel.StepsWith(steps, " ", -1).Count, "no word, no steps");
+		// in another language a setting is found by the label the step editor shows, and still by its English one
+		ToolRunner.App.WindowWords.Use(new Dictionary<string, string> { ["Output mod"] = "Мод із результатом" });
+		try {
+			Equal("TexGen", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "мод із результ", -1)), "a translated label, any case");
+			Equal("TexGen", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "Output mod", -1)), "the English label too");
+		} finally {
+			ToolRunner.App.WindowWords.Use(new Dictionary<string, string>());
+		}
 		// a setup file may hold a setting with no name at all: it has no label, and nothing fails over it
 		steps.Add(new() { ["step"] = "acmos", ["settings"] = new JsonObject { [""] = "nameless" } });
 		Equal("ACMOS Road Generator", string.Join(", ", ToolRunner.App.SettingsPanel.StepsWith(steps, "nameless", -1)), "a setting with an empty name is still searched");

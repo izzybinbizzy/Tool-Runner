@@ -53,7 +53,11 @@ public static class SettingsPanel
 		["max_restarts"] = "Restarts allowed",
 		["build_min"] = "Patcher build limit (minutes)",
 		["extra_args"] = "Extra arguments (one per line)",
+		["stall_min"] = "Give up when nothing moves for (minutes)",
 	};
+
+	// every label the step editor can show for a known setting (a shipped language must hold each)
+	public static IReadOnlyCollection<string> StepLabels => [.. Labels.Values.Distinct(StringComparer.Ordinal)];
 
 	// an edit not saved yet (the window asks before the drawer closes over it)
 	public static bool HasChanges { get; private set; }
@@ -274,10 +278,12 @@ public static class SettingsPanel
 		}
 		StackPanel setupPage = Page("Setup"), runPage = Page("Run"), gamePage = Page("Game steps"), backupPage = Page("Backups"), alertPage = Page("Alerts"),
 			stepPage = Page("Steps"), toolPage = Page("Tools"), changesPage = Page("MO2 Changelog"), programPage = Page("Program");
-		var cats = new ListBox { Width = 168, Margin = new Thickness(0, 0, 16, 0), ItemsSource = pages.Select(p => p.Name).ToList(), SelectedIndex = s_page < pages.Count ? s_page : 0,
+		// (the pages are shown in the window's language and known by their English names)
+		var cats = new ListBox { Width = 168, Margin = new Thickness(0, 0, 16, 0), ItemsSource = pages.Select(p => WindowWords.Word(p.Name)).ToList(), SelectedIndex = s_page < pages.Count ? s_page : 0,
 			VerticalAlignment = VerticalAlignment.Top, BorderThickness = new Thickness(0), Background = System.Windows.Media.Brushes.Transparent };
 		System.Windows.Automation.AutomationProperties.SetName(cats, "Settings pages");
 		s_cats = cats;
+		s_catNames = [.. pages.Select(p => p.Name)];
 		var host = new StackPanel();
 		var scroller = new ScrollViewer { Content = host, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Padding = new Thickness(0, 0, 12, 0) };
 		System.Windows.Automation.AutomationProperties.SetName(scroller, "The settings of the page picked");
@@ -453,10 +459,8 @@ public static class SettingsPanel
 		Field(changesPage, apply, "Hide mods whose name starts with (one per line)", changes, "hideModsStartingWith", JsonValueKind.Array);
 		stack = programPage;
 
-		// the window's look for every setup (his ask 2026-10-27: themes his design agent makes from "Theme template.json")
-		// his checklist 476
 		Head("LANGUAGE");
-		var languageNote = new TextBlock { Text = "English, or a language file in the Languages folder. A file holds each English text and its translation; what it leaves out stays English. Nothing is translated yet: this is ready for whoever wants to.",
+		var languageNote = new TextBlock { Text = "The window's language. A language file of your own in the Languages folder adds to the shipped ones, or corrects one: it holds each English text and its translation, and what it leaves out stays as it was.",
 			Style = (Style)a_w.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
 		var languages = new ComboBox { MinWidth = 220, Margin = new Thickness(0, 0, 10, 0), ItemsSource = WindowWords.Available(), SelectedItem = WindowWords.Picked() };
 		System.Windows.Automation.AutomationProperties.SetName(languages, "The window's language");
@@ -924,8 +928,10 @@ public static class SettingsPanel
 			}
 			foreach (var (key, kind, def) in Known.GetValueOrDefault(stepKey, []).Append((Key: "deadline_min", Kind: JsonValueKind.Number, Default: "the step's own"))
 				         .Where(k => !o.ContainsKey(k.Key))) {
-				Field(stepHost, stepApply, $"{Label(key)} (default {def})", o, key, kind, def == "on");
+				Field(stepHost, stepApply, WindowWords.Format("{0} (default {1})", WindowWords.Word(Label(key)), WindowWords.Word(def)), o, key, kind, def == "on");
 			}
+			// drawn after Settings opened (another step picked): into the window's language like the rest of it
+			WindowWords.Tree(stepHost);
 		};
 		stack.Children.Add(pick);
 		stack.Children.Add(stepHost);
@@ -1069,7 +1075,7 @@ public static class SettingsPanel
 			bar.Children.Add(keep);
 		}
 		bar.Children.Add(remove);
-		var where = new TextBlock { Text = "Data folder (setups, runs, backups): " + AppPaths.Data, Style = (Style)a_w.FindResource("MutedText"),
+		var where = new TextBlock { Text = WindowWords.Format("Data folder (setups, runs, backups): {0}", AppPaths.Data), Style = (Style)a_w.FindResource("MutedText"),
 			TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0) };
 		var dock = new DockPanel();
 		DockPanel.SetDock(where, Dock.Bottom);
@@ -1110,6 +1116,7 @@ public static class SettingsPanel
 	static int s_page;
 
 	static ListBox? s_cats;
+	static List<string> s_catNames = [];
 
 	// the line of the drawing on screen that says why its settings were not saved (a save of an earlier drawing that ends
 	// late writes its failure there)
@@ -1191,11 +1198,11 @@ public static class SettingsPanel
 			return false;
 		}
 		// a search left in the box would keep hiding the step's fields: the category's own change clears it, but Steps may be
-		// the page already (CodeRabbit on pull request #38)
+		// the page already
 		if (s_find is { } f && f.Text != "") {
 			f.Text = "";
 		}
-		if (cats.Items.IndexOf("Steps") is var page and >= 0) {
+		if (s_catNames.IndexOf("Steps") is var page and >= 0) {
 			cats.SelectedIndex = page;
 		}
 		pick.SelectedIndex = i;
@@ -1219,7 +1226,7 @@ public static class SettingsPanel
 			return null;
 		}
 		cats.SelectedIndex = a_page;
-		return cats.Items[a_page] as string;
+		return a_page < s_catNames.Count ? s_catNames[a_page] : cats.Items[a_page] as string;
 	}
 
 	// the search's line under its box: how many settings on screen hold the word, and the other steps whose settings hold it (a
@@ -1234,7 +1241,8 @@ public static class SettingsPanel
 			(others.Count == 0 ? "" : $" Also in the settings of: {string.Join(", ", others)} (pick it on the Steps page).");
 	}
 
-	// the steps (all but a_skip) whose settings hold a_q - in a setting's name, its label or its value
+	// the steps (all but a_skip) whose settings hold a_q - in a setting's name, its label (in English and as the step editor
+	// shows it, in the window's language) or its value
 	public static List<string> StepsWith(IReadOnlyList<JsonObject> a_steps, string a_q, int a_skip)
 	{
 		bool Has(string? a_t) => (a_t ?? "").Contains(a_q, StringComparison.OrdinalIgnoreCase);
@@ -1247,7 +1255,7 @@ public static class SettingsPanel
 			return [];
 		}
 		return a_steps.Select((s, i) => (s, i)).Where(x => x.i != a_skip && x.s["settings"] is JsonObject o &&
-				o.Any(p => Has(p.Key) || Has(Label(p.Key)) || Holds(p.Value)))
+				o.Any(p => Has(p.Key) || Has(Label(p.Key)) || Has(WindowWords.Word(Label(p.Key))) || Holds(p.Value)))
 			.Select(x => StepCatalog.Name(Setup.Str(x.s, "step") ?? "")).Distinct(StringComparer.Ordinal).ToList();
 	}
 
@@ -1600,7 +1608,7 @@ public static class SettingsPanel
 		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 		row.Children.Add(new TextBlock { Text = label, Foreground = Brushes2.Get("Accent"), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) });
 		var current = Setup.Str(a_obj, "character");
-		var names = new List<string> { AnyCharacter };
+		var names = new List<string> { WindowWords.Word(AnyCharacter) };
 		if (current != null) {
 			names.Add(current);
 		}
@@ -1652,7 +1660,7 @@ public static class SettingsPanel
 				// the player may have picked meanwhile: that pick stays picked while this profile has it
 				var picked = box.SelectedIndex > 0 ? box.SelectedItem as string : null;
 				var found = t.Result;
-				var list = new List<string> { AnyCharacter };
+				var list = new List<string> { WindowWords.Word(AnyCharacter) };
 				list.AddRange(found);
 				// the setup's own character, not found in its own profile's saves, is shown as such; under another profile only
 				// the characters of that profile are offered
@@ -1694,7 +1702,7 @@ public static class SettingsPanel
 				var wasPicked = box.SelectedIndex > 0;
 				var wasFilling = filling;
 				filling = true;
-				box.ItemsSource = new List<string> { AnyCharacter };
+				box.ItemsSource = new List<string> { WindowWords.Word(AnyCharacter) };
 				box.SelectedIndex = 0;
 				filling = wasFilling;
 				if (wasPicked) {
@@ -1715,7 +1723,8 @@ public static class SettingsPanel
 		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(230) });
 		row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 		row.Children.Add(new TextBlock { Text = a_label, Foreground = Brushes2.Get("Accent"), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) });
-		var box = new ComboBox { ItemsSource = a_options.Select(o => o.Text).ToList() };
+		// shown in the window's language; what is saved is still each choice's own value, by its place in the list
+		var box = new ComboBox { ItemsSource = a_options.Select(o => WindowWords.Word(o.Text)).ToList() };
 		var cur = Setup.Str(a_obj, a_key);
 		box.SelectedIndex = Math.Max(0, Array.FindIndex(a_options, o => string.Equals(o.Value, cur, StringComparison.OrdinalIgnoreCase)));
 		// (the choice in whole words on hover: a box made narrow cuts a long one off)

@@ -52,7 +52,7 @@ public static class CommandBox
 			var q = box.Text.Trim();
 			var shown = Match(a_items, i => i.Label, q);
 			if (q != "") {
-				shown.Add(new Item($"Find in the settings: \"{q}\"", () => a_find(q)));
+				shown.Add(new Item(WindowWords.Format("Find in the settings: \"{0}\"", q), () => a_find(q)));
 			}
 			list.ItemsSource = shown;
 			list.SelectedIndex = shown.Count > 0 ? 0 : -1;

@@ -38,6 +38,8 @@
     <EmbeddedResource Include="Theme template.json" LogicalName="ThemeTemplate.json" />
     <!-- the shipped themes, each the same file a player's own theme is (written by the work folder's "make themes.py") -->
     <EmbeddedResource Include="Themes\*.json" LogicalName="Theme.%(Filename).json" />
+    <!-- the shipped languages: { "the English words": "their translation" } each -->
+    <EmbeddedResource Include="Languages\*.json" LogicalName="Language.%(Filename).json" />
   </ItemGroup>
 
   <ItemGroup>
