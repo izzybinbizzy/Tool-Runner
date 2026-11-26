@@ -26,7 +26,7 @@ public sealed class XLodGenStep : IStep
 		using (new Toggle(a_ctx, [.. a_s.List("enable_during"), .. StepKit.ToolMods(a_ctx, a_s)], a_s.List("disable_during"), "xLODGen", a_ctx.Cancel)) {
 			try {
 				// xLODGen writes where its -o: says - and that is in Mod Organizer's entry for it, not here: the step puts its own
-				// output folder into the arguments it starts xLODGen with (the trial of 2026-10-27 21:36 wrote into another folder)
+				// output folder into the arguments it starts xLODGen with (a real run wrote into another folder)
 				// the game MO2 runs is named whatever the arguments came from (a setup's own too), unless they name one themselves
 				var args = WithData(a_s.Str("args") ?? WithOutput(a_ctx.Mo2.Executable(a_s.Req("executable"))?.Arguments ?? "", outDir), a_ctx.Mo2.GameDir);
 				a_ctx.Log.Detail("xLODGen's arguments: " + args);
@@ -124,7 +124,7 @@ public sealed class XLodGenStep : IStep
 	}
 
 	// xLODGen's options hold more than one check list - its LOD levels ("", 4, 8, 16, 32) as well as the worldspaces, and UI
-	// Automation's order put the levels first (both real-MO2 trials of 2026-10-27 ticked the LOD levels and left the worldspaces
+	// Automation's order put the levels first (real runs ticked the LOD levels and left the worldspaces
 	// alone). The worldspace list is the one whose rows are names ("Tamriel [WRLD:0000003C]"), never bare numbers
 	static AutomationElement WorldspaceList(RunContext a_ctx, AutomationElement a_opts, TimeSpan a_timeout)
 	{
@@ -227,7 +227,7 @@ public sealed class AcmosStep : IStep
 		// ACMOS 4.1+'s own command line (its readme and source): -autorun presses Generate itself, skips the zip question and exits
 		// when done. Its output goes to a folder of its OWN: with output = the LOD folder it still asks "overwrite the LOD textures?".
 		// It needs no load order, so it runs on a hidden desktop - nothing on the player's screen. (Its Tk button ignores every click
-		// not from the real mouse - UI Automation, BM_CLICK, posted mouse, the parent's WM_COMMAND, all measured 2026-10-27.)
+		// not from the real mouse - UI Automation, BM_CLICK, posted mouse, the parent's WM_COMMAND, all measured.)
 		var exe = a_s.Str("exe") ?? a_ctx.Mo2.Executable(a_s.Req("executable"))?.Binary ?? throw new StepFailedException("ACMOS's program is not found");
 		var toolDir = Path.GetDirectoryName(exe)!;
 		var logs = Path.Combine(toolDir, "logs");
@@ -251,7 +251,7 @@ public sealed class AcmosStep : IStep
 		var cmd = $"{Mo2Control.Quote(exe)} {args}";
 		a_ctx.Activity(Key, "painting roads into the terrain LOD");
 		string body;
-		// Hidden unless the step's "hidden" is switched off (his rule: a setting lets players turn it off): on a PC where a hidden
+		// Hidden unless the step's "hidden" is switched off (a setting lets players turn it off): on a PC where a hidden
 		// start does not work the tool then runs in the open like the others - started as any program, never brought to the front
 		using (var desk = a_s.Bool("hidden", true) ? new HiddenDesktop() : null) {
 			using var proc = desk?.Start(cmd, toolDir) ??
@@ -311,7 +311,7 @@ public sealed class AcmosStep : IStep
 	}
 
 	// the terrain LOD ACMOS paints: the scratch folder xLODGen wrote, or - when xLODGen has its own output mod and moved it
-	// there already (the 2026-10-31 trial: "Invalid Path to LOD") - that mod; null when neither holds terrain LOD textures.
+	// there already (a real run: "Invalid Path to LOD") - that mod; null when neither holds terrain LOD textures.
 	// No trailing backslash: inside -l:"..." it would escape the closing quote.
 	public static string? LodFolder(string a_reads, string a_modDir)
 	{
@@ -684,7 +684,7 @@ public sealed class DynDolodStep : DynDolodFamily
 
 	public override void Run(RunContext a_ctx, StepSettings a_s)
 	{
-		// a setup rule (his, 2026-10-10): no terrain underside - written into the preset the options window loads, read back
+		// a setup's own rule: no terrain underside - written into the preset the options window loads, read back
 		if (a_s.Bool("no_terrain_underside", false) && a_s.Str("preset") is { } preset) {
 			// read as single bytes (an ANSI preset keeps every accented letter); [ \t]* keeps the line's own \r
 			var raw = System.Text.Encoding.Latin1.GetString(Files.ReadShared(preset));

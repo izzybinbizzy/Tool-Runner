@@ -280,7 +280,7 @@ public sealed class Toggle : IDisposable
 			_ctx.Log.Error($"could not close Mod Organizer to put the mods back after {_label}: {e.Message}");
 			throw;
 		}
-		// what the player changed in Mod Organizer while the step's switches were on (CodeRabbit on PR #24): read before the order
+		// what the player changed in Mod Organizer while the step's switches were on: read before the order
 		// files go back, laid back over them after, and still counted as the player's (the expectation goes back to before the
 		// step), so the run's final put-back sees and keeps it too
 		var theirs = _ctx.Profile.ChangedByOthers();
@@ -288,8 +288,8 @@ public sealed class Toggle : IDisposable
 		try {
 			_ctx.Profile.Restore(_snap);
 		} catch (Mo2OpenException) {
-			// a Mod Organizer the step started a moment ago was not there for the close above and is there now (his run of
-			// 2026-11-10: a Stop seen right after the start left the step FAILED on "Mod Organizer is open"): closed, then once more
+			// a Mod Organizer the step started a moment ago was not there for the close above and is there now (a Stop seen right
+			// after the start left the step FAILED on "Mod Organizer is open"): closed, then once more
 			_ctx.Log.Detail("Mod Organizer came up while the mods were being put back - closing it, then putting them back");
 			_ctx.Control.Close();
 			// looked at again: nothing was put back yet (the refusal comes before the first file is written), and the Mod
@@ -304,7 +304,7 @@ public sealed class Toggle : IDisposable
 				// The game made its list of files while this step's mods were switched: with them back as they were, that list
 				// names other files than the game now finds. Counted when the step ends, after a finished game step has called
 				// its list current (Crdw.StepEnded) - a game step that writes nothing left a list from before the put-back
-				// marked current, and no later game start made a new one (CodeRabbit on pull request #35)
+				// marked current, and no later game start made a new one
 				_ctx.SwitchedBack = true;
 			} else if (_ctx.Journal.FilesChanged > 0) {
 				// no list was made meanwhile, and the mods are as they were before: nothing has changed for the game's list
@@ -345,7 +345,7 @@ public sealed class AwakeClock
 }
 
 // waiting on a tool: its own "done" signal (poll), a deadline, and its whole process tree's CPU - a tool that uses no CPU for
-// the setup's idle minutes is looked at at once (his rule: a finished tool is noticed within 2 minutes)
+// the setup's idle minutes is looked at at once (a finished tool is noticed within 2 minutes)
 public static class Waits
 {
 	public enum Poll
@@ -355,8 +355,8 @@ public static class Waits
 	}
 
 	// the one wait of the engine's steps: it ends the moment a Stop is asked, and says so by throwing as every other look at Stop
-	// does (his finds of 2026-11-04, 11-06 and 11-10: "pressing stop now still doesn't stop it" - each time a wait that could
-	// not see it). The offline test NoStepWaitIsBlindToStop holds the steps to it.
+	// does (a Stop pressed during a wait that could not see it did nothing until that wait was over). The offline test
+	// NoStepWaitIsBlindToStop holds the steps to it.
 	public static void Pause(TimeSpan a_for, CancellationToken a_ct)
 	{
 		if (a_for > TimeSpan.Zero) {
@@ -377,8 +377,8 @@ public static class Waits
 	public static TimeSpan GoneGrace { get; set; } = TimeSpan.FromMinutes(3);
 
 	// a_progress: for a tool driven through its window - what its window says; a change counts as work, and so does CPU its CHILD
-	// processes use (a long patcher shows nothing new for minutes - the fourth review, M2), never the window process's own (a
-	// window drawing itself uses CPU while the tool does nothing - Synthesis sat 4 min on its main screen, 2026-10-27)
+	// processes use (a long patcher shows nothing new for minutes), never the window process's own (a
+	// window drawing itself uses CPU while the tool does nothing - Synthesis sat 4 min on its main screen)
 	public static void Tool(RunContext a_ctx, string a_step, Process a_proc, TimeSpan a_deadline, Func<Poll> a_poll,
 		Func<bool>? a_onIdle = null, TimeSpan? a_every = null, Func<string>? a_progress = null)
 	{

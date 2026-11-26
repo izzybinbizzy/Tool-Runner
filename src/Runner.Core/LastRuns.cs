@@ -2,8 +2,8 @@ using ToolRunner.Steps;
 
 namespace ToolRunner;
 
-// His checklist 450: "all tools need to have a last run and description of the last run section", and each step's output
-// shown current or not ("12 mods added since DynDOLOD ran"). For every step of a setup: its last run (when, how it ended, how
+// Every tool's last run and what it did, and each step's output shown current or not ("12 mods added since DynDOLOD
+// ran"). For every step of a setup: its last run (when, how it ended, how
 // long, its own lines of that run's log) and its last FINISHED run - a step that finished keeps its output even when a later
 // step stopped the run - and the changes made in Mod Organizer outside the runner, in the setup's profile, since it last
 // finished: Mo2Changes' kept rows, plus what changed since its last look. The setup's own mods are left out (its runs tick

@@ -77,7 +77,7 @@ public static partial class InGame
 
 	// Where the SKSE plugins' logs really are. The game is told My Games\<game>\SKSE, but a Mod Organizer file-mapper plugin (an
 	// "SKSE log redirector") can show it another folder there: the files are then in that other folder and the one in Documents
-	// stays empty (his run of 2026-11-10: the shader log and the crash logs were never found). So, when the setup names no
+	// stays empty (the shader log and the crash logs were never found). So, when the setup names no
 	// folder: the usual one, then every existing folder such a plugin names in its own file.
 	public static List<string> LogFolders(Setup a_setup, Mo2Instance a_mo2)
 	{
@@ -151,7 +151,7 @@ public static partial class InGame
 		}
 	}
 
-	// his checklist 470: the game closed under a step - the crash report written since that start is named (Crash Logger writes
+	// the game closed under a step - the crash report written since that start is named (Crash Logger writes
 	// SKSE\crash-<time>.log, Trainwreck SKSE\Crashlogs\crash-<time>.log, .NET Script Framework NetScriptFramework\Crash\Crash_<time>.txt
 	// and Tullius CTD Logger SKSE\Plugins\...\SkyrimDiag_Crash_<time>_SkyrimDiagReport.txt, the last two in Mod Organizer's
 	// overwrite), so the failure points at the cause instead of only saying the game went
@@ -200,7 +200,7 @@ public static partial class InGame
 			.GroupBy(f => Path.GetFileName(f).StartsWith("SkyrimDiag", StringComparison.OrdinalIgnoreCase) ? "t" : Path.GetExtension(f).ToLowerInvariant()).Select(g => g.First()).ToList();
 	}
 
-	// the log a shader mod writes now: the newest of the known names (Bottled Shaders renamed its log 2026-10-26)
+	// the log a shader mod writes now: the newest of the known names (Bottled Shaders renamed its log)
 	public static string? NewestShaderLog(string a_folder, string? a_preferred = null) => NewestShaderLog([a_folder], a_preferred);
 
 	public static string? NewestShaderLog(IReadOnlyList<string> a_folders, string? a_preferred = null)
@@ -266,7 +266,7 @@ public static partial class InGame
 	}
 
 	// the same, of a log's text - the whole of it, however many lines follow the count. Bottled Shaders writes the line only for
-	// a SLOW shader, so a last count above 0 says nothing about now; only 0 is a verdict (his run of 2026-11-10: its last line
+	// a SLOW shader, so a last count above 0 says nothing about now; only 0 is a verdict (its last line
 	// read remaining=549 five minutes before the compile's real end, and nothing after it said done)
 	public static int? RemainingIn(string a_logText)
 	{
@@ -342,9 +342,9 @@ public static partial class InGame
 		return Path.Combine(myGames, string.IsNullOrEmpty(savePath) ? "Saves" : savePath.TrimEnd('\\'));
 	}
 
-	// the player's own newest save - never one the runner (or the old MO2 Updater) made itself (his addition 2, 2026-10-27), nor
-	// one written while a run of ours went on (an autosave or quicksave the runner's game made in QASmoke - the fourth review, M3)
-	// a_character: only that character's saves (the setup's "character", his checklist 457); empty = anyone's newest
+	// the player's own newest save - never one the runner (or the old MO2 Updater) made itself, nor
+	// one written while a run of ours went on (an autosave or quicksave the runner's game made in QASmoke)
+	// a_character: only that character's saves (the setup's "character"); empty = anyone's newest
 	public static string? NewestPlayerSave(Profile a_profile, IReadOnlyList<(DateTime From, DateTime To)>? a_ourRuns = null, string? a_character = null)
 	{
 		var d = SavesDir(a_profile);
@@ -394,7 +394,7 @@ public static partial class InGame
 	static readonly HashSet<string> GameSteps = ["cleansave", "playsave", "shaders", "grass"];
 
 	// when the runner's own game ran on this profile, as UTC time spans (a step still going: up to now) - only those, never a
-	// whole run: a save the player makes while a tool step runs is still theirs (CodeRabbit on PR #4)
+	// whole run: a save the player makes while a tool step runs is still theirs
 	public static List<(DateTime From, DateTime To)> OurRuns(RunContext a_ctx)
 	{
 		try {
@@ -439,7 +439,7 @@ public static partial class InGame
 		return f != null && File.Exists(f) ? File.GetLastWriteTimeUtc(f) : null;
 	}
 
-	// which save the final save starts from (the fourth review, H1): this run's clean save; else the one the setup names; else
+	// which save the final save starts from: this run's clean save; else the one the setup names; else
 	// an older run's clean save ONLY when it is newer than the player's own newest save (the player has not played since); else
 	// the player's newest - never an old clean save over progress made after it
 	public static (string? Save, string Why) PlaySaveFrom(string? a_thisRun, string? a_named, DateTime? a_oldClean, string? a_player, DateTime? a_playerTime)
@@ -459,7 +459,7 @@ public static partial class InGame
 	}
 
 	// after a run that did not finish: when the newest save on disk is one the runner's game made (QASmoke, DynDOLOD maybe off),
-	// the player is told which of their own to load (the fourth review, M5)
+	// the player is told which of their own to load
 	public static string? SaveWarning(RunContext a_ctx)
 	{
 		try {
@@ -484,7 +484,7 @@ public static partial class InGame
 	public static bool HasDynDolod(Profile a_profile) =>
 		a_profile.States().Where(s => s.Value == '+').Any(s => File.Exists(Path.Combine(a_profile.Mo2.ModDir(s.Key), "SKSE", "Plugins", "DynDOLOD.dll")));
 
-	// the clean save's "dyndolod_off" (the final save reads the same one - the fourth review, L1 / L2)
+	// the clean save's "dyndolod_off" (the final save reads the same one)
 	static bool DynOff(RunContext a_ctx) =>
 		a_ctx.Setup.StepSettings("cleansave") is { } cs && cs["dyndolod_off"] != null ? new StepSettings(cs).Bool("dyndolod_off", false) : HasDynDolod(a_ctx.Profile);
 
@@ -499,7 +499,7 @@ public static partial class InGame
 	public static DateTime SettleUntil(DateTime a_plain, DateTime a_now, string a_body) =>
 		PromisesBox(a_body) ? a_now.AddMinutes(10) : a_plain > a_now.AddSeconds(10) ? a_plain : a_now.AddSeconds(10);
 
-	// a save just loaded is given time to settle before anything is done in it (his flow: a full minute); a mod's message box
+	// a save just loaded is given time to settle before anything is done in it (a full minute); a mod's message box
 	// that opens meanwhile (seconds after the load, pausing the game) is answered like a load box
 	static void Settle(RunContext a_ctx, string a_step, int a_seconds, string a_why)
 	{
@@ -566,8 +566,8 @@ public static partial class InGame
 	const int GameBoxTries = 5;
 
 	// One look at the game's own message box. One the run knows is answered by its text and labels (DecideBox). One it does
-	// not know is closed all the same, by the button that takes nothing on (DevBench.CloseIndex) - his word of 2026-11-21:
-	// "it needs to be externally found no matter what the box could potentially be and immediately closed" - and named in the
+	// not know is closed all the same, by the button that takes nothing on (DevBench.CloseIndex) - whatever the box is, it is
+	// found and closed at once - and named in the
 	// log and the run's notes; a setup may say such a box is the player's (ClosesUnknown), and then a_left gets it,
 	// unanswered - as it gets a box that still stands after its answer was given GameBoxTries times.
 	// Returns the text of a box that was answered or closed, else null. The run's watch makes this look every few seconds
@@ -599,7 +599,7 @@ public static partial class InGame
 			}
 			var (answer, idx) = DevBench.DecideBox(box.Body, box.Labels, box.Count);
 			if (answer == null) {
-				// a game in another language (his checklist 439); read again until the game settings answer, a load may not serve them yet
+				// a game in another language; read again until the game settings answer, a load may not serve them yet
 				if (a_ctx.GameWords is not { HasAskYes: > 0 }) {
 					a_ctx.GameWords = GameWords.Read(a_ctx.Mo2.GameDir, s => GameSetting(a_ctx, s));
 				}
@@ -732,7 +732,7 @@ public static partial class InGame
 
 	// What the game shows right now, in plain words, for a step that is about to give up: this run's Windows boxes and, with
 	// DevBench, the open game menus and message box. A step never blames its own signal (a log, a cache) while something else is
-	// on screen - an unknown menu of another mod is named instead (his 2026-11-06 find: a mod's menu read as "no shader log").
+	// on screen - an unknown menu of another mod is named instead (a mod's menu read as "no shader log").
 	public static string WhatTheGameShows(RunContext a_ctx, DateTime a_launched)
 	{
 		var parts = new List<string>();
@@ -834,7 +834,7 @@ public static partial class InGame
 
 	const string Player = "0x00000014";
 
-	// what the player is doing just before a teleport (his checklist 458)
+	// what the player is doing just before a teleport
 	public sealed record PlayerState(bool Mounted, bool Beast, bool Menu, bool ControlsOff, bool Busy);
 
 	// the game's werewolf race, or Dawnguard's vampire lord race as the game itself resolves it (a_vampireLord, null without Dawnguard)
@@ -904,8 +904,8 @@ public static partial class InGame
 		}
 	}
 
-	// before a teleport: off a mount, out of a fight (god mode is on from the load) - his addition 4; a beast form, a dragon, a
-	// conversation, a menu or a scene waited out (his checklist 458). Swimming needs nothing: the teleport itself ends it
+	// before a teleport: off a mount, out of a fight (god mode is on from the load); a beast form, a dragon, a
+	// conversation, a menu or a scene waited out. Swimming needs nothing: the teleport itself ends it
 	static void ReadyToMove(RunContext a_ctx)
 	{
 		string? stop;
@@ -931,8 +931,8 @@ public static partial class InGame
 
 	static bool IsTrue(JsonNode? a_n) => a_n is JsonValue v && v.TryGetValue<bool>(out var b) && b;
 
-	// the player's followers in a DevBench actor list: every living teammate loaded near them, never the player (his addition 4,
-	// "followers come along" - the game's follow package can leave one behind after a coc / MoveTo)
+	// the player's followers in a DevBench actor list: every living teammate loaded near them, never the player (followers
+	// come along - the game's follow package can leave one behind after a coc / MoveTo)
 	public static List<string> Teammates(JsonObject a_refs) =>
 		(a_refs["refs"] as JsonArray ?? []).OfType<JsonObject>()
 			.Where(r => r["actor"] is JsonObject a && IsTrue(a["playerTeammate"]) && IsTrue(a["alive"]))
@@ -1047,7 +1047,7 @@ public static partial class InGame
 		}
 		a_ctx.Log.Detail($"the game is up after {sw.Elapsed.TotalSeconds:0} s");
 		var compiled = WaitCompile(a_ctx, a_step, a_s, started);
-		// His rule of 2026-11-21: a run builds its shader cache once, in its first step, and every later game start uses it.
+		// A run builds its shader cache once, in its first step, and every later game start uses it.
 		// Shaders compiled at a start that comes after this run's own shader step are a fault to look into - said in the
 		// log and in the run's notes, never only waited out.
 		if (compiled && a_ctx.Journal.Step("shaders") is { State: StepState.Done }) {
@@ -1105,7 +1105,7 @@ public static partial class InGame
 			// a compile that started under the load is never cut off - the load clock waits while one runs
 			if (t.Elapsed > limit - TimeSpan.FromMinutes(1) && Compiling(LogFolders(a_ctx.Setup, a_ctx.Mo2), a_ctx.Mo2.OverwriteDir, started)) {
 				a_ctx.Log.Detail("shaders still compiling under the load - waiting for them");
-				// counted as a compile at this start too (the final save reports a stale cache - the fourth review, L3)
+				// counted as a compile at this start too (the final save reports a stale cache)
 				compiled = true;
 				t.Restart();
 			}
@@ -1186,7 +1186,7 @@ public static partial class InGame
 		_ => $"the shader mod says its shaders are ready ({a_pass.Done} of {a_pass.Total})",
 	};
 
-	// "You can't load a save while shaders are compiling" (his word). A compile can begin a minute after the game answers and
+	// "You can't load a save while shaders are compiling". A compile can begin a minute after the game answers and
 	// write its first line only when a shader finishes, so it is watched for `compile_watch_s` (300) before a load is sent -
 	// unless the shader mod itself says its start-up pass is over: then there is nothing to watch for, and the load is sent
 	// (a start with its cache whole once sat out the full five minutes at the main menu, at every game start of a run).
@@ -1273,7 +1273,7 @@ public static partial class InGame
 	}
 
 	// the game's own save, waited until the file is on disk and stopped growing, then the game closed
-	// how long a save may take to appear at all; one being written is never cut short by it (his checklist 459)
+	// how long a save may take to appear at all; one being written is never cut short by it
 	public static TimeSpan SaveWait { get; set; } = TimeSpan.FromMinutes(3);
 
 	// why a save did not happen, in the player's words: a mod that blocks saving is the usual reason
@@ -1390,10 +1390,10 @@ public static partial class InGame
 
 	static bool Auto(RunContext a_ctx) => DevBench.InProfile(a_ctx.Profile);
 
-	// phase 1, the profile as it is (before any output goes off) - his flow, 2026-10-27: the player's newest save loaded and left a
+	// phase 1, the profile as it is (before any output goes off): the player's newest save loaded and left a
 	// full minute; DynDOLOD deactivated by its MCM's own call, 30 s; the place the player stands recorded (a persistent marker
 	// left there); a teleport to QASmoke; saved there; quit. Only the generated output goes off later - the DLL, Resources and
-	// every other DynDOLOD mod stay on (his word 2026-10-27).
+	// every other DynDOLOD mod stay on.
 	public static void Deactivate(RunContext a_ctx, StepSettings a_s)
 	{
 		CopySaves(a_ctx);
@@ -1458,7 +1458,7 @@ public static partial class InGame
 	}
 
 	// phase 2, every old output off (Mod Organizer started again by the switch): that save loaded past its warnings, a full
-	// minute, saved - the clean save the rebuild starts from (his flow)
+	// minute, saved - the clean save the rebuild starts from
 	public static void CleanSaves(RunContext a_ctx, StepSettings a_s)
 	{
 		var from = a_ctx.CleanSaveName ?? throw new StepFailedException("no DynDOLOD-off save from this run - the clean save starts at the beginning of a run");
@@ -1483,10 +1483,9 @@ public static partial class InGame
 	}
 
 	// the final save: the clean save loaded with every new output on, a full minute, the player taken back to the place
-	// recorded before QASmoke, DynDOLOD on again, saved (his addition 1). A compile at this start means the shader cache was
-	// out of date - said in the run's result (his question 2026-10-27, "rebuilding another tool wont cause shaders to need to
-	// be rebuilt")
-	// his checklist 464: before the first step that loads a save, the player's saves (each save and its SKSE co-save) are copied into
+	// recorded before QASmoke, DynDOLOD on again, saved. A compile at this start means the shader cache was out of date - said
+	// in the run's result (rebuilding another tool's output never makes the shaders stale)
+	// before the first step that loads a save, the player's saves (each save and its SKSE co-save) are copied into
 	// the run's backup folder - once a run, the setup's "copySaves" (on unless switched off). A copy that cannot be made, or that would
 	// not leave the room the run needs, is said and the run goes on: it is a safety copy, never a reason to stop
 	public const string SavesCopyFolder = "saves before the run";

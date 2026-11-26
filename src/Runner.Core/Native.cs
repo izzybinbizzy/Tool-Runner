@@ -192,7 +192,7 @@ public static partial class Native
 	}
 
 	// the FULL text of an edit / memo (UI Automation cuts a VCL memo at 2048 characters), unpacked when a tool answers with its
-	// ANSI bytes packed two to a character (xLODGen 4.1.5o, 2026-10-12)
+	// ANSI bytes packed two to a character (xLODGen 4.1.5o)
 	// A window that does not answer in time reads as no text this look: the caller's loop goes on to its own clock
 	public static string ControlText(nint a_hwnd)
 	{
@@ -205,8 +205,8 @@ public static partial class Native
 	}
 
 	// A tool that packs its ANSI bytes two to a character counts BYTES in its answer, so half the buffer stays empty; the text
-	// ends at the first empty character, or those empties outvote the packed half and it is never unpacked (the trial of
-	// 2026-10-27 22:40: xLODGen's "LOD generation done." went unseen and the finished tool was called idle)
+	// ends at the first empty character, or those empties outvote the packed half and it is never unpacked (in a real run
+	// xLODGen's "LOD generation done." went unseen and the finished tool was called idle)
 	public static string FromBuffer(char[] a_buf, int a_got)
 	{
 		var s = new string(a_buf, 0, Math.Clamp(a_got, 0, a_buf.Length));

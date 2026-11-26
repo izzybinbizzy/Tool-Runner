@@ -1,6 +1,6 @@
 namespace ToolRunner;
 
-// His checklist 467: the first-start helper. Which of the tools a setup can run are in Mod Organizer's Executables list, which sit on the
+// The first-start helper. Which of the tools a setup can run are in Mod Organizer's Executables list, which sit on the
 // PC without being listed, and which are missing, with where to get each and where to put it; the ones found are added to the list for the
 // player, with Mod Organizer closed (it writes its ini when it closes, over anything written meanwhile). A step exists only for a tool the
 // list holds, so this comes before a setup is made. FasterNGIO is left out: it is found in the mods without a list entry.

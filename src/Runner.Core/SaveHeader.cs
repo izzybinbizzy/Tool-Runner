@@ -2,7 +2,7 @@ using System.Text;
 
 namespace ToolRunner;
 
-// Which character a save belongs to (his checklist 457: pick the character for the in-game steps). Only the start of a save's
+// Which character a save belongs to (pick the character for the in-game steps). Only the start of a save's
 // header is read - the layout the UESP wiki documents for Skyrim Special Edition saves: "TESV_SAVEGAME", the header's size, its
 // version, the save number, then the player's name (a 16-bit length and its characters). Nothing else of the save is touched.
 public static class SaveHeader

@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 
 namespace ToolRunner;
 
-// "A new version is out" (his checklist 471): at most once a day the program reads the newest version of ITSELF where it is
+// "A new version is out": at most once a day the program reads the newest version of ITSELF where it is
 // published - its Nexus page once it has one, until then the repository's latest GitHub release - and the window says so with
 // a link to the download page. Nothing is downloaded or installed: the download stays the player's. The player can turn the
 // check off, and a version they set aside ("Not now") is not mentioned again; the next newer one is.
@@ -89,7 +89,7 @@ public static class ProgramUpdate
 		return state?.SetAside is { } aside && !ToolUpdates.IsNewer(aside, newest) ? null : newest;
 	}
 
-	// ---- download and install (his list of 2026-11-16, point 1: a new version taken and put in place from inside the program)
+	// ---- download and install (a new version taken and put in place from inside the program)
 	// Only while the newest version comes from GitHub: a Nexus download needs the player's own key, so there it stays "Open
 	// the download page". The release's zip is fetched into the data folder's Updates, checked (its size, GitHub's own sha-256
 	// of it where GitHub gives one, plain file names only, the program inside it at the version asked for), and its files
@@ -122,7 +122,7 @@ public static class ProgramUpdate
 	// the same version, however each is written ("v1.1", "1.1.0.0")
 	// - and never for a value with no version number in it ("unknown", "")
 	// The program's own versions are compared number by number with trailing zeros dropped - never with the tools' rules, which
-	// read a short version as the end of a long one ("0.1.1.0" against "1.1" was taken as the same; CodeRabbit on pull request #37)
+	// read a short version as the end of a long one ("0.1.1.0" against "1.1" was taken as the same)
 	public static bool SameVersion(string a_a, string a_b) => Numbers(a_a) is { Count: > 0 } a && a.SequenceEqual(Numbers(a_b));
 
 	static List<int> Numbers(string a_v)
@@ -356,7 +356,6 @@ public static class ProgramUpdate
 	// old program still ending) stays on record for the start after. Under the lock Install takes: an install begun in the same
 	// moment sets the running program aside under the very "(old)" name this would remove, and its way back needs that file.
 	// Lock taken elsewhere (a run, a put-back, an install): nothing is removed and the record stays for the next start
-	// (CodeRabbit on pull request #37)
 	public static void CleanUp(string a_dataDir)
 	{
 		using var hold = Runner.HoldIfFree();

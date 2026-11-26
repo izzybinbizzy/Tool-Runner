@@ -1,6 +1,6 @@
 namespace ToolRunner.App;
 
-// The command line (for players who script, and for agents under watch.py):
+// The command line (for players who script):
 //   "Tool Runner.exe" run --setup <file> [--only <step> | --from <step> | --until <step>]   a run, no window
 //   "Tool Runner.exe" retry --setup <file>                                                  its last run again, from the step that did not finish
 //   "Tool Runner.exe" queue --setup <file> --setup <file> ... [--keep-going]               several setups, one after another

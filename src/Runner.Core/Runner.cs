@@ -526,7 +526,7 @@ public static class Runner
 				journal.Doing = "the setup's command after the run";
 				// A command of the setup may add, move or take away game files, also when it then fails, and nobody can tell
 				// from here: it counts as a change BEFORE it runs, so the note below never calls the game's list current
-				// after it (CodeRabbit on pull request #35)
+				// after it
 				++journal.FilesChanged;
 				journal.TrySave();
 				Chore("the command after the run", () => Hook(ctx, cmd, "after the run", CancellationToken.None, cts.Token));
@@ -534,7 +534,7 @@ public static class Runner
 			Chore("the look at Mod Organizer's overwrite", () => ReportOverwrite(ctx));
 			Chore("tidying old backups", () => PruneBackups(ctx));
 			Chore("noting the tools' versions for the next run", () => ToolVersions.Remember(setup, mo2, journal.Steps.Where(r => r.State == StepState.Done).Select(r => r.Key)));
-			// his checklist 456: said at the end too - a run's own placement may have just moved them; a look that fails changes nothing
+			// said at the end too - a run's own placement may have just moved them; a look that fails changes nothing
 			Chore("the look at the output plugins' places", () => {
 				foreach (var i in PluginPlaces.Check(profile.ActivePlugins())) {
 					log.Warn(i.Text);
@@ -556,7 +556,7 @@ public static class Runner
 			SaySummary(ctx);
 			log.Say("ALL DONE: " + journal.Verdict);
 			log.Simple("ALL DONE: " + journal.Verdict);
-			// his checklist 454: the old outputs packed into one zip, as the very last thing and only after a run that finished -
+			// the old outputs packed into one zip, as the very last thing and only after a run that finished -
 			// it can take minutes, the window says so, and Stop ends it at once (the run stays finished)
 			if (Setup.Bool(setup.Root, "zipBackups") != false && !journal.Parked.Any(p => !p.Replaced && !p.PutBack)) {
 				Chore("packing the old outputs", () => RunUndo.Pack(ctx.BackupFolder, log, a_doing => {
@@ -735,7 +735,7 @@ public static class Runner
 		}
 	}
 
-	// every output the setup's steps make goes OFF before the first step (his rule 2026-10-02: no tool reads its own or a later
+	// every output the setup's steps make goes OFF before the first step (no tool reads its own or a later
 	// step's output) - except the shader caches (no tool reads one, and with it off every game start recompiles) - plus every
 	// mod a step replaces and the setup's LOD outputs
 	static void OutputsOff(RunContext a_ctx, List<Setup.StepEntry> a_todo)
@@ -885,10 +885,10 @@ public static class Runner
 		}
 	}
 
-	// His checklist 650 ("user choice."): a run that starts at a later step - "run from", "run again from the failed step", one
+	// A run that starts at a later step - "run from", "run again from the failed step", one
 	// step only - leaves the outputs of the switched-on steps before it ON (the setup's "keepEarlierOutputs", default on): those
 	// tools are not run again, and the tools after them build on what they made (DynDOLOD on TexGen's output, grass LOD on the
-	// grass cache - dyndolod.info/Help/Grass-LOD). Off, every output goes off as in a whole run (his rule of 2026-10-02).
+	// grass cache - dyndolod.info/Help/Grass-LOD). Off, every output goes off as in a whole run.
 	public const string KeepEarlierSetting = "keepEarlierOutputs";
 
 	public static bool KeepsEarlierOutputs(Setup a_setup) => Setup.Bool(a_setup.Root, KeepEarlierSetting) != false;
@@ -925,7 +925,7 @@ public static class Runner
 		var outList = new List<(string Mod, string Why)>();
 		var earlier = EarlierOutputs(a_setup, a_todo);
 		// a_replacedByTheRun: a step the run runs replaces it - it goes off even when an earlier step's output is kept on, or that
-		// tool would read what it replaces (CodeRabbit on pull request #40)
+		// tool would read what it replaces
 		void Add(string a_mod, string a_why, bool a_replacedByTheRun = false)
 		{
 			if (a_states.TryGetValue(a_mod, out var f) && f == '+' && (a_replacedByTheRun || !earlier.Contains(a_mod)) && !outList.Any(o => string.Equals(o.Mod, a_mod, StringComparison.OrdinalIgnoreCase))) {
@@ -1369,7 +1369,7 @@ public static class Runner
 			SaySummary(a_ctx);
 			a_ctx.Log.Say(j.Verdict);
 			a_ctx.Log.Simple((a_state == RunState.Stopped ? "Stopped: " : "Failed: ") + j.Verdict, a_state == RunState.Stopped ? Level.Warn : Level.Error);
-			// a failed or stopped run's backups are pruned too (they piled up until the next finished run - the fourth review, L7);
+			// a failed or stopped run's backups are pruned too (they piled up until the next finished run);
 			// a folder an unfinished run still names is never touched
 			Keep();
 			PruneBackups(a_ctx);
@@ -1660,7 +1660,7 @@ public static class Runner
 			return new RunOutcome(RunState.Failed, a_j.Verdict, a_j.Folder);
 		}
 		// a step the crash cut off ends when its run record was last written - never left open (an open game step would read as
-		// the runner's game running "until now" and hide every save the player made since - the fifth review, N1). The time was
+		// the runner's game running "until now" and hide every save the player made since). The time was
 		// read at the top: by now this put-back has written the record itself
 		var died = a_j.Ended ?? lastWritten;
 		foreach (var r in a_j.Steps.Where(r => r.State is StepState.Running or StepState.Pending)) {
@@ -1680,7 +1680,7 @@ public static class Runner
 		return new RunOutcome(RunState.Restored, a_j.Verdict, a_j.Folder);
 	}
 
-	// his checklist 454: the last run undone - each output back to what it was before the run (the new one set aside in the run's
+	// the last run undone - each output back to what it was before the run (the new one set aside in the run's
 	// backup, never erased), outputs the run made new taken out, the order files as they were before it; whatever the player changed
 	// in Mod Organizer since the run began stays
 	public static RunOutcome Undo(Journal a_j)
@@ -1868,8 +1868,8 @@ public static class Runner
 	}
 
 	// What a step made in overwrite: a file that was there and changed, or one that was not there and was written or created
-	// since the step began. A path new to overwrite that carries a date from before the step is NOT the step's (his run of
-	// 2026-11-10: a crash logger renamed its own older logs at each game start, and they were taken as the run's) - it stays.
+	// since the step began. A path new to overwrite that carries a date from before the step is NOT the step's (a crash
+	// logger renamed its own older logs at each game start, and they were taken as the run's) - it stays.
 	public static (List<string> Made, List<string> Older) NewInOverwrite(IReadOnlyDictionary<string, DateTime> a_before, IReadOnlyDictionary<string, DateTime> a_now, DateTime a_beganUtc,
 		Func<string, DateTime>? a_created = null)
 	{
@@ -1971,7 +1971,7 @@ public static class Runner
 
 	static string Said(TimeSpan a_t) => a_t.TotalMinutes >= 1 ? a_t.TotalMinutes.ToString("0.#", InvariantCulture) + " minutes" : a_t.TotalSeconds.ToString("0", InvariantCulture) + " seconds";
 
-	// A setup's own command before / after a run (his: the shared game claim); it must end with exit code 0, within its limit
+	// A setup's own command before / after a run; it must end with exit code 0, within its limit
 	// (then its whole tree is ended). What it printed is read as it comes and never waited for: a program the command left
 	// running keeps the command's output open for as long as it lives.
 	// a_ct: a Stop that ends the command at once - a before-run command, where nothing is changed yet.
@@ -2063,8 +2063,8 @@ public sealed class Commands(Journal a_journal, Action a_cancel) : IDisposable
 
 	public bool Stopped => _stopped;
 
-	// what a Stop does at once, beside cancelling the run: ends the game and tools this run started (his 2026-11-06 find:
-	// "the stop now button does not work" - a cancel alone waited for the step's next look, and a game kept compiling)
+	// what a Stop does at once, beside cancelling the run: ends the game and tools this run started (a cancel alone waited
+	// for the step's next look, and a game kept compiling)
 	public Action? OnStop { get; set; }
 
 	public static string Dir(string a_runFolder) => Path.Combine(a_runFolder, "commands");
