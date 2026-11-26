@@ -254,7 +254,7 @@ public static class DataFolder
 			foreach (var d in dirs) {
 				Directory.CreateDirectory(Path.Combine(staging, Path.GetRelativePath(from, d)));
 			}
-			// Each file is put on the copy's own list before it is copied: what a failed or cut-off move takes away is what that
+			// Each file is put on the copy's own list once it is copied: what a failed or cut-off move takes away is what that
 			// list names, never a file another program put in the folder (one already standing where a file goes stops the move)
 			var copied = Path.Combine(staging, CopiedList);
 			foreach (var rel in want.Keys) {
@@ -262,8 +262,11 @@ public static class DataFolder
 				if (File.Exists(target)) {
 					throw new IOException($"{target} was put there by another program while the data was copied");
 				}
-				File.AppendAllText(copied, rel + "\n");
+				BeforeCopy?.Invoke(target);
 				Files.Copy(Path.Combine(from, rel), target, false);
+				// (named on the list only once its copy is there: a file the list does not name is never taken away - one of
+				// this move's own cut off in the middle stays too, and the move waits for it to be moved away)
+				File.AppendAllText(copied, rel + "\n");
 			}
 			AfterCopy?.Invoke(staging);
 			// each copy read back against its file, byte for byte, before anything of the old folder goes (its size alone says
@@ -368,8 +371,11 @@ public static class DataFolder
 			Directory.EnumerateFiles(a_staging).All(f => Path.GetFileName(f).StartsWith(half, StringComparison.Ordinal) && f.EndsWith(".tmp", StringComparison.Ordinal));
 	}
 
-	// the list a copy keeps of every file it copies, each named before it is copied
+	// the list a copy keeps of every file it copied, each named once its copy is there
 	const string CopiedList = ".copied.txt";
+
+	// the offline tests only: called before each file is copied, with where it goes
+	public static Action<string>? BeforeCopy { get; set; }
 
 	// the offline tests only: called once every file is copied, before they are read back
 	public static Action<string>? AfterCopy { get; set; }

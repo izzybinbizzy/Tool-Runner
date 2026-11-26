@@ -1652,6 +1652,15 @@ public sealed partial class MainViewModel : Observable
 	// program's end: a change the window took is in the file before the program is gone
 	public static Task PendingSetupSave { get; private set; } = Task.CompletedTask;
 
+	// A setup's text written to its file, with the data's write lock held: a move of the data folder by this or another copy
+	// of the program finishes first, and a write after it - into a folder that moved, or is gone - is refused, never made in
+	// the old place. Null when written; else why not
+	public static string? WriteSetup(string a_data, string a_file, string a_text, string a_copies)
+	{
+		using var writes = DataFolder.HoldWrites();
+		return DataFolder.WhyNotWritable(a_data) ?? Setup.WriteKeepingACopy(a_file, a_text, a_copies);
+	}
+
 	// The setup shown, written to its file - away from the window's own thread, where the copy into "Setup backups", the
 	// tidying of older copies and the write itself held up every click on a slow disk. Its text is made here (memory
 	// only); one save at a time, and while one is on its way the setup is not changed again, so what is shown and what is
@@ -1679,10 +1688,7 @@ public sealed partial class MainViewModel : Observable
 			// (with the data's write lock: a move of the data folder by this or another copy of the program finishes first, and a
 			// save after it would land in a folder that is no longer the data's)
 			var data = AppPaths.Data;
-			var write = Task.Run(() => {
-				using var writes = DataFolder.HoldWrites();
-				return DataFolder.WhyNotWritable(data) ?? Setup.WriteKeepingACopy(file, text, copies);
-			});
+			var write = Task.Run(() => WriteSetup(data, file, text, copies));
 			PendingSetupSave = write;
 			why = await write;
 		} finally {
