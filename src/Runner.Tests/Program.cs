@@ -12900,6 +12900,39 @@ public static class Program
 		}
 	});
 
+	// A Mod Organizer a late answer names that Windows does not list yet still counts as running for the seconds one started at
+	// once gets: the close after that answer does not read "closed" in that moment (a put-back would write under it) - and the
+	// process stays someone else's all the same
+	static void T_ALateModOrganizerNotListedYetStillCountsAsRunning() => FastReady(() => {
+		using var f = new FakeMo2();
+		var keepWait = Mo2Control.LateStartWait;
+		var keepGrace = Mo2Control.StartingGrace;
+		Mo2Control.LateStartWait = TimeSpan.FromSeconds(1);
+		Mo2Control.StartingGrace = TimeSpan.FromSeconds(3);
+		// (a stand-in program of the test's own plays the Mod Organizer that is up but not listed under its name yet)
+		using var late = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "PING.EXE"), "-n 30 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false })!;
+		try {
+			var answer = new TaskCompletionSource<int>();
+			var c = new Mo2Control(Mo2Instance.Load(f.Exe, f.Instance), "Test", RunLog.Null) {
+				ReadyProbe = () => new(true, true, TimeSpan.FromSeconds(9), null),
+				Launch = (_, _) => throw new Mo2Control.StartUnansweredException("late", answer.Task),
+				TheirsProbe = () => [],
+			};
+			// (asked the way a tool is: the start of Mod Organizer itself would first look for programs left in its virtual folder)
+			Equal<int?>(null, c.LaunchTool("x", () => 0, TimeSpan.FromSeconds(1), default), "(a request not answered in time)");
+			answer.SetResult(late.Id);
+			var took = Stopwatch.StartNew();
+			c.Close();
+			Check(took.Elapsed >= TimeSpan.FromSeconds(2.5), $"the close waits out the seconds a new Mod Organizer may go unlisted ({took.Elapsed.TotalSeconds:0.0} s)");
+			Check(!c.RunProcesses().Contains(late.Id), "and the process is still never the run's own");
+		} finally {
+			Mo2Control.LateStartWait = keepWait;
+			Mo2Control.StartingGrace = keepGrace;
+			late.Kill();
+			late.WaitForExit(10_000);
+		}
+	});
+
 	// a put-back that stopped on a start Windows had not answered keeps that start's time in the run's record: pressed again
 	// soon, it is refused and says until when; once that start can no longer come, it goes ahead
 	static void T_APutBackWaitsForAStartWindowsHadNotAnswered()

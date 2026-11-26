@@ -492,14 +492,19 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 			}
 			if (late.Answer.Result is var pid and not 0) {
 				_log.Warn($"Windows answered a start it had not answered in time (process {pid}) - a Mod Organizer that came up from it cannot be proven to be the run's, so it is treated as yours: close it when the run asks");
+				// not owned, but seen: a Mod Organizer that came up a moment ago may not be listed yet, so it counts as running for
+				// the seconds one started at once gets (OwnStarting), and nothing is written under it meanwhile
+				_lastStarted = pid;
+				_mo2LaunchedAt = Environment.TickCount64;
 			}
 			_lateStarts.Remove(late);
 			UnansweredChanged?.Invoke(UnansweredSince);
 		}
 	}
 
-	// the Mod Organizer this run started last: for its first seconds Windows may not list it by name yet, or not let its path be
-	// read - it still counts as running (a put-back that read "closed" in that moment wrote the order files under it)
+	// the Mod Organizer this run started last (or a late answer named - seen, never owned): for its first seconds Windows may not
+	// list it by name yet, or not let its path be read - it still counts as running (a put-back that read "closed" in that moment
+	// wrote the order files under it)
 	int? _lastStarted;
 	public static TimeSpan StartingGrace { get; set; } = TimeSpan.FromSeconds(20);
 
