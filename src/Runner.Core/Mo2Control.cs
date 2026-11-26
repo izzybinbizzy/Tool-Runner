@@ -417,17 +417,20 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 			// a Stop already asked for never starts Mod Organizer (it would only have to be closed again for the put-back)
 			a_ct.ThrowIfCancellationRequested();
 			_log.Detail($"starting Mod Organizer (profile {ProfileName})");
+			var askedAt = Asking();
 			_mo2LaunchedAt = Environment.TickCount64;
-			var askedAt = DateTime.UtcNow;
 			try {
 				_lastStarted = Launch($"{Quote(Mo2.Exe)}{Instance} -p {Quote(ProfileName)}", Path.GetDirectoryName(Mo2.Exe)!);
 			} catch (StartUnansweredException e) {
 				// Mod Organizer may come up all the same: the start's own answer is waited for before Mod Organizer counts as
-				// closed (LateStartsSettled), and the process it names, once proven to be that start's, is this run's
-				_lateStarts.Add((e.Answer, askedAt));
-				UnansweredChanged?.Invoke(UnansweredSince);
+				// closed (LateStartsSettled)
+				Asked(e.Answer, askedAt);
+				throw;
+			} catch {
+				Asked(null, askedAt);
 				throw;
 			}
+			Asked(null, askedAt);
 			_ownMo2.Add(_lastStarted.Value);
 		}
 		WaitReady(a_ct);
@@ -437,31 +440,50 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	// each with when it was asked
 	readonly List<(Task<int> Answer, DateTime AskedAt)> _lateStarts = [];
 
-	// when the oldest start still unanswered was asked (null: none) - kept in the run's record by whoever keeps it, so a
-	// put-back pressed later, in another process, waits for that start too
-	public DateTime? UnansweredSince => _lateStarts.Count == 0 ? null : _lateStarts.Min(s => s.AskedAt);
+	// the start being asked of Windows right now (null: none) - on record from before it is asked until it is answered
+	DateTime? _asking;
 
-	// Whether the process a late answer names is the very one that start made, asked while that process is held open (its
-	// number cannot change hands while it is looked at and put on record): the program that start ran (a_image), begun at or
-	// after the ask, with Windows' management host for its parent. A number whose process ended before the answer came and went
-	// to another program - a Mod Organizer the player opened from the desktop - fails it. A test puts its own
-	public static Func<int, DateTime, string, bool> MadeByTheStart { get; set; } = (a_pid, a_askedAt, a_image) =>
-		Procs.StartTime(a_pid) is { } began && began >= a_askedAt.AddSeconds(-1) &&
-		Procs.Image(a_pid).Equals(a_image, StringComparison.OrdinalIgnoreCase) &&
-		Procs.Snapshot().FirstOrDefault(r => r.Pid == a_pid).Parent is var parent and not 0 &&
-		Procs.Image(parent).Equals("WmiPrvSE.exe", StringComparison.OrdinalIgnoreCase);
+	// when the oldest start not answered yet was asked (null: none) - the one being asked right now included, so a crash while
+	// Windows still works on it leaves it in the run's record; a put-back pressed later, in another process, waits for it too
+	public DateTime? UnansweredSince => _lateStarts.Select(s => (DateTime?)s.AskedAt).Append(_asking).Min();
 
-	// told the time of the oldest start still unanswered whenever it changes (null: none left) - the run keeps it in its record
-	// at once, so a put-back after a crash knows a start could still bring Mod Organizer up
-	public Action<DateTime?>? UnansweredChanged { get; set; }
+	// told the time of the oldest start not answered yet whenever it changes (null: none left), and answers whether it is on
+	// record: the run keeps it in its record at once. A start that cannot be put on record is never asked - a crash after it
+	// would leave a put-back that knows nothing of a Mod Organizer still to come
+	public Func<DateTime?, bool>? UnansweredChanged { get; set; }
+
+	// a start about to be asked: on record first (the time it is asked at), or refused
+	DateTime Asking()
+	{
+		var at = DateTime.UtcNow;
+		_asking = at;
+		if (UnansweredChanged?.Invoke(UnansweredSince) == false) {
+			_asking = null;
+			UnansweredChanged.Invoke(UnansweredSince);
+			throw new IOException("the run's record could not be written (is the disk full?), so a start of Mod Organizer could not be put on record - it is not started");
+		}
+		return at;
+	}
+
+	// that start answered (a_late: it was not, and its answer is still to come - waited for before Mod Organizer counts as closed)
+	void Asked(Task<int>? a_late, DateTime a_at)
+	{
+		_asking = null;
+		if (a_late != null) {
+			_lateStarts.Add((a_late, a_at));
+		}
+		UnansweredChanged?.Invoke(UnansweredSince);
+	}
 
 	// how long a put-back waits for such an answer before it refuses to write the profile (the start may still bring Mod
 	// Organizer up over it); a test sets it short
 	public static TimeSpan LateStartWait { get; set; } = TimeSpan.FromMinutes(5);
 
-	// Each start the service answered late: its answer waited for, and the process it names - the very one that start made -
-	// put on the run's record. One still not answered stops whoever is about to write the profile: Mod Organizer could still
-	// come up over it, so nothing is written meanwhile, and the put-back stays on offer
+	// Each start the service answered late: its answer waited for. One still not answered stops whoever is about to write the
+	// profile: Mod Organizer could still come up over it, so nothing is written meanwhile, and the put-back stays on offer.
+	// The process a late answer names is never put on the run's record: by the time the answer comes, the process that start
+	// made may have ended and its number gone to another program, and nothing read then tells the two apart. A Mod Organizer
+	// that came up from it is treated as the player's - waited for, never closed by the run itself
 	void LateStartsSettled(CancellationToken a_ct)
 	{
 		foreach (var late in _lateStarts.ToList()) {
@@ -469,16 +491,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 				throw new Mo2BusyException($"Windows has not answered a start this run asked it for in {LateStartWait.TotalMinutes:0} minutes - Mod Organizer could still come up, so the profile is not written now; put it back again in a few minutes");
 			}
 			if (late.Answer.Result is var pid and not 0) {
-				// (held open first: what is looked at below and put on record is one and the same process)
-				using var held = Procs.StartTime(pid) is { } began ? Procs.Pin(pid, began) : null;
-				if (held != null && MadeByTheStart(pid, late.AskedAt, Path.GetFileName(Mo2.Exe))) {
-					_ownMo2.Add(pid);
-					// (a Mod Organizer that came up a moment ago may not be listed yet: it gets the seconds one started at once gets)
-					_lastStarted = pid;
-					_mo2LaunchedAt = Environment.TickCount64;
-				} else {
-					_log.Warn($"Windows answered a late start with process {pid}, which is not the one it started (that one ended, and its number went to another program) - left alone");
-				}
+				_log.Warn($"Windows answered a start it had not answered in time (process {pid}) - a Mod Organizer that came up from it cannot be proven to be the run's, so it is treated as yours: close it when the run asks");
 			}
 			_lateStarts.Remove(late);
 			UnansweredChanged?.Invoke(UnansweredSince);
@@ -1253,18 +1266,21 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	{
 		for (var attempt = 0; attempt < 3; ++attempt) {
 			WaitReady(a_ct);
+			var askedTool = Asking();
 			_mo2LaunchedAt = Environment.TickCount64;
-			var askedTool = DateTime.UtcNow;
 			// the second Mod Organizer that hands the request on is the run's own, never taken for the player's while it lives
 			try {
 				_ownMo2.Add(Launch(a_cmd, Path.GetDirectoryName(Mo2.Exe)!));
+				Asked(null, askedTool);
 			} catch (StartUnansweredException e) {
 				// the request may have reached the open Mod Organizer all the same: the tool is waited for as always, so one it
 				// starts is on the run's record (a tool left open off the record would hold Mod Organizer, and the put-back, open),
 				// and the second Mod Organizer that carries the request is waited for before Mod Organizer counts as closed
-				_lateStarts.Add((e.Answer, askedTool));
-				UnansweredChanged?.Invoke(UnansweredSince);
+				Asked(e.Answer, askedTool);
 				_log.Warn(e.Message + " - waiting for the tool all the same");
+			} catch {
+				Asked(null, askedTool);
+				throw;
 			}
 			var waited = Stopwatch.StartNew();
 			var lost = false;

@@ -95,6 +95,10 @@ public static class RunnerErrors
 			"Open Mod Organizer and let it find the game again (it asks at its start when the folder is gone), close it, then press Check (F5)."),
 		E("TR-215", "has not answered a start|is no longer where its record says", "Windows has not yet answered a start of Mod Organizer the run asked it for, or the Mod Organizer the run worked in has moved - so your profile is not written now.",
 			"Wait the few minutes the message names, then press \"Put my profile back\" again. If Mod Organizer moved, put it back where it was (or start it once from there), then press it again."),
+		E("TR-216", "could not be kept anywhere", "The disk took no write - neither the run's record nor its backup folder - so the mods and plugins you changed in Mod Organizer during the run could not be kept safe before the profile is put back. The profile is left as it is, with your changes in it.",
+			"Free some room on the disk Tool Runner keeps its data on (and the one the backups go to), then press \"Put my profile back\"."),
+		E("TR-217", "could not be put on record - it is not started", "The disk took no write to the run's record, so a start of Mod Organizer could not be noted there first. Tool Runner does not start Mod Organizer without that note: after a crash, the put-back would not know a Mod Organizer could still come up.",
+			"Free some room on the disk Tool Runner keeps its data on, then start the run again (or press \"Put my profile back\" if it offers to)."),
 
 		// ---- the check before a run: a step's own settings and its tool
 		E("TR-301", "no output mod is set|no output folder is set|the terrain LOD folder it reads is not set|no shader cache is set", "A step has no place to put what it makes.",

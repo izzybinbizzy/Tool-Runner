@@ -63,19 +63,11 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 
 	public bool IsOn(string a_mod) => States().TryGetValue(a_mod, out var c) && c == '+';
 
-	// the mod states in a snapshot's modlist.txt (empty when it holds none)
-	// the plugin ticks a snapshot's plugins.txt holds
-	public static Dictionary<string, bool> MarksOf(IReadOnlyDictionary<string, byte[]> a_snap)
-	{
-		var marks = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-		if (a_snap.TryGetValue("plugins.txt", out var b)) {
-			foreach (var ln in Files.DecodeText(b).Replace("\r\n", "\n").Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith('#'))) {
-				marks[ln.TrimStart('*')] = ln.StartsWith('*');
-			}
-		}
-		return marks;
-	}
+	// the plugin ticks a snapshot's plugins.txt holds, read as the live file is read: the same decoding, the same names
+	public static Dictionary<string, bool> MarksOf(IReadOnlyDictionary<string, byte[]> a_snap) =>
+		a_snap.TryGetValue("plugins.txt", out var b) ? MarksIn(DecodePluginFile("plugins.txt", b).Lines) : new(StringComparer.OrdinalIgnoreCase);
 
+	// the mod states in a snapshot's modlist.txt (empty when it holds none)
 	public static Dictionary<string, char> StatesOf(IReadOnlyDictionary<string, byte[]> a_snap)
 	{
 		var st = new Dictionary<string, char>(StringComparer.OrdinalIgnoreCase);
@@ -417,7 +409,7 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 		return idx;
 	}
 
-	static string Bare(string a_line) => a_line.TrimStart('*').ToLowerInvariant();
+	static string Bare(string a_line) => (PluginLine(a_line)?.Name ?? "").ToLowerInvariant();
 
 	// Each of the two files is read, and written back, the way Mod Organizer itself reads and writes it: plugins.txt in the
 	// PC's own code page, loadorder.txt as UTF-8 (read off Mod Organizer's public source, its game_bethesda plugin:
@@ -425,19 +417,41 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 	// writes loadorder.txt as UTF-8). Read and written as UTF-8, a plugin name with an accent in plugins.txt came back as a line
 	// that names no file: Mod Organizer dropped it and listed the real plugin as new - unticked, at the end of the load order -
 	// after a run that said it had put everything back. A file that carries a mark of its own is read by that mark.
-	static (List<string> Lines, string Nl, Encoding How) ReadPluginFile(string a_path)
+	static (List<string> Lines, string Nl, Encoding How) ReadPluginFile(string a_path) => DecodePluginFile(Path.GetFileName(a_path), Files.ReadShared(a_path));
+
+	// One reading of a plugin list's bytes, the file's own or a snapshot's: a plugins.txt with no mark is in the PC's own code
+	// page (as Mod Organizer writes it), any other by its mark or as UTF-8
+	static (List<string> Lines, string Nl, Encoding How) DecodePluginFile(string a_name, byte[] a_raw)
 	{
-		var raw = Files.ReadShared(a_path);
 		Encoding how;
 		string text;
-		if (Path.GetFileName(a_path).Equals("plugins.txt", StringComparison.OrdinalIgnoreCase) && !Files.HasMark(raw)) {
+		if (a_name.Equals("plugins.txt", StringComparison.OrdinalIgnoreCase) && !Files.HasMark(a_raw)) {
 			how = Files.AnsiEncoding;
-			text = how.GetString(raw);
+			text = how.GetString(a_raw);
 		} else {
-			text = Files.DecodeText(raw, out how);
+			text = Files.DecodeText(a_raw, out how);
 		}
 		var nl = text.Contains("\r\n") ? "\r\n" : "\n";
 		return (text.Replace("\r\n", "\n").Split('\n').Where(l => l != "").ToList(), nl, how);
+	}
+
+	// One rule for the plugin a line of plugins.txt names, and whether it is ticked: blanks round the line and the name taken
+	// off, the tick ("*") too. Null for a comment or a blank line
+	static (string Name, bool On)? PluginLine(string a_line)
+	{
+		var l = a_line.Trim();
+		return l.Length == 0 || l.StartsWith('#') ? null : (l.TrimStart('*').Trim(), l.StartsWith('*'));
+	}
+
+	static Dictionary<string, bool> MarksIn(IEnumerable<string> a_lines)
+	{
+		var marks = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+		foreach (var line in a_lines) {
+			if (PluginLine(line) is { } p && p.Name.Length > 0) {
+				marks[p.Name] = p.On;
+			}
+		}
+		return marks;
 	}
 
 	static void WritePluginFile(string a_path, List<string> a_lines, string a_nl, Encoding a_how) =>
@@ -445,7 +459,7 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 
 	// the plugins ticked in plugins.txt ("*name")
 	public List<string> ActivePlugins() => File.Exists(PluginsTxt)
-		? ReadPluginFile(PluginsTxt).Lines.Where(l => l.StartsWith('*')).Select(l => l[1..].Trim()).ToList()
+		? ReadPluginFile(PluginsTxt).Lines.Select(PluginLine).Where(p => p is { On: true, Name.Length: > 0 }).Select(p => p!.Value.Name).ToList()
 		: [];
 
 	public sealed record PlaceRule(string Plugin, string Where, bool Active = false);
@@ -480,8 +494,8 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 				var entry = lines[idx];
 				lines.RemoveAt(idx);
 				// only a plugin something ticked provides: a line with no file behind it stops Synthesis (and a game start asks about it)
-				if (fn == "plugins.txt" && rule.Active && !entry.StartsWith('*') && paths.ContainsKey(rule.Plugin)) {
-					entry = "*" + entry;
+				if (fn == "plugins.txt" && rule.Active && PluginLine(entry) is { On: false } un && paths.ContainsKey(rule.Plugin)) {
+					entry = "*" + un.Name;
 				}
 				int pos;
 				if (rule.Where == "last_master") {
@@ -538,8 +552,8 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 			foreach (var (pl, path) in news) {
 				var i = lines.FindIndex(l => string.Equals(Bare(l), pl, StringComparison.OrdinalIgnoreCase));
 				if (i >= 0) {
-					if (star != "" && !lines[i].StartsWith('*')) {
-						lines[i] = "*" + lines[i];
+					if (star != "" && PluginLine(lines[i]) is { On: false } un) {
+						lines[i] = "*" + un.Name;
 						changed.Add(pl);
 					}
 					continue;
@@ -607,14 +621,7 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 	// plugins.txt's ticks as the file is now (name -> ticked)
 	public Dictionary<string, bool> PluginMarks()
 	{
-		var marks = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-		if (!File.Exists(PluginsTxt)) {
-			return marks;
-		}
-		foreach (var l in ReadPluginFile(PluginsTxt).Lines.Where(l => l.Length > 0 && !l.StartsWith('#'))) {
-			marks[l.TrimStart('*')] = l.StartsWith('*');
-		}
-		return marks;
+		return File.Exists(PluginsTxt) ? MarksIn(ReadPluginFile(PluginsTxt).Lines) : new(StringComparer.OrdinalIgnoreCase);
 	}
 
 	// these plugins ticked or unticked as given (only lines the file has; a plugin it does not list is left to ActivatePlugins)
@@ -627,10 +634,10 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 		var (lines, nl, how) = ReadPluginFile(PluginsTxt);
 		var changed = false;
 		for (int i = 0; i < lines.Count; ++i) {
-			if (lines[i].Length == 0 || lines[i].StartsWith('#') || !a_marks.TryGetValue(lines[i].TrimStart('*'), out var on) || lines[i].StartsWith('*') == on) {
+			if (PluginLine(lines[i]) is not { } p || !a_marks.TryGetValue(p.Name, out var on) || p.On == on) {
 				continue;
 			}
-			lines[i] = on ? "*" + lines[i] : lines[i][1..];
+			lines[i] = (on ? "*" : "") + p.Name;
 			changed = true;
 		}
 		if (changed) {
@@ -669,9 +676,9 @@ public sealed class Profile(Mo2Instance a_mo2, string a_name, Func<bool> a_mo2Ru
 		MustBeClosed("the plugin list");
 		var (lines, nl, how) = ReadPluginFile(PluginsTxt);
 		for (int i = 0; i < lines.Count; ++i) {
-			if (lines[i].StartsWith('*') && names.Contains(lines[i][1..].ToLowerInvariant())) {
-				off.Add(lines[i][1..]);
-				lines[i] = lines[i][1..];
+			if (PluginLine(lines[i]) is { On: true } p && names.Contains(p.Name.ToLowerInvariant())) {
+				off.Add(p.Name);
+				lines[i] = p.Name;
 			}
 		}
 		if (off.Count > 0) {

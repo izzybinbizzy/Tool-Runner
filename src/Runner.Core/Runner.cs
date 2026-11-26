@@ -272,10 +272,11 @@ public static class Runner
 		};
 		forThisRun = control;
 		control.StopAsked = cts.Token;
-		// a start Windows has not answered is in the run's record from the moment it is so - a put-back after a crash waits for it
+		// a start of Mod Organizer is in the run's record from before it is asked until Windows answers it - a put-back after a
+		// crash waits for it; one that cannot be recorded is not asked
 		control.UnansweredChanged = a_at => {
 			journal.UnansweredStartAt = a_at;
-			journal.TrySave();
+			return journal.TrySave() || journal.TrySave();
 		};
 		journal.Mo2KeptOpen = control.CompanionOn;
 		control.CompanionGaveUp = () => {
@@ -1461,8 +1462,8 @@ public static class Runner
 	// wins; what was kept before fills only what is no longer there to read (a switch or a plugin line the lists lost when they
 	// went back), so a change the player made since is never undone by an older one. Kept in the run's record; when the disk
 	// refuses it twice, in a file of its own in the run's backup folder (often another disk). Each keeping carries its time, and
-	// the newer of the two places is the one read. The order files go back all the same (the run's changes are never left in
-	// the profile); only when neither place takes it is it set from memory alone, and said
+	// the newer of the two places is the one read. When neither place takes it, the put-back stops before the order files go
+	// back (a refusal, the put-back on offer): the player's changes are never held in memory alone
 	//
 	// a_snap: the lists this put-back puts back. After one that was cut off between its lists going back and the player's
 	// changes being set again, a tick read now that equals the tick those lists hold is theirs (the restore's), not the
@@ -1497,7 +1498,10 @@ public static class Runner
 			Files.WriteAtomic(keptFile, System.Text.Json.JsonSerializer.Serialize(kept));
 			a_ctx.Log.Warn($"the run's record could not be written just now (is the disk full?) - what you changed in Mod Organizer is kept in {keptFile} instead");
 		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
-			a_ctx.Log.Warn("the run's record could not be written just now, nor the run's backup folder (is the disk full?) - what you changed in Mod Organizer is set again from memory; if Tool Runner is stopped before that, check your mods and plugins in Mod Organizer");
+			// held only in memory, the player's changes would be lost to a crash between the lists going back and their being set
+			// again: the lists stay as they are now, the player's changes in them, and the put-back stays on offer
+			throw new IOException("what you changed in Mod Organizer during the run could not be kept anywhere - neither the run's record nor its backup folder takes a write " +
+				$"(is the disk full?), so the profile is not put back now and keeps your changes; put it back once the disk has room ({e.Message})", e);
 		}
 		return kept;
 	}
