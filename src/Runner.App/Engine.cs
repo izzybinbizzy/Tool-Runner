@@ -174,10 +174,17 @@ public static partial class ConsoleAttach
 		// the console owns these writers for the rest of the program's life (a command ends the process right after)
 #pragma warning disable CA2000
 		if (AttachConsole(-1)) {
-			// A console shows the bytes written to it in its own code page: UTF-8 written there came out as wrong letters for
-			// every name with an accent or a non-Latin letter in it (a mod, a folder). A file or a pipe - a script - gets
-			// UTF-8, as before
-			var encoding = Console.IsOutputRedirected ? new System.Text.UTF8Encoding(false) : Console.OutputEncoding;
+			// A console shows bytes in its own code page, which holds few letters: UTF-8 written there came out as wrong letters,
+			// and the code page itself has no Cyrillic or Chinese. Text for a console goes as UTF-16 - .NET then hands it to
+			// Windows' wide-character console call, every letter the font has shown and the console's code page left as the
+			// player set it. A file or a pipe - a script - gets UTF-8 without a byte-order mark, as before
+			System.Text.Encoding encoding;
+			if (Console.IsOutputRedirected) {
+				encoding = new System.Text.UTF8Encoding(false);
+			} else {
+				Console.OutputEncoding = System.Text.Encoding.Unicode;
+				encoding = new System.Text.UnicodeEncoding(false, false);
+			}
 			Console.SetOut(new ReaderGone(new StreamWriter(Console.OpenStandardOutput(), encoding) { AutoFlush = true }));
 			Console.SetError(Console.Out);
 		} else {
