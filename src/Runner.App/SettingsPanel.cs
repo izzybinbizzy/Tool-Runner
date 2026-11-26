@@ -341,9 +341,14 @@ public static class SettingsPanel
 				a_vm.Say($"Not shared: these are the settings of \"{openedName}\", and \"{current.Name}\" is picked in the main window now. Pick \"{openedName}\" again to share it.", "bad");
 				return;
 			}
-			// (it writes into the data folder: never while that folder is being moved)
+			// (it writes into the data folder: never while that folder is being moved, and one at a time - a Settings drawn
+			// again while one writes has a Share button of its own)
 			if (a_vm.MovingData) {
 				a_vm.Say(a_vm.WhyNotWriting("shared")!, "bad");
+				return;
+			}
+			if (a_vm.SharingSetup) {
+				a_vm.Say("A shared copy is still being written - share again when it is done.", "bad");
 				return;
 			}
 			// the setup as it is this moment, written off the window's thread; one share at a time

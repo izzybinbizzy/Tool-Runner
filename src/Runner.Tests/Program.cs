@@ -115,6 +115,39 @@ public static class Program
 		throw new InvalidOperationException(a_what + ": did not throw " + typeof(TE).Name);
 	}
 
+	[System.Runtime.InteropServices.DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+	static extern Microsoft.Win32.SafeHandles.SafeFileHandle OpenForLink(string a_name, uint a_access, uint a_share, nint a_security, uint a_how, uint a_flags, nint a_template);
+
+	[System.Runtime.InteropServices.DllImport("kernel32.dll", EntryPoint = "DeviceIoControl", SetLastError = true)]
+	[return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+	static extern bool SetReparse(Microsoft.Win32.SafeHandles.SafeFileHandle a_handle, uint a_code, byte[] a_in, int a_inSize, nint a_out, int a_outSize, out int a_returned, nint a_overlapped);
+
+	// A junction a_link -> a_target made by Windows' own call: no command processor, so nothing in either path is read as
+	// anything but itself (a "%" in a temp folder's name included)
+	static void Junction(string a_link, string a_target)
+	{
+		var target = Path.GetFullPath(a_target);
+		var named = Encoding.Unicode.GetBytes(@"\??\" + target);
+		var shown = Encoding.Unicode.GetBytes(target);
+		// a mount point's reparse data: tag, length, then the two names' places and lengths, then the names (each ending in 0)
+		var dataLength = 8 + named.Length + 2 + shown.Length + 2;
+		var data = new byte[8 + dataLength];
+		BitConverter.GetBytes(0xA0000003u).CopyTo(data, 0);
+		BitConverter.GetBytes((ushort)dataLength).CopyTo(data, 4);
+		BitConverter.GetBytes((ushort)0).CopyTo(data, 8);
+		BitConverter.GetBytes((ushort)named.Length).CopyTo(data, 10);
+		BitConverter.GetBytes((ushort)(named.Length + 2)).CopyTo(data, 12);
+		BitConverter.GetBytes((ushort)shown.Length).CopyTo(data, 14);
+		named.CopyTo(data, 16);
+		shown.CopyTo(data, 16 + named.Length + 2);
+		Directory.CreateDirectory(a_link);
+		const uint Write = 0x40000000, OpenExisting = 3, BackupSemantics = 0x02000000, OpenReparsePoint = 0x00200000, SetReparsePoint = 0x000900A4;
+		using var h = OpenForLink(a_link, Write, 0, 0, OpenExisting, BackupSemantics | OpenReparsePoint, 0);
+		if (h.IsInvalid || !SetReparse(h, SetReparsePoint, data, data.Length, 0, 0, out _, 0)) {
+			throw new IOException($"the junction {a_link} could not be made (error {System.Runtime.InteropServices.Marshal.GetLastWin32Error()})");
+		}
+	}
+
 	// the same, handing back what was thrown (to read its message)
 	static TE Thrown<TE>(Action a_act, string a_what) where TE : Exception
 	{
@@ -5912,15 +5945,40 @@ public static class Program
 			File.WriteAllText(Path.Combine(parent9, Brand.Name, ".renamed from.txt"), source9);
 			Check(Files.SamePath(DataFolder.Adopt(parent9, "", () => false), source9) && File.Exists(Path.Combine(parent9, Brand.Name, ".renamed from.txt")),
 				"the data stays where it came from, and the copy keeps its mark for the move to be made again");
+			// a "(being copied)" folder that holds someone else's files is not this move's: the move waits for it, the files stay
+			var from11 = Path.Combine(root, "beside 11", Brand.Name + " Data");
+			var to11 = Path.Combine(root, "appdata 11", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from11, "Setups"));
+			Directory.CreateDirectory(to11 + " (being copied)");
+			File.WriteAllText(Path.Combine(to11 + " (being copied)", "theirs.txt"), "x");
+			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from11, to11), "a staging folder holding another's file is refused");
+			Check(File.Exists(Path.Combine(to11 + " (being copied)", "theirs.txt")), "and that file stays");
+			// the old folder that cannot be marked after the copy took its place: the copy goes again, but only what the move put
+			// there - a file another program put in the new place meanwhile stays
+			var from12 = Path.Combine(root, "beside 12", Brand.Name + " Data");
+			var to12 = Path.Combine(root, "appdata 12", Brand.Name);
+			Directory.CreateDirectory(Path.Combine(from12, "Setups"));
+			File.WriteAllText(Path.Combine(from12, "Setups", "S.json"), "{}");
+			DataFolder.AfterPublish = a_to => {
+				File.WriteAllText(Path.Combine(a_to, "theirs.txt"), "x");
+				// (the old folder's mark cannot be written: a folder stands where it would go)
+				Directory.CreateDirectory(Path.Combine(from12, DataFolder.MovedMark));
+			};
+			try {
+				Throws<IOException>(() => DataFolder.MoveTo(from12, to12), "a move whose old folder cannot be marked");
+			} finally {
+				DataFolder.AfterPublish = null;
+			}
+			Check(File.Exists(Path.Combine(to12, "theirs.txt")) && !File.Exists(Path.Combine(to12, "Setups", "S.json")) && !Directory.Exists(Path.Combine(to12, "Setups")),
+				"takes back only its own copy: another's file in the new place stays");
+			Check(File.Exists(Path.Combine(from12, "Setups", "S.json")), "and the data is still where it was");
+			Directory.Delete(Path.Combine(from12, DataFolder.MovedMark));
 			// a folder inside the data that is a link to another folder stops the move: it would be copied as what it leads to
 			var from10 = Path.Combine(root, "beside 10", Brand.Name + " Data");
 			var elsewhere10 = Path.Combine(root, "backups elsewhere");
 			Directory.CreateDirectory(from10);
 			Directory.CreateDirectory(elsewhere10);
-			using (var mk10 = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/d /c mklink /J \"{Path.Combine(from10, "Backups")}\" \"{elsewhere10}\"") {
-				UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true })!) {
-				mk10.WaitForExit();
-			}
+			Junction(Path.Combine(from10, "Backups"), elsewhere10);
 			Check(Directory.Exists(Path.Combine(from10, "Backups")), "the test's junction inside the data was made");
 			Check(Thrown<InvalidOperationException>(() => DataFolder.MoveTo(from10, Path.Combine(root, "appdata 10", Brand.Name)), "a link inside the data").Message.Contains("is a link to another folder", StringComparison.Ordinal),
 				"a link inside the data stops the move, named");
@@ -5943,10 +6001,13 @@ public static class Program
 			// a link that leads into the data folder is that folder, whatever its own path says
 			var link = Path.Combine(root, "link into the data");
 			Directory.CreateDirectory(Path.Combine(from5 + " again", "inside"));
-			using (var mk = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/d /c mklink /J \"{link}\" \"{Path.Combine(from5 + " again", "inside")}\"") {
-				UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true })!) {
-				mk.WaitForExit();
-			}
+			Junction(link, Path.Combine(from5 + " again", "inside"));
+			// (both paths taken literally: a "%" that a command processor would read as a variable is only a letter here)
+			var percent = Path.Combine(root, "100%PATH% here");
+			Directory.CreateDirectory(Path.Combine(percent, "target"));
+			Junction(Path.Combine(percent, "link"), Path.Combine(percent, "target"));
+			Check(Files.FinalPath(Path.Combine(percent, "link")) is { } leads && Files.SamePath(leads, Path.Combine(percent, "target")), "a junction in a folder whose name holds %...% leads where it was made to");
+			Directory.Delete(Path.Combine(percent, "link"));
 			Check(Directory.Exists(link), "the test's junction was made");
 			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from5 + " again", link), "a link is refused as the new place");
 			Throws<InvalidOperationException>(() => DataFolder.MoveTo(from5 + " again", Path.Combine(link, "deeper")), "a folder reached through a link into the data is refused");
@@ -10748,9 +10809,7 @@ public static class Program
 		File.WriteAllText(Path.Combine(kept, "theirs.txt"), "x");
 		File.WriteAllText(Path.Combine(from, "plain.txt"), "y");
 		var link = Path.Combine(from, "link");
-		using (var mk = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), $"/d /c mklink /J \"{link}\" \"{kept}\"") { CreateNoWindow = true, UseShellExecute = false })!) {
-			mk.WaitForExit();
-		}
+		Junction(link, kept);
 		if (Directory.Exists(link)) {
 			Check(Files.IsLink(link) && !Files.IsLink(kept), "a junction is a link, a plain folder is none");
 			Files.MoveContents(from, into);
