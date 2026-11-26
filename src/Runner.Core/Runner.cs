@@ -1506,7 +1506,7 @@ public static class Runner
 	}
 
 	// what the player changed is all set again: the record lets go of it, and so does the backup folder's file
-	internal static void LetGoOfTheirs(RunContext a_ctx)
+	public static void LetGoOfTheirs(RunContext a_ctx)
 	{
 		a_ctx.Journal.Theirs = null;
 		Files.TryDelete(Path.Combine(a_ctx.BackupFolder, TheirsFile));
