@@ -11857,6 +11857,11 @@ public static class Program
 			Files.DeleteDir(holds);
 			Check(!Directory.Exists(holds), "the folder is gone");
 			Check(File.Exists(theirs) && File.GetAttributes(theirs).HasFlag(FileAttributes.ReadOnly), "the file behind the link is there, read-only as it was");
+			// a folder that is itself a link is removed as the link
+			var gone = Path.Combine(f.Root, "A link to remove");
+			Check(Junction(gone, kept), "a junction to remove");
+			Files.DeleteDir(gone);
+			Check(!Directory.Exists(gone) && File.Exists(theirs), "removed as a link, what it points at untouched");
 			// a folder that is itself a link moves as the link
 			var link = Path.Combine(f.Root, "A link");
 			Check(Junction(link, kept), "a second junction");

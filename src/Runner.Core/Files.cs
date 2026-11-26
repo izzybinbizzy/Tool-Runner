@@ -207,7 +207,17 @@ public static partial class Files
 		if (!Directory.Exists(a_dir)) {
 			return;
 		}
+		// a folder that is itself a link goes as the link: what it points at is never touched
+		if (IsLink(a_dir)) {
+			Directory.Delete(a_dir);
+			return;
+		}
 		try {
+			// a link inside goes first, as the link alone: Windows' own delete of the whole tree asks a junction to come off as
+			// a volume, and some PCs refuse that ("The parameter is incorrect")
+			foreach (var link in LinksUnder(a_dir)) {
+				Directory.Delete(link);
+			}
 			Directory.Delete(a_dir, true);
 		} catch (UnauthorizedAccessException) {
 			foreach (var f in Under(a_dir).Where(f => f.IsReadOnly)) {
