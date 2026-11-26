@@ -13253,6 +13253,13 @@ public static class Program
 		Equal(RunnerErrors.ToolsOwnWords, RunnerErrors.Find("DynDOLOD reported an error: Error: could not start the export, did not write the file")?.Code,
 			"the tool's own words choose no entry of the runner's");
 		Equal(RunnerErrors.ToolsOwnWords, RunnerErrors.All[^1].Code, "and that entry is the last one asked");
+		// every place a tool's or the game's own words follow the runner's: only the runner's words choose
+		Equal(RunnerErrors.ToolsOwnWords, RunnerErrors.Find("Pandora logged errors: could not start the engine | the job ended with exit code 3")?.Code, "Pandora's log lines choose nothing");
+		Equal(RunnerErrors.ToolsOwnWords, RunnerErrors.Find("PGPatcher asks a question this step does not answer: could not start the export?")?.Code, "nor a tool's question");
+		Equal("TR-415", RunnerErrors.Find("the game shows a box this step does not answer: Mod Organizer is open | could not start the export")?.Code, "a game box's own words choose nothing");
+		Equal("TR-415", RunnerErrors.Find("the game shows a Windows box this step does not answer: the command ended with exit code 1")?.Code, "nor a Windows box's");
+		Equal("TR-433", RunnerErrors.Find("Landscape Fixer shows no usable Generate button. Its window shows: could not start, ended with exit code 2.")?.Code, "nor what a tool's window shows");
+		Check(RunnerErrors.Find("the after-run command ended with exit code 4: cmd /c exit 4") is { } own && own.Code != RunnerErrors.ToolsOwnWords, "the runner's own exit-code words are never cut away");
 		// a tool's own documented error goes before the catalog's general words for "the tool said so"
 		var memory = Explain.For("dyndolod", "DynDOLOD: Error: Out of memory");
 		Check(memory is { Code: null, Help: "https://dyndolod.info/FAQ" }, "the tool's own help first: " + memory);

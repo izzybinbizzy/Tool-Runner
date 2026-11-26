@@ -251,15 +251,24 @@ public static class RunnerErrors
 			"A question it asks every time: answer it once in the tool's own window (Tools, at the top of the window), then run again from this step."),
 	];
 
-	// what a tool said follows these words: its own words may hold any entry's ("could not start", "did not write"), so only
-	// the runner's words before them choose the entry
-	const string ToolSaid = " reported an error: ";
+	// what a tool (or the game) said follows these words: its own words may hold any entry's ("could not start", "ended with
+	// exit code"), so only the runner's words up to the first of them choose the entry
+	static readonly string[] ToolSaid = [
+		" reported an error: ", " logged errors: ", " asks a question this step does not answer: ", " refused to run: ",
+		" still wants a build inside Mod Organizer: ", " shows a box this step does not answer: ", "Its window shows: ",
+		" its box stays open after OK: ", " shows a Windows box this step does not answer: ", " shows a box this run does not know - ",
+	];
 
 	// the entry a refusal or failure text falls under (any letter case), or null when it is none of the runner's own
 	public static Entry? Find(string a_text)
 	{
-		var cut = a_text.IndexOf(ToolSaid, StringComparison.OrdinalIgnoreCase);
-		var ours = cut < 0 ? a_text : a_text[..(cut + ToolSaid.Length)];
+		var ours = a_text;
+		foreach (var said in ToolSaid) {
+			var cut = ours.IndexOf(said, StringComparison.OrdinalIgnoreCase);
+			if (cut >= 0) {
+				ours = ours[..(cut + said.Length)];
+			}
+		}
 		return All.FirstOrDefault(e => e.Any.Any(a => ours.Contains(a, StringComparison.OrdinalIgnoreCase)));
 	}
 }
