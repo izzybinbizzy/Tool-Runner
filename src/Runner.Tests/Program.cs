@@ -12570,8 +12570,9 @@ public static class Program
 				new JsonObject { ["step"] = "texgen", ["on"] = false, ["settings"] = new JsonObject { ["wrapper"] = @"D:\Tools\wrap.cmd", ["deadline_min"] = 30 } }) }, @"D:\Data\Setups\Mine.json");
 		var lines = s.Starts();
 		Equal(@"Mod Organizer: D:\MO2\ModOrganizer.exe|a command before each run: first.bat|a command after each run: last.bat|" +
-			StepCatalog.Name("xlodgen") + @" (exe): D:\Tools\xLODGenx64.exe|" + StepCatalog.Name("texgen") + @" (wrapper): D:\Tools\wrap.cmd", string.Join("|", lines),
-			"Mod Organizer, its commands, and each program a step names - of a step that is off too");
+			StepCatalog.Name("xlodgen") + @" (exe): D:\Tools\xLODGenx64.exe|" + StepCatalog.Name("xlodgen") + " (Mod Organizer's entry): xLODGen|" +
+			StepCatalog.Name("texgen") + @" (wrapper): D:\Tools\wrap.cmd", string.Join("|", lines),
+			"Mod Organizer, its commands, each program a step names and each entry of Mod Organizer's list it starts - of a step that is off too");
 		var mark = s.StartsMark();
 		((JsonObject)s.Root["steps"]![1]!)["on"] = true;
 		((JsonObject)s.Root["steps"]![0]!["settings"]!)["output_mod"] = "Another Output";
@@ -12582,7 +12583,9 @@ public static class Program
 		Equal("starts.allowed.mine", ToolRunner.App.MainViewModel.StartsAllowedKey(s.File), "kept per setup, by its file's name");
 		Equal(2, s.TakeOutCommands(), "brought in from elsewhere, its commands go");
 		s.TakeOutWhatStartsPrograms();
-		Equal(0, s.Starts().Count, "... and its programs: it starts nothing, and nothing is asked");
+		// (a step's entry of Mod Organizer's list stays: it names only a program the player put on that list, and the step needs
+		// it - so the setup still asks before it starts it)
+		Equal(StepCatalog.Name("xlodgen") + " (Mod Organizer's entry): xLODGen", string.Join("|", s.Starts()), "... and its programs: only its step's entry is left, and asked about");
 		Equal(0, Setup.FromJson(new JsonObject { ["steps"] = new JsonArray() }).Starts().Count, "a setup with nothing in it starts nothing");
 		// a program a step starts is one by the setting's name, whatever its file is called
 		var odd = Setup.FromJson(new JsonObject { ["steps"] = new JsonArray(new JsonObject { ["step"] = "synthesis", ["settings"] = new JsonObject {
