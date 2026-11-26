@@ -12784,13 +12784,13 @@ public static class Program
 		using var f = new FakeMo2();
 		var c = new Mo2Control(Mo2Instance.Load(f.Exe, f.Instance), "Test", RunLog.Null) {
 			ReadyProbe = () => new(true, true, TimeSpan.FromSeconds(9), null),
-			Launch = (_, _) => throw new Mo2Control.StartUnansweredException("Windows could not start x (its management service did not answer within 2 minutes)"),
+			Launch = (_, _) => throw new Mo2Control.StartUnansweredException("Windows could not start x (its management service did not answer within 2 minutes)", Task.FromResult(0)),
 		};
 		var looks = 0;
 		Equal<int?>(4242, c.LaunchTool("x", () => ++looks >= 3 ? 4242 : 0, TimeSpan.FromSeconds(10), default), "the tool that came is handed back");
 		var none = new Mo2Control(Mo2Instance.Load(f.Exe, f.Instance), "Test", RunLog.Null) {
 			ReadyProbe = () => new(true, true, TimeSpan.FromSeconds(9), null),
-			Launch = (_, _) => throw new Mo2Control.StartUnansweredException("late"),
+			Launch = (_, _) => throw new Mo2Control.StartUnansweredException("late", Task.FromResult(0)),
 		};
 		Equal<int?>(null, none.LaunchTool("x", () => 0, TimeSpan.FromSeconds(2), default), "and none that never came is made up");
 		// a Stop pressed while Windows still had not answered: a tool Mod Organizer started meanwhile goes on the run's record,
@@ -12802,7 +12802,7 @@ public static class Program
 				ReadyProbe = () => new(true, true, TimeSpan.FromSeconds(9), null),
 				Launch = (_, _) => {
 					cts.Cancel();
-					throw new Mo2Control.StartUnansweredException("late");
+					throw new Mo2Control.StartUnansweredException("late", Task.FromResult(0));
 				},
 			};
 			Thrown<OperationCanceledException>(() => stopped.LaunchTool("x", () => tool.Id, TimeSpan.FromSeconds(10), cts.Token), "the Stop ends the wait");
@@ -12810,6 +12810,35 @@ public static class Program
 		} finally {
 			tool.Kill();
 			tool.WaitForExit(10_000);
+		}
+	});
+
+	// A start of Mod Organizer Windows answered too late: nothing counts as closed - so no profile is written - until its own
+	// answer comes, and the process that answer names is then the run's own. Nothing is guessed from start times, so a Mod
+	// Organizer the player opens meanwhile is never taken for it
+	static void T_ALateModOrganizerStartIsWaitedFor() => FastReady(() => {
+		using var f = new FakeMo2();
+		var answer = new TaskCompletionSource<int>();
+		var keep = Mo2Control.LateStartWait;
+		Mo2Control.LateStartWait = TimeSpan.FromSeconds(1);
+		// (a stand-in program of the test's own plays the Mod Organizer that came up late)
+		using var late = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "PING.EXE"), "-n 30 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false })!;
+		try {
+			var c = new Mo2Control(Mo2Instance.Load(f.Exe, f.Instance), "Test", RunLog.Null) {
+				RunningProbe = () => false,
+				ReadyProbe = () => new(true, true, TimeSpan.FromSeconds(9), null),
+				Launch = (_, _) => throw new Mo2Control.StartUnansweredException("late", answer.Task),
+			};
+			Thrown<Mo2Control.StartUnansweredException>(() => c.Start(default), "the start says it was not answered");
+			Thrown<Mo2BusyException>(() => c.Close(), "nothing counts as closed while its answer is still to come");
+			Check(!c.RunProcesses().Contains(late.Id), "(nothing is taken for the run's before the answer names it)");
+			answer.SetResult(late.Id);
+			c.Close();
+			Check(c.RunProcesses().Contains(late.Id), "the process the late answer names is the run's own");
+		} finally {
+			Mo2Control.LateStartWait = keep;
+			late.Kill();
+			late.WaitForExit(10_000);
 		}
 	});
 

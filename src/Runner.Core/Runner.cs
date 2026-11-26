@@ -1453,19 +1453,47 @@ public static class Runner
 	// or a step's): a put-back that cannot set them all - a mod's folder did not read - is tried again with them, after the
 	// order files lost their lines. The ticks read now win; one kept from an earlier put-back fills only a plugin whose line the
 	// lists no longer hold, so a tick the player changed since is never undone by an older one. A record the disk refuses is
-	// asked twice and then said: the order files go back all the same (the run's changes are never left in the profile), and the
-	// ticks are set from memory - only a stop before that loses them
+	// asked twice, and then the ticks go into a file of their own in the run's backup folder (often another disk), which a later
+	// put-back reads. The order files go back all the same (the run's changes are never left in the profile); only when neither
+	// place takes them are they set from memory alone, and said
 	public static Dictionary<string, bool> KeepTheirMarks(RunContext a_ctx)
 	{
-		var marks = new Dictionary<string, bool>(a_ctx.Journal.TheirMarks ?? [], StringComparer.OrdinalIgnoreCase);
+		var keptFile = Path.Combine(a_ctx.BackupFolder, TheirMarksFile);
+		var marks = new Dictionary<string, bool>(a_ctx.Journal.TheirMarks ?? ReadTheirMarks(keptFile) ?? [], StringComparer.OrdinalIgnoreCase);
 		foreach (var (plugin, on) in a_ctx.Profile.PluginMarks()) {
 			marks[plugin] = on;
 		}
 		a_ctx.Journal.TheirMarks = marks;
-		if (!a_ctx.Journal.TrySave() && !a_ctx.Journal.TrySave()) {
-			a_ctx.Log.Warn("the run's record could not be written just now (is the disk full?) - your plugin ticks are set again from memory; if Tool Runner is stopped before that, check them in Mod Organizer");
+		if (a_ctx.Journal.TrySave() || a_ctx.Journal.TrySave()) {
+			return marks;
+		}
+		try {
+			Directory.CreateDirectory(a_ctx.BackupFolder);
+			Files.WriteAtomic(keptFile, System.Text.Json.JsonSerializer.Serialize(marks));
+			a_ctx.Log.Warn($"the run's record could not be written just now (is the disk full?) - your plugin ticks are kept in {keptFile} instead");
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+			a_ctx.Log.Warn("the run's record could not be written just now, nor the run's backup folder (is the disk full?) - your plugin ticks are set again from memory; if Tool Runner is stopped before that, check them in Mod Organizer");
 		}
 		return marks;
+	}
+
+	// the file in a run's backup folder that holds the player's plugin ticks when its record would not take them
+	const string TheirMarksFile = "your plugin ticks.json";
+
+	static Dictionary<string, bool>? ReadTheirMarks(string a_file)
+	{
+		try {
+			return File.Exists(a_file) ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, bool>>(Files.ReadSharedText(a_file)) : null;
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) {
+			return null;
+		}
+	}
+
+	// the ticks are all set again: the record lets go of them, and so does the backup folder's file
+	static void LetGoOfTheirMarks(RunContext a_ctx)
+	{
+		a_ctx.Journal.TheirMarks = null;
+		Files.TryDelete(Path.Combine(a_ctx.BackupFolder, TheirMarksFile));
 	}
 
 	public static void PutBack(RunContext a_ctx, Dictionary<string, byte[]>? a_snap)
@@ -1509,7 +1537,7 @@ public static class Runner
 				ReapplyTheirs(a_ctx, theirs, marks);
 			}
 			if (a_ctx.MarksLeft.Count == 0) {
-				a_ctx.Journal.TheirMarks = null;
+				LetGoOfTheirMarks(a_ctx);
 			}
 		}
 		// an output left empty (its step failed, was stopped, or never ran) never stays in the mod list - one the run made:
