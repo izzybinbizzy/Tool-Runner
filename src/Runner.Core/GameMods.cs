@@ -329,12 +329,11 @@ public static partial class FasterArchives
 // Cached Recursive Directory Walk (CRDW, Nexus 186434) keeps a list of the game's loose files so the game need not walk its
 // folders at each start. At a start it asks "Do you want to generate CRDW cache files?" (Yes = walk and make the list again,
 // No = load the old list); with its question switched off it does what its Mode says. A run changes the game's files, and an
-// old list hides them from the game (its page: tools that write into Data mean the cache must be made again). So its question
-// is answered Yes at every game start of a run (KnownBoxes). With its question off and Mode LOAD it loads its old list
-// blind; then the run has it make a new list (its Mode set to CACHE) at the run's own game starts that come after the run
-// changed the game's files, and puts the mod's own setting back after each step. The setup can ask for a new list at every
-// game start instead, or for the
-// mod to be left alone and the player only told.
+// old list hides them from the game (its page: tools that write into Data mean the cache must be made again). So its
+// question is answered Yes at every game start of a run (KnownBoxes). With its question off and Mode LOAD it loads its old
+// list blind; then the run has it make a new list (its Mode set to CACHE) at the run's own game starts that come after the
+// run changed the game's files, and puts the mod's own setting back after each step. The setup can ask for a new list at
+// every game start instead, or for the mod to be left alone and the player only told.
 public static partial class Crdw
 {
 	public const string IniRel = @"SKSE\Plugins\CRDW.ini";
