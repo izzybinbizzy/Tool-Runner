@@ -13017,6 +13017,13 @@ public static class Program
 		Check(File.ReadAllBytes(mods).AsSpan().SequenceEqual(listsBefore) && File.ReadAllBytes(plugins).AsSpan().SequenceEqual(ticksBefore), "nothing of the profile was written");
 		Thrown<IOException>(() => Runner.KeepTheirs(ctx, new Dictionary<string, char> { ["Base Mod"] = '-' }, before), "a step's put-back stops on it too");
 		File.Delete(file);
+		// one that cannot even be looked at (a folder in its place: Windows' "is it there" answers no, opening it is refused) is
+		// not taken for one that is not there
+		Directory.CreateDirectory(file);
+		Check(!File.Exists(file), "(the plain look says no file is there)");
+		var unseen = Thrown<IOException>(() => Runner.PutBack(ctx, before), "a put-back whose kept changes cannot be looked at stops");
+		Check(RunnerErrors.Find(unseen.Message)?.Code == "TR-219" && File.ReadAllBytes(mods).AsSpan().SequenceEqual(listsBefore), "and writes nothing: " + unseen.Message);
+		Directory.Delete(file);
 		// neither the run's record nor its backup folder takes a write: the put-back stops before its lists go back - the
 		// player's changes stay in the profile, never held in memory alone - and says so
 		var listsNow = File.ReadAllBytes(mods);

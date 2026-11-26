@@ -1516,13 +1516,14 @@ public static class Runner
 	{
 		TheirsKept? inFile = null;
 		var file = Path.Combine(a_ctx.BackupFolder, TheirsFile);
-		if (File.Exists(file)) {
-			try {
-				inFile = System.Text.Json.JsonSerializer.Deserialize<TheirsKept>(Files.ReadSharedText(file)) ?? throw new System.Text.Json.JsonException("it holds nothing");
-			} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) {
-				throw new IOException($"the file that keeps what you changed in Mod Organizer during the run ({file}) could not be read ({e.Message}) - " +
-					"the profile is not put back now and keeps your changes; put it back once that file can be read", e);
-			}
+		// opened, never first asked whether it is there: a look that cannot see the file (no access, a disk error) answers
+		// "not there" just as an absent one does. Only a file or folder that is truly not there is none
+		try {
+			inFile = System.Text.Json.JsonSerializer.Deserialize<TheirsKept>(Files.ReadSharedText(file)) ?? throw new System.Text.Json.JsonException("it holds nothing");
+		} catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException) {
+		} catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException) {
+			throw new IOException($"the file that keeps what you changed in Mod Organizer during the run ({file}) could not be read ({e.Message}) - " +
+				"the profile is not put back now and keeps your changes; put it back once that file can be read", e);
 		}
 		var inRecord = a_ctx.Journal.Theirs;
 		return inRecord == null ? inFile : inFile == null || inRecord.At >= inFile.At ? inRecord : inFile;
