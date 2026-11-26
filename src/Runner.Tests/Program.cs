@@ -6045,6 +6045,25 @@ public static class Program
 				Check(!second.Wait(300), "a second writer waits while the first holds the data");
 			}
 			Check(second.Wait(5000), "and goes on once the first lets go");
+			// a save that waited for a move finds where the data stands once it may write: a move that removed the old folder whole
+			// (its mark with it) leaves nothing to write into, and the save is refused rather than making the old folder again
+			var waitedData = Path.Combine(root, "beside 16", Brand.Name + " Data");
+			Directory.CreateDirectory(Path.Combine(waitedData, "Setups"));
+			Equal<string?>(null, DataFolder.WhyNotWritable(waitedData), "the data where it is may be written");
+			Task<string?> waitingSave;
+			using (DataFolder.HoldWrites()) {
+				waitingSave = Task.Run(() => {
+					using var h = DataFolder.HoldWrites();
+					return DataFolder.WhyNotWritable(waitedData);
+				});
+				Check(!waitingSave.Wait(300), "the save waits for the move");
+				Directory.Delete(waitedData, true);
+			}
+			Check(waitingSave.Wait(5000) && waitingSave.Result?.Contains("no longer in", StringComparison.Ordinal) == true && !Directory.Exists(waitedData),
+				"and, the old folder gone, is refused without making it again: " + waitingSave.Result);
+			Directory.CreateDirectory(waitedData);
+			File.WriteAllText(Path.Combine(waitedData, DataFolder.MovedMark), to);
+			Check(DataFolder.WhyNotWritable(waitedData)?.Contains("has moved to", StringComparison.Ordinal) == true, "a folder that still holds the move mark is refused too, naming where the data went");
 			// a setup written by hand (a comment, a comma after its last value, a path with forward slashes) is repointed too
 			var from5 = Path.Combine(root, "beside 5", Brand.Name + " Data");
 			var to5 = Path.Combine(root, "appdata 5", Brand.Name);

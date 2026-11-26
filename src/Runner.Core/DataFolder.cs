@@ -327,6 +327,12 @@ public static class DataFolder
 	// move both hold it, so no save lands in a folder that is being copied away (the run lock keeps runs out the same way)
 	public static IDisposable HoldWrites() => new WriteHold();
 
+	// Why the data may not be written in a_data now (null: it may) - asked with HoldWrites held: a move that finished meanwhile
+	// left the move mark there, or removed the folder whole, mark and all. A write then would make the old folder again
+	public static string? WhyNotWritable(string a_data) =>
+		MovedTo(a_data) is { } moved ? $"the program's data has moved to {moved} - start Tool Runner again, then save there" :
+		!Directory.Exists(a_data) ? $"the program's data is no longer in {a_data} - start Tool Runner again" : null;
+
 	sealed class WriteHold : IDisposable
 	{
 		readonly Mutex _gate = new(false, @"Local\" + Brand.Name + " data writes");
