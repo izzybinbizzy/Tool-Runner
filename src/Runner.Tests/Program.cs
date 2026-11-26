@@ -12232,10 +12232,10 @@ public static class Program
 			}
 			var next = stepClasses.FirstOrDefault(m => m.Index > at.Index)?.Index ?? gameSteps.Length;
 			var calls = new System.Text.RegularExpressions.Regex(@"\bInGame\.(\w+)\(").Matches(gameSteps[at.Index..next]).Select(x => x.Groups[1].Value);
-			var reads = ReadThrough(calls);
-			inGameAll.UnionWith(reads);
+			var stepReads = ReadThrough(calls);
+			inGameAll.UnionWith(stepReads);
 			var offered = ToolRunner.App.SettingsPanel.OfferedKeys(step);
-			var lost = reads.Where(k => !offered.Contains(k) && !basics.Contains(k)).Order(StringComparer.Ordinal).ToList();
+			var lost = stepReads.Where(k => !offered.Contains(k) && !basics.Contains(k)).Order(StringComparer.Ordinal).ToList();
 			Check(lost.Count == 0, $"{step} reads, through the game's own steps, settings its page never offers: {string.Join(", ", lost)}");
 		}
 		Check(inGameAll.Count >= 6, $"the save steps' settings were found in the source ({inGameAll.Count})");
