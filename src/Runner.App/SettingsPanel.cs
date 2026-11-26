@@ -71,7 +71,7 @@ public static class SettingsPanel
 	public static bool IsFor(Setup? a_setup) => string.Equals(s_openedFor, a_setup?.File, StringComparison.OrdinalIgnoreCase);
 
 	// Why settings opened for one setup are not saved while another is picked (null: they were opened for the picked one).
-	// Saved all the same, they were written over the picked setup's own (CodeRabbit on pull request #35).
+	// Saved all the same, they were written over the picked setup's own.
 	public static string? NotThisSetup(string a_openedFor, string a_openedName, Setup? a_picked) =>
 		MainViewModel.StillShown(a_openedFor, a_picked?.File) ? null
 			: $"Not saved: these are the settings of \"{a_openedName}\", and {(a_picked == null ? "no setup" : $"\"{a_picked.Name}\"")} is picked in the main window now. " +
@@ -157,7 +157,7 @@ public static class SettingsPanel
 		a_host.Children.Add(rows);
 	}
 
-	// his checklist 478: how much room this setup's run backups take, and a clean-up to the newest few without waiting for a run
+	// how much room this setup's run backups take, and a clean-up to the newest few without waiting for a run
 	static void BackupsBlock(MainWindow a_w, MainViewModel a_vm, Panel a_host)
 	{
 		var setup = a_vm.Setup!;
@@ -231,7 +231,7 @@ public static class SettingsPanel
 	// (a setting saved under an empty key still gets a name: its editor is announced by it)
 	static string Label(string a_key) => Labels.TryGetValue(a_key, out var l) ? l : a_key.Length == 0 ? "Unnamed setting" : char.ToUpperInvariant(a_key[0]) + a_key[1..].Replace('_', ' ');
 
-	// his checklist 471: the program's own new versions - kept for the whole program, saved the moment it is ticked
+	// the program's own new versions - kept for the whole program, saved the moment it is ticked
 	static void NewVersions(MainWindow a_w, StackPanel a_stack)
 	{
 		a_stack.Children.Add(new TextBlock { Text = "UPDATES", Style = (Style)a_w.FindResource("H2"), Margin = new Thickness(0, 18, 0, 8), Tag = HeadTag });
@@ -266,7 +266,7 @@ public static class SettingsPanel
 		var steps = (work["steps"] as JsonArray)?.OfType<JsonObject>().ToList() ?? [];
 		var shown = -1;
 		HasChanges = false;
-		// His list of 2026-11-16: the settings in sub-menus. Each page is a panel of its own; the list on the left shows one at
+		// The settings in sub-menus. Each page is a panel of its own; the list on the left shows one at
 		// a time, and the search shows the matching rows of every page at once. `stack` is the page the rows below go into.
 		var pages = new List<(string Name, StackPanel Panel)>();
 		StackPanel Page(string a_name)
@@ -309,7 +309,7 @@ public static class SettingsPanel
 
 		void Head(string a_t) => stack.Children.Add(new TextBlock { Text = a_t, Style = (Style)a_w.FindResource("H2"), Margin = new Thickness(0, 18, 0, 8), Tag = HeadTag });
 
-		// his checklist 475: a search over every setting (Ctrl+F while Settings is open)
+		// a search over every setting (Ctrl+F while Settings is open)
 		var find = new TextBox { Margin = new Thickness(0, 0, 0, 4), ToolTip = "Ctrl+F" };
 		System.Windows.Automation.AutomationProperties.SetName(find, "Find a setting");
 		System.Windows.Automation.AutomationProperties.SetAcceleratorKey(find, "Ctrl+F");
@@ -334,7 +334,7 @@ public static class SettingsPanel
 		top.Children.Add(findHint);
 
 
-		// his checklist 466: a copy another player can import - its steps and options, nothing of this PC
+		// a copy another player can import - its steps and options, nothing of this PC
 		var share = new Button { Content = "Share this setup ...", Style = (Style)a_w.FindResource("Ghost"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 8),
 			ToolTip = "Writes a copy of this setup (as last saved) for another player: every path of this PC and the commands it runs before and after a run are taken out" };
 		share.Click += async (_, _) => {
@@ -391,18 +391,16 @@ public static class SettingsPanel
 		// the character whose saves the game steps load, picked from the characters of the profile's saves (read off the window's thread)
 		CharacterChoice(stack, apply, work, a_vm.Setup!, mo2Boxes);
 		// ---- Game steps (the rest of that page)
-		// his checklist 460
 		work["quietGame"] ??= false;
 		Field(gamePage, apply, "Run game steps in a small, muted window (your game settings are put back after)", work, "quietGame", JsonValueKind.True);
-		// his checklist 464
 		work["copySaves"] ??= true;
 		Field(gamePage, apply, "Back up my saves before a game step", work, "copySaves", JsonValueKind.True);
-		// his checklist 459: off unless asked for - it changes the game's own saving switch in the run's game
+		// off unless asked for - it changes the game's own saving switch in the run's game
 		work["forceSave"] ??= false;
 		Field(gamePage, apply, "Force the save when a mod blocks saving (the run's game only)", work, "forceSave", JsonValueKind.True);
 		work["guidedReminderMin"] ??= 0;
 		Field(gamePage, apply, "Remind me when a game step waits for me, every (minutes; 0 = off)", work, "guidedReminderMin", JsonValueKind.Number);
-		// his word of 2026-11-21: a pop-up of the game is closed at once, whatever it is - a setup may leave the ones the run
+		// a pop-up of the game is closed at once, whatever it is - a setup may leave the ones the run
 		// does not know to the player instead
 		Choice(gamePage, apply, "A game pop-up the run does not know", work, InGame.UnknownBoxSetting,
 			[("close", "close it at once (named in the log and the notes)"), ("stop", "leave it to me (unanswered, the step stops)")]);
@@ -420,10 +418,10 @@ public static class SettingsPanel
 			[("changed", "new cache when the run changed files"), ("always", "new cache at every game start"), ("never", "leave it alone - warn me only")]);
 
 		// ---- Run
-		// his checklist 270 ("all 3."): the preview before a run
+		// the preview before a run
 		work["previewBeforeRun"] ??= true;
 		Field(runPage, apply, "Show the run preview before it starts", work, "previewBeforeRun", JsonValueKind.True);
-		// his checklist 650 ("user choice."): on by default - the tools after them build on what the skipped tools made
+		// on by default - the tools after them build on what the skipped tools made
 		work[Runner.KeepEarlierSetting] ??= true;
 		Field(runPage, apply, "When a run starts at a later step, leave the earlier tools' outputs on (they are not run again)", work, Runner.KeepEarlierSetting, JsonValueKind.True);
 		Field(runPage, apply, "Check on a tool that sits idle for (minutes)", work, "idleMinutes", JsonValueKind.Number);
@@ -431,16 +429,15 @@ public static class SettingsPanel
 		// the forecast of the room a run takes: on, a run that will not fit is not started; off, it is only told
 		work["diskForecastStops"] ??= true;
 		Field(runPage, apply, "Do not start a run that will not fit on the disk (off: warn only)", work, "diskForecastStops", JsonValueKind.True);
-		// his checklist 479: the tools at a lower priority, so the PC stays smooth while they work (a run may take a little longer)
+		// the tools at a lower priority, so the PC stays smooth while they work (a run may take a little longer)
 		work["lowerPriority"] ??= false;
 		Field(runPage, apply, "Run tools at low priority (smoother PC, slightly longer run)", work, "lowerPriority", JsonValueKind.True);
-		// his checklist 477
 		work["keepMo2Open"] ??= false;
 		Field(runPage, apply, "Keep MO2 open during a run (fewer restarts; needs the MO2 Tools menu entry)", work, "keepMo2Open", JsonValueKind.True);
 		Field(runPage, apply, "Commands before a run (one per line; each must succeed)", work, "beforeRun", JsonValueKind.Array);
 		Field(runPage, apply, "Commands after a run (one per line)", work, "afterRun", JsonValueKind.Array);
 
-		// ---- Backups: only the last few runs' kept (his checklist 270), as a zip (454), their size and a clean-up (478)
+		// ---- Backups: only the last few runs' kept, as a zip, their size and a clean-up
 		work["keepBackups"] ??= 5;
 		Field(backupPage, apply, "Backups to keep (runs; 0 = all)", work, "keepBackups", JsonValueKind.Number);
 		BackupsBlock(a_w, a_vm, backupPage);
@@ -512,7 +509,7 @@ public static class SettingsPanel
 
 		NewVersions(a_w, stack);
 
-		// his checklist 433-435: add-ons from other modders, each allowed by the player
+		// add-ons from other modders, each allowed by the player
 		stack = toolPage;
 		Head("ADD-ONS");
 		var addOnNote = new TextBlock { Style = (Style)a_w.FindResource("MutedText"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8),
@@ -618,7 +615,7 @@ public static class SettingsPanel
 		work[AddOns.NoAskSetting] ??= false;
 		Field(stack, apply, "Do not ask before adding an add-on, or when its file changes", work, AddOns.NoAskSetting, JsonValueKind.True);
 
-		// his checklist 468: the program in Mod Organizer's Tools menu
+		// the program in Mod Organizer's Tools menu
 		if (a_vm.Setup is { } menuSetup && Environment.ProcessPath is { } program) {
 			try {
 				var menuMo2 = Mo2Instance.Load(menuSetup.Mo2Exe, menuSetup.Mo2Instance);
@@ -645,7 +642,7 @@ public static class SettingsPanel
 			}
 		}
 
-		// his checklist 492: our add-on, only where Root Builder is in this setup's Mod Organizer
+		// our add-on, only where Root Builder is in this setup's Mod Organizer
 		if (a_vm.Setup is { } rootSetup) {
 			try {
 				var rootMo2 = Mo2Instance.Load(rootSetup.Mo2Exe, rootSetup.Mo2Instance);
@@ -681,9 +678,9 @@ public static class SettingsPanel
 			}
 		}
 
-		// his ask 2026-10-27: aware of a tool's updates, the download from the runner (its page, in the player's browser)
+		// aware of a tool's updates, the download from the runner (its page, in the player's browser)
 		Head("TOOL UPDATES");
-		// his list of 2026-11-16: the Check button looks for updates too (asked of the tools' pages only on that press)
+		// the Check button looks for updates too (asked of the tools' pages only on that press)
 		work["checkUpdates"] ??= true;
 		Field(stack, apply, "Check (F5) also looks for updates", work, "checkUpdates", JsonValueKind.True);
 		var updNote = new TextBlock { Text = "Asks each tool's own page (Nexus, GitHub) for its newest version - only when you press this.",
@@ -718,7 +715,7 @@ public static class SettingsPanel
 				updCheck.IsEnabled = true;
 			}
 		};
-		// his checklist 445: what a tool's update may have moved, looked for before a run needs it
+		// what a tool's update may have moved, looked for before a run needs it
 		var testTools = new Button { Content = "Test my tools ...", Style = (Style)a_w.FindResource("Ghost"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 8),
 			ToolTip = "Opens each tool that is driven through its window, up to the window a run presses, and looks for what it would press" };
 		// While the tools are tested a button of its own stops the test: a LOD tool takes minutes to reach its window, and the
@@ -820,7 +817,7 @@ public static class SettingsPanel
 			var o = steps[pick.SelectedIndex]["settings"] as JsonObject ?? (JsonObject)(steps[pick.SelectedIndex]["settings"] = new JsonObject());
 			var aboutKey = Setup.Str(steps[pick.SelectedIndex], "step") ?? "";
 			var aboutRow = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
-			// his checklist 475: help on every step - the tool's own page (its author's instructions), opened in the browser
+			// help on every step - the tool's own page (its author's instructions), opened in the browser
 			if (HelpPage(aboutKey) is { } help) {
 				var page = new Button { Content = "Its own page", Style = (Style)a_w.FindResource("Ghost"), Margin = new Thickness(10, 0, 0, 0), ToolTip = help.Url,
 					VerticalAlignment = VerticalAlignment.Top };
@@ -839,7 +836,7 @@ public static class SettingsPanel
 				Field(stepHost, stepApply, Label(key), o, key, val?.GetValueKind() ?? JsonValueKind.String);
 			}
 			var stepKey = Setup.Str(steps[pick.SelectedIndex], "step") ?? "";
-			// his ask 2026-10-27: the tool's settings from its OWN window, kept for every run (never a copy of its window here).
+			// the tool's settings from its OWN window, kept for every run (never a copy of its window here).
 			// Only while the setup picked in the main window is the one these settings were opened for: with another one
 			// picked, the button stood among this setup's steps and opened - and learned for - the other setup's tool
 			if (ToolSettings.CanLearn(new StepSettings(o)) && a_vm.Setup is { } setupNow && IsFor(setupNow)) {
@@ -922,7 +919,7 @@ public static class SettingsPanel
 				stepHost.Children.Add(status);
 				stepHost.Children.Add(learn);
 			}
-			// his lesson 2026-10-27 (checklist 271): LOD settings depend on the mods it is built from - their own pages say which
+			// LOD settings depend on the mods it is built from - their own pages say which
 			if (LodGuide.Applies(stepKey)) {
 				LodBlock(a_w, a_vm.Setup!, stepKey, stepHost);
 			}
@@ -1028,7 +1025,7 @@ public static class SettingsPanel
 		};
 		undo.Click += (_, _) => a_w.ShowPanel("settings", true);
 		folders.Click += (_, _) => MainViewModel.OpenFolder(AppPaths.Data);
-		// his checklist 484: a clean removal of everything the program keeps (to the Recycle Bin, never erased)
+		// a clean removal of everything the program keeps (to the Recycle Bin, never erased)
 		var remove = new Button { Content = "Remove program data ...", Style = (Style)a_w.FindResource("Danger"), Margin = new Thickness(10, 0, 0, 0),
 			ToolTip = "Moves Tool Runner's data and run backups to the Recycle Bin. The mods the tools created stay in Mod Organizer." };
 		remove.Click += async (_, _) => {
@@ -1186,7 +1183,7 @@ public static class SettingsPanel
 	static ComboBox? s_pick;
 	static List<JsonObject>? s_steps;
 
-	// The Steps page with a_key's settings open (a step double-clicked in the main window, his checklist 635). False when this
+	// The Steps page with a_key's settings open (a step double-clicked in the main window). False when this
 	// drawing has no such step, or the step open now has a value that does not read (it stays, to be fixed first)
 	public static bool ShowStep(string a_key)
 	{

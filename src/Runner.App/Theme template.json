@@ -4,7 +4,7 @@
     "A theme is one copy of this file with new values: keep every key, change only the \"value\" fields (and the numbers / glyphs).",
     "Put the theme file (and its icon, if it has one) in the \"Themes\" folder inside the program's data folder; the Themes page (Ctrl+T) shows it as a card - press Look again there, then click it. \"New theme from the one in use\" there makes this file for you.",
     "A key left out keeps the default; a value that does not read is named in Settings and the default kept.",
-    "Colours are #RRGGBB, or #AARRGGBB where AA is opacity (00 see-through ... FF solid). Fonts are Windows font names, a fallback after a comma.",
+    "Colors are #RRGGBB, or #AARRGGBB where AA is opacity (00 see-through ... FF solid). Fonts are Windows font names, a fallback after a comma.",
     "Each \"where\" line says where on screen the value shows, so a theme can be judged without running the program.",
     "Rules a theme must keep: Text and Muted readable on Bg, Panel and Panel2 (contrast 4.5 : 1 or more); Good, Warn and Bad told apart",
     "without color alone being the only cue (each also has its own glyph); Accent readable on Panel2 (outlined buttons); the primary button's",

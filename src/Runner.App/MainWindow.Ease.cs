@@ -4,9 +4,8 @@ using System.Windows.Input;
 
 namespace ToolRunner.App;
 
-// His checklist 635 ("all"): the ease-of-use ideas of the page "Tool Runner quality of life" - a step's settings from a
-// double-click, its output mod's folder and its tool's page from a right-click, a setup copied or renamed from the setup list,
-// the command box (Ctrl+K) and the compact view (Ctrl+J)
+// Ease of use: a step's settings from a double-click, its output mod's folder and its tool's page from a right-click, a
+// setup copied or renamed from the setup list, the command box (Ctrl+K) and the compact view (Ctrl+J)
 public partial class MainWindow
 {
 	// ---------------------------------------------------------------- a step's settings, its output, its tool's page

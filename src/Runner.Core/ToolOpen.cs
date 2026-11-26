@@ -1,10 +1,9 @@
 namespace ToolRunner;
 
 // One tool's window opened through Mod Organizer to learn its settings - the way the tools box and the settings panel both do
-// it. His report of 2026-11-22: "if clicking set it up in tools while another game/mo2 is open, tool runner doesn't open the
-// new screen and greys out it's own interface. closing the pop up doesn't work". Mod Organizer is closed before the tool opens
-// and is never closed under a game, a download, a repack or a program of the player's: that wait went on for up to half an hour
-// with nothing said and nothing to stop it. Now what holds it is asked about first (wait for it, or not now), what the wait is
+// it. Mod Organizer is closed before the tool opens and is never closed under a game, a download, a repack or a program of
+// the player's: left to itself that wait can go on for half an hour with nothing said and nothing to stop it. So what
+// holds it is asked about first (wait for it, or not now), what the wait is
 // on is told as it goes, and the wait can always be stopped - before the tool is up at once, after it only on the player's word,
 // since what the tool saves is kept only once it has closed.
 public sealed class ToolOpen : IDisposable

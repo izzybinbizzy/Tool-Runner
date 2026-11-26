@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 namespace ToolRunner;
 
 // A tool that needs no load order and no clicks (ACMOS with -autorun) runs on a Windows desktop of its own that nobody sees:
-// its window never shows on the player's screen and can never take the focus. Proven 2026-10-27 (ACMOS: 8 s, "All Done!").
+// its window never shows on the player's screen and can never take the focus. Proven (ACMOS: 8 s, "All Done!").
 public sealed partial class HiddenDesktop : IDisposable
 {
 	const uint GENERIC_ALL = 0x10000000, CREATE_NO_WINDOW = 0x08000000;
@@ -56,7 +56,7 @@ public sealed partial class HiddenDesktop : IDisposable
 	{
 		var si = new STARTUPINFO { cb = Marshal.SizeOf<STARTUPINFO>(), lpDesktop = Name };
 		// CreateProcessW may write into the command line: a writable, zero-ended buffer. CREATE_NO_WINDOW: a console program gets
-		// no console - Windows Terminal would open one on the player's screen whatever desktop the program is on (2026-10-27)
+		// no console - Windows Terminal would open one on the player's screen whatever desktop the program is on
 		if (!CreateProcessW(null, (a_commandLine + "\0").ToCharArray(), 0, 0, false, CREATE_NO_WINDOW, 0, a_cwd, ref si, out var pi)) {
 			throw new StepFailedException($"could not start {a_commandLine} (error {Marshal.GetLastWin32Error()})");
 		}
@@ -77,8 +77,8 @@ public sealed partial class HiddenDesktop : IDisposable
 		return p;
 	}
 
-	// THE LEAK GUARD: a tool started here must never show on the player's screen (his catch 2026-10-27: a probe's box sat on
-	// his desktop). Every half second while the tool runs, its whole process tree is looked for among the visible windows of
+	// THE LEAK GUARD: a tool started here must never show on the player's screen (a start that ignores the desktop it was
+	// given does). Every half second while the tool runs, its whole process tree is looked for among the visible windows of
 	// the normal desktop; one found there ends the tree at once (by PID) and the step fails naming it.
 	public string? Leak => _leak;
 

@@ -91,7 +91,7 @@ public sealed class Setup
 	public List<StepEntry> EnabledSteps => OnSteps.Where(s => !UsesOld(s)).ToList();
 
 	// the steps a run does not run, because the output each made before is used
-	// (only of steps this version has: a removed step's old output is not managed - CodeRabbit on pull request #40)
+	// (only of steps this version has: a removed step's old output is not managed)
 	public List<StepEntry> KeptSteps => OnSteps.Where(UsesOld).ToList();
 
 	public const string PgLiteMod = "PGLite";

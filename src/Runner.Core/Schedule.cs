@@ -3,9 +3,8 @@ using System.Text;
 
 namespace ToolRunner;
 
-// Runs at a set time are gone (his checklist answer 451, 2026-11-03: "completely remove scheduled runs from this entirely. they
-// will never happen."). What is left only clears away a Windows task an older version made, under its old or new name, so
-// nothing starts a run by itself any more.
+// Runs at a set time are gone. What is left only clears away a Windows task an older version made, under its old or new
+// name, so nothing starts a run by itself any more.
 public static class Schedule
 {
 	// a task name an older version gave a setup's timed run
@@ -121,7 +120,7 @@ public static class Schedule
 	// the test's own task removed whatever it runs
 	public static void DeleteProbe(string a_name) => Schtasks("/Delete", "/TN", a_name, "/F");
 
-	// schtasks writes in the console's code page, not UTF-8 (a localized Windows' messages came out garbled - the fourth review, L6)
+	// schtasks writes in the console's code page, not UTF-8 (a localized Windows' messages came out garbled)
 	static Encoding ConsoleText()
 	{
 		try {

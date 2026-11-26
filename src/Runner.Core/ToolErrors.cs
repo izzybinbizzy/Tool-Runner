@@ -1,7 +1,7 @@
 namespace ToolRunner;
 
-// His checklist 469: "a detailed professional log for nerds and a simple step by step for casuals" - a tool's known error turned
-// into what it means and what to do, with the tool's own help page. Read off each tool's own documentation (2026-11-04):
+// A tool's known error turned into what it means and what to do, with the tool's own help page. Read off each tool's own
+// documentation:
 // sheson's tools (TexGen, DynDOLOD, xLODGen, TreeLODGen) list their exceptions at dyndolod.info/Messages/Exceptions and their
 // memory advice in dyndolod.info/FAQ ("High memory usage / Out of memory"); Synthesis keeps its questions in its GitHub
 // Discussions. Only what a page names is here; anything else keeps the tool's own words.

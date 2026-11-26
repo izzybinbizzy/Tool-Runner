@@ -5,8 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace ToolRunner;
 
-// Is a tool newer on its own page than the player's copy? (his ask 2026-10-27, checklist 268: "it needs to be aware of when tools
-// update and be able to have users download them via the runner"). Asked only when the player presses the button - never in the
+// Is a tool newer on its own page than the player's copy? Asked only when the player presses the button - never in the
 // background. The player's version: MO2's own record of the mod the tool is installed in (meta.ini), else the program's file
 // version. The newest: Nexus (its public GraphQL, no key) or GitHub's latest release. A download is the page itself, opened in
 // the player's browser - the download stays theirs (Nexus's Mod Manager Download button).

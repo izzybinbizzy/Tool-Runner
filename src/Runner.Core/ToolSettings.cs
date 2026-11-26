@@ -4,11 +4,10 @@ using ToolRunner.Steps;
 
 namespace ToolRunner;
 
-// The tools' own settings, never their windows (his ask 2026-10-27, checklist 268: "make the user run each tool's gui once so the
-// runner can save those settings ... any time users want to run the tool again they will have to change the own mods' gui and
-// the runner saves the settings again"). "Learn": the tool's OWN window opens through Mod Organizer, the player sets it up and
-// closes it, and every settings file it wrote is kept with the setup. Every run puts those files in place before the tool
-// starts (each live file kept in the run record first) and the player's own back after. Nothing of a tool's window is copied.
+// The tools' own settings, never their windows. "Learn": the tool's OWN window opens through Mod Organizer, the player sets
+// it up and closes it, and every settings file it wrote is kept with the setup. Every run puts those files in place before
+// the tool starts (each live file kept in the run record first) and the player's own back after. Nothing of a tool's window
+// is copied.
 public static partial class ToolSettings
 {
 	public sealed class LearnedFile
@@ -23,8 +22,8 @@ public static partial class ToolSettings
 		public string Tool { get; set; } = "";
 		public DateTime At { get; set; }
 		public List<LearnedFile> Files { get; set; } = [];
-		// what the tool's own window was set to, read off its debug log (TexGen / DynDOLOD keep no file of them - mo2-setup's
-		// finding 2026-10-27); a later run that used other values is said in the run's notes
+		// what the tool's own window was set to, read off its debug log (TexGen / DynDOLOD keep no file of them); a later run
+		// that used other values is said in the run's notes
 		public Dictionary<string, string> Values { get; set; } = [];
 	}
 
@@ -136,7 +135,7 @@ public static partial class ToolSettings
 	// a tool of the setup the player can set up in its own window: its step, its name, what is kept of it so far
 	public sealed record ToSet(string Step, string Name, Learned? Learned);
 
-	// Every switched-on step of the setup whose tool has a window of its own, in the setup's order (his word of 2026-11-21: each
+	// Every switched-on step of the setup whose tool has a window of its own, in the setup's order (each
 	// patcher set up by hand before the first run, and again whenever wanted). A step listed twice is one tool. One that
 	// uses its old output for now is switched on all the same: its tool is set up here for the run that builds it again
 	public static List<ToSet> ToSetUp(Setup a_setup) =>
@@ -289,8 +288,8 @@ public static partial class ToolSettings
 	}
 
 	// What would make "Learn its settings" wait before the tool's window opens (null: nothing - it opens at once): this setup's
-	// Mod Organizer is open and cannot be closed under a game, a download, a repack or a program of the player's (his report of
-	// 2026-11-22: with the game open, the box greyed its window, the tool never came and the box would not close).
+	// Mod Organizer is open and cannot be closed under a game, a download, a repack or a program of the player's (with the
+	// game open, the box greyed its window, the tool never came and the box would not close).
 	public static string? WhyNotNow(Setup a_setup, CancellationToken a_ct = default)
 	{
 		var mo2 = Mo2Instance.Load(a_setup.Mo2Exe, a_setup.Mo2Instance);

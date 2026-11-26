@@ -10,8 +10,8 @@ public enum Level
 	Error,
 }
 
-// One run's logs. Each line is flushed at once: a run that dies leaves everything up to its death on disk. Two logs (his
-// checklist 469): log.txt, the detailed one, every line; steps.txt, the simple one, step by step in plain words - each step
+// One run's logs. Each line is flushed at once: a run that dies leaves everything up to its death on disk. Two logs:
+// log.txt, the detailed one, every line; steps.txt, the simple one, step by step in plain words - each step
 // started and done, a failure with what it means and what to do, the run's verdict.
 //
 // Writing a line never throws. Log lines stand in front of the work on every recovery path (the put-back says what it does
@@ -156,7 +156,7 @@ public sealed class RunLog : IDisposable
 	static StreamWriter Open(string a_path, FileMode a_mode) =>
 		new(new FileStream(a_path, a_mode, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete), new UTF8Encoding(false)) { AutoFlush = true };
 
-	// every line also into one fixed file, emptied first (one name for an outside watch, e.g. watch.py --watch); a file that
+	// every line also into one fixed file, emptied first (one name for a program that watches it from outside); a file that
 	// cannot be opened is simply not mirrored
 	public void Mirror(string a_path)
 	{

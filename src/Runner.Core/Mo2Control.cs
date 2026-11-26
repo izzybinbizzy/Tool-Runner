@@ -17,7 +17,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	readonly RunLog _log = a_log;
 
 	// (a WMI start cannot reach a hidden desktop: its WinstationDesktop setting was ignored and the window opened on the player's
-	// screen - measured 2026-10-27; a hidden start goes through HiddenDesktop.Start, which watches for exactly that)
+	// screen - measured; a hidden start goes through HiddenDesktop.Start, which watches for exactly that)
 	public static int StartDetached(string a_commandLine, string a_cwd)
 	{
 		using var cls = new ManagementClass(@"root\cimv2", "Win32_Process", null);
@@ -132,12 +132,12 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 
 	public static bool IsJava(string a_image) => a_image.Equals("javaw.exe", StringComparison.OrdinalIgnoreCase) || a_image.Equals("java.exe", StringComparison.OrdinalIgnoreCase);
 
-	// this program started from Mod Organizer's Tools menu (his checklist 468) is its child, and never a program the run waits for
+	// this program started from Mod Organizer's Tools menu is its child, and never a program the run waits for
 	public static bool IsThisProgram(string a_image) => Journal.IsRunnerName(Path.GetFileNameWithoutExtension(a_image));
 
 	public bool Running => IsRunning() && !HeldOpen;
 
-	// his checklist 477: the option to keep Mod Organizer open during a run. HeldOpen: it stays open, and the order files may be written; what is written is
+	// the option to keep Mod Organizer open during a run. HeldOpen: it stays open, and the order files may be written; what is written is
 	// read back in before anything else starts or it closes, or it would write its old lists over them
 	public bool CompanionOn { get; set; }
 	public bool HeldOpen { get; private set; }
@@ -160,7 +160,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	public const string UnreadDownloads = "its downloads folder could not be read, so a download may be going";
 
 	// a download MO2 finished but whose "<file>.unfinished" stayed beside it, byte for byte the same: MO2 cannot finish it and
-	// resumes it at every start, so it is no download in progress (one held a whole evening's game line, 2026-11-02) - named,
+	// resumes it at every start, so it is no download in progress (one would hold every start for good) - named,
 	// never deleted (the player removes it, or its row in MO2's Downloads tab)
 	// a_ct: a Stop ends the look (a pair being compared counts as neither: OperationCanceledException leaves it)
 	public static (List<string> Active, List<string> Stale) Downloads(string a_dir, CancellationToken a_ct = default)
@@ -230,7 +230,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	}
 
 	// a program still running from Mod Organizer's own folders while MO2 is closed (a crash dumper of a game that died, kept
-	// alive inside the virtual Data folder): MO2 started beside it can crash at once (measured 2026-10-06, three crashes) - so
+	// alive inside the virtual Data folder): MO2 started beside it can crash at once (measured, three crashes) - so
 	// MO2 waits for it to end, then names it and refuses the start; it is never ended here (its PID may not be ours)
 	public Func<List<(int Pid, string Image)>>? LeftoverProbe { get; set; }
 	public static TimeSpan LeftoverWait { get; set; } = TimeSpan.FromMinutes(2);
@@ -333,8 +333,8 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 
 	bool OwnStarting() => _lastStarted is { } pid && _mo2LaunchedAt is { } at && DateTime.UtcNow - at < StartingGrace && Procs.Alive(pid);
 
-	// the Mod Organizer processes this run started itself - any other one is the player's (his 2026-11-06 find: "the tool keeps
-	// trying to fight you when you're doing something in mo2 even though it's running"). The player's is never closed mid-run:
+	// the Mod Organizer processes this run started itself - any other one is the player's, and a run never fights the player
+	// over it. The player's is never closed mid-run:
 	// the run says so and waits for the player to close it (UserWait), then goes on; only the run's very first close, which the
 	// player asked for by pressing Start, may close it (AllowCloseTheirs)
 	// with their start times: a PID Windows gives the player's Mod Organizer later is never taken for the run's
@@ -425,7 +425,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	}
 
 	// A second ModOrganizer.exe ("run -e <tool>", an nxm link) hands its request to the open one, which can take it only once it
-	// has finished loading its plugins; one started sooner gets "failed to receive data from secondary process" (2026-10-27, 19 s
+	// has finished loading its plugins; one started sooner gets "failed to receive data from secondary process" (19 s
 	// after a start). Ready = its window open and enabled, answering messages, no box of its own open, and its own process
 	// quiet (under a sixth of one core) for ReadyQuiet.
 	public sealed record ReadySignals(bool Window, bool Responsive, TimeSpan Cpu, string? Box);
@@ -518,7 +518,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	}
 
 	// closes MO2 by its own window message (re-sent every 20 s), answering its questions; refused while it downloads or the
-	// game runs (MO2 answers "programs are still running" by ending them - 2026-10-22 his loading game ended that way)
+	// game runs (MO2 answers "programs are still running" by ending them - a loading game once ended that way)
 	// a download or a game started while the run goes: MO2 is never closed under it - the run waits for it to end (up to
 	// a_busyWait), then gives up with the reason
 	public static TimeSpan BusyWait { get; set; } = TimeSpan.FromMinutes(30);
@@ -700,7 +700,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		a_ct.WaitHandle.WaitOne(800);
 	}
 
-	// his checklist 443: Mod Organizer closed before Root Builder's clear would leave its files in the game folder
+	// Mod Organizer closed before Root Builder's clear would leave its files in the game folder
 	void WaitForRootBuilder(CancellationToken a_ct)
 	{
 		if ((RunningProbe == null || RootBuilderProbe != null) && (RootBuilderProbe != null || Mo2.RootBuilderBuilds) && !_rootBuilderStuck &&
@@ -749,7 +749,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	readonly HashSet<string> _leftAlone = [];
 	HashSet<string> _boxesBeforeClose = [];
 
-	// his checklist 439: a Mod Organizer set to words we cannot read (its own setting, else Windows' language, as it picks one itself)
+	// a Mod Organizer set to words we cannot read (its own setting, else Windows' language, as it picks one itself)
 	public static bool SpeaksOther(string a_setting, string a_windows) => !(a_setting == "" ? a_windows : a_setting).StartsWith("en", StringComparison.OrdinalIgnoreCase);
 
 	public static TimeSpan PlayerQuiet { get; set; } = TimeSpan.FromSeconds(45);
@@ -920,7 +920,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 		return p;
 	}
 
-	// his checklist 479: the tools at a lower priority (the setup's "lowerPriority") - the PC stays smooth while they work; the
+	// the tools at a lower priority (the setup's "lowerPriority") - the PC stays smooth while they work; the
 	// processes a tool starts after this take its priority with them (Windows passes below-normal on to its children)
 	public bool LowerPriority { get; set; }
 
@@ -951,7 +951,7 @@ public sealed class Mo2Control(Mo2Instance a_mo2, string a_profile, RunLog a_log
 	}
 
 	// a tool Mod Organizer was asked to start never appeared: what Mod Organizer shows (any window beside its main one) and what it
-	// wrote in its log since the request, so the failure says why instead of only that (2026-11-07: Landscape Fixer's start went
+	// wrote in its log since the request, so the failure says why instead of only that (Landscape Fixer's start went
 	// unanswered, and by the time anyone looked Mod Organizer had rotated its logs away)
 	// a tool that never appeared: everything Mod Organizer did meanwhile, unfiltered, in a file of the run folder - the processes it
 	// started, its whole log since the request, and which processes its virtual folder was put into (the short message keeps only

@@ -1,7 +1,7 @@
 namespace ToolRunner;
 
 // Every step the runner knows: its key in a setup, its plain name, what it is for, and the researched default order
-// (his pick 2026-10-27, sources in the project handoff: dyndolod.info and the Landscape Fixer / PGPatcher authors).
+// (its sources: dyndolod.info and the Landscape Fixer / PGPatcher authors).
 public sealed record StepInfo(string Key, string Name, string About, bool InGame = false, bool NeedsMo2 = true);
 
 public static class StepCatalog

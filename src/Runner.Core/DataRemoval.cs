@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace ToolRunner;
 
-// Clean removal (his checklist 484): everything the program keeps of its own goes to the Recycle Bin - its data folder (setups,
+// Clean removal: everything the program keeps of its own goes to the Recycle Bin - its data folder (setups,
 // run records, learned tool settings, themes, the change history) and the run backups it made in each setup's backup folder.
 // The output mods the tools made stay in Mod Organizer: they are part of the player's load order, and Mod Organizer removes them.
 // Refused while a run or a queue goes, and while a run still needs its profile put back.

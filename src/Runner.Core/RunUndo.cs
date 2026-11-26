@@ -2,7 +2,7 @@ using System.IO.Compression;
 
 namespace ToolRunner;
 
-// Undo the last run, and its backups kept small (his checklist 454). Once a run has ended with nothing left to put back, the old
+// Undo the last run, and its backups kept small. Once a run has ended with nothing left to put back, the old
 // outputs in its backup are packed into one zip - the folder goes only after the zip is read back. Runner.Undo unpacks them when
 // the player asks for the run to be undone.
 public static class RunUndo

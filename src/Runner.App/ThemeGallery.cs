@@ -5,10 +5,9 @@ using System.Windows.Shapes;
 
 namespace ToolRunner.App;
 
-// The theme gallery (his order 2026-11-10: "add more themes and make them easily changeable"): every theme as a card that shows
-// its own colors, one click to use it - at once, no restart - and a way to start a new theme from the one in use. A card is drawn
-// from the theme's file without applying it; everything around the cards takes the window's colors by reference, so the gallery
-// itself follows the theme it just applied.
+// The theme gallery: every theme as a card that shows its own colors, one click to use it - at once, no restart - and a way
+// to start a new theme from the one in use. A card is drawn from the theme's file without applying it; everything around the
+// cards takes the window's colors by reference, so the gallery itself follows the theme it just applied.
 public static class ThemeGallery
 {
 	// three cards side by side in the drawer
@@ -203,7 +202,7 @@ public static class ThemeGallery
 		buttons.Children.Add(open);
 		buttons.Children.Add(again);
 
-		// his checklist 473: bigger text for every theme, kept for the next start
+		// bigger text for every theme, kept for the next start
 		var sizeLabel = new TextBlock { Text = "TEXT SIZE", Style = (Style)a_w.FindResource("H2"), Margin = new Thickness(0, 14, 0, 6) };
 		var size = new ComboBox { MinWidth = 220, HorizontalAlignment = HorizontalAlignment.Left, ItemsSource = Theme.TextScales.Select(s => $"{s * 100:0} %").ToList(),
 			SelectedIndex = Math.Max(0, Array.IndexOf(Theme.TextScales, Theme.TextScale)) };

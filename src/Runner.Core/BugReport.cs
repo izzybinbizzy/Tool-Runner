@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace ToolRunner;
 
-// "Help me report a bug" (his checklist 482): one zip holding what a bug report needs - the run's record and both its logs, the
+// "Help me report a bug": one zip holding what a bug report needs - the run's record and both its logs, the
 // setup it ran, the crash notes, and the versions of the program, Windows, Mod Organizer, the game and each step's tool - with the
 // player's own names masked (their Windows user name and the PC's name), ready to attach to an issue. Nothing is sent anywhere:
 // the zip is the player's to post or not.
@@ -17,7 +17,7 @@ public static class BugReport
 	// a log can be long (a DynDOLOD run): only its last part goes in
 	const int MaxBytes = 8 * 1024 * 1024;
 
-	// the names a report never carries, longest first (so "Itsth-PC" is masked before "Itsth"); too short a name is left alone,
+	// the names a report never carries, longest first (so "Sam-PC" is masked before "Sam"); too short a name is left alone,
 	// since it would mask parts of ordinary words
 	public static List<(string Name, string Mask)> Names()
 	{

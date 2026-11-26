@@ -3,7 +3,7 @@ using System.Collections;
 namespace ToolRunner;
 
 // The processes a run started, each with the time it started. Thread-safe: Stop reads it on the command watcher's thread while
-// a step adds to it (CodeRabbit on PR #24 - a HashSet copied mid-add throws); enumerating gives a copy. A PID Windows gave to
+// a step adds to it (a HashSet copied mid-add throws); enumerating gives a copy. A PID Windows gave to
 // another process since is told apart by its start time (SameProcess), so Stop never ends a stranger that got a reused PID.
 //
 // And what those processes started themselves (Sweep). A program that hands its work to a child and then ends - a packed

@@ -38,7 +38,7 @@ static class Brushes2
 	public static Brush Get(string a_key) => (Brush)Application.Current.Resources[a_key];
 }
 
-// "good" / "bad" / "warn" -> its colour
+// "good" / "bad" / "warn" -> its color
 public sealed class KindToBrush : IValueConverter
 {
 	public object Convert(object? a_v, Type a_t, object? a_p, CultureInfo a_c) => (a_v as string) switch {
@@ -52,7 +52,7 @@ public sealed class KindToBrush : IValueConverter
 	public object ConvertBack(object? a_v, Type a_t, object? a_p, CultureInfo a_c) => throw new NotSupportedException();
 }
 
-// a step's state, or a yes / no (with the parameter's colour for yes), -> its colour
+// a step's state, or a yes / no (with the parameter's color for yes), -> its color
 public sealed class StateToBrush : IValueConverter
 {
 	public object Convert(object? a_v, Type a_t, object? a_p, CultureInfo a_c) => a_v switch {

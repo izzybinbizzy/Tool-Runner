@@ -34,17 +34,17 @@ public static class CheckList
 	static nint Ask(nint a_list, uint a_msg, nint a_w) => Native.TrySend(a_list, a_msg, a_w, 0, out var answer) ? answer :
 		throw new StepFailedException("the tool's worldspace list does not answer - its window is not responding");
 
-	// a ticked box is filled with the accent colour; an empty one is grey / white
+	// a ticked box is filled with the accent color; an empty one is grey / white
 	public static bool IsTicked(Picture a_pic, int a_x0, int a_x1, int a_y)
 	{
-		var coloured = 0;
+		var colored = 0;
 		for (int x = Math.Max(0, a_x0); x < a_x1; ++x) {
 			var (r, g, b) = a_pic.At(x, a_y);
 			if (Math.Max(r, Math.Max(g, b)) - Math.Min(r, Math.Min(g, b)) > 60) {
-				++coloured;
+				++colored;
 			}
 		}
-		return coloured >= 3;
+		return colored >= 3;
 	}
 
 	static Native.RECT ItemRect(nint a_list, int a_i)

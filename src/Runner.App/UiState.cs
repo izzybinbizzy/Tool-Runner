@@ -137,7 +137,7 @@ public static class UiState
 			s_queued = true;
 		}
 		// The value is kept at once; the file is written a moment later and never on the window's own thread - a disk that
-		// answers slowly holds up no click and no line of the log (CodeRabbit on pull request #35)
+		// answers slowly holds up no click and no line of the log
 		_ = Task.Run(async () => {
 			await Task.Delay(Settle).ConfigureAwait(false);
 			Save();

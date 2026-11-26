@@ -39,7 +39,7 @@ public static partial class SystemChecks
 		return outList;
 	}
 
-	// ---- the PC's memory (the memory audit of 2026-11-07): the LOD tools are the usual "out of memory" (dyndolod.info/FAQ), so a
+	// ---- the PC's memory: the LOD tools are the usual "out of memory" (dyndolod.info/FAQ), so a
 	// PC low on memory is told before an hour of work, never stopped - the tools may still manage
 	[StructLayout(LayoutKind.Sequential)]
 	struct MemoryStatus
@@ -58,7 +58,7 @@ public static partial class SystemChecks
 		return GlobalMemoryStatusEx(ref m) ? (m.TotalPhys / 1073741824.0, m.AvailPhys / 1073741824.0) : null;
 	};
 
-	// his checklist 438: Steam changing the game under a run. Steam's own record of the game (appmanifest_489830.acf in the steamapps
+	// Steam changing the game under a run. Steam's own record of the game (appmanifest_489830.acf in the steamapps
 	// folder above "common") says what it is doing - when the record is of this very folder; another copy in the same library, GOG or a
 	// modlist's own copy has nothing to read. Only a state of real work with Steam running refuses a run: a queued or paused update
 	// (a player staying on a version on purpose) or Steam closed in the middle of one only warns
@@ -112,7 +112,7 @@ public static partial class SystemChecks
 		}
 	}
 
-	// ---- 440: administrator on one side only
+	// ---- administrator on one side only
 	public static Func<bool> SelfAdmin { get; set; } = () => Environment.IsPrivilegedProcess;
 
 	// a Mod Organizer that runs but whose program path this process cannot read (started as administrator, or by another user):
@@ -150,7 +150,7 @@ public static partial class SystemChecks
 		}
 	}
 
-	// ---- 444: a second Mod Organizer install open
+	// ---- a second Mod Organizer install open
 	public static Func<List<string>> Mo2Paths { get; set; } = () => {
 		var outList = new List<string>();
 		foreach (var p in Procs.ByImage("ModOrganizer.exe")) {
@@ -174,7 +174,7 @@ public static partial class SystemChecks
 		}
 	}
 
-	// ---- 442: the plugin limit, counted the way the game counts
+	// ---- the plugin limit, counted the way the game counts
 	public const int FullLimit = 254, LightLimit = 4096;
 
 	// the game loads these without a line in plugins.txt
@@ -234,7 +234,7 @@ public static partial class SystemChecks
 		}
 	}
 
-	// ---- 446: a restart Windows waits for, the battery (sleep is held off for the whole run: Native.KeepAwake)
+	// ---- a restart Windows waits for, the battery (sleep is held off for the whole run: Native.KeepAwake)
 	public static Func<bool> RestartPending { get; set; } = () => {
 		using var a = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending");
 		using var b = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired");
@@ -269,7 +269,7 @@ public static partial class SystemChecks
 		}
 	}
 
-	// ---- 489: folders that cause trouble (warnings only - his answer): Program Files, a cloud-synced folder, a network drive, and
+	// ---- folders that cause trouble (warnings only): Program Files, a cloud-synced folder, a network drive, and
 	// Windows' controlled folder access. Every folder the run reads or writes is looked at; one cause is told once.
 	public static Func<string> Documents { get; set; } = () => Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
 
@@ -426,7 +426,7 @@ public static partial class SystemChecks
 		}
 	}
 
-	// ---- 447: long paths
+	// ---- long paths
 	// the tools write folders of their own inside these (LOD meshes, textures, grass cache) that run tens of letters deep, and most
 	// of them keep Windows' 260-letter limit whatever Windows' own long-path setting says (that setting reaches only programs
 	// built for it)
